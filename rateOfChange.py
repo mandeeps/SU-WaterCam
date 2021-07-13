@@ -10,7 +10,7 @@ from time import time, sleep
 from datetime import datetime
 import atexit
 import pickle
-import subprocess
+from picamera import PiCamera
 import lzma
 import os
 import pytz
@@ -20,11 +20,13 @@ mlx = adafruit_mlx90640.MLX90640(i2c)
 mlx.refresh_rate = adafruit_mlx90640.RefreshRate.REFRESH_2_HZ
 df = pd.DataFrame()
 dirname = os.getcwd()
+camera = PiCamera()
+camera.rotation = 180
 
 # configurable values
 timezone = pytz.timezone('US/Eastern')
-interval = 2 # time delay between each reading
-limit = 5 # number of frames to take
+interval = 60 # time delay between each reading
+limit = 100 # number of frames to take
 running = True
 
 # exit handler
@@ -69,21 +71,31 @@ def save():
     with lzma.open(changeFile, 'wb') as filehandler:
         pickle.dump(change, filehandler)
 
-for i in range(limit):
-#while running:
-    frame = pd.Series([], name = pd.to_datetime('now').tz_localize(pytz.utc).tz_convert(timezone).replace(microsecond=0))
-    try:
-        mlx.getFrame(frame)
-    except ValueError:
-        continue #retry
-    
-    print(frame)
-    df = pd.concat([df, frame.to_frame().T])
-    
-    # call script to take a photo with raspistill, save to images folder
-    subprocess.run(['/home/pi/pic.sh']) 
-    
-    # pause until next frame
-    sleep(interval)
+def main(argv):
+    #for i in range(limit):
+    while running:
+        frame = pd.Series([], name = pd.to_datetime('now').tz_localize(pytz.utc).tz_convert(timezone).replace(microsecond=0))
+        try:
+            mlx.getFrame(frame)
+        except ValueError:
+            continue #retry
+        
+        print(frame)
+        global df
+        df = pd.concat([df, frame.to_frame().T])
+        
+        # call script to take a photo with raspistill, save to images folder
+        #subprocess.run(['/home/pi/pic.sh']) 
+        
+        # use picamera to take a photo, save to images folder
+        timeValue = datetime.now().strftime('%Y%m%d-%H%M')
+        imageFile = os.path.join(dirname, 'images/image-%s.jpg' % timeValue)
+        camera.annotate_text = timeValue
+        camera.capture(imageFile)
+        
+        # pause until next frame
+        sleep(interval)
 
-exit()
+if __name__ == '__main__':
+    import sys
+    sys.exit(main(sys.argv))
