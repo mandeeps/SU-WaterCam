@@ -20,7 +20,7 @@ def main(args):
         array = avgs
         show(array, colorMap)
     
-    if args[1].__contains__('data'):
+    else:
         colorMap = 'coolwarm'
         
         # process each frame within the dataframe

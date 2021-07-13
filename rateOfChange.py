@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # store temp readings as pandas Series, store Series in DataFrame, 
-# calc change and rate of change per pixel vs previous measurement
+# calc change and rate of change per pixel
 
 import board
 import busio
@@ -10,15 +10,24 @@ from time import time, sleep
 from datetime import datetime
 import atexit
 import pickle
+import subprocess
+import lzma
+import os
+import pytz
 
 i2c = busio.I2C(board.SCL, board.SDA, frequency=800000)
 mlx = adafruit_mlx90640.MLX90640(i2c)
 mlx.refresh_rate = adafruit_mlx90640.RefreshRate.REFRESH_2_HZ
-interval = 1800 # time delay between each reading
-limit = 10 # number of frames to take
-running = True
 df = pd.DataFrame()
+dirname = os.getcwd()
 
+# configurable values
+timezone = pytz.timezone('US/Eastern')
+interval = 2 # time delay between each reading
+limit = 5 # number of frames to take
+running = True
+
+# exit handler
 @atexit.register
 def close():
     # to run on shutdown
@@ -47,20 +56,22 @@ def save():
         
     # local timezone
     timeValue = datetime.now().strftime('%Y%m%d-%H%M')
-    dataFile = 'data-%s.csv' % timeValue 
-    derivFile = 'deriv-%s.csv' % timeValue
-    changeFile = 'change-rates-%s.p' % timeValue
+    
+    dataFile = os.path.join(dirname, 'data/data-%s.csv' % timeValue) 
+    derivFile = os.path.join(dirname, 'data/deriv-%s.csv' % timeValue)
+    changeFile = os.path.join(dirname, 'data/change-rates-%s.p' % timeValue)
 
     # export DataFrames in csv format, and the rates list with pickle
     print('Writing data to %s, %s, and %s' % (dataFile, derivFile, changeFile))
     df.to_csv(dataFile)
     deriv.to_csv(derivFile)
-    with open(changeFile, 'wb') as filehandler:
+    # compressed pickle file for transmission over Lora radio
+    with lzma.open(changeFile, 'wb') as filehandler:
         pickle.dump(change, filehandler)
 
-#for i in range(limit):
-while running:
-    frame = pd.Series([], name = pd.to_datetime('now').replace(microsecond=0)) # UST timezone
+for i in range(limit):
+#while running:
+    frame = pd.Series([], name = pd.to_datetime('now').tz_localize(pytz.utc).tz_convert(timezone).replace(microsecond=0))
     try:
         mlx.getFrame(frame)
     except ValueError:
@@ -69,7 +80,9 @@ while running:
     print(frame)
     df = pd.concat([df, frame.to_frame().T])
     
-    raspistill -o datetime.now().strftime('%Y%m%d-%H%M')
+    # call script to take a photo with raspistill, save to images folder
+    subprocess.run(['/home/pi/pic.sh']) 
+    
     # pause until next frame
     sleep(interval)
 
