@@ -20,17 +20,22 @@ adafruit-circuitpython-rfm9x
 [Adafruit Lora radios](https://learn.adafruit.com/adafruit-rfm69hcw-and-rfm96-rfm95-rfm98-lora-packet-padio-breakouts/using-the-rfm69-radio)
 
 
-###### power optimization:
+#### power optimization:
 [1](https://blues.io/blog/tips-tricks-optimizing-raspberry-pi-power/),
 [2](https://raspberry-projects.com/pi/pi-hardware/raspberry-pi-zero/minimising-power-consumption),
 [Removing services](https://plone.lucidsolutions.co.nz/hardware/raspberry-pi/3/disable-unwanted-raspbian-services)
 
 power saving by:
+
     disabling unused hardware:
+    
         edit - /etc/rc.local
+        
             # Disable the HDMI port (to save power)
             /usr/bin/tvservice -o
+            
         edit - /boot/config.txt
+        
             # Disable the Zero's only LED (to save power)
             dtparam=act_led_trigger=none
             dtparam=act_led_activelow=off
