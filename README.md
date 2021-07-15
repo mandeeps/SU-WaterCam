@@ -20,9 +20,9 @@ adafruit-circuitpython-rfm9x
 [Adafruit Lora radios](https://learn.adafruit.com/adafruit-rfm69hcw-and-rfm96-rfm95-rfm98-lora-packet-padio-breakouts/using-the-rfm69-radio)
 
 
-######power optimization:
-[1](https://blues.io/blog/tips-tricks-optimizing-raspberry-pi-power/)
-[2](https://raspberry-projects.com/pi/pi-hardware/raspberry-pi-zero/minimising-power-consumption)
+###### power optimization:
+[1](https://blues.io/blog/tips-tricks-optimizing-raspberry-pi-power/),
+[2](https://raspberry-projects.com/pi/pi-hardware/raspberry-pi-zero/minimising-power-consumption),
 [Removing services](https://plone.lucidsolutions.co.nz/hardware/raspberry-pi/3/disable-unwanted-raspbian-services)
 
 power saving by:
