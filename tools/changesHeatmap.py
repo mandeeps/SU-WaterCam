@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 import pickle
+import lzma
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-def main(argv):    
-    array = pickle.load(open(argv[1], 'rb'))  
+def main(argv):
+    ratesFile = lzma.open(argv[1],'rb')
+    array = pickle.load(ratesFile)  
     colorMap = 'coolwarm_r'
     show(array, colorMap)	
 

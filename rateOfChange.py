@@ -1,32 +1,39 @@
 #!/usr/bin/env python3
 # store temp readings as pandas Series, store Series in DataFrame, 
-# calc change and rate of change per pixel
+# calc changes, rate of change per pixel, mean of change rates
 
+# hardware
 import board
 import busio
 import adafruit_mlx90640
+#from picamera import PiCamera
+# data
 import pandas as pd
-from time import time, sleep
-from datetime import datetime
 import atexit
 import pickle
-from picamera import PiCamera
 import lzma
 import os
+import subprocess # if not using picamera call external script
+# time
+from time import time, sleep
+from datetime import datetime
 import pytz
 
 i2c = busio.I2C(board.SCL, board.SDA, frequency=800000)
 mlx = adafruit_mlx90640.MLX90640(i2c)
 mlx.refresh_rate = adafruit_mlx90640.RefreshRate.REFRESH_2_HZ
-df = pd.DataFrame()
 dirname = os.getcwd()
-camera = PiCamera()
-camera.rotation = 180
+df = pd.DataFrame()
 
-# configurable values
+# user configurable values
 timezone = pytz.timezone('US/Eastern')
 interval = 60 # time delay between each reading
-limit = 100 # number of frames to take
+limit = 6 # max number of frames to take
+# picamera values
+#camera = PiCamera()
+#camera.rotation = 180
+#camera.resolution = (2592, 1944)
+#camera.framerate = 15
 running = True
 
 # exit handler
@@ -37,14 +44,15 @@ def close():
     save()
 
 def save():
-    ### save data for calculations on workstation ###
-    global df
+    ### save data for later processing on workstation ###
     deriv = pd.DataFrame()
     rates = []
-    
+    global df
+
     for column in df:
         deriv['Change %s' % column] = df[column].diff()
-        deriv['Rate of Change %s' % column] = df[column].diff() / df.index.to_series().diff().dt.total_seconds()
+        deriv['Rate of Change %s' % column] = df[column].diff() \
+                        / df.index.to_series().diff().dt.total_seconds()
 
     # round values for readability
     df = df.round(2)
@@ -61,37 +69,44 @@ def save():
     
     dataFile = os.path.join(dirname, 'data/data-%s.csv' % timeValue) 
     derivFile = os.path.join(dirname, 'data/deriv-%s.csv' % timeValue)
-    changeFile = os.path.join(dirname, 'data/change-rates-%s.p' % timeValue)
+    changeFile = os.path.join(dirname, 'data/change-%s.p' % timeValue)
 
     # export DataFrames in csv format, and the rates list with pickle
-    print('Writing data to %s, %s, and %s' % (dataFile, derivFile, changeFile))
+    print('Writing to: %s, %s, %s' % (dataFile, derivFile, changeFile))
     df.to_csv(dataFile)
     deriv.to_csv(derivFile)
     # compressed pickle file for transmission over Lora radio
     with lzma.open(changeFile, 'wb') as filehandler:
         pickle.dump(change, filehandler)
 
-def main(argv):
+def main(argv):    
     #for i in range(limit):
     while running:
-        frame = pd.Series([], name = pd.to_datetime('now').tz_localize(pytz.utc).tz_convert(timezone).replace(microsecond=0))
+        frame = pd.Series([], name = pd.to_datetime('now').tz_localize(
+                  pytz.utc).tz_convert(timezone).replace(microsecond=0))
         try:
             mlx.getFrame(frame)
         except ValueError:
             continue #retry
         
         print(frame)
+        
         global df
         df = pd.concat([df, frame.to_frame().T])
         
-        # call script to take a photo with raspistill, save to images folder
-        #subprocess.run(['/home/pi/pic.sh']) 
+        #script to take a photo with raspistill, save to images folder
+        print('saving photo...')
+        subprocess.run(['/home/pi/pic.sh'])
         
         # use picamera to take a photo, save to images folder
-        timeValue = datetime.now().strftime('%Y%m%d-%H%M')
-        imageFile = os.path.join(dirname, 'images/image-%s.jpg' % timeValue)
-        camera.annotate_text = timeValue
-        camera.capture(imageFile)
+        #timeValue = datetime.now().strftime('%Y%m%d-%H%M')
+        #imageFile = os.path.join(dirname, 'images/image-%s.jpg' % timeValue)
+        #camera.annotate_text = timeValue
+        #print('saving photo...')
+        #camera.capture(imageFile)
+        
+        # save recorded data every interval 
+        #save()
         
         # pause until next frame
         sleep(interval)
