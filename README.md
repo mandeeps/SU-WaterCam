@@ -29,14 +29,12 @@ power saving by:
 
     disabling unused hardware:
     
-        edit - /etc/rc.local
-        
-            # Disable the HDMI port (to save power)
+    edit - /etc/rc.local
+            # Disable the HDMI port
             /usr/bin/tvservice -o
             
-        edit - /boot/config.txt
-        
-            # Disable the Zero's only LED (to save power)
+    edit - /boot/config.txt
+            # Disable the Zero's only LED
             dtparam=act_led_trigger=none
             dtparam=act_led_activelow=off
             # Disable wifi and bluetooth
