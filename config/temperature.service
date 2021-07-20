@@ -3,6 +3,8 @@
  After=multi-user.target
 
  [Service]
+ User=pi
+ Group=pi
  Type=idle
  ExecStart=/usr/bin/python3 /home/pi/temp-humidity.py
 
