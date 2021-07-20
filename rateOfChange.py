@@ -22,12 +22,12 @@ import pytz
 i2c = busio.I2C(board.SCL, board.SDA, frequency=800000)
 mlx = adafruit_mlx90640.MLX90640(i2c)
 mlx.refresh_rate = adafruit_mlx90640.RefreshRate.REFRESH_2_HZ
-dirname = os.getcwd()
+dirname = '/home/pi/' #os.getcwd()
 df = pd.DataFrame()
 
 # user configurable values
 timezone = pytz.timezone('US/Eastern')
-interval = 60 # time delay between each reading
+interval = 25 # time delay between each reading
 limit = 6 # max number of frames to take
 # picamera values
 #camera = PiCamera()
@@ -41,7 +41,7 @@ running = True
 def close():
     # to run on shutdown
     print('exit received, saving and shutting down')
-    save()
+    #save()
 
 def save():
     ### save data for later processing on workstation ###
@@ -80,8 +80,8 @@ def save():
         pickle.dump(change, filehandler)
 
 def main(argv):    
-    #for i in range(limit):
-    while running:
+    for i in range(limit):
+    #while running:
         frame = pd.Series([], name = pd.to_datetime('now').tz_localize(
                   pytz.utc).tz_convert(timezone).replace(microsecond=0))
         try:
@@ -104,12 +104,12 @@ def main(argv):
         #camera.annotate_text = timeValue
         #print('saving photo...')
         #camera.capture(imageFile)
-        
-        # save recorded data every interval 
-        #save()
-        
+    
         # pause until next frame
         sleep(interval)
+    
+    # save recorded data after cycle completes 
+    save()
 
 if __name__ == '__main__':
     import sys

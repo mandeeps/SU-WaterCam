@@ -6,7 +6,7 @@ Code to delineate surface water extent extraction from TIR and optical cameras.
 
 ### Raspberry Pi Zero configuration Using Raspbian Lite:
 
-in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory from default to minimum 16, change default password, etc., 
+in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc., 
 [Connect with SSH via USB](https://artivis.github.io/post/2020/pi-zero/)
 
 dependencies:
@@ -19,6 +19,8 @@ for direct connection to lora radio:
 adafruit-circuitpython-rfm9x
 [Adafruit Lora radios](https://learn.adafruit.com/adafruit-rfm69hcw-and-rfm96-rfm95-rfm98-lora-packet-padio-breakouts/using-the-rfm69-radio)
 
+WittyPi (or equivalent) to schedule on/off cycle for maximum battery life:
+https://www.adafruit.com/product/5038
 
 #### power optimization:
 [1](https://blues.io/blog/tips-tricks-optimizing-raspberry-pi-power/),

@@ -1,0 +1,10 @@
+ [Unit]
+ Description=External Temp and Humidity Tracking Script
+ After=multi-user.target
+
+ [Service]
+ Type=idle
+ ExecStart=/usr/bin/python3 /home/pi/temp-humidity.py
+
+ [Install]
+ WantedBy=multi-user.target

@@ -12,7 +12,7 @@ df = pd.DataFrame()
 
 @atexit.register
 def exit():
-    df.to_csv('temp-humidity.csv')
+    df.to_csv('temp-humidity.csv', mode='a')
     print('Saved data to temp-humidity.csv, goodbye')
 
 run = True
@@ -21,4 +21,5 @@ while run:
     print("Temperature: %0.1f C" % sensor.temperature)
     print("Humidity: %0.1f %%" % sensor.relative_humidity)
     df = df.append(row)
+    df.to_csv('temp-humidity.csv', mode='a')
     sleep(60)

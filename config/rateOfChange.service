@@ -1,0 +1,10 @@
+ [Unit]
+ Description=Rate of Change Script
+ After=multi-user.target
+
+ [Service]
+ Type=idle
+ ExecStart=/usr/bin/python3 /home/pi/rateOfChange.py
+
+ [Install]
+ WantedBy=multi-user.target
