@@ -9,7 +9,7 @@ Code to delineate surface water extent extraction from TIR and optical cameras.
 in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc., 
 [Connect with SSH via USB](https://artivis.github.io/post/2020/pi-zero/)
 
-dependencies:
+python3 dependencies(use apt for pandas):
 adafruit-blinka adafruit-circuitpython-mlx90640 numpy pandas
 adafruit-circuitpython-tinylora
 gpiozero
@@ -56,3 +56,17 @@ power saving by:
             # Bluetooth
             blacklist btbcm
             blacklist hci_uart
+
+Micro-optimizations, not really needed:
+Boot time optimization (to reduce time spent turned on)
+https://unix.stackexchange.com/questions/239432/systemd-boot-optimization-dev-mmcblk0p2-device#240644
+https://www.samplerbox.org/article/fastbootrpi
+disable man-db.timer, apt-daily.timer, apt-daily-upgrade.timer
+https://unix.stackexchange.com/questions/492221/is-it-safe-to-disable-apt-daily-service
+
+
+RaspberryPi Resources:
+https://gist.github.com/htruong/7df502fb60268eeee5bca21ef3e436eb#file-chroot-to-pi-sh
+
+Notes:
+2000mAh Adafruit battery lasted ~16 hours powering Rpi, Mlx90640, IRcut camera, adfruit temp sensor, with WittyPi  
