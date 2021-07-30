@@ -9,7 +9,7 @@ import adafruit_mlx90640
 #from picamera import PiCamera
 # data
 import pandas as pd
-import atexit
+#import atexit
 import pickle
 import lzma
 import os
@@ -37,10 +37,10 @@ limit = 6 # max number of frames to take
 running = True
 
 # exit handler
-@atexit.register
-def close():
+#@atexit.register
+#def close():
     # to run on shutdown
-    print('exit received, saving and shutting down')
+#    print('exit received, saving and shutting down')
     #save()
 
 def save():

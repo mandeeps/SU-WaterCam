@@ -1,12 +1,13 @@
- [Unit]
- Description=External Temp and Humidity Tracking Script
- After=multi-user.target
+[Unit]
+Description=External Temp and Humidity Tracking Script
+After=multi-user.target
 
- [Service]
- User=pi
- Group=pi
- Type=idle
- ExecStart=/usr/bin/python3 /home/pi/temp-humidity.py
+[Service]
+Type=simple
+User=pi
+Group=pi
+ExecStart=/home/pi/HotWaterCam/tools/temperature.py
+KillMode=process
 
- [Install]
- WantedBy=multi-user.target
+[Install]
+WantedBy=multi-user.target
