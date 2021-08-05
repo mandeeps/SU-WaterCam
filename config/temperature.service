@@ -6,7 +6,7 @@ After=multi-user.target
 Type=simple
 User=pi
 Group=pi
-ExecStart=/home/pi/HotWaterCam/tools/temperature.py
+ExecStart=python3 /home/pi/HotWaterCam/tools/temperature.py
 KillMode=process
 
 [Install]

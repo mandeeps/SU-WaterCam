@@ -6,7 +6,7 @@
  User=pi
  Group=pi
  Type=idle
- ExecStart=/usr/bin/python3 /home/pi/rateOfChange.py
+ ExecStart=/usr/bin/python3 /home/pi/HotWaterCam/rateOfChange.py
 
  [Install]
  WantedBy=multi-user.target

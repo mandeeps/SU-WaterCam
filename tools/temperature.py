@@ -8,17 +8,23 @@ import board
 import adafruit_ahtx0
 
 SENSOR = adafruit_ahtx0.AHTx0(board.I2C())
-FILE = '/home/pi/HotWaterCam/tools/temps.csv'
+FILE = '/home/pi/HotWaterCam/data/temps.csv'
 
 RUN = True
-while RUN:
-    ROW = {'Time':datetime.now().strftime('%Y%m%d-%H%M%S'),
-        'Temp': '%0.1f C' % SENSOR.temperature, 'Humidity': '%0.1f %%' %
-        SENSOR.relative_humidity}
-    print(ROW)
 
-    with open(FILE, 'a+', newline='') as out:
-        DictWriter(out, ROW.keys()).writeheader()
-        DictWriter(out, ROW.keys()).writerow(ROW)
+def main():
+    while RUN:
+        row = {'Time':datetime.now().strftime('%Y%m%d-%H%M%S'),
+               'Temp': '%0.1f C' % SENSOR.temperature, 'Humidity': '%0.1f %%' %
+               SENSOR.relative_humidity}
+        print(row)
 
-    sleep(60)
+        with open(FILE, 'a+', newline='') as out:
+            DictWriter(out, row.keys()).writeheader()
+            DictWriter(out, row.keys()).writerow(row)
+
+        sleep(60)
+
+if __name__ == '__main__':
+    import sys
+    sys.exit(main())
