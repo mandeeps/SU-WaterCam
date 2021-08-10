@@ -19,16 +19,16 @@ import busio
 import adafruit_mlx90640
 #from picamera import PiCamera
 
-I2C = busio.I2C(board.SCL, board.SDA, frequency=100000)
+I2C = busio.I2C(board.SCL, board.SDA, frequency=400000)
 MLX = adafruit_mlx90640.MLX90640(I2C)
-MLX.refresh_rate = adafruit_mlx90640.RefreshRate.REFRESH_1_HZ
+MLX.refresh_rate = adafruit_mlx90640.RefreshRate.REFRESH_2_HZ
 DIRNAME = '/home/pi/HotWaterCam/' #os.getcwd()
 DF = pd.DataFrame()
 
 # user configurable values
 TIMEZONE = pytz.timezone('US/Eastern')
 INTERVAL = 6 # time delay between each reading
-LIMIT = 30 # max number of frames to take
+LIMIT = 10 # max number of frames to take
 # picamera values
 #camera = PiCamera()
 #camera.rotation = 180
@@ -50,8 +50,8 @@ def save():
     global DF
 
     for column in DF:
-        deriv['Change %s' % column] = DF[column].diff()
-        deriv['Rate of Change %s' % column] = DF[column].diff() \
+        deriv['Change %s' % column] = abs(DF[column].diff())
+        deriv['Rate of Change %s' % column] = abs(DF[column].diff()) \
                         / DF.index.to_series().diff().dt.total_seconds()
 
     # round values for readability
@@ -73,19 +73,20 @@ def save():
 
     # export DataFrames in csv format, and the rates list with pickle
     print('Writing to: %s, %s, %s' % (data_file, deriv_file, change_file))
-    DF.to_csv(data_file)
-    deriv.to_csv(deriv_file)
+    DF.to_csv(data_file, index=True, header=True)
+    deriv.to_csv(deriv_file, index=True, header=True)
     # compressed pickle file for transmission over Lora radio
-    with lzma.open(change_file, mode='wb', preset=7) as filehandler:
+    with lzma.open(change_file, mode='wb') as filehandler:
         pickle.dump(change, filehandler)
 
 def main():
     for i in range(LIMIT):
     #while RUN:
-        frame = pd.Series([], name=pd.to_datetime('now').tz_localize(
-            pytz.utc).tz_convert(TIMEZONE).replace(microsecond=0))
+        data = [None]*768
         try:
-            MLX.getFrame(frame)
+            MLX.getFrame(data)
+            frame = pd.Series(data, name=pd.to_datetime('now').tz_localize(
+            pytz.utc).tz_convert(TIMEZONE).replace(microsecond=0))
         except ValueError:
             print('mlx frame error!!!')
             continue #retry

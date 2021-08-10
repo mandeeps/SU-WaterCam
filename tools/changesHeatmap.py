@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 def main(argv):
     rates_file = lzma.open(argv[1], 'rb')
     array = pickle.load(rates_file)
-    color_map = 'coolwarm_r'
+    color_map = 'coolwarm'
     show(array, color_map)
 
 def show(array, color_map):

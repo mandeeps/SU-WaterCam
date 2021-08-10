@@ -16,7 +16,7 @@ def main(args):
         # get average of change rate for each pixel
             avgs.append(rates[column].mean())
 
-        color_map = 'coolwarm_r'
+        color_map = 'coolwarm'
         array = avgs
         show(array, color_map)
 

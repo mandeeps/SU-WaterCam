@@ -12,11 +12,11 @@ in raspi-config set timezone, enable camera, ssh and i2c, set static IP address,
 python3 dependencies(use apt for pandas):
 adafruit-blinka adafruit-circuitpython-mlx90640 numpy pandas
 adafruit-circuitpython-tinylora
-gpiozero
+gpiozero, libgpiod-dev
 [Adafruit CircuitPython docs](https://learn.adafruit.com/circuitpython-on-raspberrypi-linux/installing-circuitpython-on-raspberry-pi)
 
 for direct connection to lora radio:
-adafruit-circuitpython-rfm9x
+raspi-lora or adafruit-circuitpython-rfm9x
 [Adafruit Lora radios](https://learn.adafruit.com/adafruit-rfm69hcw-and-rfm96-rfm95-rfm98-lora-packet-padio-breakouts/using-the-rfm69-radio)
 
 WittyPi (or equivalent) to schedule on/off cycle for maximum battery life:

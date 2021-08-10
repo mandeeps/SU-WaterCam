@@ -20,7 +20,7 @@ def main():
         print(row)
 
         with open(FILE, 'a+', newline='') as out:
-            DictWriter(out, row.keys()).writeheader()
+            #DictWriter(out, row.keys()).writeheader()
             DictWriter(out, row.keys()).writerow(row)
 
         sleep(60)
