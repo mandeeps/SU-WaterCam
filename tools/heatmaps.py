@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 def main(args):
     df = pd.read_csv('%s' % args[1])
-
+    
     if args[1].__contains__('deriv'):
         rates = df.loc[:, df.columns.str.contains('Rate')]
 
@@ -34,6 +34,7 @@ def main(args):
 
             show(array, color_map)
 
+    cmd(array)
 
 def show(array, color_map):
     # display frames, 32x24 res
@@ -44,8 +45,37 @@ def show(array, color_map):
             value = array[row * 32 + pixel]
             line.append(value)
         frame.append(line)
-    sns.heatmap(frame, cmap=color_map, annot=True)
+    sns.heatmap(frame, cmap=color_map, annot=True).invert_xaxis()
     plt.show()
+
+def cmd(frame):
+    for h in range(24):
+        for w in range(32):
+            t = frame[h * 32 + w]
+            c = "&"
+            # pylint: disable=multiple-statements
+            if t < 20:
+                c = " "
+            elif t < 23:
+                c = "."
+            elif t < 25:
+                c = "-"
+            elif t < 27:
+                c = "*"
+            elif t < 29:
+                c = "+"
+            elif t < 31:
+                c = "x"
+            elif t < 33:
+                c = "%"
+            elif t < 35:
+                c = "#"
+            elif t < 37:
+                c = "X"
+            # pylint: enable=multiple-statements
+            print(c, end="")
+        print()
+    print()
 
 if __name__ == '__main__':
     import sys
