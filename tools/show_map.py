@@ -19,7 +19,7 @@ def show(array, color_map):
             value = array[row * 32 + pixel]
             line.append(value)
         frame.append(line)
-    sns.heatmap(frame, cmap=color_map, annot=True)
+    sns.heatmap(frame, cmap=color_map, annot=True).invert_xaxis()
     plt.show()
 
 if __name__ == '__main__':

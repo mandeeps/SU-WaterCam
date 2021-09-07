@@ -38,8 +38,8 @@ def main(args):
         #deriv[f'Rate of Change {column}'] = value / DF.index.to_series().diff().dt.total_seconds()
 
     for column in deriv:
-        value = abs(deriv[column] / DF.index.to_series().diff().dt.total_seconds())
-        #value = abs(deriv[column].diff())
+        #value = abs(deriv[column] / DF.index.to_series().diff().dt.total_seconds())
+        value = abs(deriv[column].diff())
         deriv[f'Rate {column}'] = value
 
 # ToDo since taking multiple readings per boot, average them out discarding outliers to get most
