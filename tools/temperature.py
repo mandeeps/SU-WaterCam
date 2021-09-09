@@ -8,7 +8,7 @@ import board
 import adafruit_ahtx0
 
 SENSOR = adafruit_ahtx0.AHTx0(board.I2C())
-FILE = '/home/pi/HotWaterCam/data/temps.csv'
+FILE = '/home/pi/HotWaterCam/data/temp_humidity.csv'
 
 RUN = True
 
