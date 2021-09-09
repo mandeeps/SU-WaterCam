@@ -38,6 +38,8 @@ def main(args):
         #deriv[f'Rate of Change {column}'] = value / DF.index.to_series().diff().dt.total_seconds()
 
     for column in deriv:
+        # TODO determine with real world testing which approach works better for
+        # distinguishing water from other surfaces
         #value = abs(deriv[column] / DF.index.to_series().diff().dt.total_seconds())
         value = abs(deriv[column].diff())
         deriv[f'Rate {column}'] = value
@@ -69,12 +71,15 @@ def main(args):
 
     # divide pixels by change rate into relatively slow/fast categories
     # each recording period
-    median_value = median(change)
-    print('Median change rate value of entire set: ', median_value)
+    #median_value = median(change)
+    #print('Median change rate value of entire set: ', median_value)
+    
+    #instead use reference pixel cluster
+    ref_value = median([change[48],change[49],change[50]])
     
     extent = []
     for pixel in change:
-        if pixel < median_value:
+        if pixel < ref_value: #median_value:
              extent.append(0) # water
         else:
             extent.append(1) # land

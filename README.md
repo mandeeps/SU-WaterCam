@@ -10,7 +10,7 @@ in raspi-config set timezone, enable camera, ssh and i2c, set static IP address,
 [Connect with SSH via USB](https://artivis.github.io/post/2020/pi-zero/)
 
 python3 dependencies(use apt for pandas):
-adafruit-blinka adafruit-circuitpython-mlx90640 numpy pandas
+adafruit-blinka adafruit-circuitpython-mlx90640 numpy pandas compress_pickle
 adafruit-circuitpython-tinylora
 gpiozero, libgpiod-dev
 [Adafruit CircuitPython docs](https://learn.adafruit.com/circuitpython-on-raspberrypi-linux/installing-circuitpython-on-raspberry-pi)
