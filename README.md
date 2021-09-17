@@ -1,12 +1,12 @@
 # HotWaterCam
 Code to delineate surface water extent extraction from TIR and optical cameras.
 
-
+Thermal sensor tracks temperatures, Pandas is used to analyze data to distinguish pixels correlating to water from other surfaces based on the difference in the rate of temperature change over time.
 
 
 ### Raspberry Pi Zero configuration Using Raspbian Lite:
 
-in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc., 
+in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc.,
 [Connect with SSH via USB](https://artivis.github.io/post/2020/pi-zero/)
 
 python3 dependencies(use apt for pandas):
@@ -33,7 +33,7 @@ power saving by:
         edit - /etc/rc.local
             # Disable the HDMI port
             /usr/bin/tvservice -o
-            
+
         edit - /boot/config.txt
             # Disable the Zero's only LED
             dtparam=act_led_trigger=none
@@ -41,13 +41,13 @@ power saving by:
             # Disable wifi and bluetooth
             dtoverlay=disable-wifi
             dtoverlay=disable-bt
-            
+
     disabling services:
         systemctl disable bluetooth
         systemctl disable avahi-daemon
         systemctl disable triggerhappy
-        systemctl disable wpa_supplicant     
-           
+        systemctl disable wpa_supplicant
+
     disabling loading wifi/bluetooth drivers:
         edit - /etc/modprobe.d/raspi-blacklist.conf
             # WiFi
@@ -69,4 +69,5 @@ RaspberryPi Resources:
 https://gist.github.com/htruong/7df502fb60268eeee5bca21ef3e436eb#file-chroot-to-pi-sh
 
 Notes:
-2000mAh Adafruit battery lasted ~16 hours powering Rpi, Mlx90640, IRcut camera, adfruit temp sensor, with WittyPi  
+2000mAh Adafruit battery lasted ~16 hours powering Rpi, Mlx90640, IRcut camera, adfruit temp sensor, with WittyPi.
+Voltaic V50 12,800mAh battery lasts over a week running for ten minutes per hour with WittyPi and no IR LEDs attached.
