@@ -3,23 +3,19 @@
 # From multiple data files determine the boundaries of a body of water
 # and export that boundary data for transmission over radio
 
-from compress_pickle import dump
-import pickle
 from datetime import datetime
-#import lzma
-import pandas as pd
 import os
-import csv
 from statistics import median
+import pandas as pd
+from compress_pickle import dump
 
 def main(args):
     print(args)
-    DIRNAME = os.getcwd()
+    dir_name = os.getcwd()
     frames = []
 
-    for i in range(len(args)):
-        name = args[i]
-        frames.append(pd.read_csv(f'{name}', index_col=[0], parse_dates=[0]))
+    for count,arg in enumerate(args):
+        frames.append(pd.read_csv(f'{arg}', index_col=[0], parse_dates=[0]))
 
     # use datetime part of first and last datafiles passed as part of
     # the generated file's name
@@ -56,46 +52,41 @@ def main(args):
     print('Mean Change Rate Per Pixel *10: ', change)
 
     # round values for readability
-    #DF = DF.round(2)
-    #deriv = deriv.round(2)
-    #print(deriv)
+    DF = DF.round(2)
+    deriv = deriv.round(2)
 
     time_val = datetime.now().strftime('%Y%m%d-%H%M')
 
-    changes_file = os.path.join(DIRNAME, f'data/changes-{file_name}-{time_val}.csv')
+    changes_file = os.path.join(dir_name, f'data/changes-{file_name}-{time_val}.csv')
     dump(change, changes_file, compression='lzma')
 
-    deriv_file = os.path.join(DIRNAME, f'data/derivative-{file_name}-{time_val}.csv')
+    deriv_file = os.path.join(dir_name, f'data/derivative-{file_name}-{time_val}.csv')
     deriv.to_csv(deriv_file, index=True, header=True)
     print("Deriv file name: ", deriv_file)
 
     # divide pixels by change rate into relatively slow/fast categories
     # each recording period
-    #median_value = median(change)
-    #print('Median change rate value of entire set: ', median_value)
+    # median_value = median(change)
+    # print('Median change rate value of entire set: ', median_value)
 
-    #instead use reference pixel cluster
+    # instead use reference pixel cluster
     ref_value = median([change[48],change[49],change[50]])
     print('Median value of the reference pixels: ', ref_value)
 
     extent = []
     for pixel in change:
-        if pixel < ref_value: #median_value:
-             extent.append(0) # water
+        if pixel < ref_value: # median_value:
+            extent.append(0) # water
         else:
             extent.append(1) # land
 
-    extent_file = os.path.join(DIRNAME, f'data/extent-{file_name}-processed{time_val}.p')
-    extent_text = os.path.join(DIRNAME, f'data/extent-{file_name}-processed{time_val}.txt')
+    extent_file = os.path.join(dir_name, f'data/extent-{file_name}-processed{time_val}.p')
+    extent_text = os.path.join(dir_name, f'data/extent-{file_name}-processed{time_val}.txt')
 
     print('Extent: ', extent)
 
-    with open(extent_text, 'w') as f:
-        f.write(''.join(map(str, extent)))
-
-    # compressed pickle file for transmission over Lora radio
-   # with lzma.open(extent_file, mode='wb') as filehandler:
-   #     pickle.dump(extent, filehandler)
+    with open(extent_text, 'w') as file_handler:
+        file_handler.write(''.join(map(str, extent)))
 
     dump(extent, extent_file, compression='bz2')
 

@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import pickle
 from compress_pickle import load
 import seaborn as sns
 import matplotlib.pyplot as plt
