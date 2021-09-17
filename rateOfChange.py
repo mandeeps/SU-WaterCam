@@ -64,18 +64,18 @@ def save():
     print('avg: ', avg)
 
     avg_file = path.join(DIRNAME, 'data/avg_temp_per_boot.csv')
-    try: # check if file containing averaged readings already exists
-        temp_csv = pd.read_csv(avg_file, index_col=0)
-    except Exception: # if it doesn't create one with header values
-        print('Creating avg_temp_per_boot.csv file')
-        header_val = True
-    else: # if it already exists
+    if path.exists(avg_file):
+        not_first_boot = True
         print('avg file exists')
         header_val = False # don't write more header lines into the file
-    finally: # add avg dataframe to csv file
-        avg.to_csv(avg_file, mode='a', index=True, header=header_val)
+    else:
+        not_first_boot = False
+        print('Creating avg_temp_per_boot.csv file')
+        header_val = True
 
-    if not header_val:
+    avg.to_csv(avg_file, mode='a', index=True, header=header_val)
+
+    if not_first_boot:
         # if it already exists, calculate rate of temperature change
         # per hour by comparing temperature per pixel to prior saved
         # values
