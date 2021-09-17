@@ -52,11 +52,16 @@ def save():
     time_val = datetime.now().strftime('%Y%m%d-%H%M')
     data_file = path.join(DIRNAME, f'data/data-{time_val}.csv')
 
-    # Export DataFrames in csv format
+    # Export DataFrame in csv format
     print(f'Writing to: {data_file}')
+    print('DF: ', DF)
     DF.to_csv(data_file, index=True, header=True)
 
-    # Save mean of each column in DF to account for sensor errors
+    # Strip outliers from DF
+    DF = DF[abs(DF - DF.mean()) <= (1 * DF.std())]
+    print('DF sans outliers 1 std dev: ', DF)
+    
+    # Get mean temperature value per pixel
     avg_list = []
     for column in DF:
         avg_list.append(DF[column].mean())
