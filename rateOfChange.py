@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
-# store temp readings as pandas Series, store Series in DataFrame,
+# Store temp readings as pandas Series, store Series in DataFrame,
 # calc changes, rate of change per pixel, mean of change rates
+# Generate an extent map for Lora transmission from data after each run
+# starting with the second run
 
 import atexit
 from os import path
-import subprocess #if not using picamera, call external script
+import subprocess # if not using picamera, call external script
 from statistics import median
 # time
 from time import sleep
@@ -18,67 +20,75 @@ import board
 import busio
 import adafruit_mlx90640
 
+# Config the MLX90640 thermal sensor using the Adafruit library
 I2C = busio.I2C(board.SCL, board.SDA, frequency=400000)
 MLX = adafruit_mlx90640.MLX90640(I2C)
 MLX.refresh_rate = adafruit_mlx90640.RefreshRate.REFRESH_2_HZ
-DIRNAME = '/home/pi/HotWaterCam/' #os.getcwd()
+DIRNAME = '/home/pi/HotWaterCam/' # Could use os.getcwd() instead or
+                                  # use a different directory
 DF = pd.DataFrame()
 
-# config
-# user configurable values
-TIMEZONE = pytz.timezone('US/Eastern')
-INTERVAL = 6 # time delay between each reading
-LIMIT = 5 # max number of frames to take
+# User configurable values
+TIMEZONE = pytz.timezone('US/Eastern') # Set correct timezone here
+INTERVAL = 6 # Time delay between each reading
+LIMIT = 5 # Max number of frames to take per boot
 
-# exit handler
+# Exit handler
+# This will run on any shutdown
 @atexit.register
 def close():
-    # to run on shutdown
-    print('exit received, saving and shutting down')
-    # any other cleanup functions here
+    print('Exit received, saving and shutting down')
     save()
+    # Any other cleanup functions can go here
 
 def save():
-    ### save averaged out thermal sensor data ###
-    # call hourly_rate if run at least once to calculate rate of change
+    # Save the averaged out thermal sensor data
+    # Call hourly_rate if run at least once to calculate rate of change
+    # per pixel
+
     global DF
 
-    # local timezone
+    # Local timezone
     time_val = datetime.now().strftime('%Y%m%d-%H%M')
     data_file = path.join(DIRNAME, f'data/data-{time_val}.csv')
 
-    # export DataFrames in csv format
+    # Export DataFrames in csv format
     print(f'Writing to: {data_file}')
     DF.to_csv(data_file, index=True, header=True)
 
-    # save mean of each column in DF to account for sensor errors
+    # Save mean of each column in DF to account for sensor errors
     avg_list = []
     for column in DF:
         avg_list.append(DF[column].mean())
 
+    # Create a DataFrame from the list of pixel averages
     avg = pd.DataFrame(avg_list)
+    # Set it so the pixels are columns not rows
     avg = avg.transpose()
+    # Set the index to the current timestamp
     index = [pd.to_datetime('now').tz_localize(pytz.utc).tz_convert(TIMEZONE).replace(microsecond=0)]
     avg.index = pd.DatetimeIndex(index)
+    # Round to 2 decimal places
     avg = avg.round(2)
     print('avg: ', avg)
 
     avg_file = path.join(DIRNAME, 'data/avg_temp_per_boot.csv')
+    # If this is not the first run the file should exist already
     if path.exists(avg_file):
         not_first_boot = True
         print('avg file exists')
-        header_val = False # don't write more header lines into the file
+        header_val = False # so don't write more header lines into it
     else:
-        not_first_boot = False
+        not_first_boot = False # if it's the first boot create the file
         print('Creating avg_temp_per_boot.csv file')
         header_val = True
-
+    # Save the averages to a csv
     avg.to_csv(avg_file, mode='a', index=True, header=header_val)
 
     if not_first_boot:
-        # if it already exists, calculate rate of temperature change
-        # per hour by comparing temperature per pixel to prior saved
-        # values
+        # If the file already exists, calculate rate of temperature
+        # change per hour by comparing temperature per pixel to prior
+        # saved values
         last_rows = pd.read_csv(avg_file, index_col=0).tail(2)
         print('last two rows: ', last_rows)
         hourly_rate(last_rows)
@@ -87,27 +97,34 @@ def hourly_rate(rows):
     change_per_hour = pd.DataFrame()
 
     for column in rows:
-        #print('Column in rows: ', rows[column])
+        # Save absolute values only, doesn't matter if temperature
+        # change is up or down, just need the rate temps are changing
         value = abs(rows[column].diff().tail(1))
         change_per_hour[f'Change {column}'] = value
 
     print('change per hour: ', change_per_hour)
+    # Save the change rate data
     time_val = datetime.now().strftime('%Y%m%d-%H%M')
-
     change_per_hour_file = path.join(DIRNAME, f'data/change_per_hour-{time_val}.csv')
     change_per_hour.to_csv(change_per_hour_file, index=True, header=True)
 
+    # Round values to improve readability of generated median values
     change_per_hour = change_per_hour.round(2)
     change_list = []
+    # Store values in a list for easy comparisons
     for column in change_per_hour:
         change_list.append(change_per_hour[column].values[0])
 
+    # Get the median rate of change over the last run for the frame
     med_value = median(change_list)
 
-    #TODO implement ref values to compare to
-    #ref_value = #reference pixel values
+    # TODO implement ref values to compare to
+    # ref_value = #reference pixel values
 
-    # divide pixels by change rate compared to median or reference pixels
+    # Divide pixels by change rate compared to median or reference pixels
+    # If a given pixel's rate of temperature change is less than the
+    # median for the frame as a whole, assume it is water
+    # If the rate of change is higher assume the pixel is land
     extent = []
     for pixel in change_list:
         if pixel < med_value:
@@ -119,35 +136,45 @@ def hourly_rate(rows):
     extent_text = path.join(DIRNAME, f'data/extent-processed{time_val}.txt')
 
     print('Extent: ', extent)
+    # Save uncompressed extent file
     with open(extent_text, 'w') as file_handler:
         file_handler.write(''.join(map(str, extent)))
 
-    # compressed pickle file for transmission over Lora radio
+    # Compressed pickle file for transmission over Lora radio
+    # Ideally fits into a single packet to improve reliability of
+    # transmission at long range or in bad conditions
     dump(extent, extent_file, compression='bz2')
 
 def main():
+    # Create list for Adafruit's library to save the frame into
     data = [None]*768
-    for i in range(LIMIT):
 
+    # Save multiple frames every boot so we can average out temperature
+    # readings to account for any errors in the sensor
+    for i in range(LIMIT):
         try:
             MLX.getFrame(data)
         except ValueError:
             print('mlx frame error!!!')
-            continue #retry
+            continue # retry
 
+        # Create Pandas series using the list we saved the frame to
+        # Set the name of the series to the current timestamp
         frame = pd.Series(data, name=pd.to_datetime('now').tz_localize(
             pytz.utc).tz_convert(TIMEZONE).replace(microsecond=0))
 
         print(frame)
 
+        # Add each frame to the global dataframe
         global DF
         DF = pd.concat([DF, frame.to_frame().T])
 
-        #script to take a photo with raspistill, save to images folder
+        # Run external script to take a photo with raspistill tool
+        # Photos are saved into the images folder
         print('saving photo...')
         subprocess.run([path.join(DIRNAME, 'pic.sh')], check=True)
 
-        # pause until next frame
+        # Pause until the next frame
         if i < LIMIT:
             sleep(INTERVAL)
 
