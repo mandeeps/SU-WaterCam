@@ -1,6 +1,6 @@
-#Build Guide / How To
+# Build Guide / How To
 
-###Project requires a Raspberry Pi or compatible single board computer
+### Project requires a Raspberry Pi or compatible single board computer
 running Linux.
 
 If using a Pi Zero install headers if it doesn't ship with them attached
@@ -121,6 +121,8 @@ Press the button on the WittyPi to check if everything turns on. Check the LEDs
 If you are using a provided microSD card or if you flashed the image yourself, 
 the OS should already be set to run everything for 10 minutes every hour, saving data to the card.
 If not, you can log into the Pi and use the WittyPi program to set the schedule (or increase idle power use if using a normal power bank)
+
+https://cdn-shop.adafruit.com/product-files/5038/5038_WittyPi3Mini_UserManual.pdf
 
 If you have a computer set up to connect to the RPi Zero using USB-OTG networking
 

@@ -71,3 +71,9 @@ https://gist.github.com/htruong/7df502fb60268eeee5bca21ef3e436eb#file-chroot-to-
 Notes:
 2000mAh Adafruit battery lasted ~16 hours powering Rpi, Mlx90640, IRcut camera, adfruit temp sensor, with WittyPi.
 Voltaic V50 12,800mAh battery lasts over a week running for ten minutes per hour with WittyPi and no IR LEDs attached.
+
+ToDo:
+Implement data transmission over LoRa
+
+Remote login over LoRa?
+https://unsigned.io/15-kilometre-ssh-link-with-rnode/
