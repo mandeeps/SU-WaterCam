@@ -18,16 +18,19 @@ from compress_pickle import dump
 # hardware
 import board
 import busio
+# MLX90640 sensor
 import adafruit_mlx90640
 
+# Thermal sensor configuration, change values depending on sensor used
 # Config the MLX90640 thermal sensor using the Adafruit library
 I2C = busio.I2C(board.SCL, board.SDA, frequency=400000)
 MLX = adafruit_mlx90640.MLX90640(I2C)
 MLX.refresh_rate = adafruit_mlx90640.RefreshRate.REFRESH_2_HZ
-DIRNAME = '/home/pi/HotWaterCam/' # Could use os.getcwd() instead or
-                                  # use a different directory
-DF = pd.DataFrame()
+# Could use os.getcwd() or specify a different directory
+DIRNAME = '/home/pi/HotWaterCam/'
+RESOLUTION = 768 # 32x24 for MLX90640
 
+DF = pd.DataFrame()
 # User configurable values
 TIMEZONE = pytz.timezone('US/Eastern') # Set correct timezone here
 INTERVAL = 6 # Time delay between each reading
@@ -120,19 +123,23 @@ def hourly_rate(rows):
     for column in change_per_hour:
         change_list.append(change_per_hour[column].values[0])
 
-    # Get the median rate of change over the last run for the frame
+    # Get the median rate of change over the last run for the whole frame
     med_value = median(change_list)
 
-    # TODO implement ref values to compare to
-    # ref_value = #reference pixel values
+    # Get the median rate of the reference pixels in the center of 
+    # the frame so all other pixels can be compared to this value, 
+    # assuming the center of the frame is constantly water
+    ref_value = median([change_list[191], change_list[192], change_list[193]])
+    print('Ref value is: ', ref_value)
 
-    # Divide pixels by change rate compared to median or reference pixels
-    # If a given pixel's rate of temperature change is less than the
-    # median for the frame as a whole, assume it is water
+    # Split pixels by their change rate compared to the median of the 
+    # whole frame or the median of three reference pixels in the center
+    # If a given pixels rate of temperature change is less than the
+    # value it is being compared to, assume it is water
     # If the rate of change is higher assume the pixel is land
     extent = []
     for pixel in change_list:
-        if pixel < med_value:
+        if pixel < ref_value:
             extent.append(0) # water
         else:
             extent.append(1) # land
@@ -151,16 +158,19 @@ def hourly_rate(rows):
     dump(extent, extent_file, compression='bz2')
 
 def main():
-    # Create list for Adafruit's library to save the frame into
-    data = [None]*768
+    # List to save frames into for concatination in Pandas DF outside 
+    # the loop. Concatinating inside a loop is slow
+    frames = []
+    # Create list for thermal sensor library to save the frame into
+    data = [None]*RESOLUTION
 
     # Save multiple frames every boot so we can average out temperature
     # readings to account for any errors in the sensor
     for i in range(LIMIT):
         try:
-            MLX.getFrame(data)
+            MLX.getFrame(data) # MLX90640 specific
         except ValueError:
-            print('mlx frame error!!!')
+            print('Frame error!!!')
             continue # retry
 
         # Create Pandas series using the list we saved the frame to
@@ -170,9 +180,10 @@ def main():
 
         print(frame)
 
-        # Add each frame to the global dataframe
-        global DF
-        DF = pd.concat([DF, frame.to_frame().T])
+        # Instead of appending directly to DF, append to list for later
+        # concatination into the DF so we're not iteratively altering
+        # the DF which would be inefficient
+        frames.append(frame.to_frame().T)
 
         # Run external script to take a photo with raspistill tool
         # Photos are saved into the images folder
@@ -182,7 +193,11 @@ def main():
         # Pause until the next frame
         if i < LIMIT:
             sleep(INTERVAL)
-
+    
+    # Concat frames into global DataFrame
+    global DF
+    DF = pd.concat(frames)
+        
 if __name__ == '__main__':
     import sys
     sys.exit(main())
