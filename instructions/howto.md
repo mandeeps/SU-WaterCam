@@ -1,36 +1,49 @@
-Build Guide / How To
+#Build Guide / How To
 
-Project requires a Raspberry Pi or compatible single board computer
+###Project requires a Raspberry Pi or compatible single board computer
 running Linux.
 
 If using a Pi Zero install headers if it doesn't ship with them attached
 
-Parts List
+### Parts List
+
 Case
+
 https://www.amazon.com/LMioEtool-Dustproof-Waterproof-Electrical-Transparent/dp/B07PK8K8S2
 
 Raspberry Pi Zero
+
 https://www.adafruit.com/product/2885
 
 Optical Camera
+
 https://www.amazon.com/Dorhea-Raspberry-Camera-Automatic-Adjustable/dp/B07DNSSDGG/ref=pd_bxgy_img_2/136-0027955-5919373?pd_rd_w=2vD2j&pf_rd_p=fd3ebcd0-c1a2-44cf-aba2-bbf4810b3732&pf_rd_r=GYFEFWF9TX4TQ2CJAENW&pd_rd_r=47fda39a-7777-432d-9d94-af7113524711&pd_rd_wg=zb2az&pd_rd_i=B07DNSSDGG&psc=1
+
 If using a Pi Zero make sure to get a camera cable that will fit the smaller
 CSI connector on the Zero!
+
 https://www.adafruit.com/product/3157
 
 WittyPi 3 Mini
+
 https://www.adafruit.com/product/2223
 
 Stacking header to attach WittyPi to RPi 
+
 https://www.adafruit.com/product/5038
 
 Adafruit MLX90640 Thermal Sensor
+
 https://www.adafruit.com/product/4407
+
 or
+
 https://www.adafruit.com/product/4469
+
 or better
 
 Stemma QT cable to connect Adafruit thermal sensor to headers
+
 https://www.adafruit.com/product/4397
 
 If using a different thermal sensor (like the Flir Lepton) get needed
@@ -47,7 +60,9 @@ Make sure to have a way to connect whatever battery you are using to the
 WittyPi. If using a plain lipo battery instead of a USB power bank like 
 the Voltaic get a charger that will also let you connect the battery to 
 the microUSB port on the WittyPi like 
+
 https://www.adafruit.com/product/2465
+
 You'll need to solder the inlcuded USB header on or else solder a micro USB cable
 to the output so it can be connected to the WittyPi
 If you use a regular USB power bank / portable phone charger you'll need
@@ -87,10 +102,15 @@ Install WittyPi 3 Mini onto the extended headers making sure it is in place
 
 Once the WittyPi is installed you can connect your thermal sensor
 See the reference Raspberry Pi Zero image
+
 Connect the Stemma QT cable to the Adafruit MLX90640 sensor, either socket works
+
 Connect the red header cable to pin 1, the 3.3v pin on the top left
+
 Connect the blue header cable to pin 3, the GPIO data pin just below pin 1
+
 Connect the yellow header cable to pin 5, the GPIO clock pin just below pin 3
+
 Connect the black header cable to pin 6, the Ground pin just right of pin 5
 
 Make sure your battery is charged.
@@ -103,8 +123,11 @@ the OS should already be set to run everything for 10 minutes every hour, saving
 If not, you can log into the Pi and use the WittyPi program to set the schedule (or increase idle power use if using a normal power bank)
 
 If you have a computer set up to connect to the RPi Zero using USB-OTG networking
+
 https://learn.adafruit.com/turning-your-raspberry-pi-zero-into-a-usb-gadget/ethernet-gadget
+
 https://artivis.github.io/post/2020/pi-zero/
+
 you can plug a micro USB cable into the data port of the RPi (the middle port of the three)
 and the other end into your computer. Assuming your computer configuration is correct you
 should be able to use SSH to access the Zero. If you are not using a Zero
