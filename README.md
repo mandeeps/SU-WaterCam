@@ -5,18 +5,20 @@ Thermal sensor tracks temperatures, Pandas is used to analyze data to distinguis
 
 
 ### Raspberry Pi Zero configuration Using Raspbian Lite:
-
+If installing regular Raspbian/RaspberryPi OS image:
 in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc.,
 [Connect with SSH via USB](https://artivis.github.io/post/2020/pi-zero/)
 
-python3 dependencies(use apt for pandas):
-adafruit-blinka adafruit-circuitpython-mlx90640 numpy pandas compress_pickle
-adafruit-circuitpython-tinylora
-gpiozero, libgpiod-dev
-[Adafruit CircuitPython docs](https://learn.adafruit.com/circuitpython-on-raspberrypi-linux/installing-circuitpython-on-raspberry-pi)
+use apt to install python3-pandas: sudo apt install python3-pandas
+and libgpiod-dev: sudo apt install libgpiod-dev
 
+use pip to install other dependencies: python3 -m pip install compress_pickle adafruit-blinka adafruit_circuitpython-mlx90640 gpiozero
+
+If using SD card image provided this should already have been done for you.
+
+[Adafruit CircuitPython docs](https://learn.adafruit.com/circuitpython-on-raspberrypi-linux/installing-circuitpython-on-raspberry-pi)
 for direct connection to lora radio:
-raspi-lora or adafruit-circuitpython-rfm9x
+raspi-lora or adafruit-circuitpython-rfm9x or adafruit-circuitpython-tinylora
 [Adafruit Lora radios](https://learn.adafruit.com/adafruit-rfm69hcw-and-rfm96-rfm95-rfm98-lora-packet-padio-breakouts/using-the-rfm69-radio)
 
 WittyPi (or equivalent) to schedule on/off cycle for maximum battery life:

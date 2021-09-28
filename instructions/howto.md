@@ -3,7 +3,7 @@
 ### Project requires a Raspberry Pi or compatible single board computer
 running Linux.
 
-If using a Pi Zero install headers if it doesn't ship with them attached
+If using a Pi Zero, install the headers if it doesn't ship with them attached
 
 ### Parts List
 
@@ -77,6 +77,14 @@ Instructions assume you are using a Raspberry Pi Zero with headers installed
 with either Adafruit MLX90640 sensor
 
 Flash the provided disk image onto the microSD card if not already done
+
+If installing regular Raspbian/RaspberryPi OS image:
+in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc.,
+use apt to install python3-pandas: sudo apt install python3-pandas
+and libgpiod-dev: sudo apt install libgpiod-dev
+use pip to install other dependencies: python3 -m pip install compress_pickle adafruit-blinka adafruit_circuitpython-mlx90640 gpiozero
+
+If using SD card image provided this should already have been done for you!
 Insert into the micrSD card slot on the Raspberry Pi
 
 It's easier to connect the optical camera before installing the WittyPi
