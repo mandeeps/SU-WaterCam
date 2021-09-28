@@ -28,7 +28,7 @@ I2C = busio.I2C(board.SCL, board.SDA, frequency=400000)
 MLX = adafruit_mlx90640.MLX90640(I2C)
 MLX.refresh_rate = adafruit_mlx90640.RefreshRate.REFRESH_2_HZ
 # Could use os.getcwd() or specify a different directory
-DIRNAME = '/home/pi/HotWaterCam/'
+DIRNAME = '/home/pi/SU-WaterCam/'
 RESOLUTION = 768 # 32x24 for MLX90640
 
 DF = pd.DataFrame()
