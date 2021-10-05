@@ -79,3 +79,6 @@ Implement data transmission over LoRa
 
 Remote login over LoRa?
 https://unsigned.io/15-kilometre-ssh-link-with-rnode/
+
+Compress SD image:
+https://github.com/Drewsif/PiShrink
