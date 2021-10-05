@@ -6,7 +6,7 @@ After=multi-user.target
 Type=simple
 User=pi
 Group=pi
-ExecStart=python3 /home/pi/HotWaterCam/tools/sonar.py
+ExecStart=python3 /home/pi/SU-WaterCam/tools/sonar.py
 KillMode=process
 
 [Install]
