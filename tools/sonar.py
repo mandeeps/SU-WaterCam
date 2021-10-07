@@ -7,7 +7,7 @@ from csv import DictWriter
 import board
 import adafruit_hcsr04
 
-FILE = '/home/pi/HotWaterCam/data/distance.csv'
+FILE = '/home/pi/SU-WaterCam/data/distance.csv'
 RUN = True
 
 def main():

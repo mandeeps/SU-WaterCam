@@ -24,6 +24,10 @@ raspi-lora or adafruit-circuitpython-rfm9x or adafruit-circuitpython-tinylora
 WittyPi (or equivalent) to schedule on/off cycle for maximum battery life:
 https://www.adafruit.com/product/5038
 
+[Ultrasonic distance sensor:](https://www.adafruit.com/product/4007)
+python3 -m pip install adafruit-circuitpython-hcsr04
+sudo apt install gpiod
+
 #### power optimization:
 [1](https://blues.io/blog/tips-tricks-optimizing-raspberry-pi-power/),
 [2](https://raspberry-projects.com/pi/pi-hardware/raspberry-pi-zero/minimising-power-consumption),
