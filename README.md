@@ -4,7 +4,7 @@ Code to delineate surface water extent extraction from TIR and optical cameras.
 Thermal sensor tracks temperatures, Pandas is used to analyze data to distinguish pixels correlating to water from other surfaces based on the difference in the rate of temperature change over time.
 
 
-### Raspberry Pi Zero configuration Using Raspbian Lite:
+### Initial Raspberry Pi Zero configuration Using Raspbian Lite:
 If installing regular Raspbian/RaspberryPi OS image:
 in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc.,
 [Connect with SSH via USB](https://artivis.github.io/post/2020/pi-zero/)
@@ -15,6 +15,10 @@ and libgpiod-dev: sudo apt install libgpiod-dev
 use pip to install other dependencies: python3 -m pip install compress_pickle adafruit-blinka adafruit_circuitpython-mlx90640 gpiozero
 
 If using SD card image provided this should already have been done for you.
+
+To connect using SSH: https://learn.adafruit.com/turning-your-raspberry-pi-zero-into-a-usb-gadget/ethernet-gadget
+Connect via serial cable: https://learn.adafruit.com/adafruits-raspberry-pi-lesson-5-using-a-console-cable/software-installation-windows
+
 
 [Adafruit CircuitPython docs](https://learn.adafruit.com/circuitpython-on-raspberrypi-linux/installing-circuitpython-on-raspberry-pi)
 for direct connection to lora radio:
@@ -27,6 +31,10 @@ https://www.adafruit.com/product/5038
 [Ultrasonic distance sensor:](https://www.adafruit.com/product/4007)
 python3 -m pip install adafruit-circuitpython-hcsr04
 sudo apt install gpiod
+
+[GPS](https://www.adafruit.com/product/4415)
+sudo python3 -m pip install adafruit-circuitpython-gps
+
 
 #### power optimization:
 [1](https://blues.io/blog/tips-tricks-optimizing-raspberry-pi-power/),
