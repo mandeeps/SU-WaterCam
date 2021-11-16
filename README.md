@@ -94,3 +94,8 @@ https://unsigned.io/15-kilometre-ssh-link-with-rnode/
 
 Compress SD image:
 https://github.com/Drewsif/PiShrink
+
+Flir Lepton 3.5 with Flir Breakout Board 2.0
+Building off these examples:
+https://github.com/lukevanhorn/Lepton3
+https://github.com/lukevanhorn/Lepton3/issues/4#issuecomment-652940493
