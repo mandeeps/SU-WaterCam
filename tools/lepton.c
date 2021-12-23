@@ -99,7 +99,7 @@ static void save_pgm_file(void)
     int image_index = 0;
 
     do {
-        sprintf(image_name, "images/IMG_%.4d.pgm", image_index);
+        sprintf(image_name, "images/temp_%.4d.pgm", image_index);
         image_index += 1;
         if (image_index > 9999) 
         {
@@ -116,10 +116,9 @@ static void save_pgm_file(void)
         exit(1);
     }
 
-    printf("Calculating min/max values for proper scaling...\n");
+//    printf("Calculating min/max values for proper scaling...\n");
     for(i = 0; i < 240; i++)
-    {
-        
+    {        
         for(j = 0; j < 80; j++)
         {
             if (lepton_image[i][j] > maxval) {
@@ -131,7 +130,7 @@ static void save_pgm_file(void)
         }
     }
     printf("maxval = %u\n",maxval);
-    printf("minval = %u\n",minval);
+//    printf("minval = %u\n",minval);
     
     fprintf(f,"P2\n160 120\n%u\n",maxval); //-minval); For exact temp
     // measurement we do not subtract the minval. This makes the image
