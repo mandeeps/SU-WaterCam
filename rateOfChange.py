@@ -50,7 +50,7 @@ def save():
     # Call hourly_rate if run at least once to calculate rate of change
     # per pixel
 
-    global DF
+    global DF # will fix later, promise
 
     # Local timezone
     time_val = datetime.now().strftime('%Y%m%d-%H%M')
@@ -195,8 +195,8 @@ def main():
         if i < LIMIT:
             sleep(INTERVAL)
     
-    # Concat frames into global DataFrame
-    global DF
+    # Concat frames into DataFrame
+    global DF # fix later
     DF = pd.concat(frames)
         
 if __name__ == '__main__':

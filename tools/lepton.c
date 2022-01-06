@@ -83,7 +83,7 @@ static uint8_t status_bits = 0;
 int8_t last_packet = -1;
 
 #define VOSPI_FRAME_SIZE (164)
-#define LEP_SPI_BUFFER (118080) //(118080)39360
+#define LEP_SPI_BUFFER (118080)
 /* modify /boot/cmdline.txt to include spidev.bufsiz=131072 */
 
 static uint8_t rx_buf[LEP_SPI_BUFFER] = {0};
@@ -99,7 +99,7 @@ static void save_pgm_file(void)
     int image_index = 0;
 
     do {
-        sprintf(image_name, "images/temp_%.4d.pgm", image_index);
+        sprintf(image_name, "lepton_temp_%.4d.csv", image_index);
         image_index += 1;
         if (image_index > 9999) 
         {
@@ -116,7 +116,6 @@ static void save_pgm_file(void)
         exit(1);
     }
 
-//    printf("Calculating min/max values for proper scaling...\n");
     for(i = 0; i < 240; i++)
     {        
         for(j = 0; j < 80; j++)
@@ -124,38 +123,35 @@ static void save_pgm_file(void)
             if (lepton_image[i][j] > maxval) {
                 maxval = lepton_image[i][j];
             }
-            if (lepton_image[i][j] < minval) {
+            /*if (lepton_image[i][j] < minval) {
                 minval = lepton_image[i][j];
-            }
+            }*/
         }
     }
-    printf("maxval = %u\n",maxval);
-//    printf("minval = %u\n",minval);
+    //printf("maxval = %u\n",maxval);
     
-    fprintf(f,"P2\n160 120\n%u\n",maxval); //-minval); For exact temp
+    //fprintf(f,"P2\n160 120\n%u\n",maxval); //-minval); For exact temp
     // measurement we do not subtract the minval. This makes the image
     // unviewable but we get the temp values
+    
     for(i=0; i < 240; i += 2)
     {
         /* first 80 pixels in row */
         for(j = 0; j < 80; j++)
-        {
-            fprintf(f,"%d ", lepton_image[i][j]); // - minval);
+        { // subtract 27315 and divide by 100 to get Celsius values
+            fprintf(f,"%d ", ((lepton_image[i][j] - 27315) / 100) );
         }
 
         /* second 80 pixels in row */
         for(j = 0; j < 80; j++)
         {
-            fprintf(f,"%d ", lepton_image[i + 1][j]); // - minval);
+            fprintf(f,"%d ", ((lepton_image[i + 1][j] - 27315) / 100) );
         }        
         fprintf(f,"\n");
     }
     fprintf(f,"\n\n");
 
     fclose(f);
-
-    //launch image viewer
-    //execlp("gpicview", image_name, NULL);
 }
 
 int transfer(int fd)
