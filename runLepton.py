@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
-
-import atexit
 from os import path, mkdir, listdir, remove
 import subprocess # to call external apps
-from statistics import median
 # time
 from time import sleep
 from datetime import datetime
@@ -16,7 +13,7 @@ import shutil
 DIRNAME = '/home/pi/SU-WaterCam/'
 # User configurable values
 TIMEZONE = pytz.timezone('US/Eastern') # Set correct timezone here
-INTERVAL = 1#6 # Time delay between each reading
+INTERVAL = 6 # Time delay between each reading
 LIMIT = 5 # Max number of frames to take per boot
 
 def main():
@@ -34,13 +31,15 @@ def main():
     print(app)
     shutil.copy(source, app)
     
-    # call capture and lepton binaries to save image and temp data
+    # call external capture and lepton binaries to save image and temp data
     for i in range(LIMIT):
         # Photos are saved into the images folder
-        print('saving photo...')
+        print('saving thermal photo...')
         subprocess.run([path.join(DIRNAME, 'capture')], check=True)
         print('\nsaving temp data...')
         subprocess.run([app], check=True, cwd=folder)
+        # save normal picture
+        subprocess.run([path.join(DIRNAME, 'pic.sh')], check=False)
         
         # Pause until the next frame
         if i < LIMIT:
@@ -52,15 +51,30 @@ def main():
     print('\n second stage \n')
     remove(app)
     
-    DF = pd.DataFrame()
-    
+    frames = []
     for item in listdir(folder):
-        print(item)
-#        tempDF = pd.read_csv(item, header=None)
-#        print(tempDF)
-        #DF.append(pd.read_csv(item, sep='\s', header=0))
+        tempDF = pd.read_csv(path.join(folder, f'{item}'), sep='\s+', index_col=False, header=None)
+        # Create Pandas series using the DF we saved the frame to
+        #series = tempDF.transpose()[0]
+        # Set the name of the series to the current timestamp
+        #series = pd.Series(tempDF.transpose()[0], name=pd.to_datetime('now').tz_localize(
+        #    pytz.utc).tz_convert(TIMEZONE).replace(microsecond=0))
+        #frame = pd.Series(data, name=pd.to_datetime('now').tz_localize(
+        #    pytz.utc).tz_convert(TIMEZONE).replace(microsecond=0))
         
-#    print(DF)
+        # Instead of appending directly to DF, append to list for later
+        # concatination into the DF so we're not iteratively altering
+        # the DF which would be inefficient
+        #frames.append(tempDF.to_frame().T)
+        frames.append(tempDF)
+        
+    DF = pd.concat(frames)
+    DF = DF.divide(100)
+    DF.applymap(np.mean)
+    print(DF)
+    data_file = path.join(folder, f'{time_val}.csv')
+    
+    DF.to_csv(data_file)
 
 if __name__ == '__main__':
     import sys

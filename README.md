@@ -99,3 +99,6 @@ Flir Lepton 3.5 with Flir Breakout Board 2.0
 Building off these examples:
 https://github.com/lukevanhorn/Lepton3
 https://github.com/lukevanhorn/Lepton3/issues/4#issuecomment-652940493
+
+Tensorflow Lite from:
+https://github.com/prettyflyforabeeguy/tf_lite_on_pi_zero.git
