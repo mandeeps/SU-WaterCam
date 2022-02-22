@@ -1,3 +1,6 @@
+Tensorflow Lite 2.3 for Pi Zero is in the Tools directory
+Pi3/4 & Zero 2 can use more up to date versions
+
 Resources:
 https://github.com/Cow911/SingleImageWaterHazardDetectionWithRAU
 
