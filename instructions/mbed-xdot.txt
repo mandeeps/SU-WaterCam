@@ -1,0 +1,23 @@
+multitech xdot
+easiest to use the online ide: https://studio.keil.arm.com/
+
+multitech examples - set active project to https://studio.keil.arm.com/?import=http://os.mbed.com/teams/MultiTech/code/Dot-Examples/
+import the library https://github.com/MultiTechSystems/libxDot
+set target hardware to xDot
+Make sure mbed os is a matching version for what the examples were written for - 6.1
+
+for uploading to device: pip install mtsmultitool
+
+offline
+create virtualenv
+install mbed cli tools
+https://os.mbed.com/docs/mbed-os/latest/build-tools/install-or-upgrade.html
+python3 -m pip install mbed-tools
+
+create or import project
+
+example: mbed import http://os.mbed.com/teams/MultiTech/code/Dot-Examples/
+cd into directory examples, 
+add xDot library: mbed add https://github.com/MultiTechSystems/libxDot
+set target hardware: mbed-tools target xdot_l151cc
+set toolchain: mbed-tools toolchain GCC_ARM - free access to the ARM compiler only through the online tools
