@@ -13,7 +13,7 @@ import shutil
 DIRNAME = '/home/pi/SU-WaterCam/'
 # User configurable values
 TIMEZONE = pytz.timezone('US/Eastern') # Set correct timezone here
-INTERVAL = 6 # Time delay between each reading
+INTERVAL = 10 # Time delay between each reading
 LIMIT = 5 # Max number of frames to take per boot
 
 def main():

@@ -56,7 +56,7 @@ def run(DIR):
         print('Classification Time =', classification_time, 'seconds.')
         #print(label_id, prob)
         # Return the classification label of the image.
-        #classification_label = labels[label_id]
+        classification_label = labels[label_id]
         print('Image Label is :', label_id, ', with Accuracy :', np.round(prob*100, 2), '%.')
 
 print('Testing on photos')
