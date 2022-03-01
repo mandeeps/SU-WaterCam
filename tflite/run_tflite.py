@@ -57,7 +57,7 @@ def run(DIR):
         #print(label_id, prob)
         # Return the classification label of the image.
         classification_label = labels[label_id]
-        print('Image Label is :', label_id, ', with Accuracy :', np.round(prob*100, 2), '%.')
+        print('Image Label is :', classification_label, ', with Accuracy :', np.round(prob*100, 2), '%.')
 
 print('Testing on photos')
 run(DIR)
