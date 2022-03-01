@@ -12,7 +12,7 @@ from tflite_runtime.interpreter import Interpreter
 from PIL import Image
 import numpy as np
 
-DIR = '/home/pi/SU-HotwaterCam/'
+DIR = '/home/pi/SU-WaterCam/'
 IMG = path.join(DIR, 'images')
 DATA = path.join(DIR, 'data')
 
