@@ -6,7 +6,7 @@ from PIL import Image
 import numpy as np
 import os, time
 
-model = "ei-flood2-transfer-learning-tensorflow-lite-int8-quantized-model.lite"
+model = "trained.tflite"
 labels = [line.rstrip('\n') for line in open("labels.txt")]
 interpreter = Interpreter(model)
 print("Model Loaded Successfully.")

@@ -27,7 +27,7 @@ def classify_image(interpreter, image, top_k=1):
   ordered = np.argpartition(-output, 1)
   return [(i, output[i]) for i in ordered[:top_k]][0]
 
-data_folder = "/home/pi/mobilenet/"
+data_folder = "/home/pi/SU-WaterCam/tf-examples/mobilenet/"
 
 model_path = data_folder + "mobilenet_v1_1.0_224_quant.tflite"
 label_path = data_folder + "labels_mobilenet_quant_v1_224.txt"
