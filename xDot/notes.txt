@@ -1,0 +1,21 @@
+On Raspberry Pi - install Python serial module with pip
+python3 -m pip install pyserial
+
+Connect xDot devkit to USB port
+Device is /dev/ttyACM0 and /dev/ttyACM1 on RPi
+
+Connect to xDot devkit with:
+python3 -m serial.tools.miniterm /dev/ttyACM0 115200 --parity N --filter colorize
+
+
+Python serial module can be used within python scripts, see connect.py
+
+xDot module sans devkit can connect via UART, I2C, or SPI
+
+
+On other computers the xDot devkit may appear as /dev/ttyUSB0
+
+Can also use screen to interact with the xDot:
+screen /dev/ttyACM0 115200,cs8,-parenb,-cstopb,-hupcl
+
+or cutecom, putty, etc.,

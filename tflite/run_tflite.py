@@ -47,6 +47,8 @@ def run(DIR):
     for photo in listdir(IMG):
         f = path.join(IMG, photo)
         print(f)
+        # exclude git dotfiles, unreadable files
+        
         image = Image.open(f).convert('RGB').resize((width, height))
         # Classify the image.
         time1 = time.time()
@@ -54,8 +56,6 @@ def run(DIR):
         time2 = time.time()
         classification_time = np.round(time2-time1, 3)
         print('Classification Time =', classification_time, 'seconds.')
-        #print(label_id, prob)
-        # Return the classification label of the image.
         classification_label = labels[label_id]
         print('Image Label is :', classification_label, ', with Accuracy :', np.round(prob*100, 2), '%.')
 
