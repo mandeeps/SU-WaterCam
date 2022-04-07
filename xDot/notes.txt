@@ -19,3 +19,28 @@ Can also use screen to interact with the xDot:
 screen /dev/ttyACM0 115200,cs8,-parenb,-cstopb,-hupcl
 
 or cutecom, putty, etc.,
+
+AT Commands:
+ATI for device firmware information
+AT+PS to preserve session information in auto mode
+
+
+To connect to a gateway manually the following is needed:
+network_address AT+NA=(number of multicast session 1-8),(4 bytes of hex seperated by :)
+see AT command document page 49-50
+
+network_session_key AT+NSK=(multicast session #),(16 bytes hex data seperated by :)
+pag 50-51 of AT reference
+
+data_session_key AT+DSK=(multicast #),(16 bytes hex)
+pg 51-52
+
+Possibly also:
+frequency_sub_band
+network_type
+join_delay
+
+AT+SS & AT+RS to save and restore session when in manual mode
+
+AT+NJS network join status
+pg 55

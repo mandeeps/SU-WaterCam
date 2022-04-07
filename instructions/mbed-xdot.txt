@@ -20,4 +20,4 @@ example: mbed import http://os.mbed.com/teams/MultiTech/code/Dot-Examples/
 cd into directory examples, 
 add xDot library: mbed add https://github.com/MultiTechSystems/libxDot
 set target hardware: mbed-tools target xdot_l151cc
-set toolchain: mbed-tools toolchain GCC_ARM - free access to the ARM compiler only through the online tools
+set toolchain: mbed-tools toolchain GCC_ARM - free access to the ARM compiler through the online tools
