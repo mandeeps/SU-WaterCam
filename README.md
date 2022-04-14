@@ -93,6 +93,7 @@ Remote login over LoRa?
 https://unsigned.io/15-kilometre-ssh-link-with-rnode/
 
 Compress SD image:
+https://www.pragmaticlinux.com/2020/12/how-to-clone-your-raspberry-pi-sd-card-in-linux/
 https://github.com/Drewsif/PiShrink
 
 Flir Lepton 3.5 with Flir Breakout Board 2.0
