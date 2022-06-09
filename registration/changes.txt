@@ -1,4 +1,0 @@
-Removed xfeatures2d from sift and hough https://github.com/opencv/opencv/issues/16736
-Added correct shebang for python3
-Removed future import because we are using python3
-Converted to Unix line endings
