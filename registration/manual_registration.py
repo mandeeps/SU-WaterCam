@@ -2,7 +2,7 @@
 # github.com/dbloisi/homography-computation
 # University of Basilicata
 # Select a pair of matching keypoints by clicking them with the mouse
-# then press 's' to save the pair. Select at least 4 points this way, 
+# then press 's' to save the pair. Select at least 4 pairs this way, 
 # saving each one. Then press 'm' to merge and 'h' to see the modified
 # image
 
@@ -42,7 +42,7 @@ def get_plan_view(src, dst):
     dst_pts = np.array(dst_list).reshape(-1,1,2)
     H, mask = cv.findHomography(src_pts, dst_pts, cv.RANSAC,5.0)
     print("H:")
-    print(H)
+    np.save('homography', H)
     plan_view = cv.warpPerspective(src, H, (dst.shape[1], dst.shape[0]))
     return plan_view
 

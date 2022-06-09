@@ -13,9 +13,9 @@ if dummy != cv2.STITCHER_OK:
   # checking if the stitching procedure is successful
   # .stitch() function returns a true value if stitching is
   # done successfully
-    print("stitching ain't successful")
+    print("not ready")
 else:
-    print('Your Panorama is ready!!!')
+    print('panorama ready')
  
 # final output
 cv2.imshow('final result',output)
