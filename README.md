@@ -35,6 +35,13 @@ sudo apt install gpiod
 [GPS](https://www.adafruit.com/product/4415)
 sudo python3 -m pip install adafruit-circuitpython-gps
 
+for MPU-6050 there is an i2c address conflict with the WittyPi and using another unit that doesn't use the 0x68 or 0x69 address would be easier. 
+To get them working together first bridge the solder jumper on the back of the MPU 6050 to set it to 0x69. 
+Use the command i2cset -y 1 0x69 9 0x70 with the WittyPi connected to change its microcontroller address from 0x69 to 0x70. 
+The WittyPi software will need to be edited to use the new 0x70 address before the power management features work. Edit the utilities.sh script in the wittypi directory and change the I2C_MC_ADDRESS value to 0x70
+Disconnect and reconnect power.
+Then connect the MPU 6050 and other i2c peripherals, power-cycle again if needed.
+
 
 #### power optimization:
 [1](https://blues.io/blog/tips-tricks-optimizing-raspberry-pi-power/),
