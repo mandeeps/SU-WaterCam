@@ -35,7 +35,7 @@ data = open(DATA, LOG_MODE)
 
 write = csv.writer(log)
     
-# First 5 fields recognized by Exiftool, rest for logging other data
+# Last 4 from IMU, first several for GPS geotagging by exiftool
 fields = ['GPSDateTime', 'GPSLatitude', 'GPSLongitude', 'GPSAltitude',
           'GPSTrack', 'IMU Time', 'IMU Accel', 'IMU Gyro', 'IMU Temp']
 write.writerow(fields)
@@ -43,7 +43,7 @@ write.writerow(fields)
 while True:
     gps.update()
     current = time.monotonic()
-    if current - last_print >= 1.0:
+    if current - last_print >= 5.0:
         last_print = current
 
         # log IMU data
@@ -68,14 +68,15 @@ while True:
               ), "\n"
             ]
 
-            coords = ["Latitude: {0:.6f} degrees".format(gps.latitude),
-              "Longitude: {0:.6f} degrees".format(gps.longitude),
-              "Precise Latitude: {:2.}{:2.4f} degrees".format(
-              gps.latitude_degrees, gps.latitude_minutes
-              ),
-              "Precise Longitude: {:2.}{:2.4f} degrees".format(
-              gps.longitude_degrees, gps.longitude_minutes
-              ), "\n"]
+            coords = ["Latitude: {0:.3f} degrees".format(gps.latitude),
+              "Longitude: {0:.3f} degrees".format(gps.longitude),
+              #"Precise Latitude: {:2.}{:2.4f} degrees".format(
+              #gps.latitude_degrees, gps.latitude_minutes
+              #),
+              #"Precise Longitude: {:2.}{:2.4f} degrees".format(
+              #gps.longitude_degrees, gps.longitude_minutes
+              #), 
+              "\n"]
 
             extra = []
             if gps.satellites is not None:
@@ -98,7 +99,16 @@ while True:
             for line in extra:
                 data.writelines(line)
 
-            row = [gps.timestamp_utc, gps.latitude, gps.longitude, 
+            # time in required format
+            exiftime = "{}/{}/{} {:02}:{:02}:{:02}".format(
+              gps.timestamp_utc.tm_year,
+              gps.timestamp_utc.tm_mon,
+              gps.timestamp_utc.tm_mday,
+              gps.timestamp_utc.tm_hour,
+              gps.timestamp_utc.tm_min,
+              gps.timestamp_utc.tm_sec)
+
+            row = [exiftime, gps.latitude, gps.longitude, 
                    gps.altitude_m, gps.track_angle_deg, 
                    time.asctime(time.localtime(time.time())),
                    mpu.acceleration, mpu.gyro, mpu.temperature
