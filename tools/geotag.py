@@ -110,8 +110,8 @@ while running:
               ), "\n"
             ]
 
-            coords = ["Latitude: {0:.3f} degrees".format(gps.latitude),
-              "Longitude: {0:.3f} degrees".format(gps.longitude), "\n"]
+            coords = ["Latitude: {0:.3f} degrees ".format(gps.latitude),
+              "Longitude: {0:.3f} degrees ".format(gps.longitude), "\n"]
 
             # Not always available so check before recording
             extra = []
@@ -164,16 +164,17 @@ while running:
             exif_bytes = piexif.dump(exif_data)
             # write to disk
             piexif.insert(exif_bytes, image)
-        else:
-            data.write("\nNo GPS fix \n")    
+            
+        else: # if no gps fix
+            data.write("\n No GPS fix \n")    
             sentence = gps.readline()
             if not sentence:
                 continue
             print(str(sentence, "ascii").strip())
             data.write(str(sentence, "ascii").strip())
  
-        loop = loop + 1
+        loop += 1
         data.flush()
             
-    if(loop == LIMIT):
+    if (loop == LIMIT):
         running = False

@@ -1,0 +1,14 @@
+ [Unit]
+ Description=GPS and IMU recording script
+ After=multi-user.target
+
+ [Service]
+ Type=idle
+ User=pi
+ Group=pi
+ Restart=always
+ Restart=10
+ ExecStart=/usr/bin/python3 /home/pi/SU-WaterCam/tools/geotag.py
+
+ [Install]
+ WantedBy=multi-user.target
