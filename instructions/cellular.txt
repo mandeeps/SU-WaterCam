@@ -1,0 +1,14 @@
+Easiest way seems to be to use modemmanger with network-manager
+This requires replacing Raspbian's default stack of dhcpcd and openresolv
+Remove and purge udhcpcd and openresolv: sudo apt purge udhcpcd openresolv
+Reconfigure current network devices with network manager to retain local networking during setup - sudo nmtui is easiest way
+Make sure /etc/network/interfaces has no references to devices you want NM to manage
+
+Then configure cellular modem and verify everything works as expected after restarts
+
+docs:
+https://wiki.archlinux.org/title/NetworkManager
+https://serverfault.com/questions/810636/how-to-manage-dns-in-networkmanager-via-console-nmcli
+https://wiki.debian.org/NetworkManager
+https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/networking_guide/sec-configuring_ip_networking_with_nmcli
+https://access.redhat.com/documentation/en-us/red_hat_enterprise_linux/7/html/networking_guide/sec-configuring_static_routes_using_nmcli
