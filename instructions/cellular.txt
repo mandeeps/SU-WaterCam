@@ -6,7 +6,10 @@ Make sure /etc/network/interfaces has no references to devices you want NM to ma
 
 Then configure cellular modem and verify everything works as expected after restarts
 
+Multitech Telit modem seems to need ppp installed 
 docs:
+https://www.simplexwireless.com/site/post-starting-telit-le901-in-linux
+
 https://wiki.archlinux.org/title/NetworkManager
 https://serverfault.com/questions/810636/how-to-manage-dns-in-networkmanager-via-console-nmcli
 https://wiki.debian.org/NetworkManager
