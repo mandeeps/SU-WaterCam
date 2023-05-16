@@ -18,7 +18,8 @@ gyro_x = 0
 gyro_y = 0
 gyro_z = 0
 
-for i in range(1000):
+n = 1000
+for i in range(n):
     accel = mpu.acceleration
     accel_x += accel[0]
     accel_y += accel[1]
@@ -34,12 +35,12 @@ for i in range(1000):
     print("")
     time.sleep(0.33)
 
-accel_x = accel_x / 500
-accel_y = accel_y / 500
-accel_z = accel_z / 500
-gyro_x = gyro_x / 500
-gyro_y = gyro_y / 500
-gyro_z = gyro_z / 500
+accel_x = accel_x / n
+accel_y = accel_y / n
+accel_z = accel_z / n
+gyro_x = gyro_x / n
+gyro_y = gyro_y / n
+gyro_z = gyro_z / n
 
 print(f"Accel X offset: {accel_x: .2f}")
 print(f"Accel Y offset: {accel_y: .2f}")
