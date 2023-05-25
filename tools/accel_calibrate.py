@@ -1,7 +1,8 @@
 #!/usr/bin/env python
-# Collect 500 samples from MPU6050 while it is lying flat and not moving
+# Collect 1000 samples from MPU6050 while it is lying flat and not moving
 # Create offsets for each axis on accelerometer and gyro by averaging values for each
 # to get flat readings close to zero
+# Save offsets to imu_offsets.txt
 
 import time
 import board
@@ -18,8 +19,8 @@ gyro_x = 0
 gyro_y = 0
 gyro_z = 0
 
-n = 1000
-for i in range(n):
+num = 1000
+for i in range(num):
     accel = mpu.acceleration
     accel_x += accel[0]
     accel_y += accel[1]
@@ -35,12 +36,12 @@ for i in range(n):
     print("")
     time.sleep(0.33)
 
-accel_x = accel_x / n
-accel_y = accel_y / n
-accel_z = accel_z / n
-gyro_x = gyro_x / n
-gyro_y = gyro_y / n
-gyro_z = gyro_z / n
+accel_x = accel_x / num
+accel_y = accel_y / num
+accel_z = accel_z / num
+gyro_x = gyro_x / num
+gyro_y = gyro_y / num
+gyro_z = gyro_z / num
 
 print(f"Accel X offset: {accel_x: .2f}")
 print(f"Accel Y offset: {accel_y: .2f}")
@@ -48,3 +49,6 @@ print(f"Accel Z offset: {accel_z: .2f}")
 print(f"Gyro X offset: {gyro_x: .2f}")
 print(f"Gyro Y offset: {gyro_y: .2f}")
 print(f"Gyro Z offset: {gyro_z: .2f}")
+
+with open('/home/pi/SU-WaterCam/data/imu_offsets.txt', 'w') as file:
+    file.writelines('\n'.join([f"{accel_x:2f}", f"{accel_y:2f}", f"{accel_z:2f}", f"{gyro_x:2f}", f"{gyro_y:2f}", f"{gyro_z:2f}"]))

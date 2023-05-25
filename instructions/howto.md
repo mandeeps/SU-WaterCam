@@ -84,7 +84,9 @@ If installing regular Raspbian/RaspberryPi OS image:
 in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc.,
 use apt to install python3-pandas: sudo apt install python3-pandas
 and libgpiod-dev: sudo apt install libgpiod-dev
-use pip to install other dependencies: python3 -m pip install compress_pickle adafruit-blinka adafruit_circuitpython-mlx90640 gpiozero
+
+Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
+or manually use pip to install dependencies: python3 -m pip install compress_pickle adafruit-blinka adafruit_circuitpython-mlx90640 gpiozero adafruit_circuitpython_mpu6050
 
 If using SD card image provided this should already have been done for you!
 Insert into the micrSD card slot on the Raspberry Pi
