@@ -1,0 +1,13 @@
+apt install gpsd gpsd-clients
+
+mmcli -m 0 –location-enable-gps-unmanaged -- to tell ModemManager to start the GPS on the Quectel EC25 but not control it, so gpsd can manage it instead
+
+Then in python we can get gps data:
+import gpsd2
+gpsd2.connect()
+packet = gpsd2.get_current()
+print(packet.position())
+
+sources:
+https://sigquit.wordpress.com/2012/03/29/enabling-gps-location-in-modemmanager/
+Stackoverflow mirror: https://code.whatever.social/questions/6146131/python-gps-module-reading-latest-gps-data
