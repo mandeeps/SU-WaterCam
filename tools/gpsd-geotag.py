@@ -85,18 +85,19 @@ while running:
         # get current gps info from gpsd
         packet = gpsd2.get_current()
         if packet.mode >= 2:
-            gps_data = [f"GPS Time UTC: {packet.time_utc()},
-                f"GPS Time Local: {packet.time_local()}",
-                f"Latitude: {packet.lat} degrees",
-                f"Longitude: {packet.lon} degrees",
-                f"Satellites: {packet.sats}", 
-                f"Error: {packet.error}",
-                f"Precision: {packet.position_precision()}", 
-                f"Map URL: {packet.map_url()}",
-                f"Device: {gpsd.device()}"]
+            gps_data = [
+                f"GPS Time UTC: {packet.time}\n",
+                #f"GPS Time Local: {packet.time_local()}",
+                f"Latitude: {packet.lat} degrees\n",
+                f"Longitude: {packet.lon} degrees\n",
+                f"Satellites: {packet.sats}\n", 
+                f"Error: {packet.error}\n",
+                f"Precision: {packet.position_precision()}\n", 
+                f"Map URL: {packet.map_url()}\n",
+                f"Device: {gpsd2.device()}\n"]
 
             if packet.mode >= 3:
-                data.append(f"Altitude: {packet.alt}")
+                gps_data.append(f"Altitude: {packet.alt}\n")
 
             # save to csv file
             for line in gps_data:
@@ -134,8 +135,6 @@ while running:
             exif_bytes = piexif.dump(exif_data)
             # write to disk
             piexif.insert(exif_bytes, image)
-            # verify exif data
-            print(piexif.load(image))
         else:
             data.write("\nNo GPS fix \n")    
  

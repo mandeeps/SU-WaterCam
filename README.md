@@ -47,7 +47,11 @@ Disconnect and reconnect power.
 Then connect the MPU 6050 and other i2c peripherals, power-cycle again if needed.
 You can check what i2c locations are in use with i2cdetect -y 1
 
-
+#### SD Card Life Extention
+Disable swap to reduce writes to SD card: sudo swapoff --all, sudo apt purge dphys-swapfile.
+Add noatime, commit=60 settings to ext4 partitions in /etc/fstab - noatime prevents writing access times to files, commit collects and delays writes to every N seconds. Data loss will be limited to the last N seconds of writes if power is lost.
+Set temp directories like /tmp, /var/tmp to mount in RAM, ex. tmpfs /var/tmp tmpfs nodev,nosuid,size=20M 0 0 in fstab
+Use a larger SD card size than needed with plenty of free space for wear-leveling
 #### power optimization:
 [1](https://blues.io/blog/tips-tricks-optimizing-raspberry-pi-power/),
 [2](https://raspberry-projects.com/pi/pi-hardware/raspberry-pi-zero/minimising-power-consumption),
