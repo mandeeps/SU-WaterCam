@@ -10,9 +10,11 @@ from os import path
 import board
 import adafruit_mpu6050
 import piexif
+import piexif.helper
 import picamera
 import gpsd2
 from fractions import Fraction
+from math import atan2, pi, sqrt
 
 # setup
 i2c = board.I2C()
@@ -20,7 +22,19 @@ mpu = adafruit_mpu6050.MPU6050(i2c, 0x69) # must set IMU to 0x69 because of Witt
 gpsd2.connect()
 DIRNAME = '/home/pi/SU-WaterCam/images/'
 
-# raw data record without formatting
+offset_accel = []
+offset_gyro = []
+offset_path = "/home/pi/SU-WaterCam/data/imu_offsets.txt"
+with open(offset_path) as file:
+    # first 3 lines are accelerometer offsets
+    for i in range(3):
+        # read line, strip newline char,convert to float
+        offset_accel.append(float(file.readline().rstrip()))
+    # gyro offset lines
+    for i in range(3):
+        offset_gyro.append(float(file.readline().rstrip()))
+
+# data record
 DATA = '/home/pi/SU-WaterCam/data/gps.txt'
 data = open(DATA, 'a')
 last_print = time.monotonic()
@@ -64,16 +78,8 @@ while running:
     # only proceed to recording data if past interval time
     if current - last_print >= INTERVAL:
         last_print = current
-        
-        # log IMU data
-        imu = ["\nTime: {} \n".format(time.asctime(time.localtime(time.time()))),
-        "Acceleration: X: {0[0]}, Y: {0[1]}, Z: {0[2]} m/s^2 \n".format(mpu.acceleration),
-        "Gyro X: {0[0]}, Y: {0[1]}, Z: {0[2]} degrees/s \n".format(mpu.gyro),
-        "Temperature: {} C".format(mpu.temperature),"\n"]
-        
-        for line in imu:
-            data.writelines(line)
-        
+
+        # take a new photo
         with picamera.PiCamera() as camera:
             camera.resolution = (2592, 1944) # max res of camera
             time.sleep(1) # Camera has to warm up
@@ -82,24 +88,59 @@ while running:
             print('taking photo')
             camera.capture(image)
 
+        # subtract the offset values from what the IMU measures
+        accel = [x - y for x, y in zip(mpu.acceleration, offset_accel)]
+        gyro = [x - y for x, y in zip(mpu.gyro, offset_gyro)]
+        accel_record = "Acceleration: X: {}, Y: {}, Z: {} m/s^2 \n".format(*accel)
+        gyro_record = "Gyro X: {}, Y: {}, Z: {} degrees/s \n".format(*gyro)
+        temp_record = f"Temperature: {mpu.temperature:.2f} C \n"
+
+        # log IMU data to text file
+        imu = [f"\nFile: {image}\n", "Time: {} \n".format(time.asctime(time.localtime(time.time()))),
+        accel_record, gyro_record, temp_record]
+
+        for line in imu:
+            data.writelines(line)
+        
+        # Attempt to calculate Roll/Pitch/Yaw values
+        X = accel[0]
+        Y = accel[1]
+        Z = accel[2]
+        if Z > 0:
+            sign = 1
+        else:
+            sign = -1
+        miu = 0.001
+        roll = atan2(Y, sign * sqrt(Z*Z + miu*X*X))
+        pitch = atan2(X, sqrt(Y*Y + Z*Z)) * 180/pi;
+        yaw = 0 # TODO add yaw later!
+
+        # Start exif handling
+        # load original exif data
+        exif_data = piexif.load(image)
+        # Add roll/pitch/yaw to UserComment tag
+        user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
+        exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
+ 
         # get current gps info from gpsd
         packet = gpsd2.get_current()
         if packet.mode >= 2:
             gps_data = [
                 f"GPS Time UTC: {packet.time}\n",
-                #f"GPS Time Local: {packet.time_local()}",
+                f"GPS Time Local: {time.asctime(time.localtime(time.time()))}\n",
                 f"Latitude: {packet.lat} degrees\n",
                 f"Longitude: {packet.lon} degrees\n",
+                f"Track: {packet.track}\n",
                 f"Satellites: {packet.sats}\n", 
                 f"Error: {packet.error}\n",
-                f"Precision: {packet.position_precision()}\n", 
+                f"Precision: {packet.position_precision()}\n",
                 f"Map URL: {packet.map_url()}\n",
                 f"Device: {gpsd2.device()}\n"]
 
             if packet.mode >= 3:
                 gps_data.append(f"Altitude: {packet.alt}\n")
 
-            # save to csv file
+            # save to text file
             for line in gps_data:
                 data.writelines(line)
 
@@ -107,36 +148,49 @@ while running:
             lat_deg = to_deg(packet.lat,['S','N'])
             lng_deg = to_deg(packet.lon,['W','E'])
             
-            exiv_lat = (change_to_rational(lat_deg[0]), 
-                        change_to_rational(lat_deg[1]), 
+            exiv_lat = (change_to_rational(lat_deg[0]),
+                        change_to_rational(lat_deg[1]),
                         change_to_rational(lat_deg[2]))
             
-            exiv_lng = (change_to_rational(lng_deg[0]), 
-                        change_to_rational(lng_deg[1]), 
+            exiv_lng = (change_to_rational(lng_deg[0]),
+                        change_to_rational(lng_deg[1]),
                         change_to_rational(lng_deg[2]))
                 
             gps_ifd = {
                     piexif.GPSIFD.GPSVersionID: (2,0,0,0),
+                    piexif.GPSIFD.GPSTimeStamp: packet.time,
                     piexif.GPSIFD.GPSAltitudeRef: 0,
                     piexif.GPSIFD.GPSAltitude: change_to_rational(round(packet.alt)),
                     piexif.GPSIFD.GPSLatitudeRef: lat_deg[3],
                     piexif.GPSIFD.GPSLatitude: exiv_lat,
                     piexif.GPSIFD.GPSLongitudeRef: lng_deg[3],
-                    piexif.GPSIFD.GPSLongitude: exiv_lng
+                    piexif.GPSIFD.GPSLongitude: exiv_lng,
+                    piexif.GPSIFD.GPSTrack: packet.track,
             }
             
+            # Since we have GPS data, add to Exif
             gps_exif = {"GPS": gps_ifd}
             print(gps_exif)
             # load original exif data
-            exif_data = piexif.load(image)
+            #exif_data = piexif.load(image)
+            
             # add gps tag to original exif data
             exif_data.update(gps_exif)
+            # Add roll/pitch/yaw to UserComment tag
+            #user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
+            #exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
             # convert to byte format for writing into file
-            exif_bytes = piexif.dump(exif_data)
+            #exif_bytes = piexif.dump(exif_data)
             # write to disk
-            piexif.insert(exif_bytes, image)
+            #piexif.insert(exif_bytes, image)
         else:
             data.write("\nNo GPS fix \n")    
+         
+        # Finish exif handling
+        # convert to byte format for writing into file
+        exif_bytes = piexif.dump(exif_data)
+        # write to disk
+        piexif.insert(exif_bytes, image)
  
         loop = loop + 1
         data.flush()
