@@ -15,6 +15,7 @@ import picamera
 import gpsd2
 from fractions import Fraction
 from math import atan2, pi, sqrt
+from libxmp import XMPFiles, consts
 
 # setup
 i2c = board.I2C()
@@ -40,7 +41,7 @@ data = open(DATA, 'a')
 last_print = time.monotonic()
 
 # How often we take a photo
-INTERVAL = 10
+INTERVAL = 1
 # How many photos to take per run
 LIMIT = 10
 loop = 0;
@@ -65,7 +66,7 @@ def to_deg(value, loc):
     return (deg, min, sec, loc_value)
 
 def change_to_rational(number):
-    """convert a number to rantional
+    """convert a number to rational
     Keyword arguments: number
     return: tuple like (1, 2), (numerator, denominator)
     """
@@ -88,7 +89,7 @@ while running:
             print('taking photo')
             camera.capture(image)
 
-        # subtract the offset values from what the IMU measures
+        # subtract the previously calculated offset values from what the IMU measures
         accel = [x - y for x, y in zip(mpu.acceleration, offset_accel)]
         gyro = [x - y for x, y in zip(mpu.gyro, offset_gyro)]
         accel_record = "Acceleration: X: {}, Y: {}, Z: {} m/s^2 \n".format(*accel)
@@ -158,31 +159,20 @@ while running:
                 
             gps_ifd = {
                     piexif.GPSIFD.GPSVersionID: (2,0,0,0),
-                    piexif.GPSIFD.GPSTimeStamp: packet.time,
                     piexif.GPSIFD.GPSAltitudeRef: 0,
                     piexif.GPSIFD.GPSAltitude: change_to_rational(round(packet.alt)),
                     piexif.GPSIFD.GPSLatitudeRef: lat_deg[3],
                     piexif.GPSIFD.GPSLatitude: exiv_lat,
                     piexif.GPSIFD.GPSLongitudeRef: lng_deg[3],
                     piexif.GPSIFD.GPSLongitude: exiv_lng,
-                    piexif.GPSIFD.GPSTrack: packet.track,
+                    piexif.GPSIFD.GPSTrack: change_to_rational(packet.track)
             }
-            
+
             # Since we have GPS data, add to Exif
             gps_exif = {"GPS": gps_ifd}
             print(gps_exif)
-            # load original exif data
-            #exif_data = piexif.load(image)
-            
             # add gps tag to original exif data
             exif_data.update(gps_exif)
-            # Add roll/pitch/yaw to UserComment tag
-            #user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
-            #exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
-            # convert to byte format for writing into file
-            #exif_bytes = piexif.dump(exif_data)
-            # write to disk
-            #piexif.insert(exif_bytes, image)
         else:
             data.write("\nNo GPS fix \n")    
          
@@ -191,7 +181,16 @@ while running:
         exif_bytes = piexif.dump(exif_data)
         # write to disk
         piexif.insert(exif_bytes, image)
- 
+        
+        # Write roll/pitch/yaw to XMP tags for Pix4D
+        xmpfile = XMPFiles(file_path=image, open_forupdate=True)
+        xmp = xmpfile.get_xmp()
+        xmp.set_property(consts.XMP_NS_DC, u'Camera.Roll', str(roll))
+        xmp.set_property(consts.XMP_NS_DC, u'Camera.Pitch', str(pitch))
+        xmp.set_property(consts.XMP_NS_DC, u'Camera.Yaw', str(yaw))
+        xmpfile.put_xmp(xmp)
+        xmpfile.close_file()
+
         loop = loop + 1
         data.flush()
             
