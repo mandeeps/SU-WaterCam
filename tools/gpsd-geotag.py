@@ -104,17 +104,22 @@ while running:
             data.writelines(line)
         
         # Attempt to calculate Roll/Pitch/Yaw values
-        X = accel[0]
-        Y = accel[1]
-        Z = accel[2]
-        if Z > 0:
-            sign = 1
-        else:
-            sign = -1
-        miu = 0.001
-        roll = atan2(Y, sign * sqrt(Z*Z + miu*X*X))
-        pitch = atan2(X, sqrt(Y*Y + Z*Z)) * 180/pi;
+        accelX = accel[0]
+        accelY = accel[1]
+        accelZ = accel[2]
+        print(f"Accel values X: {accelX} Y: {accelY} Z: {accelZ}")
+        
+        # atan2 returns radians, multiply by 180/pi to convert from radians to degrees
+        #pitch = atan2(accelX, sqrt(accelY*accelY + accelZ*accelZ)) * (180/pi)
+        pitch = round(atan2(accelX, accelZ) * (180/pi)) # 360 degree range
+        #roll = atan2(accelY, sqrt(accelX*accelX + accelZ*accelZ)) * (180/pi)
+        roll = round(atan2(accelY, accelZ) * (180/pi))
         yaw = 0 # TODO add yaw later!
+        if roll < 0:
+            roll = roll + 360
+        if pitch < 0:
+            pitch = pitch + 360
+        print(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
 
         # Start exif handling
         # load original exif data
