@@ -14,7 +14,7 @@ import piexif.helper
 import picamera
 import gpsd2
 from fractions import Fraction
-from math import atan2, pi, sqrt
+from math import atan2, pi, sqrt, atan
 from libxmp import XMPFiles, consts
 
 # setup
@@ -103,7 +103,7 @@ while running:
         for line in imu:
             data.writelines(line)
         
-        # Attempt to calculate Roll/Pitch/Yaw values
+        # Attempt to calculate Roll/Pitch/Yaw values, 0 to 360 degree range
         accelX = accel[0]
         accelY = accel[1]
         accelZ = accel[2]
@@ -114,11 +114,13 @@ while running:
         pitch = round(atan2(accelX, accelZ) * (180/pi)) # 360 degree range
         #roll = atan2(accelY, sqrt(accelX*accelX + accelZ*accelZ)) * (180/pi)
         roll = round(atan2(accelY, accelZ) * (180/pi))
-        yaw = 0 # TODO add yaw later!
         if roll < 0:
             roll = roll + 360
         if pitch < 0:
             pitch = pitch + 360
+        
+        # Yaw estimation - needs to be replaced with sensor fusion approach
+        yaw = 180 * atan(accelZ / sqrt(accelX*accelX + accelZ*accelZ)) / pi
         print(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
 
         # Start exif handling
@@ -190,9 +192,9 @@ while running:
         # Write roll/pitch/yaw to XMP tags for Pix4D
         xmpfile = XMPFiles(file_path=image, open_forupdate=True)
         xmp = xmpfile.get_xmp()
-        xmp.set_property(consts.XMP_NS_DC, u'Camera.Roll', str(roll))
-        xmp.set_property(consts.XMP_NS_DC, u'Camera.Pitch', str(pitch))
-        xmp.set_property(consts.XMP_NS_DC, u'Camera.Yaw', str(yaw))
+        xmp.set_property(consts.XMP_NS_DC, u'Roll', str(roll))
+        xmp.set_property(consts.XMP_NS_DC, u'Pitch', str(pitch))
+        xmp.set_property(consts.XMP_NS_DC, u'Yaw', str(yaw))
         xmpfile.put_xmp(xmp)
         xmpfile.close_file()
 

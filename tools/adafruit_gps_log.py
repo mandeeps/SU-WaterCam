@@ -68,8 +68,8 @@ while True:
               ), "\n"
             ]
 
-            coords = ["Latitude: {0:.3f} degrees".format(gps.latitude),
-              "Longitude: {0:.3f} degrees".format(gps.longitude),
+            coords = ["Latitude: {0:.6f} degrees".format(gps.latitude),
+              "Longitude: {0:.6f} degrees".format(gps.longitude),
               #"Precise Latitude: {:2.}{:2.4f} degrees".format(
               #gps.latitude_degrees, gps.latitude_minutes
               #),
@@ -101,9 +101,9 @@ while True:
 
             # time in required format
             exiftime = "{}/{}/{} {:02}:{:02}:{:02}".format(
-              gps.timestamp_utc.tm_year,
               gps.timestamp_utc.tm_mon,
               gps.timestamp_utc.tm_mday,
+              gps.timestamp_utc.tm_year,
               gps.timestamp_utc.tm_hour,
               gps.timestamp_utc.tm_min,
               gps.timestamp_utc.tm_sec)

@@ -45,11 +45,16 @@ while True:
     pitch = round(atan2(accelX, accelZ) * (180/pi)) # 360 degree range
     #roll = atan2(accelY, sqrt(accelX*accelX + accelZ*accelZ)) * (180/pi)
     roll = round(atan2(accelY, accelZ) * (180/pi))
-    yaw = 0 # TODO add yaw later!
+
+    # Yaw estimation - needs to be replaced with sensor fusion approach
+    yaw = round(atan2(accelY, accelX) * (180/pi)) 
+
     if roll < 0:
         roll = roll + 360
     if pitch < 0:
        pitch = pitch + 360
+    if yaw < 0:
+        yaw = yaw + 360
     print(f"Roll {roll} Pitch {pitch} Yaw {yaw}") 
     with open(datapath, 'a') as data:
         data.writelines('\n'.join([accel_record, gyro_record, temp_record, '\n']))

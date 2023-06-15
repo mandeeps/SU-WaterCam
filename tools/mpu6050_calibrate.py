@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 # Collect 1000 samples from MPU6050 while it is lying flat and not moving
-# Create offsets for each axis on accelerometer and gyro by averaging values for each
+# Create offsets for each axis on gyro by averaging values
 # to get flat readings close to zero
+# Offset for accelerometer should set X/Y close to 0 and Z close to 9.8 m/s^2
 # Save offsets to imu_offsets.txt
 
 import time
@@ -38,7 +39,7 @@ for i in range(num):
 
 accel_x = accel_x / num
 accel_y = accel_y / num
-accel_z = accel_z / num
+accel_z = (accel_z / num) - 9.81
 gyro_x = gyro_x / num
 gyro_y = gyro_y / num
 gyro_z = gyro_z / num
