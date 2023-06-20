@@ -75,9 +75,21 @@ If using a Pi Zero, install the headers if it doesn't ship with them attached
 
 
 ### Raspberry Pi 4 with Flir camera, IMU, and Quectel Cellular modem+GPS
-From scratch: Use Imager to install current stable 64-bit Raspberry Pi OS lite to an SD card with SSH enabled in configuration options. Use a serial cable to connect to the console and use sudo raspi-config to configure the device settings (locale, timezone, GPU memory, etc.,) and select Network Manager in place of dhcpcd in networking settings.
+Ideally we will have an image that can be flashed onto an SD card for new builds.
+
+Installation from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS lite to a microSD card with SSH enabled in the configuration options, along with the user account name and password. After flashing, add enable_uart=1 at the end of the /boot/config.txt file. Insert the SD card in the Pi, attach power and boot it up.
+
+Use a serial cable to connect to the console and use sudo raspi-config to configure the device settings (locale, timezone, GPU memory, predictable network names, etc.,) and select Network Manager in place of dhcpcd in networking settings.
+https://learn.adafruit.com/adafruits-raspberry-pi-lesson-5-using-a-console-cable/software-installation-windows
+
 
 Use sudo nmtui to configure the ethernet connection to a static IP, with your computer IP as the gateway and DNS server if you are sharing your Internet connection with the Pi. Otherwise configure for whatever network setup you have.
+Now you can use ssh to login to the Pi after connecting it to your computer with an ethernet cable. Connection sharing can be setup using Network Manager on a Linux computer, or Windows Connection sharing, or the macOS equivalent.
+
+Once you've logged in and are sharing an internet connection from your computer to the Pi, run sudo apt update and sudo apt upgrade
+
+Helpful tools: sudo apt install git tmux
+Install your preferred editor, which should be neovim, and aptitude if you want a TUI for apt
 
 Set /boot/config.txt options:
 # Disable LEDs to save power
@@ -90,7 +102,7 @@ dtparam=eth_led1=14
 # disable audio
 dtparam=audio=off
 
-# disable wireless
+# disable wireless, we won't use WiFi or Bluetooth
 dtoverlay=disable-wifi
 dtoverlay=disable-bt
 dtoverlay=pi3-disable-wifi
@@ -101,35 +113,49 @@ spidev.bufsiz=131072   for Flir camera
 
 Comment out the DRM VC4 V3D driver so we can use tvservice -o to shutdown HDMI output and save power.
 
-Disable swap and set noatime to prolong SD card life
+# SD Card settings
+Disable swap and set noatime to prolong SD card life: sudo swapoff --all, sudo apt purge dphys-swapfile.
 
-Next, configure the WittyPi for power management. 
+Add noatime, commit=60 settings to ext4 partitions in /etc/fstab - noatime prevents writing access times to files, commit collects and delays writes to every N seconds. Data loss will be limited to the last N seconds of writes if power is lost. Do NOT change the /boot partition settings, it is a vfat filesystem and these options will not work and will cause the Pi to not boot.
 
-Clone the git repo
-Compile lepton.c and capture.c for the device: gcc lepton.c -o lepton
+Set temp directories like /tmp, /var/tmp to mount in RAM, ex. tmpfs /var/tmp tmpfs nodev,nosuid,size=20M 0 0 in fstab
+
+# Power Management
+Next, configure the WittyPi 3 Mini for power management.
+Download: wget http://www.uugear.com/repo/WittyPi3/install.sh
+Install: sudo sh install.sh
+Reboot, then run wittyPi.sh from the wittypi directory to configure the schedule.
+
+# SU-WaterCam setup
+Clone the public git repo: https://github.com/mandeeps/SU-WaterCam.git
+Compile lepton.c and capture.c for the device. cd to the SU-WaterCam/tools directory and run: 
+gcc lepton.c -o lepton
 gcc capture.c -o capture
 
-use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev exempi
+Copy to the root of the SU-WaterCam directory. From tools, run "cp lepton ../." and "cp capture ../."
 
-Helpful tools: sudo apt install neovim tmux
+use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel
 
-Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, 
+We need to use virtual environments for Python on Debian-derivatives like Raspberry Pi OS starting with Debian 12 (codenamed Bookworm). 
+As of 6-20-23 Debian 11 remains the current stable base for Raspberry Pi OS, but let's future proof by using a venv now.
+Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, (we use system-site-packages to copy over pandas and other modules)
 activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
 or manually with pip install compress_pickle adafruit-blinka gpiozero piexif picamera2 py-gpsd2 python-xmp-toolkit
 
-If using MLX90640 thermal sensor: adafruit_circuitpython-mlx90640
-If using MPU6050 IMU: adafruit_circuitpython_mpu6050
+If using MLX90640 thermal sensor also install: adafruit_circuitpython-mlx90640
+If using MPU6050 IMU install: adafruit_circuitpython_mpu6050
 
-If using MPU6050, change the WittyPi 3 i2c address to avoid a conflict. First solder the connection on the back of the MPU6050 board to set its i2c address to 0x69. Then change the WittyPi 3 i2c address to something else, like 0x70 following the instructions in the manual. WittyPi 4 does not require this.
+# If using MPU6050:
+Change the WittyPi 3 i2c address to avoid a conflict. The WittyPi 3 uses 0x68 for the RTC, and 0x69 for its microcontroller. The RTC address cannot be changed, but the microcontroller address can. The MPU6050 uses 0x68 by default. First solder the connection on the back of the MPU6050 board to change its i2c address to 0x69. Then change the WittyPi 3 microcontroller i2c address to something else, like 0x70 by following the instructions in the manual. WittyPi 4 does not require this.
 
-sudo i2cset -y 1 0x69 9 0x70
+Change the Witty Pi 3 microcontroller I2C address: i2cset -y 1 0x69 9 0x70
 Edit the utilities.sh file in the wittypi directory and change I2C_MC_ADDRESS=0x69 to 0x70
 Then shutdown the system: sudo halt
-Disconnect the power to the wittypi 3, reconnect it, start the system
-Check that things worked: i2cdetect -y 1
+Disconnect the power to the wittypi 3, reconnect it, start the system up
+Check the i2c settings changed: i2cdetect -y 1
 Run the wittypi script to verify ./wittypi/wittyPi.sh
 
-* Quectel GPS
+# Quectel GPS
 sudo apt install gpsd gpsd-clients
 
 Remove and purge udhcpcd and openresolv: sudo apt purge udhcpcd openresolv
@@ -160,24 +186,33 @@ https://sigquit.wordpress.com/2012/03/29/enabling-gps-location-in-modemmanager/
 Stackoverflow mirror: https://code.whatever.social/questions/6146131/python-gps-module-reading-latest-gps-data
 
 
-## Flir Lepton Breakout board wiring
+# Flir Lepton Breakout board wiring
 7 female-female cables needed
 
 Orient the back of the breakout board towards yourself. The front is the side with the socket for the Lepton camera.
 Let's call the pins that are closest to you pins 1 through 10, starting from the left going to the right. Right is the side with the mini ZIF connector on top (the white plastic bit above the QR code sticker)
 Let's call the pins on the bottom (away from you) pins A through J
 Pin 1 is for power, so wire that to the 3V3 power pin on the Pi. See the Flir Lepton Wiring image for help.
-We can use the top pin of the two without jumpers on the back of the board (side towards you right now) for ground. In other words, the pin with nothing covering it that is closest to the white ZIF socket towards the top is ground.
+We can use the top pin of the two pins without jumpers on the back of the board (side towards you right now) for ground. In other words, the pin with nothing covering it that is closest to the white ZIF socket towards the top is the ground pin, so connect it to the ground pin on the Pi.
 
 Because we need I2C for other peripherals, use splitter cables for the two I2C pins on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU.
 
 The SDA pin on the Pi (pin #3) will connect to pin C on the breakout board
 The SCL pin on the Pi (pin #5) will connect to pin 4 on the breakout board
-CLK pin on the Pi (GPIO 11, physical pin #23) will connect to pin D on the breakout
-MOSI on the Pi (pin 19) pin E on the breakout
-
-CS pin (pin 24, right across from CLK, aka CE0 GPIO 8) connects to pin 5
+MOSI on the Pi (pin 19) connects to pin E on the breakout
 MISO (pin 21) connect to pin 6
+CLK pin on the Pi (GPIO 11, physical pin #23) will connect to pin D on the breakout
+CS pin (pin 24, right across from CLK, aka CE0 GPIO 8) connects to pin 5
+
+Insert the Flir camera into the breakout board.
+Check everything is correct by running capture and lepton in SU-WaterCam: 
+./capture
+
+# Tailscale for remote login
+https://tailscale.com/download
+
+# Pytorch
+pip install torch (in the venv)
 
 
 ### Pi Zero Instructions 

@@ -54,15 +54,14 @@ dtparam=i2c_arm=on
 # Additional overlays and parameters are documented /boot/overlays/README
 
 # Enable audio (loads snd_bcm2835)
-dtparam=audio=off
+#dtparam=audio=off
 
 [pi4]
 # Enable DRM VC4 V3D driver on top of the dispmanx display stack
-dtoverlay=vc4-fkms-v3d
+#dtoverlay=vc4-fkms-v3d
 max_framebuffers=2
 
 [all]
-#dtoverlay=vc4-fkms-v3d
 dtoverlay=disable-wifi
 dtoverlay=disable-bt
 
@@ -77,3 +76,4 @@ dtparam=act_led_activelow=off
 dtparam=i2c1=on
 start_x=1
 dtoverlay=pi3-miniuart-bt
+enable_uart=1
