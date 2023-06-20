@@ -26,9 +26,8 @@ If using a Pi Zero, install the headers if it doesn't ship with them attached
 * WittyPi 3 Mini
 
     https://www.adafruit.com/product/2223
-    In the future we might want to switch to a custom power management
-    solution for more options like remote start over lora
-
+    Witty Pi 4 supports 3A output for the Raspberry Pi 4
+    
 * Stacking header to attach WittyPi to RPi 
 
     https://www.adafruit.com/product/5038
@@ -64,7 +63,7 @@ If using a Pi Zero, install the headers if it doesn't ship with them attached
 
     https://www.adafruit.com/product/2465
 
-    You'll need to solder the inlcuded USB header on or else solder a micro USB cable
+    You'll need to solder the included USB header on or else solder a micro USB cable
     to the output so it can be connected to the WittyPi
     If you use a regular USB power bank / portable phone charger you'll need
     to adjust some WittyPi settings so it draws more power when the RPi is off to
@@ -74,7 +73,114 @@ If using a Pi Zero, install the headers if it doesn't ship with them attached
 * MicroSD card
 * micro USB cables, at least one for setup, preferably 2 so you can test with the WittyPi attached
 
-### Instructions 
+
+### Raspberry Pi 4 with Flir camera, IMU, and Quectel Cellular modem+GPS
+From scratch: Use Imager to install current stable 64-bit Raspberry Pi OS lite to an SD card with SSH enabled in configuration options. Use a serial cable to connect to the console and use sudo raspi-config to configure the device settings (locale, timezone, GPU memory, etc.,) and select Network Manager in place of dhcpcd in networking settings.
+
+Use sudo nmtui to configure the ethernet connection to a static IP, with your computer IP as the gateway and DNS server if you are sharing your Internet connection with the Pi. Otherwise configure for whatever network setup you have.
+
+Set /boot/config.txt options:
+# Disable LEDs to save power
+dtparam=act_led_trigger=none
+dtparam=act_led_activelow=off
+dtparam=pwr_led_activelow=off
+dtparam=eth_led0=14
+dtparam=eth_led1=14
+
+# disable audio
+dtparam=audio=off
+
+# disable wireless
+dtoverlay=disable-wifi
+dtoverlay=disable-bt
+dtoverlay=pi3-disable-wifi
+dtoverlay=pi3-disable-bt
+
+# Add to /boot/cmdline.txt
+spidev.bufsiz=131072   for Flir camera
+
+Comment out the DRM VC4 V3D driver so we can use tvservice -o to shutdown HDMI output and save power.
+
+Disable swap and set noatime to prolong SD card life
+
+Next, configure the WittyPi for power management. 
+
+Clone the git repo
+Compile lepton.c and capture.c for the device: gcc lepton.c -o lepton
+gcc capture.c -o capture
+
+use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev exempi
+
+Helpful tools: sudo apt install neovim tmux
+
+Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, 
+activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
+or manually with pip install compress_pickle adafruit-blinka gpiozero piexif picamera2 py-gpsd2 python-xmp-toolkit
+
+If using MLX90640 thermal sensor: adafruit_circuitpython-mlx90640
+If using MPU6050 IMU: adafruit_circuitpython_mpu6050
+
+If using MPU6050, change the WittyPi 3 i2c address to avoid a conflict. First solder the connection on the back of the MPU6050 board to set its i2c address to 0x69. Then change the WittyPi 3 i2c address to something else, like 0x70 following the instructions in the manual. WittyPi 4 does not require this.
+
+sudo i2cset -y 1 0x69 9 0x70
+Edit the utilities.sh file in the wittypi directory and change I2C_MC_ADDRESS=0x69 to 0x70
+Then shutdown the system: sudo halt
+Disconnect the power to the wittypi 3, reconnect it, start the system
+Check that things worked: i2cdetect -y 1
+Run the wittypi script to verify ./wittypi/wittyPi.sh
+
+* Quectel GPS
+sudo apt install gpsd gpsd-clients
+
+Remove and purge udhcpcd and openresolv: sudo apt purge udhcpcd openresolv
+Reconfigure current network devices with network manager to retain local networking during setup - sudo nmtui is easiest way
+Make sure /etc/network/interfaces has no references to devices you want NM to manage
+
+Then configure cellular modem and verify everything works as expected after restarts
+sudo mmcli -m 0 --simple-connect='apn=iot.1nce.net' Replace apn as appropriate
+
+Setup connection in NetworkManager: sudo nmcli c add type gsm ifname cdc-wdm0 con-name Quectel apn iot.1nce.net
+
+
+sudo mmcli -m 0 –-location-enable-gps-unmanaged -- to tell ModemManager to start the GPS on the Quectel EC25 but not control it, so gpsd can manage it instead
+
+enable gps.service in the git config directory so this will be done automatically on boot
+
+Edit /etc/default/gpsd to set the correct gps device, in this case /dev/ttyUSB1
+
+
+Then in python we can get gps data:
+import gpsd2
+gpsd2.connect()
+packet = gpsd2.get_current()
+print(packet.position())
+
+sources:
+https://sigquit.wordpress.com/2012/03/29/enabling-gps-location-in-modemmanager/
+Stackoverflow mirror: https://code.whatever.social/questions/6146131/python-gps-module-reading-latest-gps-data
+
+
+## Flir Lepton Breakout board wiring
+7 female-female cables needed
+
+Orient the back of the breakout board towards yourself. The front is the side with the socket for the Lepton camera.
+Let's call the pins that are closest to you pins 1 through 10, starting from the left going to the right. Right is the side with the mini ZIF connector on top (the white plastic bit above the QR code sticker)
+Let's call the pins on the bottom (away from you) pins A through J
+Pin 1 is for power, so wire that to the 3V3 power pin on the Pi. See the Flir Lepton Wiring image for help.
+We can use the top pin of the two without jumpers on the back of the board (side towards you right now) for ground. In other words, the pin with nothing covering it that is closest to the white ZIF socket towards the top is ground.
+
+Because we need I2C for other peripherals, use splitter cables for the two I2C pins on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU.
+
+The SDA pin on the Pi (pin #3) will connect to pin C on the breakout board
+The SCL pin on the Pi (pin #5) will connect to pin 4 on the breakout board
+CLK pin on the Pi (GPIO 11, physical pin #23) will connect to pin D on the breakout
+MOSI on the Pi (pin 19) pin E on the breakout
+
+CS pin (pin 24, right across from CLK, aka CE0 GPIO 8) connects to pin 5
+MISO (pin 21) connect to pin 6
+
+
+### Pi Zero Instructions 
 Written assuming you are using a Raspberry Pi Zero with headers installed
 and the Adafruit MLX90640 sensor
 
@@ -82,8 +188,7 @@ Flash the provided disk image onto the microSD card if not already done
 
 If installing regular Raspbian/RaspberryPi OS image:
 in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc.,
-use apt to install python3-pandas: sudo apt install python3-pandas
-and libgpiod-dev: sudo apt install libgpiod-dev
+use apt to install python3-pandas and libgpiod-dev: sudo apt install libgpiod-dev python3-pandas
 
 Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
 or manually use pip to install dependencies: python3 -m pip install compress_pickle adafruit-blinka adafruit_circuitpython-mlx90640 gpiozero adafruit_circuitpython_mpu6050
@@ -130,7 +235,7 @@ Connect the battery to the WittyPi micro USB port. Either directly with a
 cable if using a Voltaic power pack, or through the charger if using a lipo battery.
 Press the button on the WittyPi to check if everything turns on. Check the LEDs
 
-Log into the Pi and use the WittyPi program to set the schedule (and increase idle power use if using a normal power bank)
+Log into the Pi and use the WittyPi program to set the schedule (and increase idle power use if using a normal power bank that isn't intended for IoT devices/doesn't have an always-on mode. Voltaic batteries should not need this.)
 
 https://cdn-shop.adafruit.com/product-files/5038/5038_WittyPi3Mini_UserManual.pdf
 

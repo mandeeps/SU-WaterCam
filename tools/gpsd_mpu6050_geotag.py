@@ -11,7 +11,7 @@ import board
 import adafruit_mpu6050
 import piexif
 import piexif.helper
-import picamera
+from picamera2 import Picamera2
 import gpsd2
 from fractions import Fraction
 from math import atan2, pi, sqrt, atan
@@ -81,13 +81,13 @@ while running:
         last_print = current
 
         # take a new photo
-        with picamera.PiCamera() as camera:
-            camera.resolution = (2592, 1944) # max res of camera
-            time.sleep(1) # Camera has to warm up
-            time_val = datetime.now().strftime('%Y%m%d-%H%M%S')
-            image = path.join(DIRNAME, f'{time_val}.jpg')
-            print('taking photo')
-            camera.capture(image)
+        camera = Picamera2()
+        #camera.resolution = (2592, 1944) # max res of camera
+        #time.sleep(1) # Camera has to warm up
+        time_val = datetime.now().strftime('%Y%m%d-%H%M%S')
+        image = path.join(DIRNAME, f'{time_val}.jpg')
+        print('taking photo')
+        camera.start_and_capture_file(image,show_preview=False)
 
         # subtract the previously calculated offset values from what the IMU measures
         accel = [x - y for x, y in zip(mpu.acceleration, offset_accel)]
@@ -111,9 +111,9 @@ while running:
         
         # atan2 returns radians, multiply by 180/pi to convert from radians to degrees
         #pitch = atan2(accelX, sqrt(accelY*accelY + accelZ*accelZ)) * (180/pi)
-        pitch = round(atan2(accelX, accelZ) * (180/pi)) # 360 degree range
+        pitch = atan2(accelX, accelZ) * (180/pi) # 360 degree range
         #roll = atan2(accelY, sqrt(accelX*accelX + accelZ*accelZ)) * (180/pi)
-        roll = round(atan2(accelY, accelZ) * (180/pi))
+        roll = atan2(accelY, accelZ) * (180/pi)
         if roll < 0:
             roll = roll + 360
         if pitch < 0:

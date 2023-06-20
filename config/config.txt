@@ -77,4 +77,3 @@ dtparam=act_led_activelow=off
 dtparam=i2c1=on
 start_x=1
 dtoverlay=pi3-miniuart-bt
-core_freq=250
