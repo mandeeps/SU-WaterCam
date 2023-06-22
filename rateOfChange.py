@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Written for use on Pi Zero, obsolete
+
 # MS
 # Store temp readings as pandas Series, store Series in DataFrame,
 # calc changes, rate of change per pixel, mean of change rates

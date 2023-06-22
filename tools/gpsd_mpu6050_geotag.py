@@ -46,9 +46,9 @@ INTERVAL = 1
 LIMIT = 10
 loop = 0;
 
-# helper functions from https://gist.github.com/c060604/8a51f8999be12fc2be498e9ca56adc72
+# two helper functions from https://gist.github.com/c060604/8a51f8999be12fc2be498e9ca56adc72
 def to_deg(value, loc):
-    """convert decimal coordinates into degrees, munutes and seconds tuple
+    """convert decimal coordinates into degrees, minutes and seconds tuple
     Keyword arguments: value is float gps-value, loc is direction list ["S", "N"] or ["W", "E"]
     return: tuple like (25, 13, 48.343 ,'N')
     """

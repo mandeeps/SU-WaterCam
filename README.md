@@ -86,6 +86,11 @@ or compatible single board computer with GPIO, I2C, SPI etc.,
     https://www.adafruit.com/product/954
     or similar serial cable.
 
+* Cellular modem
+    https://www.amazon.com/Quectel-LTE-EC25-AF-Mini-PCIe/dp/B082SL8KY1
+    
+    https://www.amazon.com/gp/product/B07YY5967K
+
 ## Raspberry Pi 4 with Flir camera, IMU, and Quectel Cellular modem+GPS
 Ideally we will have an image that can be flashed onto an SD card for new builds.
 
@@ -126,10 +131,13 @@ dtoverlay=disable-bt
 dtoverlay=pi3-disable-wifi
 dtoverlay=pi3-disable-bt
 
-### Add to /boot/cmdline.txt
-spidev.bufsiz=131072        - for Flir camera
+### I2C clock stretching for BNO055 IMU
+dtparam=i2c_arm_baudrate=10000
 
 Comment out the DRM VC4 V3D driver so we can use tvservice -o to shutdown HDMI output and save a little power.
+
+### Add to /boot/cmdline.txt
+spidev.bufsiz=131072        - for Flir camera
 
 ### SD Card settings
 Disable swap and set noatime to prolong SD card life: sudo swapoff --all, sudo apt purge dphys-swapfile.
@@ -179,6 +187,11 @@ Disconnect the power to the wittypi 3, reconnect it, start the system up
 Check the i2c settings changed: i2cdetect -y 1
 
 Run the wittypi script to verify ./wittypi/wittyPi.sh
+
+### BNO055 IMU
+
+## Calibrate the IMU prior to use:
+With the IMU stable and flat, run the calibration script to save offset values.
 
 ### Quectel EC25 Modem and GPS
 sudo apt install gpsd gpsd-clients
@@ -242,9 +255,9 @@ Check everything is correct by running the capture and lepton binaries in SU-Wat
 https://tailscale.com/download
 
 ### Pytorch
-pip install torch (in the venv)
+pip install torch torchvision (in the venv)
 
-### Pi Zero 32-bit Instructions 
+## Pi Zero 32-bit Instructions 
 Written assuming you are using a Raspberry Pi Zero with headers installed
 and the Adafruit MLX90640 sensor
 

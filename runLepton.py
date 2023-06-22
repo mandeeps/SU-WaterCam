@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Written for use on a Pi Zero, running Buster
+# Obsolete
+
 from os import path, mkdir, listdir, remove
 import subprocess # to call external apps
 # time
@@ -7,7 +10,7 @@ from datetime import datetime
 import pytz
 # data
 import pandas as pd
-from compress_pickle import dump
+#from compress_pickle import dump
 import shutil
 
 DIRNAME = '/home/pi/SU-WaterCam/'
@@ -18,7 +21,7 @@ LIMIT = 5 # Max number of frames to take per boot
 
 def main():
     # Local timezone
-    time_val = datetime.now().strftime('%Y%m%d-%H%M')
+    time_val = datetime.now().strftime('%Y%m%d-%H%M%S')
     
     # create new folder named with datetime to save data to
     folder = path.join(DIRNAME, f'data/lepton-{time_val}')
@@ -70,7 +73,7 @@ def main():
         
     DF = pd.concat(frames)
     DF = DF.divide(100)
-    DF.applymap(np.mean)
+#    DF.applymap(np.mean)
     print(DF)
     data_file = path.join(folder, f'{time_val}.csv')
     
