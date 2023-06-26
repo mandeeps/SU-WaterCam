@@ -102,14 +102,18 @@ After flashing, add enable_uart=1 at the end of the /boot/config.txt file. Inser
 
 https://www.jeffgeerling.com/blog/2021/attaching-raspberry-pis-serial-console-uart-debugging
 
-Use a serial cable to connect to the console and use sudo raspi-config to configure the device settings (locale, timezone, GPU memory, predictable network names, etc.,) and select Network Manager in place of dhcpcd in networking settings.
+Use a serial cable to connect to the console and use sudo raspi-config to configure the device settings (locale, timezone, predictable network names, etc.,) and select Network Manager in place of dhcpcd in networking settings.
 https://learn.adafruit.com/adafruits-raspberry-pi-lesson-5-using-a-console-cable/software-installation-windows
+
+Leave GPU memory at the default of 32 MB, PiCamera2 will not need more and the camera will not work with less.
 
 Use sudo nmtui to configure the ethernet connection to a static IP, with your computer IP as the gateway and DNS server if you are sharing your Internet connection with the Pi. Otherwise configure for whatever network setup you have.
 
 Now you can use ssh to login to the Pi after connecting it to your computer with an ethernet cable. Connection sharing can be setup using Network Manager on a Linux computer, or Windows Connection sharing, or the macOS equivalent.
 
 Once you've logged in and are sharing an internet connection from your computer to the Pi, run sudo apt update and sudo apt upgrade
+
+Verify the Pi is on the latest firmware with rpi-eeprom-update.
 
 Helpful tools: sudo apt install git tmux
 Install your preferred editor, which should be neovim, and aptitude if you want a TUI for apt
@@ -162,17 +166,17 @@ gcc capture.c -o capture
 
 Copy to the root of the SU-WaterCam directory. From tools, run "cp lepton ../." and "cp capture ../."
 
-use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel
+use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2
 
 We need to use virtual environments for Python on Debian-derivatives like Raspberry Pi OS starting with Debian 12 (codenamed Bookworm). 
 As of 6-20-23 Debian 11 remains the current stable base for Raspberry Pi OS, but let's future proof by using a venv now.
 Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, (we use system-site-packages to copy over pandas and other modules)
 activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
-or manually with pip install compress_pickle adafruit-blinka gpiozero piexif picamera2 py-gpsd2 python-xmp-toolkit
+or manually with pip install compress_pickle adafruit-blinka gpiozero piexif py-gpsd2 python-xmp-toolkit
 
 If using MLX90640 thermal sensor also install: adafruit_circuitpython-mlx90640.
 If using MPU6050 IMU install: adafruit_circuitpython_mpu6050.
-
+If using BNO055 IMU: pip install adafruit-circuitpython-bno055 in the venv.
 ### If using Adafruit MPU6050 IMU:
 Change the WittyPi 3 i2c address to avoid a conflict. The WittyPi 3 uses 0x68 for the RTC, and 0x69 for its microcontroller. The RTC address cannot be changed, but the microcontroller address can. The MPU6050 uses 0x68 by default. First solder the connection on the back of the MPU6050 board to change its i2c address to 0x69. Then change the WittyPi 3 microcontroller i2c address to something else, like 0x70 by following the instructions in the manual. WittyPi 4 does not require this.
 
@@ -188,7 +192,10 @@ Check the i2c settings changed: i2cdetect -y 1
 
 Run the wittypi script to verify ./wittypi/wittyPi.sh
 
-### BNO055 IMU
+install adafruit_circuitpython_mpu6050
+
+### Adafruit BNO055 IMU
+pip install adafruit-circuitpython-bno055 in the venv
 
 ## Calibrate the IMU prior to use:
 With the IMU stable and flat, run the calibration script to save offset values.
@@ -253,6 +260,10 @@ Check everything is correct by running the capture and lepton binaries in SU-Wat
 
 ### Tailscale for remote login over cellular data
 https://tailscale.com/download
+
+TODO
+SSH security
+mosh for high-latency connections
 
 ### Pytorch
 pip install torch torchvision (in the venv)
