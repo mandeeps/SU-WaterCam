@@ -1,6 +1,7 @@
 #!/home/pi/SU-WaterCam/venv/bin/python
 # Take a photo and embed GPS/IMU data into EXIF
 # Using Raspberry Pi camera, IMU, and GPS data from gpsd
+# Calls lepton and capture binaries to save data from Flir Lepton
 
 import logging
 import time
@@ -13,6 +14,7 @@ import gpsd2
 from libxmp import XMPFiles, consts
 import bno055_imu # using BNO055 sensor
 import take_photo # Camera handler
+import lepton_record # Flir Lepton thermal sensor
 
 # two helper functions from https://gist.github.com/c060604/8a51f8999be12fc2be498e9ca56adc72
 def to_deg(value, loc):
@@ -52,7 +54,7 @@ def main():
         logging.error("GPS error")
 
     # data record
-    DATA = '/home/pi/SU-WaterCam/data/gps.txt'
+    DATA = '/home/pi/SU-WaterCam/data/data_log.txt'
     #with open(DATA, 'a') as data:
     last_print = time.monotonic()
 
@@ -71,6 +73,9 @@ def main():
 
             # take a new photo
             image = take_photo.main(DIRNAME)
+            # Call lepton and capture sequentially to get temperature and IR image
+            # from Flir Lepton
+            lepton_record.main()
 
             # get IMU data
             try:
