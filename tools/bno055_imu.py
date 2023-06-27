@@ -3,15 +3,15 @@
 # Based on Adafruit example
 
 import time
+import logging
 import board
 import adafruit_bno055
-import logging
 
 i2c = board.I2C()
 sensor = adafruit_bno055.BNO055_I2C(i2c)
 last_val = 0xFFFF
 
-def temperature():
+def temperature() -> int:
     global last_val  # pylint: disable=global-statement
     result = sensor.temperature
     if abs(result - last_val) == 128:
@@ -21,9 +21,9 @@ def temperature():
     last_val = result
     return result
 
-def get_values():
+def get_values() -> dict:
     return {"Temperature":sensor.temperature, "Accelerometer":sensor.acceleration,
-        "Magnetic":sensor.magnetic, "Gyro":sensor.gyro, "Euler":sensor.euler, 
+        "Magnetic":sensor.magnetic, "Gyro":sensor.gyro, "Euler":sensor.euler,
         "Quaternion":sensor.quaternion, "Linear":sensor.linear_acceleration,
         "Gravity":sensor.gravity}
 
@@ -34,11 +34,11 @@ def offset():
 
     try:
         with open(OFFSET_PATH) as file:
-            # first 3 lines are accelerometer offsets
+            # first 3 lines are accelerometer offsets, iterate through them
             for i in range(3):
-                # read line, strip newline char,convert to float
+                # read the line, strip out newline char, convert to float
                 offset_accel.append(float(file.readline().rstrip()))
-            # gyro offset lines
+            # now do the same for the gyro offset lines
             for i in range(3):
                 offset_gyro.append(float(file.readline().rstrip()))
     except IOError:

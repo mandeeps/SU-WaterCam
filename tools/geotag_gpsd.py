@@ -4,8 +4,8 @@
 
 import logging
 import time
-from datetime import datetime
-from os import path
+#from datetime import datetime
+#from os import path
 from fractions import Fraction
 import piexif
 import piexif.helper
@@ -53,7 +53,7 @@ def main():
 
     # data record
     DATA = '/home/pi/SU-WaterCam/data/gps.txt'
-    data = open(DATA, 'a')
+    #with open(DATA, 'a') as data:
     last_print = time.monotonic()
 
     # How often we take a photo
@@ -61,7 +61,6 @@ def main():
     # How many photos to take per run
     LIMIT = 10
     LOOP = 0
-
 
     RUNNING = True
     while RUNNING:
@@ -84,8 +83,10 @@ def main():
                     f"Accelerometer: {imu_values['Accelerometer']}\n",
                     f"Gyro: {imu_values['Gyro']}\n",
                     f"Temperature: {imu_values['Temperature']}\n"]
-                for line in imu:
-                    data.writelines(line)
+
+                with open(DATA, 'a') as data:
+                    for line in imu:
+                        data.writelines(line)
                 yaw, roll, pitch = imu_values['Euler']
 
             # Start exif handling
@@ -102,7 +103,8 @@ def main():
                 packet = gpsd2.get_current()
             except:
                 logging.error("No GPS data returned")
-                data.write("\nNo GPS fix \n")
+                with open(DATA, 'a') as data:
+                    data.write("\nNo GPS fix \n")
             else:
                 if packet.mode >= 2:
                     gps_data = [
@@ -121,8 +123,9 @@ def main():
                     gps_data.append(f"Altitude: {packet.alt}\n")
 
                 # save to text file
-                for line in gps_data:
-                    data.writelines(line)
+                with open(DATA, 'a') as data:
+                    for line in gps_data:
+                        data.writelines(line)
 
                 # Conversion for exif use
                 lat_deg = to_deg(packet.lat,['S','N'])
@@ -170,7 +173,7 @@ def main():
                 xmpfile.close_file()
 
             LOOP = LOOP + 1
-            data.flush()
+            #data.flush()
 
         if LOOP == LIMIT:
             RUNNING = False
