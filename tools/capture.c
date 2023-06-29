@@ -99,7 +99,7 @@ static void save_pgm_file(void)
     int image_index = 0;
 
     do {
-        sprintf(image_name, "images/IMG_%.4d.pgm", image_index);
+        sprintf(image_name, "IMG_%.4d.pgm", image_index);
         image_index += 1;
         if (image_index > 9999) 
         {

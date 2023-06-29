@@ -2,7 +2,7 @@
 # Use subprocess to run lepton and capture binaries sequentially
 # Records image and temperature data from Flir Lepton
 
-import shutil
+from shutil import copy
 from os import path, mkdir, remove
 import subprocess # to call external apps
 from datetime import datetime
@@ -22,16 +22,25 @@ def main():
 
     # copy lepton binary into newly created directory to save data there
     source = path.join(DIRNAME, 'lepton')
-    app = path.join(folder, 'lepton')
-    print(app)
-    shutil.copy(source, app)
+    lepton = path.join(folder, 'lepton')
+    print(lepton)
+    copy(source, lepton)
 
-    # call external capture and lepton binaries to save image and temperature data
+    # do the same for the capture binary
+    source = path.join(DIRNAME, 'capture')
+    capture = path.join(folder, 'capture')
+    copy(source, capture)
+    print(capture)
+
+    # call capture and lepton binaries to save image and temperature data
     print('saving thermal photo...')
-    subprocess.run([path.join(DIRNAME, 'capture')], check=True)
+    subprocess.run([capture], check=True, cwd=folder)
     print('\nsaving temp data...')
-    subprocess.run([app], check=True, cwd=folder)
-    remove(app)
+    subprocess.run([lepton], check=True, cwd=folder)
+
+    # delete duplicated binaries
+    remove(lepton)
+    remove(capture)
 
 if __name__ == '__main__':
     import sys

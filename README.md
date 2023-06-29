@@ -138,7 +138,7 @@ dtoverlay=pi3-disable-bt
 ### I2C clock stretching for BNO055 IMU
 dtparam=i2c_arm_baudrate=10000
 
-Comment out the DRM VC4 V3D driver so we can use tvservice -o to shutdown HDMI output and save a little power.
+Comment out the DRM VC4 V3D driver so we can use tvservice -o to shutdown HDMI output and save a little power - if there are issues with taking high-resolution images, re-enable the vc4-kms-v3d driver with dtoverlay=vc4-kms-v3d,cma-320
 
 ### Add to /boot/cmdline.txt
 spidev.bufsiz=131072        - for Flir camera
@@ -197,7 +197,7 @@ install adafruit_circuitpython_mpu6050
 ### Adafruit BNO055 IMU
 pip install adafruit-circuitpython-bno055 in the venv
 
-## Calibrate the IMU prior to use:
+### Calibrate the IMU prior to use:
 With the IMU stable and flat, run the calibration script to save offset values.
 
 ### Quectel EC25 Modem and GPS

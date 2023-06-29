@@ -5,8 +5,6 @@
 
 import logging
 import time
-#from datetime import datetime
-#from os import path
 from fractions import Fraction
 import piexif
 import piexif.helper
@@ -50,8 +48,9 @@ def main():
 
     try:
         gpsd2.connect()
-    except:
+    except Exception as error:
         logging.error("GPS error")
+        logging.exception('')
 
     # data record
     DATA = '/home/pi/SU-WaterCam/data/data_log.txt'
@@ -80,8 +79,9 @@ def main():
             # get IMU data
             try:
                 imu_values = bno055_imu.get_values()
-            except:
+            except Exception as error:
                 logging.error("IMU Error")
+                logging.exception('')
             else: # log IMU data to text file
                 imu = [f"\nFile: {image}\n",
                     f"Time: {time.asctime(time.localtime(time.time()))}\n",
@@ -106,8 +106,9 @@ def main():
             gps_data = []
             try:
                 packet = gpsd2.get_current()
-            except:
+            except Exception as error:
                 logging.error("No GPS data returned")
+                logging.exception('')
                 with open(DATA, 'a') as data:
                     data.write("\nNo GPS fix \n")
             else:
@@ -178,7 +179,6 @@ def main():
                 xmpfile.close_file()
 
             LOOP = LOOP + 1
-            #data.flush()
 
         if LOOP == LIMIT:
             RUNNING = False

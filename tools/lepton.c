@@ -139,7 +139,7 @@ static void save_pgm_file(void)
         /* first 80 pixels in row */
         for(j = 0; j < 80; j++)
         { // subtract 27315 and divide by 100 to get Celsius values
-          // Handle division in pandas so we can be more accurate
+          // Handle division by 100 in pandas so we can be more accurate
             fprintf(f,"%d ", ((lepton_image[i][j] - 27315)) );
         }
 

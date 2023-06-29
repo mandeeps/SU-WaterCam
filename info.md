@@ -1,3 +1,10 @@
+[Streaming video from camera over network]
+on Pi: libcamera-vid -t 0 --inline --listen -o tcp://0.0.0.0:8888
+on your computer: use vlc to connect to network stream tcp/h264://RASPBERRY_IP_ADDRESS:8888
+
+libcamera-vid --level 4.2 -t 0 --denoise cdn_off --width 640 --height 480 --framerate 30 --inline --listen -o tcp://0.0.0.0:8080
+
+
 [Connect with SSH via USB](https://artivis.github.io/post/2020/pi-zero/)
 
 To connect using SSH: https://learn.adafruit.com/turning-your-raspberry-pi-zero-into-a-usb-gadget/ethernet-gadget
