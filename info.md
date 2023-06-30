@@ -1,3 +1,14 @@
+[Quectel EC25 Modem GPS with ModemManager 1.14 on Bullseye]
+create /etc/udev/rules.d/77-mm-quectel-ignore-gps.rules
+
+ATTRS{idVendor}=="2c7c", ATTRS{idProduct}=="0125", SUBSYSTEM=="tty", ENV{ID_MM_PORT_IGNORE}="1"
+
+save and run sudo udevadm control --reload
+
+
+[HDMI]
+Comment out the DRM VC4 V3D driver so we can use tvservice -o to shutdown HDMI output and save a little power - this can cause problems with libcamera
+
 [Streaming video from camera over network]
 on Pi: libcamera-vid -t 0 --inline --listen -o tcp://0.0.0.0:8888
 on your computer: use vlc to connect to network stream tcp/h264://RASPBERRY_IP_ADDRESS:8888

@@ -30,7 +30,7 @@ def to_deg(value, loc):
     deg =  int(abs_value)
     t1 = (abs_value-deg)*60
     minutes = int(t1)
-    sec = round((t1 - min)* 60, 5)
+    sec = round((t1 - minutes)* 60, 5)
     return (deg, minutes, sec, loc_value)
 
 def change_to_rational(number):
@@ -54,7 +54,6 @@ def main():
 
     # data record
     DATA = '/home/pi/SU-WaterCam/data/data_log.txt'
-    #with open(DATA, 'a') as data:
     last_print = time.monotonic()
 
     # How often we take a photo
@@ -89,7 +88,7 @@ def main():
                     f"Gyro: {imu_values['Gyro']}\n",
                     f"Temperature: {imu_values['Temperature']}\n"]
 
-                with open(DATA, 'a') as data:
+                with open(DATA, 'a', encoding="utf8") as data:
                     for line in imu:
                         data.writelines(line)
                 yaw, roll, pitch = imu_values['Euler']
@@ -109,7 +108,7 @@ def main():
             except Exception as error:
                 logging.error("No GPS data returned")
                 logging.exception('')
-                with open(DATA, 'a') as data:
+                with open(DATA, 'a', encoding="utf8") as data:
                     data.write("\nNo GPS fix \n")
             else:
                 if packet.mode >= 2:
@@ -129,7 +128,7 @@ def main():
                     gps_data.append(f"Altitude: {packet.alt}\n")
 
                 # save to text file
-                with open(DATA, 'a') as data:
+                with open(DATA, 'a', encoding="utf8") as data:
                     for line in gps_data:
                         data.writelines(line)
 

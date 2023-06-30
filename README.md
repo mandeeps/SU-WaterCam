@@ -94,7 +94,7 @@ or compatible single board computer with GPIO, I2C, SPI etc.,
 ## Raspberry Pi 4 with Flir camera, IMU, and Quectel Cellular modem+GPS
 Ideally we will have an image that can be flashed onto an SD card for new builds.
 
-Installation from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS lite to a microSD card with SSH enabled in the configuration options, along with the user account name and password. 
+Installation from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS lite to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location) 
 
 https://www.raspberrypi.com/software/
 
@@ -138,7 +138,7 @@ dtoverlay=pi3-disable-bt
 ### I2C clock stretching for BNO055 IMU
 dtparam=i2c_arm_baudrate=10000
 
-Comment out the DRM VC4 V3D driver so we can use tvservice -o to shutdown HDMI output and save a little power - if there are issues with taking high-resolution images, re-enable the vc4-kms-v3d driver with dtoverlay=vc4-kms-v3d,cma-320
+if there are issues with taking high-resolution images use the vc4-kms-v3d driver with options: dtoverlay=vc4-kms-v3d,cma-320
 
 ### Add to /boot/cmdline.txt
 spidev.bufsiz=131072        - for Flir camera
@@ -212,11 +212,45 @@ sudo mmcli -m 0 --simple-connect='apn=iot.1nce.net' Replace apn as appropriate
 
 Setup connection with NetworkManager: sudo nmcli c add type gsm ifname cdc-wdm0 con-name Quectel apn iot.1nce.net
 
+On Bookworm:
 sudo mmcli -m 0 –-location-enable-gps-unmanaged -- to tell ModemManager to start the GPS on the Quectel EC25 but not control it, so gpsd can manage it instead
+Enable gps.service in the git config directory so this will be done automatically on boot.
 
-enable gps.service in the git config directory so this will be done automatically on boot
+Bullseye: ModemManager on Bullseye doesn't support --location-enable-gps-unmanaged for the Quectel EC25G apparently, and since RaspberryPi OS has not officially released a Bookworm-based version yet, we work around this by -
 
-Edit /etc/default/gpsd to set the correct gps device, in this case /dev/ttyUSB1
+Creating a custom Udev rule to tell ModemManager to ignore the GPS:
+
+create file /etc/udev/rules.d/77-mm-quectel-ignore-gps.rules
+with contents: ATTRS{idVendor}=="2c7c", ATTRS{idProduct}=="0125", SUBSYSTEM=="tty", ENV{ID_MM_PORT_IGNORE}="1"
+
+Save this and run sudo udevadm control --reload
+
+Might need to reboot before next step...
+
+Activate the GPS and enable autostart for future use -
+
+install minicom if not already available and run it:
+minicom -b 9600 -D /dev/ttyUSB2
+
+(ttyUSB2 is the AT port for the Quectel. ttyUSB1 is the GPS output port)
+
+In minicom, issue the following AT commands -
+
+Enable NMEA:
+AT+QGPSCFG="nmeasrc",1
+
+Enable Autostart:
+AT+QGPSCFG="autogps",1
+
+Turn GPS on:
+AT+QGPS=1
+
+Assisted location fix:
+AT+QGPSXTRA=1
+
+These should be saved to the device's NVRAM so this should only need to be done once.
+
+Now edit /etc/default/gpsd to set the correct gps device, in this case /dev/ttyUSB1
 
 Then in python we can get gps data:
 import gpsd2
@@ -254,21 +288,29 @@ CLK pin on the Pi (pin #23) will connect to pin D on the breakout
 
 CS pin (pin #24, right across from CLK, aka CE0, GPIO 8) connects to pin 5 on the breakout board
 
+The VSYNC pin is optional and we are not using it. Pin #11, GPIO 17 on the Pi connects to pin H on the breakout board.
+
 Insert the Flir camera into the breakout board.
-Check everything is correct by running the capture and lepton binaries in SU-WaterCam:
-./capture
+Check everything is correct by running the capture and lepton binaries in SU-WaterCam. Rename or copy the appropriate 32 or 64-bit binaries to "lepton" and "capture" and then run: ./capture
+
+Examine the created files to verify.
+
+Binaries are from https://github.com/lukevanhorn/Lepton3
+
+Thanks Luke Van Horn! Also, thanks to Max Lipitz for the tip about the output containing the temperature values in degrees Kelvin.
 
 ### Tailscale for remote login over cellular data
 https://tailscale.com/download
 
-TODO
-SSH security
-mosh for high-latency connections
+Install and use mosh for high-latency cellular connections
+sudo apt install mosh
+
+Use an appropriate client for your own device.
 
 ### Pytorch
 pip install torch torchvision (in the venv)
 
-## Pi Zero 32-bit Instructions 
+## Old Pi Zero 32-bit Instructions 
 Written assuming you are using a Raspberry Pi Zero with headers installed
 and the Adafruit MLX90640 sensor
 
