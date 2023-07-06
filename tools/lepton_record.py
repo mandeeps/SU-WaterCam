@@ -34,9 +34,20 @@ def main():
 
     # call capture and lepton binaries to save image and temperature data
     print('saving thermal photo...')
-    subprocess.run([capture], check=True, cwd=folder)
-    print('\nsaving temp data...')
-    subprocess.run([lepton], check=True, cwd=folder)
+    try:
+        subprocess.run([capture], check=True, cwd=folder, timeout=10)
+    except subprocess.CalledProcessError as err:
+        print(f"Capture error: {err.returncode}\n {err}")
+    except subprocess.TimeoutExpired as err:
+        print(f"Capture process timed out: {err} \n")
+
+    print('\n saving temp data...')
+    try:
+        subprocess.run([lepton], check=True, cwd=folder, timeout=10)
+    except subprocess.CalledProcessError as err:
+        print(f"Lepton error: {err.returncode}\n {err}")
+    except subprocess.TimeoutExpired as err:
+        print(f"Lepton process timed out: {err} \n")
 
     # delete duplicated binaries
     remove(lepton)

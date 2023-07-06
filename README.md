@@ -123,6 +123,14 @@ Set /boot/config.txt options:
 dtparam=act_led_trigger=none
 dtparam=act_led_activelow=off
 dtparam=pwr_led_activelow=off
+
+To disable ethernet LEDs on Pi 3 & 4 try:
+
+dtparam=eth_led0=4
+dtparam=eth_led1=4
+
+or:
+
 dtparam=eth_led0=14
 dtparam=eth_led1=14
 
@@ -139,6 +147,8 @@ dtoverlay=pi3-disable-bt
 dtparam=i2c_arm_baudrate=10000
 
 if there are issues with taking high-resolution images use the vc4-kms-v3d driver with options: dtoverlay=vc4-kms-v3d,cma-320
+
+Can also add nohdmi to the vc4-kms-v3d line to disable HDMI ports and save ~30mA
 
 ### Add to /boot/cmdline.txt
 spidev.bufsiz=131072        - for Flir camera
@@ -177,6 +187,7 @@ or manually with pip install compress_pickle adafruit-blinka gpiozero piexif py-
 If using MLX90640 thermal sensor also install: adafruit_circuitpython-mlx90640.
 If using MPU6050 IMU install: adafruit_circuitpython_mpu6050.
 If using BNO055 IMU: pip install adafruit-circuitpython-bno055 in the venv.
+
 ### If using Adafruit MPU6050 IMU:
 Change the WittyPi 3 i2c address to avoid a conflict. The WittyPi 3 uses 0x68 for the RTC, and 0x69 for its microcontroller. The RTC address cannot be changed, but the microcontroller address can. The MPU6050 uses 0x68 by default. First solder the connection on the back of the MPU6050 board to change its i2c address to 0x69. Then change the WittyPi 3 microcontroller i2c address to something else, like 0x70 by following the instructions in the manual. WittyPi 4 does not require this.
 
@@ -192,13 +203,17 @@ Check the i2c settings changed: i2cdetect -y 1
 
 Run the wittypi script to verify ./wittypi/wittyPi.sh
 
-install adafruit_circuitpython_mpu6050
+Note changing the microcontroller address seems to interfere with displaying power draw using wittyPi.sh despite having changed the address in utilities.sh
+
+now install adafruit_circuitpython_mpu6050 to use the MPU6050 in Python
 
 ### Adafruit BNO055 IMU
 pip install adafruit-circuitpython-bno055 in the venv
 
 ### Calibrate the IMU prior to use:
-With the IMU stable and flat, run the calibration script to save offset values.
+With the IMU stable and flat, run the mpu6050 calibration script to save offset values.
+
+TODO: Calibrate BNO055
 
 ### Quectel EC25 Modem and GPS
 sudo apt install gpsd gpsd-clients
@@ -216,14 +231,16 @@ On Bookworm:
 sudo mmcli -m 0 –-location-enable-gps-unmanaged -- to tell ModemManager to start the GPS on the Quectel EC25 but not control it, so gpsd can manage it instead
 Enable gps.service in the git config directory so this will be done automatically on boot.
 
-Bullseye: ModemManager on Bullseye doesn't support --location-enable-gps-unmanaged for the Quectel EC25G apparently, and since RaspberryPi OS has not officially released a Bookworm-based version yet, we work around this by -
-
-Creating a custom Udev rule to tell ModemManager to ignore the GPS:
+Bullseye: ModemManager on Bullseye doesn't support --location-enable-gps-unmanaged for the Quectel EC25 apparently, and since RaspberryPi OS has not officially released a Bookworm-based version yet, we are using Bullseye and working around this by creating a custom Udev rule to tell ModemManager to ignore the GPS:
 
 create file /etc/udev/rules.d/77-mm-quectel-ignore-gps.rules
 with contents: ATTRS{idVendor}=="2c7c", ATTRS{idProduct}=="0125", SUBSYSTEM=="tty", ENV{ID_MM_PORT_IGNORE}="1"
 
 Save this and run sudo udevadm control --reload
+
+sudo udevadm trigger
+
+If using a different cellular modem change the ids to the appropriate ones, use lsusb to lookup the ids.
 
 Might need to reboot before next step...
 
@@ -248,15 +265,18 @@ AT+QGPS=1
 Assisted location fix:
 AT+QGPSXTRA=1
 
+Quit minicom with ctrl-a, z, x
 These should be saved to the device's NVRAM so this should only need to be done once.
 
 Now edit /etc/default/gpsd to set the correct gps device, in this case /dev/ttyUSB1
 
-Then in python we can get gps data:
+Then in python we can get gps data with py-gpsd2:
 import gpsd2
 gpsd2.connect()
 packet = gpsd2.get_current()
 print(packet.position())
+
+If there are issues getting a fast location fix try updating the XTRA assist data by downloading a new xtra2.bin from xtrapath4.izatcloud.net/xtra2.bin and uploading it to the modem with sudo mmcli -m 0 --location-inject-assistance-data=xtra2.bin
 
 sources:
 https://sigquit.wordpress.com/2012/03/29/enabling-gps-location-in-modemmanager/
@@ -306,6 +326,13 @@ Install and use mosh for high-latency cellular connections
 sudo apt install mosh
 
 Use an appropriate client for your own device.
+
+### Remote Video Streaming
+with libcamera-apps-lite installed run:
+
+libcamera-vid -t 0 --inline --listen -o tcp://0.0.0.0:8888
+
+On your machine connected to the Pi (over Tailscale or directly) use VLC to stream the video using 'open network stream' and enter tcp/h264://PI_ADDRESS_OR_HOSTNAME:8888 with the appropriate IP address and port number. 
 
 ### Pytorch
 pip install torch torchvision (in the venv)

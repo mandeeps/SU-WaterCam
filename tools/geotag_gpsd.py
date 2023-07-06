@@ -5,6 +5,7 @@
 
 import logging
 import time
+from time import sleep
 from fractions import Fraction
 import piexif
 import piexif.helper
@@ -57,13 +58,14 @@ def main():
     last_print = time.monotonic()
 
     # How often we take a photo
-    INTERVAL = 1
+    INTERVAL = 5
     # How many photos to take per run
     LIMIT = 10
-    LOOP = 0
+#    LOOP = 0
 
-    RUNNING = True
-    while RUNNING:
+#    RUNNING = True
+#    while RUNNING:
+    for _ in range(LIMIT):
         current = time.monotonic()
         # only proceed to recording data if past interval time
         if current - last_print >= INTERVAL:
@@ -176,11 +178,13 @@ def main():
                 xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
                 xmpfile.put_xmp(xmp)
                 xmpfile.close_file()
+        
+        else:
+            sleep(INTERVAL)
+#            LOOP = LOOP + 1
 
-            LOOP = LOOP + 1
-
-        if LOOP == LIMIT:
-            RUNNING = False
+#       if LOOP == LIMIT:
+#            RUNNING = False
 
 if __name__ == "__main__":
     main()
