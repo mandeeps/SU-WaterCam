@@ -11,19 +11,19 @@ logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(mess
     encoding='utf-8', level=logging.DEBUG)
 
 try:
-    camera = Picamera2()
-    config = camera.create_still_configuration(main={"format": "RGB888", "size": (2592,1944)})
-    camera.configure(config)
-    camera.start() # start picam outside main function to keep it open
+    picam2 = Picamera2()
+    config = picam2.create_still_configuration(main={"format": "RGB888", "size": (2592,1944)})
+    picam2.configure(config)
+    # picam2.start() -- do not start outside start_and_capture function as this interferes with Flir Lepton
 except Exception:
     logging.error("Camera loading error")
 
-def main(file: str) -> str:
+def main(filepath: str) -> str:
     time = datetime.now().strftime('%Y%m%d-%H%M%S')
-    image = path.join(file, f'{time}.jpg')
+    image = path.join(filepath, f'{time}.jpg')
     print(f'taking photo: {image}')
     try:
-        camera.capture_file(image)
+        picam2.start_and_capture_file(image, show_preview=False)
     except Exception:
         logging.error("Camera failed to capture")
 

@@ -8,26 +8,25 @@ import subprocess # to call external apps
 from datetime import datetime
 import pytz
 
-DIRNAME = '/home/pi/SU-WaterCam/'
 # User configurable values
 TIMEZONE = pytz.timezone('US/Eastern') # Set correct timezone here
 
-def main():
+def main(filepath: str):
     # Local timezone
     time_val = datetime.now().strftime('%Y%m%d-%H%M%S')
 
     # create new directory for data from this run
-    folder = path.join(DIRNAME, f'data/lepton-{time_val}')
+    folder = path.join(filepath, f'data/lepton-{time_val}')
     mkdir(folder)
 
     # copy lepton binary into newly created directory to save data there
-    source = path.join(DIRNAME, 'lepton')
+    source = path.join(filepath, 'lepton')
     lepton = path.join(folder, 'lepton')
     print(lepton)
     copy(source, lepton)
 
     # do the same for the capture binary
-    source = path.join(DIRNAME, 'capture')
+    source = path.join(filepath, 'capture')
     capture = path.join(folder, 'capture')
     copy(source, capture)
     print(capture)
@@ -55,4 +54,5 @@ def main():
 
 if __name__ == '__main__':
     import sys
-    sys.exit(main())
+    filepath = '/home/pi/SU-WaterCam/'
+    sys.exit(main(filepath))
