@@ -1,3 +1,5 @@
+Fix mDot issue with WittyPi - UART TX pin power problem
+
 Implement Flir Lepton reset to work around reliability issues
 
 Refactor scripts
