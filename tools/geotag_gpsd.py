@@ -46,6 +46,7 @@ def main():
     # setup
     logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s', encoding='utf-8', level=logging.DEBUG)
     DIRNAME = '/home/pi/SU-WaterCam/images/'
+    BASEDIR = '/home/pi/SU-WaterCam/'
 
     try:
         gpsd2.connect()
@@ -75,7 +76,7 @@ def main():
             image = take_photo.main(DIRNAME)
             # Call lepton and capture sequentially to get temperature and IR image
             # from Flir Lepton
-            lepton_record.main()
+            lepton_record.main(BASEDIR)
 
             # get IMU data
             try:
