@@ -41,7 +41,7 @@ def main():
     except subprocess.TimeoutExpired as err:
         print(f"Capture process timed out: {err} \n")
 
-    print('\n saving temp data...')
+    print('\n saving temperature data...')
     try:
         subprocess.run([lepton], check=True, cwd=folder, timeout=10)
     except subprocess.CalledProcessError as err:

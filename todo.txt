@@ -1,3 +1,5 @@
+Implement Flir Lepton reset to work around reliability issues
+
 Refactor scripts
 	Main script to call on boot to collect all data
 	Script calls other modules to collect IMU, GPS, and any other sensor data to embed in Exif/XMP and/or text/csv logs
@@ -7,4 +9,3 @@ Machine learning model to detect flooding from data
 Data interpretation, pixel temperature rate of change calculation
 Data transmission to backend
 Backend server to store, display, interpret data
-

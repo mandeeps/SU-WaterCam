@@ -265,7 +265,7 @@ AT+QGPS=1
 Assisted location fix:
 AT+QGPSXTRA=1
 
-Quit minicom with ctrl-a, z, x
+Quit minicom with ctrl-a, x
 These should be saved to the device's NVRAM so this should only need to be done once.
 
 Now edit /etc/default/gpsd to set the correct gps device, in this case /dev/ttyUSB1
@@ -294,11 +294,11 @@ We can use the top pin of the two pins without jumpers on the back of the board 
 
 TODO: upload photos of Lepton wiring
 
-Because we need I2C for other peripherals, use splitter cables for the two I2C pins on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU.
+Because we need I2C for other peripherals, use splitter cables for the two I2C pins (SDA and SCL) on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU. Another pair of split cables is useful for 3.3V and ground.
 
-The SDA pin on the Pi (pin #3) will connect to pin C on the breakout board (side away from you)
+The SDA pin on the Pi (pin #3) will connect to pin C on the breakout board (side away from you) - use a splitter
 
-The SCL pin on the Pi (pin #5) will connect to pin 4 on the breakout board (side towards you)
+The SCL pin on the Pi (pin #5) will connect to pin 4 on the breakout board (side towards you) - use a splitter
 
 MOSI on the Pi (pin #19) connects to pin E on the breakout
 
@@ -308,16 +308,26 @@ CLK pin on the Pi (pin #23) will connect to pin D on the breakout
 
 CS pin (pin #24, right across from CLK, aka CE0, GPIO 8) connects to pin 5 on the breakout board
 
-The VSYNC pin is optional and we are not using it. Pin #11, GPIO 17 on the Pi connects to pin H on the breakout board.
+The VSYNC pin is optional and we are not using it but it would be Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board.
 
 Insert the Flir camera into the breakout board.
 Check everything is correct by running the capture and lepton binaries in SU-WaterCam. Rename or copy the appropriate 32 or 64-bit binaries to "lepton" and "capture" and then run: ./capture
 
-Examine the created files to verify.
+Examine the created files to verify things are working.
 
 Binaries are from https://github.com/lukevanhorn/Lepton3
 
 Thanks Luke Van Horn! Also, thanks to Max Lipitz for the tip about the output containing the temperature values in degrees Kelvin.
+
+### Multitech mDot LoRa module
+The default mDot firmware is set up for UART. Remove "console=serial0,115200 console=tty1" from /boot/cmdline.txt on the Pi if you've been using a serial connection to the Pi for debugging. Reboot the Pi for this to take effect.
+
+The power pin (VOD, pin # 1) on the mDot can be connected to the 5V power pin on the Pi. Connect ground (pin 10 on the mDot) to a free ground pin. Connect the mDot UART TX (transmit, pin #2) to the Pi RX (receive) pin (#10), and the mDot RX pin (#3) to the Pi TX pin (#8).
+
+For deployment we'll want the mDot to have a seperate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data.
+
+On the Pi, run sudo minicom -s -D /dev/serial0 to connect to the mDot and issue AT commands.
+
 
 ### Tailscale for remote login over cellular data
 https://tailscale.com/download

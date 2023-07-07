@@ -1,5 +1,6 @@
 #!/home/pi/SU-WaterCam/venv/bin/python
 # Use picamera2 to take a photo
+# Assumes use of 5MP camera
 
 import logging
 from os import path
@@ -11,17 +12,18 @@ logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(mess
 
 try:
     camera = Picamera2()
-    config = camera.create_still_configuration()
+    config = camera.create_still_configuration(main={"format": "RGB888", "size": (2592,1944)})
     camera.configure(config)
+    camera.start() # start picam outside main function to keep it open
 except Exception:
     logging.error("Camera loading error")
 
 def main(file: str) -> str:
     time = datetime.now().strftime('%Y%m%d-%H%M%S')
     image = path.join(file, f'{time}.jpg')
-    print('taking photo')
+    print(f'taking photo: {image}')
     try:
-        camera.start_and_capture_file(image,show_preview=False)
+        camera.capture_file(image)
     except Exception:
         logging.error("Camera failed to capture")
 
