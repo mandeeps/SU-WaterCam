@@ -326,7 +326,31 @@ The power pin (VOD, pin # 1) on the mDot can be connected to the 5V power pin on
 
 For deployment we'll want the mDot to have a seperate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data.
 
-On the Pi, run sudo minicom -s -D /dev/serial0 to connect to the mDot and issue AT commands.
+On the Pi, run sudo minicom -s -D /dev/serial0 to connect to the mDot and issue AT commands. Use the settings specified in the mDot manual: 
+
+Baud rate 115200
+Data bits 8
+Parity N
+Stop bits 1
+Hardware/software flow control off
+
+TODO: the WittyPi can tell if the Raspberry Pi is off by reading the TX pin, which should be set low. The mDot seems to interfere with this, keeping the TX pin on the Pi set high and preventing the WittyPi from cutting off power to the system. There are several possible workarounds for this:
+
+1 - Use something other than the WittyPi. We already have several and it works well otherwise, so this is not a good option.
+
+2 - Use something other than the mDot. We also have several of these, so this is not an ideal option.
+
+3 - Use a USB-Serial adapter to connect the mDot to the Pi instead of the UART pins. This would increase power draw and add another component to the build, so it is not ideal but better than the first two.
+
+4 - Modify the mDot firmware to keep its RX pin low. We do not have a devkit for this device so this is not possible right now. The same applies to modifying the firmware to use I2C instead. Maybe we could use a resistor to connect to ground?
+
+5 - Turn on alternative UART pins on the Pi 4 and use those to connect to the mDot instead of the pin the WittyPi reads to determine the Pi's state. This is the option I am currently looking into. Potential downside is reduced performance if we use mini-UART and have to disable variable clock rates. Upside is we can restore the serial console for debugging and use the mDot at the same time.
+
+By adding dtoverlay=uart3 to /boot/config.txt on a Pi 4 we can use pin 7 for TX and pin 29 for RX.
+
+The non-4 models only expose one UART on GPIO at a time, so using the USB adapter may be the only real option for those. For a Pi 3 or other non-4, connect the Adafruit USB-serial adapter to the USB port. Connect the mDot TX to the white RX header, and the mDot RX to the green TX header. Use minicom or screen with the settings listed in the mDot manual to connect to the appropriate device, it will be /dev/ttyUSBx where x is a number. Check dmesg to see what device the adapter is: dmesg | grep "cp210x"
+
+On the Pi 4, make sure "enable_uart=1" is in the /boot/config.txt file, and add dtoverlay=uart5. Save and reboot. Connect the TX pin on the mDot to pin #33 on the Pi and connect the RX pin on the mDot to pin #32 on the Pi. Check with minicom or screen connecting to /dev/ttyAMA1 with the appropriate settings from the manual.
 
 
 ### Tailscale for remote login over cellular data
