@@ -58,7 +58,7 @@ or compatible single board computer with GPIO, I2C, SPI etc.,
     We are using Voltaic battery packs because they do not auto-shutdown during low power draw, which is important for this system as it will be in low-power mode most of the time and losing power then would prevent it from starting back up.
 
     Get the appropriate cables to connect whatever battery you are using to the 
-    WittyPi. For the Pi 3B and 4, use a dual USB to single micro Y splitter cable to supply adequate power from the Voltaic pack, like:
+    WittyPi. For the Pi 4 use a dual USB to single micro Y splitter cable to supply adequate power from the Voltaic pack, like:
     
     https://www.amazon.com/StarTech-com-Cable-External-Drive-Micro/dp/B0047AALW6/ref=psdc_172456_t2_B00L1K1OIA?th=1
 
@@ -76,12 +76,13 @@ or compatible single board computer with GPIO, I2C, SPI etc.,
     to adjust some WittyPi settings so it draws more power when the RPi is off to
     avoid the power bank shutting off all power. This will decrease battery life. 
 
-* MicroSD cards
+* MicroSD cards - preferably higher capacity
+
 * Micro USB cables, preferably 2 if using a Pi Zero so you can configure it as a network device and login over the data USB, with the other powering the WittyPi.
 
 * Ethernet cable for Pi 3B, 4 - so you can connect to a network for updates and initial configuration. I shared the wifi connection on my laptop with the Pi over ethernet using Network Manager's connection sharing on Linux. Other operating systems have similar functionality.
 
-* Serial TTL cable - useful for logging into the Pi before networking has been configured, and for debugging.
+* Serial TTL cable - useful for logging into the Pi before networking has been configured, and for debugging. Also useful for connecting the mDot LoRa module to Pi models other than the 4.
 
     https://www.adafruit.com/product/954
     or similar serial cable.
@@ -90,6 +91,11 @@ or compatible single board computer with GPIO, I2C, SPI etc.,
     https://www.amazon.com/Quectel-LTE-EC25-AF-Mini-PCIe/dp/B082SL8KY1
     
     https://www.amazon.com/gp/product/B07YY5967K
+
+* mDot LoRa module
+    https://www.multitech.com/brands/multiconnect-mdot
+
+    https://www.multitech.com/documents/publications/manuals/s000612_DB9.pdf#%5B%7B%22num%22%3A217%2C%22gen%22%3A0%7D%2C%7B%22name%22%3A%22XYZ%22%7D%2C0%2C682.7%2C0%5D
 
 ## Raspberry Pi 4 with Flir camera, IMU, and Quectel Cellular modem+GPS
 Ideally we will have an image that can be flashed onto an SD card for new builds.
@@ -115,7 +121,7 @@ Once you've logged in and are sharing an internet connection from your computer 
 
 Verify the Pi is on the latest firmware with rpi-eeprom-update.
 
-Helpful tools: sudo apt install git tmux
+Helpful tools: sudo apt install git tmux screen minicom
 Install your preferred editor, which should be neovim, and aptitude if you want a TUI for apt
 
 Set /boot/config.txt options:
@@ -146,12 +152,8 @@ dtoverlay=pi3-disable-bt
 ### I2C clock stretching for BNO055 IMU
 dtparam=i2c_arm_baudrate=10000
 
-if there are issues with taking high-resolution images use the vc4-kms-v3d driver with options: dtoverlay=vc4-kms-v3d,cma-320
-
-Can also add nohdmi to the vc4-kms-v3d line to disable HDMI ports and save ~30mA
-
-### Add to /boot/cmdline.txt
-spidev.bufsiz=131072        - for Flir camera
+### Add to /boot/cmdline.txt - Flir SPI settings
+spidev.bufsiz=131072
 
 ### SD Card settings
 Disable swap and set noatime to prolong SD card life: sudo swapoff --all, sudo apt purge dphys-swapfile.
@@ -160,7 +162,15 @@ Add noatime,commit=60 settings to ext4 partitions in /etc/fstab - noatime preven
 
 Set temp directories like /tmp, /var/tmp to mount in RAM, ex. tmpfs /var/tmp tmpfs nodev,nosuid,size=20M 0 0 in fstab
 
-Use a larger SD card size than needed so you have free space for wear-leveling.
+Use a larger SD card size than needed so you have free space for automatic wear-leveling.
+
+### Optional Tweaks
+You can disable services we won't be needing to speed up boot slightly (~3s)
+sudo systemctl disable man-db.timer wpa_supplicant keyboard-setup triggerhappy
+
+If there are issues with taking high-resolution images use the vc4-kms-v3d driver with options: dtoverlay=vc4-kms-v3d,cma-320
+
+Can also add nohdmi to the vc4-kms-v3d line to disable HDMI ports and save ~30mA
 
 ### Power Management
 Next, configure the WittyPi 3 Mini for power management.
@@ -170,17 +180,16 @@ Reboot, then run wittyPi.sh from the wittypi directory to configure the schedule
 
 ### SU-WaterCam setup
 Clone the public git repo: https://github.com/mandeeps/SU-WaterCam.git
-Compile lepton.c and capture.c for the device. cd to the SU-WaterCam/tools directory and run: 
-gcc lepton.c -o lepton
-gcc capture.c -o capture
+Compile lepton.c and capture.c for the device. Install build-essential if not already done: sudo apt install build-essential. Then cd to the SU-WaterCam/tools directory and run: 
+gcc lepton.c -o lepton && gcc capture.c -o capture
 
-Copy to the root of the SU-WaterCam directory. From tools, run "cp lepton ../." and "cp capture ../."
+Copy to the root of the SU-WaterCam directory: From tools directory, run "cp lepton ../." and "cp capture ../."
 
-use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2
+Use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2
 
-We need to use virtual environments for Python on Debian-derivatives like Raspberry Pi OS starting with Debian 12 (codenamed Bookworm). 
+We need to use virtual environments for Python on Debian-derivatives like Raspberry Pi OS starting with Debian 12 (codenamed Bookworm).
 As of 6-20-23 Debian 11 remains the current stable base for Raspberry Pi OS, but let's future proof by using a venv now.
-Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, (we use system-site-packages to copy over pandas and other modules)
+Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, (we use system-site-packages to copy over pandas and other installed modules)
 activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
 or manually with pip install compress_pickle adafruit-blinka gpiozero piexif py-gpsd2 python-xmp-toolkit
 
@@ -211,7 +220,7 @@ now install adafruit_circuitpython_mpu6050 to use the MPU6050 in Python
 pip install adafruit-circuitpython-bno055 in the venv
 
 ### Calibrate the IMU prior to use:
-With the IMU stable and flat, run the mpu6050 calibration script to save offset values.
+With the MPU6050 IMU stable and flat, run the mpu6050 calibration script to save offset values.
 
 TODO: Calibrate BNO055
 
@@ -320,38 +329,39 @@ Binaries are from https://github.com/lukevanhorn/Lepton3
 Thanks Luke Van Horn! Also, thanks to Max Lipitz for the tip about the output containing the temperature values in degrees Kelvin.
 
 ### Multitech mDot LoRa module
-The default mDot firmware is set up for UART. Remove "console=serial0,115200 console=tty1" from /boot/cmdline.txt on the Pi if you've been using a serial connection to the Pi for debugging. Reboot the Pi for this to take effect.
+The default mDot firmware is set up for UART. The WittyPi can tell if the Raspberry Pi is off by reading the TX pin, which should be set low when the Pi shuts down. The mDot seems to interfere with this, keeping the TX pin on the Pi set high and preventing the WittyPi from cutting off power to the system. There are several possible workarounds for this:
 
-The power pin (VOD, pin # 1) on the mDot can be connected to the 5V power pin on the Pi. Connect ground (pin 10 on the mDot) to a free ground pin. Connect the mDot UART TX (transmit, pin #2) to the Pi RX (receive) pin (#10), and the mDot RX pin (#3) to the Pi TX pin (#8).
+* Option #1 - Use something other than the WittyPi. We already have several and it works well otherwise, so this is not a good option.
 
-For deployment we'll want the mDot to have a seperate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data.
+* Option #2 - Use something other than the mDot. We also have several of these, so this is not an ideal option.
 
-On the Pi, run sudo minicom -s -D /dev/serial0 to connect to the mDot and issue AT commands. Use the settings specified in the mDot manual: 
+* Option #3 - Use a USB-Serial adapter to connect the mDot to the Pi instead of the UART pins. This would increase power draw and add another component to the deployed build, so it is not ideal but better than the first two. This is the option I am using on non-4 model Pis.
+
+The non-4 models only expose one UART on GPIO at a time, so using the USB adapter may be the only easy option for those. For a Pi 3 or other non-4, connect the Adafruit USB-serial adapter to the USB port. Connect the mDot TX to the white RX header, and the mDot RX to the green TX header. Use minicom or screen with the settings listed in the mDot manual to connect to the appropriate device, it will be /dev/ttyUSBx where x is a number. Check dmesg to see what device the adapter is: dmesg | grep "cp210x"
+
+* Option #4 - Modify the mDot firmware to keep its RX pin low. We do not have a devkit for this device yet so this is not possible right now. The same applies to modifying the firmware to use I2C instead. Maybe we could use a resistor to connect to ground?
+
+* Option #5 - Turn on alternative UART pins on the Pi 4 and use those to connect to the mDot instead of the pin the WittyPi reads to determine the Pi's state. This is the option I am currently using for our Pi 4s. Upside is we can use the serial console for debugging and use the mDot at the same time.
+
+By adding dtoverlay=uart5 to /boot/config.txt on a Pi 4 we can use pin 32 for TX and pin 33 for RX. On the Pi 4, make sure "enable_uart=1" is in the /boot/config.txt file, and add dtoverlay=uart5. Save and reboot. Connect the TX pin on the mDot to pin #33 on the Pi and connect the RX pin on the mDot to pin #32 on the Pi.
+
+The power pin (VOD, pin # 1) on the mDot can be connected to the 5V or 3.3V power pin on the Pi. Connect ground (pin 10 on the mDot) to a free ground pin. Connect the mDot UART TX (transmit, pin #2) to the Pi RX (receive) pin (#10 default, pin #33 if using uart5), and the mDot RX pin (#3) to the Pi TX pin (#8 default, pin #32 using uart5).
+
+On the Pi run sudo minicom -s -D /dev/serial0 to connect to the mDot if it is on the default TX/RX pins, minicom -s -D /dev/ttyAMA1 if on uart5, and issue AT commands. Use the settings specified in the mDot manual:
 
 Baud rate 115200
+
 Data bits 8
+
 Parity N
+
 Stop bits 1
+
 Hardware/software flow control off
 
-TODO: the WittyPi can tell if the Raspberry Pi is off by reading the TX pin, which should be set low. The mDot seems to interfere with this, keeping the TX pin on the Pi set high and preventing the WittyPi from cutting off power to the system. There are several possible workarounds for this:
+If you are using the mDot on the default Pi TX/RX pins you need to remove "console=serial0,115200 console=tty1" from /boot/cmdline.txt on the Pi if you've been using a serial connection to the Pi for debugging. Reboot the Pi for this to take effect.
 
-1 - Use something other than the WittyPi. We already have several and it works well otherwise, so this is not a good option.
-
-2 - Use something other than the mDot. We also have several of these, so this is not an ideal option.
-
-3 - Use a USB-Serial adapter to connect the mDot to the Pi instead of the UART pins. This would increase power draw and add another component to the build, so it is not ideal but better than the first two.
-
-4 - Modify the mDot firmware to keep its RX pin low. We do not have a devkit for this device so this is not possible right now. The same applies to modifying the firmware to use I2C instead. Maybe we could use a resistor to connect to ground?
-
-5 - Turn on alternative UART pins on the Pi 4 and use those to connect to the mDot instead of the pin the WittyPi reads to determine the Pi's state. This is the option I am currently looking into. Potential downside is reduced performance if we use mini-UART and have to disable variable clock rates. Upside is we can restore the serial console for debugging and use the mDot at the same time.
-
-By adding dtoverlay=uart3 to /boot/config.txt on a Pi 4 we can use pin 7 for TX and pin 29 for RX.
-
-The non-4 models only expose one UART on GPIO at a time, so using the USB adapter may be the only real option for those. For a Pi 3 or other non-4, connect the Adafruit USB-serial adapter to the USB port. Connect the mDot TX to the white RX header, and the mDot RX to the green TX header. Use minicom or screen with the settings listed in the mDot manual to connect to the appropriate device, it will be /dev/ttyUSBx where x is a number. Check dmesg to see what device the adapter is: dmesg | grep "cp210x"
-
-On the Pi 4, make sure "enable_uart=1" is in the /boot/config.txt file, and add dtoverlay=uart5. Save and reboot. Connect the TX pin on the mDot to pin #33 on the Pi and connect the RX pin on the mDot to pin #32 on the Pi. Check with minicom or screen connecting to /dev/ttyAMA1 with the appropriate settings from the manual.
-
+For deployment we'll want the mDot to have a seperate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data.
 
 ### Tailscale for remote login over cellular data
 https://tailscale.com/download

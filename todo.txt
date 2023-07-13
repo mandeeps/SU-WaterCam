@@ -1,8 +1,8 @@
-Fix mDot issue with WittyPi - UART TX pin power problem
-
+Need a way to monitor and report battery charge level
+Connect to a LoRa gateway
 Implement Flir Lepton reset to work around reliability issues
 
-Refactor scripts
+Refactor scripts and implement TTPython for timing
 	Main script to call on boot to collect all data
 	Script calls other modules to collect IMU, GPS, and any other sensor data to embed in Exif/XMP and/or text/csv logs
 
