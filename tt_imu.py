@@ -10,4 +10,5 @@ def get(trigger):
     sensor = adafruit_bno055.BNO055_I2C(i2c)
 
     time.sleep(1)
+    print(sensor.euler)
     return sensor.euler 
