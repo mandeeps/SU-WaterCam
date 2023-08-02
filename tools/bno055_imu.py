@@ -46,6 +46,7 @@ def offset():
 
 def main():
     while True:
+        time.sleep(2)
         print(f"Temperature: {sensor.temperature} degrees C")
         print(f"Accelerometer (m/s^2): {sensor.acceleration}")
         print(f"Magnetometer (microteslas): {sensor.magnetic}")
@@ -54,7 +55,6 @@ def main():
         print(f"Quaternion: {sensor.quaternion}")
         print(f"Linear acceleration (m/s^2): {sensor.linear_acceleration}")
         print(f"Gravity (m/s^2): {sensor.gravity} \n")
-        time.sleep(2)
 
 if __name__ == "__main__":
     main()

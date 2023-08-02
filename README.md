@@ -381,6 +381,9 @@ On your machine connected to the Pi (over Tailscale or directly) use VLC to stre
 ### Pytorch
 pip install torch torchvision (in the venv)
 
+Model based on FloodNet data set and DeepLab
+FloodNet: https://ieeexplore.ieee.org/document/9460988
+
 ## Old Pi Zero 32-bit Instructions 
 Written assuming you are using a Raspberry Pi Zero with headers installed
 and the Adafruit MLX90640 sensor
