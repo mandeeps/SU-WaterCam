@@ -99,16 +99,16 @@ def lepton_record(trigger, filepath: str):
     remove(lepton)
     remove(capture)
 
-
+@SQify
 def gps_data(trigger):
- import gpsd2
-     gpsd2.connect()
-           # get current gps info from gpsd
-            gps_data = []
-            packet = gpsd2.get_current()
-            if packet:    
-                if packet.mode >= 2:
-                    gps_data = [
+    import gpsd2
+    gpsd2.connect()
+        # get current gps info from gpsd
+    gps_data = []
+    packet = gpsd2.get_current()
+    if packet:    
+        if packet.mode >= 2:
+            gps_data = [
                         f"GPS Time UTC: {packet.time}\n",
                         f"GPS Time Local: {time.asctime(time.localtime(time.time()))}\n",
                         f"Latitude: {packet.lat} degrees\n",
@@ -120,27 +120,27 @@ def gps_data(trigger):
                         f"Map URL: {packet.map_url()}\n",
                         f"Device: {gpsd2.device()}\n"]
 
-                if packet.mode >= 3:
-                    gps_data.append(f"Altitude: {packet.alt}\n")
+        if packet.mode >= 3:
+            gps_data.append(f"Altitude: {packet.alt}\n")
 
-                # save to text file
-                with open(DATA, 'a', encoding="utf8") as data:
-                    for line in gps_data:
-                        data.writelines(line)
+        # save to text file
+        with open(DATA, 'a', encoding="utf8") as data:
+            for line in gps_data:
+                data.writelines(line)
 
-                # Conversion for exif use
-                lat_deg = to_deg(packet.lat,['S','N'])
-                lng_deg = to_deg(packet.lon,['W','E'])
+        # Conversion for exif use
+        lat_deg = to_deg(packet.lat,['S','N'])
+        lng_deg = to_deg(packet.lon,['W','E'])
 
-                exiv_lat = (change_to_rational(lat_deg[0]),
+        exiv_lat = (change_to_rational(lat_deg[0]),
                             change_to_rational(lat_deg[1]),
                             change_to_rational(lat_deg[2]))
 
-                exiv_lng = (change_to_rational(lng_deg[0]),
+        exiv_lng = (change_to_rational(lng_deg[0]),
                             change_to_rational(lng_deg[1]),
                             change_to_rational(lng_deg[2]))
 
-                gps_ifd = {
+        gps_ifd = {
                         piexif.GPSIFD.GPSVersionID: (2,0,0,0),
                         piexif.GPSIFD.GPSAltitudeRef: 0,
                         piexif.GPSIFD.GPSAltitude: change_to_rational(round(packet.alt)),
@@ -151,10 +151,10 @@ def gps_data(trigger):
                         piexif.GPSIFD.GPSTrack: change_to_rational(packet.track)
                 }
 
-                # Since we have GPS data, add to Exif
-                gps_exif = {"GPS": gps_ifd}
-                print(gps_exif)
-  
+        # Since we have GPS data, add to Exif
+        gps_exif = {"GPS": gps_ifd}
+        print(gps_exif)
+        return gps_exif 
   
 
 @GRAPHify
@@ -226,42 +226,3 @@ def main(trigger):
                 xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
                 xmpfile.put_xmp(xmp)
                 xmpfile.close_file()
-        
-from logging import root
-from ticktalkpython.SQ import SQify, STREAMify, GRAPHify
-from ticktalkpython.Clock import TTClock
-from ticktalkpython.Instructions import COPY_TTTIME, READ_TTCLOCK, VALUES_TO_TTTIME
-import tt_imu
-
-@GRAPHify
-def main(trigger):
-    A_1 = 1
-    with TTClock.root() as root_clock:
-        start_time = READ_TTCLOCK(trigger, TTClock=root_clock)
-        N = 30
-        # Setup the stop-tick of the STREAMify's firing rule
-        stop_time = start_time + (1000000 * N) # sample for N seconds
-
-        # create a sampling interval by copying the start and stop tick from
-        # TTToken values to the token time interval
-        sampling_time = VALUES_TO_TTTIME(start_time, stop_time)
-
-        # copy the sampling interval to the input values to the STREAMify
-        # node; these input values will be treated as sticky tokens, and
-        # define the duration over which STREAMify'd nodes must run
-        sample = COPY_TTTIME(1, sampling_time)
-
-        # do the sampling with streamify'd SQs. Only one of the inputs needs
-        # the special sampling time interval (but it wouldn't hurt if all did)
-        # because the other const values have infinite timestamps
-        euler = tt_imu.get(sample,
-                                  1,
-                                  1,
-                                  TTClock=root_clock,
-                                  TTPeriod=500000,
-                                  TTPhase=0,
-                                  TTDataIntervalWidth=100000)
-
-        #return euler
-
-        #result = tt_imu.get(trigger, TTClock=root_clock, TTPeriod=500000, TTPhase=1)
