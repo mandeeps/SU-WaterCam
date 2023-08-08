@@ -1,5 +1,6 @@
 # TT Python version
 
+from fractions import Fraction
 from ticktalkpython.SQ import SQify, STREAMify, GRAPHify
 from ticktalkpython.Clock import TTClock
 from ticktalkpython.Instructions import COPY_TTTIME, READ_TTCLOCK, VALUES_TO_TTTIME
@@ -32,7 +33,8 @@ def change_to_rational(number):
     return (f.numerator, f.denominator)
 
 @SQify
-def imu_values(trigger):
+def imu_values(trigger, DATA, image):
+    import time
     from time import sleep
     import board
     import adafruit_bno055
@@ -45,7 +47,21 @@ def imu_values(trigger):
         "Magnetic":sensor.magnetic, "Gyro":sensor.gyro, "Euler":sensor.euler,
         "Quaternion":sensor.quaternion, "Linear":sensor.linear_acceleration,
         "Gravity":sensor.gravity}
-    return values
+   
+    # log IMU data to text file
+    imu_data = [f"\nFile: {image}\n",
+                f"Time: {time.asctime(time.localtime(time.time()))}\n",
+                f"Accelerometer: {values['Accelerometer']}\n",
+                f"Gyro: {values['Gyro']}\n",
+                f"Temperature: {values['Temperature']}\n"]
+
+    with open(DATA, 'a', encoding="utf8") as data:
+        for line in imu_data:
+            data.writelines(line)
+    
+    yaw, roll, pitch = values['Euler']
+    
+    return values, roll, pitch, yaw
 
 @SQify
 def take_photo(trigger, filepath: str):
@@ -100,8 +116,11 @@ def lepton_record(trigger, filepath: str):
     remove(capture)
 
 @SQify
-def gps_data(trigger):
+def gps_data(trigger, DATA):
     import gpsd2
+    import time
+    import piexif
+
     gpsd2.connect()
         # get current gps info from gpsd
     gps_data = []
@@ -154,16 +173,44 @@ def gps_data(trigger):
         # Since we have GPS data, add to Exif
         gps_exif = {"GPS": gps_ifd}
         print(gps_exif)
-        return gps_exif 
+        return gps_exif
   
 
-@GRAPHify
-def main(trigger):
-    import time
-    from fractions import Fraction
+@SQify
+def exif(trigger, image, gps_exif, roll, pitch, yaw):
     import piexif
     import piexif.helper
     from libxmp import XMPFiles, consts
+    print(image)
+    # load original exif data
+    exif_data = piexif.load(image)
+    # Add roll/pitch/yaw to UserComment tag if they exist
+    if roll:
+        user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
+        exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
+
+    # add gps tag to original exif data
+    if gps_exif:
+        exif_data.update(gps_exif)
+
+    # Finish exif handling
+    # convert to byte format for writing into file
+    exif_bytes = piexif.dump(exif_data)
+    # write to disk
+    piexif.insert(exif_bytes, image)
+
+    # Write roll/pitch/yaw to XMP tags for Pix4D
+    if roll:
+        xmpfile = XMPFiles(file_path=image, open_forupdate=True)
+        xmp = xmpfile.get_xmp()
+        xmp.set_property(consts.XMP_NS_DC, 'Roll', str(roll))
+        xmp.set_property(consts.XMP_NS_DC, 'Pitch', str(pitch))
+        xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
+        xmpfile.put_xmp(xmp)
+        xmpfile.close_file()
+
+@GRAPHify
+def main(trigger):
 
     # setup
     DIRNAME = '/home/pi/SU-WaterCam/images/'
@@ -171,58 +218,18 @@ def main(trigger):
 
     # data record
     DATA = '/home/pi/SU-WaterCam/data/data_log.txt'
-    last_print = time.monotonic()
-
-    # How often we take a photo
-    INTERVAL = 5
-    # How many photos to take per run
-    LIMIT = 10
 
     with TTClock.root() as root_clock:
-            # take a new photo
-            image = take_photo(trigger, DIRNAME)
-            # Call lepton and capture sequentially to get temperature and IR image
-            # from Flir Lepton
-            lepton_record(trigger, BASEDIR)
+        # take a new photo
+        image = take_photo(trigger, DIRNAME)
+        print(image)
+        # Call lepton and capture sequentially to get temperature and IR image
+        # from Flir Lepton
+        lepton_record(trigger, BASEDIR)
 
-            # get IMU data
-            imu_data = imu_values(trigger)
-            print(imu_data)
-            # log IMU data to text file
-            imu = [f"\nFile: {image}\n",
-                    f"Time: {time.asctime(time.localtime(time.time()))}\n",
-                    f"Accelerometer: {imu_data['Accelerometer']}\n",
-                    f"Gyro: {imu_data['Gyro']}\n",
-                    f"Temperature: {imu_data['Temperature']}\n"]
-
-            with open(DATA, 'a', encoding="utf8") as data:
-                for line in imu:
-                    data.writelines(line)
-            yaw, roll, pitch = imu_data['Euler']
-
-            # Start exif handling
-            # load original exif data
-            exif_data = piexif.load(image)
-            # Add roll/pitch/yaw to UserComment tag if they exist
-            if roll:
-                user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
-                exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
-
-               # add gps tag to original exif data
-                exif_data.update(gps_exif)
-
-            # Finish exif handling
-            # convert to byte format for writing into file
-            exif_bytes = piexif.dump(exif_data)
-            # write to disk
-            piexif.insert(exif_bytes, image)
-
-            # Write roll/pitch/yaw to XMP tags for Pix4D
-            if roll:
-                xmpfile = XMPFiles(file_path=image, open_forupdate=True)
-                xmp = xmpfile.get_xmp()
-                xmp.set_property(consts.XMP_NS_DC, 'Roll', str(roll))
-                xmp.set_property(consts.XMP_NS_DC, 'Pitch', str(pitch))
-                xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
-                xmpfile.put_xmp(xmp)
-                xmpfile.close_file()
+        # get IMU data
+        imu_data, roll, pitch, yaw = imu_values(trigger, DATA, image)
+        print(imu_data)
+        gps_exif = gps_data(trigger, DATA)
+        
+        exif(trigger, image, gps_exif, roll, pitch, yaw)
