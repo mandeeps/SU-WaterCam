@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # TT Python version
 
 from ticktalkpython.SQ import SQify, STREAMify, GRAPHify
@@ -228,7 +227,6 @@ def main(trigger):
                 xmpfile.put_xmp(xmp)
                 xmpfile.close_file()
         
-=======
 from logging import root
 from ticktalkpython.SQ import SQify, STREAMify, GRAPHify
 from ticktalkpython.Clock import TTClock
@@ -267,4 +265,3 @@ def main(trigger):
         #return euler
 
         #result = tt_imu.get(trigger, TTClock=root_clock, TTPeriod=500000, TTPhase=1)
->>>>>>> 261c87ca3fcade6266c08af06cfa0cbf47c55253
