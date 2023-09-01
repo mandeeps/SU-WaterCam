@@ -4,13 +4,15 @@ from ticktalkpython.SQ import SQify, STREAMify, GRAPHify
 from ticktalkpython.Clock import TTClock
 from ticktalkpython.Instructions import COPY_TTTIME, READ_TTCLOCK, VALUES_TO_TTTIME
 
-@SQify
+@STREAMify
 def imu_values(trigger, image):
     import time
     from time import sleep
     import board
     import adafruit_bno055
+    import logging
 
+    logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s', encoding='utf-8', level=logging.DEBUG)
     fname = image[0]
     DATA = '/home/pi/SU-WaterCam/data/data_log.txt'
     i2c = board.I2C()
@@ -43,17 +45,24 @@ def take_photo(trigger):
     from os import path
     from datetime import datetime
     from picamera2 import Picamera2
+    import logging
 
     filepath = '/home/pi/SU-WaterCam/images/'
-    picam2 = Picamera2()
-    config = picam2.create_still_configuration(main={"format": "RGB888", "size": (2592,1944)})
-    picam2.configure(config)
+    try:
+        picam2 = Picamera2()
+        config = picam2.create_still_configuration(main={"format": "RGB888", "size": (2592,1944)})
+        picam2.configure(config)
+    except Exception:
+        logging.error("PiCamera loading error")
 
     time = datetime.now().strftime('%Y%m%d-%H%M%S')
     image = path.join(filepath, f'{time}.jpg')
     print(f'taking photo: {image}')
-    picam2.start_and_capture_file(image, show_preview=False)
-
+    try:
+        picam2.start_and_capture_file(image, show_preview=False)
+    except Exception:
+        logging.error("Camera failed to capture image")
+    
     return [image]
 
 @SQify
@@ -63,6 +72,7 @@ def lepton_record(trigger):
     import subprocess # to call external apps
     from datetime import datetime
     import pytz
+    import logging
 
     filepath = '/home/pi/SU-WaterCam/'
     # User configurable values
@@ -84,9 +94,20 @@ def lepton_record(trigger):
     print(capture)
     # call capture and lepton binaries to save image and temperature data
     print('saving thermal photo...')
-    subprocess.run([capture], check=True, cwd=folder, timeout=10)
+    try:
+        subprocess.run([capture], check=True, cwd=folder, timeout=10)
+    except subprocess.CalledProcessError as err:
+        logging.error(f"Capture error: {err.returncode} \n {err}")
+    except subprocess.TimeoutExpired as err:
+        logging.error(f"Capture process timeout: {err} \n")
+
     print('\n saving temperature data...')
-    subprocess.run([lepton], check=True, cwd=folder, timeout=10)
+    try:
+        subprocess.run([lepton], check=True, cwd=folder, timeout=10)
+    except subprocess.CalledProcessError as err:
+        logging.error(f"Capture error: {err.returncode} \n {err}")
+    except subprocess.TimeoutExpired as err:
+        logging.error(f"Capture process timeout: {err} \n")
 
     # delete duplicated binaries
     remove(lepton)
@@ -99,6 +120,7 @@ def gps_data(trigger):
     import time
     import piexif
     from fractions import Fraction
+    import logging
 
     # two helper functions from https://gist.github.com/c060604/8a51f8999be12fc2be498e9ca56adc72
     def to_deg(value, loc):
@@ -130,8 +152,12 @@ def gps_data(trigger):
 
 
     DATA = '/home/pi/SU-WaterCam/data/data_log.txt'
-    gpsd2.connect()
+    try:
+        gpsd2.connect()
         # get current gps info from gpsd
+    except Exception as err:
+        logging.error("GPS error! \n")
+
     gps_data = []
     packet = gpsd2.get_current()
     if packet:    
@@ -190,6 +216,7 @@ def exif(trigger, image, gps_exif, imu_data):
     import piexif
     import piexif.helper
     from libxmp import XMPFiles, consts
+
     print(image)
     print(image[0])
     fname = image[0]
@@ -231,16 +258,22 @@ def exif(trigger, image, gps_exif, imu_data):
 @GRAPHify
 def main(trigger):
     with TTClock.root() as root_clock:
+        start_time = READ_TTCLOCK(trigger, TTClock=root_clock)
+        N = 50
+        stop_time = start_time + (1000000 * N)
+        sampling_time = VALUES_TO_TTTIME(start_time, stop_time)
+        sample_window = COPY_TTTIME(1, sampling_time)
+
         # take a new photo
         image = take_photo(trigger)
         
         # Call lepton and capture sequentially to get temperature and IR image
         # from Flir Lepton
-        
-        #runlepton = lepton_record(trigger)
+        runlepton = lepton_record(trigger)
 
         # get IMU data
-        imu_data = imu_values(trigger, image)
+        imu_data = imu_values(sample_window, image, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000)
         gps_exif = gps_data(trigger)
         
+        # Save exif/xmp data to image file
         runexif = exif(trigger, image, gps_exif, imu_data)
