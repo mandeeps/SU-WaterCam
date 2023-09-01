@@ -18,7 +18,7 @@ def imu_values(trigger, image):
     i2c = board.I2C()
     sensor = adafruit_bno055.BNO055_I2C(i2c)
     
-    sleep(1)
+    #sleep(1)
     values = {"Temperature":sensor.temperature, "Accelerometer":sensor.acceleration,
         "Magnetic":sensor.magnetic, "Gyro":sensor.gyro, "Euler":sensor.euler,
         "Quaternion":sensor.quaternion, "Linear":sensor.linear_acceleration,
@@ -212,7 +212,7 @@ def gps_data(trigger):
   
 
 @SQify
-def exif(trigger, image, gps_exif, imu_data):
+def exif(image, gps_exif, imu_data):
     import piexif
     import piexif.helper
     from libxmp import XMPFiles, consts
@@ -276,4 +276,4 @@ def main(trigger):
         gps_exif = gps_data(trigger)
         
         # Save exif/xmp data to image file
-        runexif = exif(trigger, image, gps_exif, imu_data)
+        runexif = exif(image, gps_exif, imu_data)
