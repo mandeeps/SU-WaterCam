@@ -114,7 +114,7 @@ def lepton_record(trigger):
     remove(capture)
     return True
 
-@SQify
+@STREAMify
 def gps_data(trigger):
     import gpsd2
     import time
@@ -273,7 +273,7 @@ def main(trigger):
 
         # get IMU data
         imu_data = imu_values(sample_window, image, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000)
-        gps_exif = gps_data(trigger)
+        gps_exif = gps_data(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000)
         
         # Save exif/xmp data to image file
         runexif = exif(image, gps_exif, imu_data)
