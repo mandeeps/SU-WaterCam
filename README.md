@@ -319,6 +319,8 @@ CS pin (pin #24, right across from CLK, aka CE0, GPIO 8) connects to pin 5 on th
 
 The VSYNC pin is optional and we are not using it but it would be Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board.
 
+Reset pin (pin #9 counting left to right looking at the back of the board) connect to arbritrary GPIO pin on Pi, I am using GPIO 26 (pin 37 on the Pi)
+
 Insert the Flir camera into the breakout board.
 Check everything is correct by running the capture and lepton binaries in SU-WaterCam. Rename or copy the appropriate 32 or 64-bit binaries to "lepton" and "capture" and then run: ./capture
 

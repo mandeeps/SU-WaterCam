@@ -3,6 +3,7 @@
 from ticktalkpython.SQ import SQify, STREAMify, GRAPHify
 from ticktalkpython.Clock import TTClock
 from ticktalkpython.Instructions import COPY_TTTIME, READ_TTCLOCK, VALUES_TO_TTTIME
+from ticktalkpython.Deadline import TTFinishByOtherwise
 
 @STREAMify
 def imu_values(trigger, image):
@@ -18,7 +19,7 @@ def imu_values(trigger, image):
     i2c = board.I2C()
     sensor = adafruit_bno055.BNO055_I2C(i2c)
     
-    #sleep(1)
+    sleep(1)
     values = {"Temperature":sensor.temperature, "Accelerometer":sensor.acceleration,
         "Magnetic":sensor.magnetic, "Gyro":sensor.gyro, "Euler":sensor.euler,
         "Quaternion":sensor.quaternion, "Linear":sensor.linear_acceleration,
@@ -39,6 +40,10 @@ def imu_values(trigger, image):
     
     results = [roll, pitch, yaw]
     return results
+
+@SQify
+def imu_planb():
+    return [0,0,0]
 
 @SQify
 def take_photo(trigger):
@@ -149,8 +154,6 @@ def gps_data(trigger):
         f = Fraction(str(number))
         return (f.numerator, f.denominator)
 
-
-
     DATA = '/home/pi/SU-WaterCam/data/data_log.txt'
     try:
         gpsd2.connect()
@@ -210,6 +213,9 @@ def gps_data(trigger):
         print(gps_exif)
         return gps_exif
   
+@SQify
+def gps_planb():
+    return [{"GPS": {}}]    
 
 @SQify
 def exif(image, gps_exif, imu_data):
@@ -272,8 +278,15 @@ def main(trigger):
         runlepton = lepton_record(trigger)
 
         # get IMU data
-        imu_data = imu_values(sample_window, image, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000)
-        gps_exif = gps_data(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000)
+        imu_data = TTFinishByOtherwise(imu_values(sample_window, image, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), 
+                                       TTTimeDeadline=start_time + 1000,
+                                       TTPlanB=imu_planb(),
+                                       TTWillContinue=True)
+        
+        gps_exif = TTFinishByOtherwise(gps_data(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000),
+                                       TTTimeDeadline=start_time + 1000,
+                                       TTPlanB=gps_planb(),
+                                       TTWillContinue=True)
         
         # Save exif/xmp data to image file
         runexif = exif(image, gps_exif, imu_data)
