@@ -319,7 +319,7 @@ CS pin (pin #24, right across from CLK, aka CE0, GPIO 8) connects to pin 5 on th
 
 The VSYNC pin is optional and we are not using it but it would be Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board.
 
-Reset pin (pin #9 counting left to right looking at the back of the board) connect to arbritrary GPIO pin on Pi, I am using GPIO 26 (pin 37 on the Pi)
+Reset pin on the breakout is pin I following the convention declared above. Connect it to an arbritrary GPIO pin on Pi that is set high by default options are 0-8. I am using GPIO 6 (pin 31 on the Pi) in the lepton_reset.py script. We need a pin that is high by default because the breakout board reset triggers on low.
 
 Insert the Flir camera into the breakout board.
 Check everything is correct by running the capture and lepton binaries in SU-WaterCam. Rename or copy the appropriate 32 or 64-bit binaries to "lepton" and "capture" and then run: ./capture
