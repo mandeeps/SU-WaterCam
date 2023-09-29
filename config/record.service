@@ -1,0 +1,15 @@
+[Unit]
+Description=Run python script
+Requires=network-online.target 
+After=network-online.target
+
+[Service]
+User=pi
+Group=pi
+Type=idle
+WorkingDirectory=/home/pi/SU-WaterCam
+ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/simulate.py /home/pi/SU-WaterCam/output/tt_main.pickle
+#/home/pi/SU-WaterCam/tools/geotag_gpsd.py
+
+[Install]
+WantedBy=multi-user.target
