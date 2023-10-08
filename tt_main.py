@@ -6,7 +6,7 @@ from ticktalkpython.Instructions import COPY_TTTIME, READ_TTCLOCK, VALUES_TO_TTT
 from ticktalkpython.Deadline import TTFinishByOtherwise
 
 @STREAMify
-def imu_values(trigger, image):
+def imu_values(trigger):
     import time
     from time import sleep
     import board
@@ -14,7 +14,6 @@ def imu_values(trigger, image):
     import logging
 
     logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s', encoding='utf-8', level=logging.DEBUG)
-    fname = image[0]
     DATA = '/home/pi/SU-WaterCam/data/data_log.txt'
     i2c = board.I2C()
     sensor = adafruit_bno055.BNO055_I2C(i2c)
@@ -26,7 +25,7 @@ def imu_values(trigger, image):
         "Gravity":sensor.gravity}
    
     # log IMU data to text file
-    imu_data = [f"\nFile: {fname}\n",
+    imu_data = [
                 f"Time: {time.asctime(time.localtime(time.time()))}\n",
                 f"Accelerometer: {values['Accelerometer']}\n",
                 f"Gyro: {values['Gyro']}\n",
@@ -45,40 +44,55 @@ def imu_values(trigger, image):
 def imu_planb():
     return [0,0,0]
 
-@SQify
+@STREAMify
 def take_photo(trigger):
     from os import path
     from datetime import datetime
     from picamera2 import Picamera2
     import logging
+    from ticktalkpython.Empty import TTEmpty
 
     filepath = '/home/pi/SU-WaterCam/images/'
-    try:
-        picam2 = Picamera2()
-        config = picam2.create_still_configuration(main={"format": "RGB888", "size": (2592,1944)})
-        picam2.configure(config)
-    except Exception:
-        logging.error("PiCamera loading error")
+    
+    # initialize once
+    global sq_state
+    if sq_state.get('picam', None) is None:
+        try:
+            picam2 = Picamera2()
+            config = picam2.create_still_configuration(main={"format": "RGB888", "size": (2592,1944)})
+            picam2.configure(config)
+            sq_state['picam'] = picam2
+        except Exception:
+            logging.error("PiCamera loading error")
+            return TTEmpty()
+        
 
     time = datetime.now().strftime('%Y%m%d-%H%M%S')
     image = path.join(filepath, f'{time}.jpg')
     print(f'taking photo: {image}')
     try:
+        picam2 = sq_state.get('picam')
         picam2.start_and_capture_file(image, show_preview=False)
-    except Exception:
+    except Exception as e:
         logging.error("Camera failed to capture image")
-    
-    return [image]
+        return TTEmpty()
+    else:
+        print(f"Took photo: {image}")
+        return [image]
 
 @SQify
+def image_planb():
+    print("image plan B")
+    return True 
+
+@STREAMify
 def lepton_record(trigger):
     from shutil import copy
     from os import path, mkdir, remove
     import subprocess # to call external apps
     from datetime import datetime
     import pytz
-    import logging
-
+    import logging 
     filepath = '/home/pi/SU-WaterCam/'
     # User configurable values
     TIMEZONE = pytz.timezone('US/Eastern') # Set correct timezone here
@@ -100,24 +114,54 @@ def lepton_record(trigger):
     # call capture and lepton binaries to save image and temperature data
     print('saving thermal photo...')
     try:
-        subprocess.run([capture], check=True, cwd=folder, timeout=10)
+        subprocess.run([capture], check=True, cwd=folder) #, timeout=10)
     except subprocess.CalledProcessError as err:
         logging.error(f"Capture error: {err.returncode} \n {err}")
-    except subprocess.TimeoutExpired as err:
-        logging.error(f"Capture process timeout: {err} \n")
+    #except subprocess.TimeoutExpired as err:
+    #    logging.error(f"Capture process timeout: {err} \n")
 
     print('\n saving temperature data...')
     try:
-        subprocess.run([lepton], check=True, cwd=folder, timeout=10)
+        subprocess.run([lepton], check=True, cwd=folder) #, timeout=10)
     except subprocess.CalledProcessError as err:
         logging.error(f"Capture error: {err.returncode} \n {err}")
-    except subprocess.TimeoutExpired as err:
-        logging.error(f"Capture process timeout: {err} \n")
+    #except subprocess.TimeoutExpired as err:
+    #    logging.error(f"Capture process timeout: {err} \n")
 
     # delete duplicated binaries
     remove(lepton)
     remove(capture)
     return True
+
+@STREAMify
+def lepton_track(trigger):
+    return 0
+
+@SQify
+def lepton_planb():
+    # Flir Lepton breakout board 2.0
+    # Pin 17 on the breakout is RESET_L
+    # We connect this to pin 31 (GPIO 6) on the Raspberry Pi
+    print("Lepton plan b")
+    from time import sleep
+    import RPi.GPIO as GPIO
+
+    pin = 31
+
+    GPIO.setmode(GPIO.BOARD)
+    GPIO.setup(pin, GPIO.OUT)
+
+    # set low for 1 second to trigger reset on breakout board
+    GPIO.output(pin, GPIO.LOW)
+    sleep(1.0)
+
+    # reset to default state
+    GPIO.output(pin, GPIO.HIGH)
+    GPIO.setup(pin, GPIO.IN)
+
+    print(f"Pin {pin}: {GPIO.input(pin)}")
+
+    return {}
 
 @STREAMify
 def gps_data(trigger):
@@ -223,68 +267,81 @@ def exif(image, gps_exif, imu_data):
     import piexif.helper
     from libxmp import XMPFiles, consts
 
-    print(image)
-    print(image[0])
+    print(f"value of 'image' passed to exif function: {image}")
+    print(f"filepath within image list: {image[0]}")
     fname = image[0]
     # load original exif data
-    exif_data = piexif.load(fname)
-    # Add roll/pitch/yaw to UserComment tag if they exist
-    print(imu_data)
-    roll = imu_data[0]
-    pitch = imu_data[1]
-    yaw = imu_data[2]
-    print(f"Roll: {roll} Pitch: {pitch} Yaw: {yaw} \n")
-    if roll:
-        user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
-        exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
+    try:
+        exif_data = piexif.load(fname)
+    except Exception:
+        print("no image file or no image exif data")
+    else:
+        # Add roll/pitch/yaw to UserComment tag if they exist
+        print(imu_data)
+        roll = imu_data[0]
+        pitch = imu_data[1]
+        yaw = imu_data[2]
+        print(f"Roll: {roll} Pitch: {pitch} Yaw: {yaw} \n")
+        if roll:
+            user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
+            exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
 
-    # add gps tag to original exif data
-    if gps_exif:
-        gpsdict = gps_exif[0]
-        exif_data.update(gpsdict)
+        # add gps tag to original exif data
+        if gps_exif:
+            gpsdict = gps_exif[0]
+            exif_data.update(gpsdict)
 
-    # Finish exif handling
-    # convert to byte format for writing into file
-    exif_bytes = piexif.dump(exif_data)
-    # write to disk
-    piexif.insert(exif_bytes, fname)
+        # Finish exif handling
+        # convert to byte format for writing into file
+        exif_bytes = piexif.dump(exif_data)
+        # write to disk
+        piexif.insert(exif_bytes, fname)
 
-    # Write roll/pitch/yaw to XMP tags for Pix4D
-    if roll:
-        xmpfile = XMPFiles(file_path=fname, open_forupdate=True)
-        xmp = xmpfile.get_xmp()
-        xmp.set_property(consts.XMP_NS_DC, 'Roll', str(roll))
-        xmp.set_property(consts.XMP_NS_DC, 'Pitch', str(pitch))
-        xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
-        xmpfile.put_xmp(xmp)
-        xmpfile.close_file()
+        # Write roll/pitch/yaw to XMP tags for Pix4D
+        if roll:
+            xmpfile = XMPFiles(file_path=fname, open_forupdate=True)
+            xmp = xmpfile.get_xmp()
+            xmp.set_property(consts.XMP_NS_DC, 'Roll', str(roll))
+            xmp.set_property(consts.XMP_NS_DC, 'Pitch', str(pitch))
+            xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
+            xmpfile.put_xmp(xmp)
+            xmpfile.close_file()
 
-    return True
+    finally:
+        return True
 
 @GRAPHify
 def main(trigger):
     with TTClock.root() as root_clock:
         start_time = READ_TTCLOCK(trigger, TTClock=root_clock)
-        N = 50
+        N = 30
         stop_time = start_time + (1000000 * N)
         sampling_time = VALUES_TO_TTTIME(start_time, stop_time)
         sample_window = COPY_TTTIME(1, sampling_time)
 
+        timeout_val = 10_000_000
+        timestamp = READ_TTCLOCK(lepton_track(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTClock=root_clock)
+
+
         # take a new photo
-        image = take_photo(trigger)
+        #image = take_photo(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000)
+
+        image = TTFinishByOtherwise(take_photo(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=image_planb(), TTWillContinue=False)
         
         # Call lepton and capture sequentially to get temperature and IR image
         # from Flir Lepton
-        runlepton = lepton_record(trigger)
+        #runlepton = lepton_record(trigger)
+
+        runlepton = TTFinishByOtherwise(lepton_record(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=lepton_planb(), TTWillContinue=True)
 
         # get IMU data
-        imu_data = TTFinishByOtherwise(imu_values(sample_window, image, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), 
-                                       TTTimeDeadline=start_time + 1000,
+        imu_data = TTFinishByOtherwise(imu_values(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), 
+                                       TTTimeDeadline=start_time + timeout_val,
                                        TTPlanB=imu_planb(),
                                        TTWillContinue=True)
         
         gps_exif = TTFinishByOtherwise(gps_data(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000),
-                                       TTTimeDeadline=start_time + 1000,
+                                       TTTimeDeadline=start_time + timeout_val,
                                        TTPlanB=gps_planb(),
                                        TTWillContinue=True)
         
