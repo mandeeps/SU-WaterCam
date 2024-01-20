@@ -310,6 +310,71 @@ def exif(image, gps_exif, imu_data):
     finally:
         return True
 
+@SQify
+def tf_classify(trigger):
+    from tflite_runtime.interpreter import Interpreter
+    from PIL import Image
+    import numpy as np
+    import time
+
+    def load_labels(path):
+        with open(path, 'r') as f:
+            return [line.strip() for i, line in enumerate(f.readlines())]
+
+    def set_input_tensor(interpreter, image):
+        tensor_index = interpreter.get_input_details()[0]['index']
+        input_tensor = interpreter.tensor(tensor_index)()[0]
+        # Convert the PIL Image to a NumPy array and then flatten it
+        input_array = np.array(image).flatten()
+
+        # Copy the values to the input tensor
+        input_tensor.flat = input_array
+
+    def classify_image(interpreter, image, top_k=1):
+        set_input_tensor(interpreter, image)
+        interpreter.invoke()
+        output_details = interpreter.get_output_details()[0]
+        output = np.squeeze(interpreter.get_tensor(output_details['index']))
+
+        scale, zero_point = output_details['quantization']
+        output = scale * (output - zero_point)
+
+        ordered = np.argpartition(-output, 1)
+        return [(i, output[i]) for i in ordered[:top_k]][0]
+
+    data_folder = "images"
+    model_path = "model.tflite"
+    label_path = "labels.txt"
+    interpreter = Interpreter(model_path)
+    print("Model Loaded Successfully.")
+    interpreter.allocate_tensors()
+    _, height, width, _ = interpreter.get_input_details()[0]['shape']
+    print("Image Shape (", width, ",", height, ")")
+
+    # Load an image to be classified.
+    #image = Image.open(data_folder + "/test.jpg").convert('RGB').resize((width, height))
+    image = Image.open("test.jpg").convert('RGB').resize((width, height))
+
+    # Classify the image.
+    time1 = time.time()
+    label_id, prob = classify_image(interpreter, image)
+    time2 = time.time()
+    classification_time = np.round(time2-time1, 3)
+    print("Classification Time =", classification_time, "seconds.")
+
+    # Read class labels.
+    labels = load_labels(label_path)
+
+    # Return the classification label of the image.
+    classification_label = labels[label_id]
+    print("Image Label is :", classification_label, ", with Accuracy :", np.round(prob*100, 2), "%.")
+    return True
+
+@SQify
+def tf_classify_planb():
+  print('Tensorflow issue')
+  return 1
+
 @GRAPHify
 def main(trigger):
     with TTClock.root() as root_clock:
@@ -347,3 +412,6 @@ def main(trigger):
         
         # Save exif/xmp data to image file
         runexif = exif(image, gps_exif, imu_data)
+
+        # classification test on single file
+        run_tf_classify = tf_classify(sample_window)
