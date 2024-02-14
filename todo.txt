@@ -1,3 +1,8 @@
+regular data transmission, sms alerts, optional image request from sms
+regular gps/imu ping to check for movement
+backend server, individual config for each unit, units check for config changes
+imu movement detection
+GPS tracking of stolen units
 Need a way to monitor and report battery charge level
 Connect to a LoRa gateway
 Implement Flir Lepton reset to work around reliability issues
