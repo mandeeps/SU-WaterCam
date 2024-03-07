@@ -187,6 +187,8 @@ Copy to the root of the SU-WaterCam directory: From tools directory, run "cp lep
 
 Use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2
 
+Make sure picamera2 is installed as system package, not through pip
+
 We need to use virtual environments for Python on Debian-derivatives like Raspberry Pi OS starting with Debian 12 (codenamed Bookworm).
 As of 6-20-23 Debian 11 remains the current stable base for Raspberry Pi OS, but let's future proof by using a venv now.
 Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, (we use system-site-packages to copy over pandas and other installed modules)

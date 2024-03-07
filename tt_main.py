@@ -153,7 +153,7 @@ def lepton_planb():
 
     # set low for 1 second to trigger reset on breakout board
     GPIO.output(pin, GPIO.LOW)
-    sleep(1.0)
+    sleep(5.0)
 
     # reset to default state
     GPIO.output(pin, GPIO.HIGH)
@@ -414,3 +414,5 @@ def main(trigger):
 
         # classification test on single file
         run_tf_classify = tf_classify(image)
+
+        reset = TTSingleRunTimeout(lepton_planb, TTTimeout=1_000_000)
