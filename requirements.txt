@@ -1,3 +1,10 @@
+astor
+networkx
+matplotlib
+astunparse
+intervaltree
+simpy
+multiprocess
 py-gpsd2
 Adafruit_Blinka==8.19.0
 adafruit_circuitpython_bno055==5.4.9

@@ -199,17 +199,17 @@ def gps_data(trigger):
         return (f.numerator, f.denominator)
 
     DATA = '/home/pi/SU-WaterCam/data/data_log.txt'
+    gps_data = []
     try:
         gpsd2.connect()
         # get current gps info from gpsd
     except Exception as err:
         logging.error("GPS error! \n")
-
-    gps_data = []
-    packet = gpsd2.get_current()
-    if packet:    
-        if packet.mode >= 2:
-            gps_data = [
+    else:
+        packet = gpsd2.get_current()
+        if packet:    
+            if packet.mode >= 2:
+                gps_data = [
                         f"GPS Time UTC: {packet.time}\n",
                         f"GPS Time Local: {time.asctime(time.localtime(time.time()))}\n",
                         f"Latitude: {packet.lat} degrees\n",
@@ -221,27 +221,27 @@ def gps_data(trigger):
                         f"Map URL: {packet.map_url()}\n",
                         f"Device: {gpsd2.device()}\n"]
 
-        if packet.mode >= 3:
-            gps_data.append(f"Altitude: {packet.alt}\n")
+            if packet.mode >= 3:
+                gps_data.append(f"Altitude: {packet.alt}\n")
 
-        # save to text file
-        with open(DATA, 'a', encoding="utf8") as data:
-            for line in gps_data:
-                data.writelines(line)
+            # save to text file
+            with open(DATA, 'a', encoding="utf8") as data:
+                for line in gps_data:
+                    data.writelines(line)
 
-        # Conversion for exif use
-        lat_deg = to_deg(packet.lat,['S','N'])
-        lng_deg = to_deg(packet.lon,['W','E'])
+            # Conversion for exif use
+            lat_deg = to_deg(packet.lat,['S','N'])
+            lng_deg = to_deg(packet.lon,['W','E'])
 
-        exiv_lat = (change_to_rational(lat_deg[0]),
+            exiv_lat = (change_to_rational(lat_deg[0]),
                             change_to_rational(lat_deg[1]),
                             change_to_rational(lat_deg[2]))
 
-        exiv_lng = (change_to_rational(lng_deg[0]),
+            exiv_lng = (change_to_rational(lng_deg[0]),
                             change_to_rational(lng_deg[1]),
                             change_to_rational(lng_deg[2]))
 
-        gps_ifd = {
+            gps_ifd = {
                         piexif.GPSIFD.GPSVersionID: (2,0,0,0),
                         piexif.GPSIFD.GPSAltitudeRef: 0,
                         piexif.GPSIFD.GPSAltitude: change_to_rational(round(packet.alt)),
@@ -252,10 +252,10 @@ def gps_data(trigger):
                         piexif.GPSIFD.GPSTrack: change_to_rational(packet.track)
                 }
 
-        # Since we have GPS data, add to Exif
-        gps_exif = [{"GPS": gps_ifd}]
-        print(gps_exif)
-        return gps_exif
+            # Since we have GPS data, add to Exif
+            gps_exif = [{"GPS": gps_ifd}]
+            print(gps_exif)
+            return gps_exif
   
 @SQify
 def gps_planb():
@@ -396,7 +396,7 @@ def main(trigger):
         # from Flir Lepton
         #runlepton = lepton_record(trigger)
 
-        runlepton = TTFinishByOtherwise(lepton_record(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=lepton_planb(), TTWillContinue=True)
+        runlepton = TTFinishByOtherwise(lepton_record(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=TTSingleRunTimeout(lepton_planb(), TTTimeout=10_000_000), TTWillContinue=True)
 
         # get IMU data
         imu_data = TTFinishByOtherwise(imu_values(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), 
@@ -415,4 +415,4 @@ def main(trigger):
         # classification test on single file
         run_tf_classify = tf_classify(image)
 
-        reset = TTSingleRunTimeout(lepton_planb, TTTimeout=1_000_000)
+        #reset = TTSingleRunTimeout(lepton_planb(), TTTimeout=1_000_000)

@@ -76,7 +76,7 @@ or compatible single board computer with GPIO, I2C, SPI etc.,
     to adjust some WittyPi settings so it draws more power when the RPi is off to
     avoid the power bank shutting off all power. This will decrease battery life. 
 
-* MicroSD cards - preferably higher capacity
+* MicroSD cards - preferably higher capacity than needed for wear-leveling, consider high endurance or industrial (for temperature tolerance) cards. 
 
 * Micro USB cables, preferably 2 if using a Pi Zero so you can configure it as a network device and login over the data USB, with the other powering the WittyPi.
 
@@ -389,6 +389,28 @@ pip install torch torchvision (in the venv)
 
 Model based on FloodNet data set and DeepLab
 FloodNet: https://ieeexplore.ieee.org/document/9460988
+
+### segment anything
+
+lang-segment-anything needs older Python version than what is available in current raspberrypi os.
+
+https://github.com/luca-medeiros/lang-segment-anything/tree/main
+
+So first install pyenv to install an older python
+
+sudo apt-get install build-essential zlib1g-dev libffi-dev libssl-dev libbz2-dev libreadline-dev libsqlite3-dev liblzma-dev
+
+curl https://pyenv.run | bash
+
+add to .bashrc as instructed
+
+pyenv install 3.8
+
+switch to python 3.8 with pyenv global 3.8
+
+now you can run the install for lang-segment-anything
+
+Run running_test.py 
 
 ## Old Pi Zero 32-bit Instructions 
 Written assuming you are using a Raspberry Pi Zero with headers installed
