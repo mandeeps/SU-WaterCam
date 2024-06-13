@@ -1,5 +1,7 @@
 # Build Guide / How To
 
+# See ticktalk branch for current work
+
 ### Project requires a Raspberry Pi 
 or compatible single board computer with GPIO, I2C, SPI etc.,
 
@@ -76,7 +78,9 @@ or compatible single board computer with GPIO, I2C, SPI etc.,
     to adjust some WittyPi settings so it draws more power when the RPi is off to
     avoid the power bank shutting off all power. This will decrease battery life. 
 
-* MicroSD cards - preferably higher capacity
+* MicroSD cards - preferably higher capacity than needed for wear-leveling, consider high endurance or industrial (for temperature tolerance) cards: https://www.dzombak.com/blog/2023/12/Choosing-the-right-SD-card-for-your-Pi.html 
+
+Test the SD cards with F3: https://github.com/AltraMayor/f3
 
 * Micro USB cables, preferably 2 if using a Pi Zero so you can configure it as a network device and login over the data USB, with the other powering the WittyPi.
 
@@ -186,6 +190,8 @@ gcc lepton.c -o lepton && gcc capture.c -o capture
 Copy to the root of the SU-WaterCam directory: From tools directory, run "cp lepton ../." and "cp capture ../."
 
 Use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2
+
+Make sure picamera2 is installed as system package, not through pip
 
 We need to use virtual environments for Python on Debian-derivatives like Raspberry Pi OS starting with Debian 12 (codenamed Bookworm).
 As of 6-20-23 Debian 11 remains the current stable base for Raspberry Pi OS, but let's future proof by using a venv now.
@@ -317,7 +323,11 @@ CLK pin on the Pi (pin #23) will connect to pin D on the breakout
 
 CS pin (pin #24, right across from CLK, aka CE0, GPIO 8) connects to pin 5 on the breakout board
 
-The VSYNC pin is optional and we are not using it but it would be Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board.
+The VSYNC pin is Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board.
+
+Reset pin on the breakout is pin I following the convention declared above. Connect it to an arbritrary GPIO pin on Pi that is set high by default (options are 0-8) 
+
+I am using GPIO 6 (pin 31 on the Pi) in the lepton_reset.py script. We need a pin that is high by default because the breakout board reset triggers on low.
 
 Insert the Flir camera into the breakout board.
 Check everything is correct by running the capture and lepton binaries in SU-WaterCam. Rename or copy the appropriate 32 or 64-bit binaries to "lepton" and "capture" and then run: ./capture
@@ -327,6 +337,20 @@ Examine the created files to verify things are working.
 Binaries are from https://github.com/lukevanhorn/Lepton3
 
 Thanks Luke Van Horn! Also, thanks to Max Lipitz for the tip about the output containing the temperature values in degrees Kelvin.
+
+#### Leptonic for live thermal image stream
+We're setting up an unused Pi 3 for collecting thermal images for coregistration - using leptonic from github, a forked branch that can be built on Debian 12 Bookworm
+
+https://github.com/rob-coco/leptonic/tree/bookworm-update
+
+checkout the bookworm-update branch, compile that after installing dependencies: libzmq3-dev
+
+Port forward, first ssh into pi and run leptonic on /dev/spidev0.0, then open another terminal and port forward with:
+➜ ssh -L 5555:10.42.0.3:5555 pi@10.42.0.3
+
+Run the leptonic web server on your own machine, it's too much for the Pi 3 to do both: 
+npm start in frontend directory then
+127.0.0.1:3000 in your browser
 
 ### Multitech mDot LoRa module
 The default mDot firmware is set up for UART. The WittyPi can tell if the Raspberry Pi is off by reading the TX pin, which should be set low when the Pi shuts down. The mDot seems to interfere with this, keeping the TX pin on the Pi set high and preventing the WittyPi from cutting off power to the system. There are several possible workarounds for this:
@@ -383,6 +407,32 @@ pip install torch torchvision (in the venv)
 
 Model based on FloodNet data set and DeepLab
 FloodNet: https://ieeexplore.ieee.org/document/9460988
+
+### lang segment anything
+
+lang-segment-anything needs older Python version than what is available in current raspberrypi os.
+
+https://github.com/luca-medeiros/lang-segment-anything/tree/main
+
+So first install pyenv to install an older python
+
+sudo apt-get install build-essential zlib1g-dev libffi-dev libssl-dev libbz2-dev libreadline-dev libsqlite3-dev liblzma-dev
+
+curl https://pyenv.run | bash
+
+add to .bashrc as instructed
+
+pyenv install 3.8
+
+switch to python 3.8 with pyenv local 3.8
+
+Use local for the current directory, or global use 3.8 for everything
+
+now you can run the install for lang-segment-anything
+
+Run running_test.py 
+
+TinySAM - 
 
 ## Old Pi Zero 32-bit Instructions 
 Written assuming you are using a Raspberry Pi Zero with headers installed
