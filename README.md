@@ -257,6 +257,11 @@ sudo udevadm trigger
 
 If using a different cellular modem change the ids to the appropriate ones, use lsusb to lookup the ids.
 
+Reduce the priority of the cellular modem so Ethernet is preferred while you are building the unit and still installing updates: https://superuser.com/a/1603124
+
+sudo nmcli con mod Quectel ipv4.route-metric 100 and do the same for ipv6
+
+
 Might need to reboot before next step...
 
 Activate the GPS and enable autostart for future use -
