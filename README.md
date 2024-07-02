@@ -125,7 +125,8 @@ Once you've logged in and are sharing an internet connection from your computer 
 
 Verify the Pi is on the latest firmware with rpi-eeprom-update.
 
-Helpful tools: sudo apt install git tmux screen minicom
+Helpful tools: sudo apt install git tmux htop
+Serial console application: tio [https://github.com/tio/tio] or other (screen, minicom, etc.,)
 Install your preferred editor, which should be neovim, and aptitude if you want a TUI for apt
 
 Set /boot/config.txt options:
