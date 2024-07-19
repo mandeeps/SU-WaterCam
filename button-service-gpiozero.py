@@ -14,7 +14,9 @@ def single_press(button):
     print(f"Button DOWN on pin {button.pin}")
     subprocess.call("/home/pi/SU-WaterCam/take_two_photos.sh")
 
-# Adjust button as needed
-button = Button(6)
-button.when_released = single_press
+# Using GPIO 5 because it is HIGH by default and we connect it to ground
+# by pushing the button in. Already using GPIO 6 for the Lepton reset function 
+# Adjust button GPIO as needed
+button = Button(5)
+button.when_released = single_press # Call on release 
 pause()
