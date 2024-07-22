@@ -1,3 +1,4 @@
+# make sure you are using system picamera2, wheel, pandas, numpy, etc.,!!!
 astor
 networkx
 matplotlib

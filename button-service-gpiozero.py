@@ -12,7 +12,7 @@ from signal import pause
 
 def single_press(button):
     print(f"Button DOWN on pin {button.pin}")
-    subprocess.call("/home/pi/SU-WaterCam/take_two_photos.sh")
+    subprocess.call("/home/pi/SU-WaterCam/take_three_photos.sh")
 
 # Using GPIO 5 because it is HIGH by default and we connect it to ground
 # by pushing the button in. Already using GPIO 6 for the Lepton reset function 

@@ -125,7 +125,7 @@ Once you've logged in and are sharing an internet connection from your computer 
 
 Verify the Pi is on the latest firmware with rpi-eeprom-update.
 
-Helpful tools: sudo apt install git tmux htop
+Helpful tools: sudo apt install git tmux htop rpicam-apps
 Serial console application: tio [https://github.com/tio/tio] or other (screen, minicom, etc.,)
 Install your preferred editor, which should be neovim, and aptitude if you want a TUI for apt
 
@@ -167,7 +167,7 @@ Add noatime,commit=60 settings to ext4 partitions in /etc/fstab - noatime preven
 
 Set temp directories like /tmp, /var/tmp to mount in RAM, ex. tmpfs /var/tmp tmpfs nodev,nosuid,size=20M 0 0 in fstab
 
-Use a larger SD card size than needed so you have free space for automatic wear-leveling.
+Use a larger SD card size than needed so you have free space for automatic wear-leveling (is this a thing on cheap SD cards?)
 
 ### Optional Tweaks
 You can disable services we won't be needing to speed up boot slightly (~3s)
@@ -181,6 +181,7 @@ Can also add nohdmi to the vc4-kms-v3d line to disable HDMI ports and save ~30mA
 Next, configure the WittyPi 3 Mini for power management.
 Download: wget http://www.uugear.com/repo/WittyPi3/install.sh
 Install: sudo sh install.sh
+Shutdown the Pi, install the WittyPi onto the Pi using the extended headers
 Reboot, then run wittyPi.sh from the wittypi directory to configure the schedule.
 
 ### SU-WaterCam setup
@@ -195,7 +196,7 @@ Use apt to install these packages: sudo apt install libgpiod-dev python3-pandas 
 Make sure picamera2 is installed as system package, not through pip
 
 We need to use virtual environments for Python on Debian-derivatives like Raspberry Pi OS starting with Debian 12 (codenamed Bookworm).
-As of 6-20-23 Debian 11 remains the current stable base for Raspberry Pi OS, but let's future proof by using a venv now.
+As of 2024-07-22 this project has moved to Bookworm.
 Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, (we use system-site-packages to copy over pandas and other installed modules)
 activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
 or manually with pip install compress_pickle adafruit-blinka gpiozero piexif py-gpsd2 python-xmp-toolkit

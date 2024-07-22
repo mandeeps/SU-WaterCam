@@ -1,1 +1,4 @@
 console=tty1 root=/dev/mmcblk0p2 rootfstype=ext4 fsck.repair=yes rootwait modules-load=dwc2,g_ether spidev.bufsiz=131072
+
+
+cfg80211.ieee80211_regdom=US
