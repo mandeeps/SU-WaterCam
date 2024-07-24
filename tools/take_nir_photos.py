@@ -32,7 +32,7 @@ def take_photo(directory: str, nir: str) -> str:
     return image
 
 def main(filepath: str) -> str:
-    date = datetime.now().strftime('%Y%m%d')
+    date = datetime.now().strftime('%Y%m%d-%H%M')
     directory = path.join(filepath, date)
     if not path.exists(directory):
         makedirs(directory)   
