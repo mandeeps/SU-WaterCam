@@ -305,6 +305,9 @@ https://sigquit.wordpress.com/2012/03/29/enabling-gps-location-in-modemmanager/
 Stackoverflow mirror: https://code.whatever.social/questions/6146131/python-gps-module-reading-latest-gps-data
 
 ### Flir Lepton Breakout board wiring
+
+![Raspberry Pi GPIO Header](../46ab385d/pi-gpio.png)
+
 8 female-female jumper cables needed.
 At least 2 should be splitters to share I2C with other devices.
 

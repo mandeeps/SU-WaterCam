@@ -374,6 +374,15 @@ def tf_classify_planb():
   print('Tensorflow issue')
   return 1 
 
+@SQify
+def segformer():
+    import subprocess
+    segformer_python = "/home/pi/miniforge3/envs/5band/bin/python"
+    segformer_test = "/home/pi/git/segformer_5band/tools/test_no_label.py"
+
+    subprocess.Popen([segformer_python, segformer_test], cwd="/home/pi/git/segformer_5band")
+    return True
+
 @GRAPHify
 def main(trigger):
     with TTClock.root() as root_clock:
@@ -413,6 +422,9 @@ def main(trigger):
         runexif = exif(image, gps_exif, imu_data)
 
         # classification test on single file
-        run_tf_classify = tf_classify(image)
+        #run_tf_classify = tf_classify(image)
+
+        # Segformer 5 band test
+        segformer()
 
         #reset = TTSingleRunTimeout(lepton_planb(), TTTimeout=1_000_000)
