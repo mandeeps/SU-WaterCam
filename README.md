@@ -191,7 +191,7 @@ gcc lepton.c -o lepton && gcc capture.c -o capture
 
 Copy to the root of the SU-WaterCam directory: From tools directory, run "cp lepton ../." and "cp capture ../."
 
-Use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2
+Use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2 python3-rasterio
 
 Make sure picamera2 is installed as system package, not through pip
 

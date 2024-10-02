@@ -86,6 +86,57 @@ def image_planb():
     return True 
 
 @STREAMify
+def take_two_photos():
+# Take two photos with Dorhea IR-Cut camera
+# one with NIR filter in place and one without
+# Set GPIO HIGH to include NIR in the red band and LOW for normal photo
+    import pytz
+    import logging
+    from os import path, makedirs, chdir
+    from datetime import datetime
+    from picamera2 import Picamera2
+    from gpiozero import LED
+
+    logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s',
+        encoding='utf-8', level=logging.DEBUG)
+
+    try:
+        picam2 = Picamera2()
+        config = picam2.create_still_configuration(main={"format": "RGB888", "size": (2592,1944)})
+        picam2.configure(config)
+        # picam2.start() -- do not start outside start_and_capture function as this interferes with Flir Lepton! (for some reason I don't understand)
+    except Exception:
+        logging.error("Camera loading error")
+
+    def take_photo(directory: str, nir: str) -> str:   
+        #time = datetime.now().strftime('%Y%m%d-%H%M%S')
+        image = path.join(directory, f'{date}-NIR-{nir}.jpg')
+        print(f'taking photo: {image}')
+
+        try:
+            picam2.start_and_capture_file(image, show_preview=False)
+        except Exception:
+            logging.error("Camera failed to capture")
+        return image
+
+    filepath = f"./images/"
+    TIMEZONE = pytz.timezone('US/Eastern') 
+    date = datetime.now().strftime('%Y%m%d-%H%M%S')
+    directory = path.join(filepath, date)
+    # Adjust GPIO as appropriate. We are using GPIO 21, pin 40
+    pin = LED(21)
+    pin.off()
+    print(f"Pin state is: {pin.value}")
+    without_nir = take_photo(directory, "OFF")
+
+    pin.on()
+    with_nir = take_photo(directory, "ON")
+
+    return [without_nir, with_nir]
+
+
+
+@STREAMify
 def lepton_record(trigger):
     from shutil import copy
     from os import path, mkdir, remove
@@ -93,13 +144,13 @@ def lepton_record(trigger):
     from datetime import datetime
     import pytz
     import logging 
-    filepath = '/home/pi/SU-WaterCam/'
+    filepath = '/home/pi/SU-WaterCam/images/'
     # User configurable values
     TIMEZONE = pytz.timezone('US/Eastern') # Set correct timezone here
     # Local timezone
     time_val = datetime.now().strftime('%Y%m%d-%H%M%S')
     # create new directory for data from this run
-    folder = path.join(filepath, f'data/lepton-{time_val}')
+    folder = path.join(filepath, f'lepton-{time_val}')
     mkdir(folder)
     # copy lepton binary into newly created directory to save data there
     source = path.join(filepath, 'lepton')
@@ -256,59 +307,68 @@ def gps_data(trigger):
             gps_exif = [{"GPS": gps_ifd}]
             print(gps_exif)
             return gps_exif
+
+        else: print("GPS ERROR")
   
 @SQify
 def gps_planb():
     return [{"GPS": {}}]    
 
 @SQify
-def exif(image, gps_exif, imu_data):
+def exif(images, gps_exif, imu_data):
     import piexif
     import piexif.helper
     from libxmp import XMPFiles, consts
 
-    print(f"value of 'image' passed to exif function: {image}")
-    print(f"filepath within image list: {image[0]}")
-    fname = image[0]
-    # load original exif data
-    try:
-        exif_data = piexif.load(fname)
-    except Exception:
-        print("no image file or no image exif data")
-    else:
-        # Add roll/pitch/yaw to UserComment tag if they exist
-        print(imu_data)
-        roll = imu_data[0]
-        pitch = imu_data[1]
-        yaw = imu_data[2]
-        print(f"Roll: {roll} Pitch: {pitch} Yaw: {yaw} \n")
-        if roll:
-            user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
-            exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
+    print(f"value of 'image' passed to exif function: {images}")
+    print(f"filepath within image list: {images[0][0]}")
+    no_nir = images[0][0]
+    with_nir= images[0][1]
 
-        # add gps tag to original exif data
-        if gps_exif:
-            gpsdict = gps_exif[0]
-            exif_data.update(gpsdict)
+    def add_exif(fname):
+        # load original exif data
+        try:
+            exif_data = piexif.load(fname)
+        except Exception:
+            print("no image file or no image exif data")
+        else:
+            # Add roll/pitch/yaw to UserComment tag if they exist
+            print(imu_data)
+            roll = imu_data[0]
+            pitch = imu_data[1]
+            yaw = imu_data[2]
+            print(f"Roll: {roll} Pitch: {pitch} Yaw: {yaw} \n")
+            if roll:
+                user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
+                exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
 
-        # Finish exif handling
-        # convert to byte format for writing into file
-        exif_bytes = piexif.dump(exif_data)
-        # write to disk
-        piexif.insert(exif_bytes, fname)
+            # add gps tag to original exif data
+            if gps_exif:
+                gpsdict = gps_exif[0]
+                exif_data.update(gpsdict)
 
-        # Write roll/pitch/yaw to XMP tags for Pix4D
-        if roll:
-            xmpfile = XMPFiles(file_path=fname, open_forupdate=True)
-            xmp = xmpfile.get_xmp()
-            xmp.set_property(consts.XMP_NS_DC, 'Roll', str(roll))
-            xmp.set_property(consts.XMP_NS_DC, 'Pitch', str(pitch))
-            xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
-            xmpfile.put_xmp(xmp)
-            xmpfile.close_file()
+            # Finish exif handling
+            # convert to byte format for writing into file
+            exif_bytes = piexif.dump(exif_data)
+            # write to disk
+            piexif.insert(exif_bytes, fname)
 
-    finally:
+            # Write roll/pitch/yaw to XMP tags for Pix4D
+            if roll:
+                xmpfile = XMPFiles(file_path=fname, open_forupdate=True)
+                xmp = xmpfile.get_xmp()
+                xmp.set_property(consts.XMP_NS_DC, 'Roll', str(roll))
+                xmp.set_property(consts.XMP_NS_DC, 'Pitch', str(pitch))
+                xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
+                xmpfile.put_xmp(xmp)
+                xmpfile.close_file()
+
+        finally:
+            return True
+    
+    if add_exif(fname1) and add_exif(fname2):
         return True
+
 
 @SQify
 def tf_classify(file):
@@ -375,13 +435,219 @@ def tf_classify_planb():
   return 1 
 
 @SQify
-def segformer():
+def segformer(filepath):
     import subprocess
     segformer_python = "/home/pi/miniforge3/envs/5band/bin/python"
     segformer_test = "/home/pi/git/segformer_5band/tools/test_no_label.py"
 
-    subprocess.Popen([segformer_python, segformer_test], cwd="/home/pi/git/segformer_5band")
+    segformer_coreg = "/home/pi/git/segformer_5band/tools/segment_coreg.py"
+
+    subprocess.Popen([segformer_python, segformer_coreg], cwd="/home/pi/git/segformer_5band")
     return True
+
+@SQify
+def multi_coreg(images):
+    import cv2
+    import os
+    import numpy as np
+    import SimpleITK as sitk
+    import rasterio
+    from rasterio.transform import from_origin
+
+    def mutual_information_registration(fixed_image_path, moving_image_path):
+        # Read the fixed (optical) and moving (thermal) images
+        fixed_image_cv = cv2.imread(fixed_image_path, cv2.IMREAD_UNCHANGED)
+        moving_image_cv = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
+
+        # Resize the thermal image to the same size as the optical image
+        if fixed_image_cv.shape[0] > 1000 or fixed_image_cv.shape[1] > 1000:
+            scale_percent = 50  # Reduce size by 50%
+            width = int(fixed_image_cv.shape[1] * scale_percent / 100)
+            height = int(fixed_image_cv.shape[0] * scale_percent / 100)
+            dim = (width, height)
+            fixed_image_cv_resized = cv2.resize(fixed_image_cv, dim)
+            moving_image_cv_resized = cv2.resize(moving_image_cv, dim)
+        else:
+            moving_image_cv_resized = cv2.resize(moving_image_cv, (fixed_image_cv.shape[1], fixed_image_cv.shape[0]))
+            fixed_image_cv_resized = fixed_image_cv
+
+        # Convert the resized images to SimpleITK format
+        fixed_image_resized = sitk.GetImageFromArray(cv2.cvtColor(fixed_image_cv_resized, cv2.COLOR_BGR2GRAY).astype(np.float32))
+        moving_image_resized = sitk.GetImageFromArray(moving_image_cv_resized.astype(np.float32))
+
+        # Ensure the types are the same
+        if fixed_image_resized.GetPixelID() != moving_image_resized.GetPixelID():
+            moving_image_resized = sitk.Cast(moving_image_resized, fixed_image_resized.GetPixelID())
+
+        # Initialize the transform
+        initial_transform = sitk.CenteredTransformInitializer(
+            fixed_image_resized,
+            moving_image_resized,
+            sitk.Euler2DTransform(),
+            sitk.CenteredTransformInitializerFilter.GEOMETRY
+        )
+
+        # Set up the image registration method
+        registration_method = sitk.ImageRegistrationMethod()
+
+        # Use Mattes Mutual Information as the metric
+        registration_method.SetMetricAsMattesMutualInformation(numberOfHistogramBins=50)
+
+        # Set the interpolator to linear
+        registration_method.SetInterpolator(sitk.sitkLinear)
+
+        # Use gradient descent optimizer
+        registration_method.SetOptimizerAsGradientDescent(
+            learningRate=1.0,
+            numberOfIterations=100
+        )
+
+        # Set the optimizer scales from physical shift
+        registration_method.SetOptimizerScalesFromPhysicalShift()
+
+        # Set the initial transform
+        registration_method.SetInitialTransform(initial_transform, inPlace=False)
+
+        # Execute the registration
+        final_transform = registration_method.Execute(
+            sitk.Cast(fixed_image_resized, sitk.sitkFloat32),
+            sitk.Cast(moving_image_resized, sitk.sitkFloat32)
+        )
+
+        # Print the final metric value and the optimizer's stopping condition
+        print("Final metric value: {0}".format(registration_method.GetMetricValue()))
+        print("Optimizer's stopping condition, {0}".format(registration_method.GetOptimizerStopConditionDescription()))
+
+        # Resample the thermal image to align with the fixed image using the final transform
+        moving_resampled = sitk.Resample(
+            moving_image_resized,
+            fixed_image_resized,
+            final_transform,
+            sitk.sitkLinear,
+            0.0,
+            moving_image_resized.GetPixelID()
+        )
+
+        # Apply colormap to the thermal image to show thermal variations
+        moving_resampled_np = sitk.GetArrayFromImage(moving_resampled)
+        moving_resampled_np = cv2.normalize(moving_resampled_np, None, 0, 255, cv2.NORM_MINMAX)
+        moving_resampled_np = 255 - moving_resampled_np  # Invert the thermal image
+        moving_resampled_colored = cv2.applyColorMap(moving_resampled_np.astype(np.uint8), cv2.COLORMAP_JET)
+
+        # Combine the thermal and optical images into a single 5-band image
+        overlay = fixed_image_cv_resized.astype(np.float32)
+        output = moving_resampled_colored.astype(np.float32)
+        cv2.addWeighted(overlay, 0.5, output, 0.5, 0, output)
+
+        four_band_with_thermal = np.dstack((overlay, moving_resampled_np))
+
+        # Ensure the combined image is within the correct range
+        output = np.clip(output, 0, 255).astype(np.uint8)
+
+        #crop
+        x_min, y_min, x_max, y_max = find_bounding_box(moving_resampled_colored)
+        cropped_output = output[y_min:y_max, x_min:x_max]
+
+        height, width, _ = output.shape
+
+        return final_transform, output, cropped_output, four_band_with_thermal  #four_band_with_thermal_cropped
+
+# crop
+    def find_bounding_box(image):
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        retval, thresh = cv2.threshold(gray, 50, 255, cv2.THRESH_BINARY)
+        contours, hierarchy = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+
+        if len(contours) == 0:
+            # No contours found, return the full image
+            return 0, 0, image.shape[1], image.shape[0]
+        x_min, y_min, x_max, y_max = np.inf, np.inf, -np.inf, -np.inf
+
+        for contour in contours:
+            x, y, w, h = cv2.boundingRect(contour)
+            x_min = min(x_min, x)
+            y_min = min(y_min, y)
+            x_max = max(x_max, x + w)
+            y_max = max(y_max, y + h)
+        return int(x_min), int(y_min), int(x_max), int(y_max)
+
+# Path to the directory
+    base_dir = f"images[0][0]"
+
+# Get a list of all folder in the base directory
+    subdirectories = [os.path.join(base_dir, d) for d in os.listdir(base_dir) if os.path.isdir(os.path.join(base_dir, d))]
+
+# Loop through each folder and process the image pairs
+    for subdirectory in subdirectories:
+        # Get the fixed (optical) and moving (thermal) image filenames
+        nir_on_image_path = None
+        nir_off_image_path = None
+        moving_image_filename = None
+        print(subdirectory)
+
+        for filename in os.listdir(subdirectory):
+            if filename.endswith('-NIR-OFF.jpg'):
+                nir_off_image_path=os.path.join(subdirectory, filename)
+            elif filename.endswith('-NIR-ON.jpg'):
+                nir_on_image_path = os.path.join(subdirectory, filename)
+            elif filename.endswith('.pgm'):
+                moving_image_filename = filename
+
+        moving_image_path = os.path.join(subdirectory, moving_image_filename)
+
+        # Convert the PGM image to JPG with proper normalization
+        image = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
+        image_normalized = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
+        image_normalized = image_normalized.astype(np.uint8)
+        jpg_path = os.path.splitext(moving_image_path)[0] + '.jpg'
+        cv2.imwrite(jpg_path, image_normalized)
+
+        # Save the output images
+        output_filename = f"registered.jpg"
+        cropped_output_filename = f"cropped.jpg"
+        final_image_filename=f"4_band_with_thermal.tif"
+        #final_cropped_filename = f"4_band_with_thermal_cropped.tif"
+
+        if not os.path.exists(output_filename) or not os.path.exists(cropped_output_filename):
+            #Perform the registration and get the final transform
+            transform, output, cropped_output, four_band = mutual_information_registration(nir_off_image_path, jpg_path)
+
+            cv2.imwrite(os.path.join(subdirectory, output_filename), output)
+            cv2.imwrite(os.path.join(subdirectory, cropped_output_filename), cropped_output)
+            cv2.imwrite(os.path.join(subdirectory, final_image_filename), four_band)
+            #cv2.imwrite(os.path.join(subdirectory, final_cropped_filename), four_band_cropped)
+            W=four_band.shape[1]
+            H=four_band.shape[0]
+
+            # extract NIR and add as band
+            NI = cv2.imread(nir_on_image_path)
+            NIR = cv2.cvtColor(NIR, cv2.COLOR_BGR2RGB)
+            red_channel_NIR = NIR[:, :, 0]
+            without_NIR = cv2.imread(nir_off_image_path)
+            without_NIR = cv2.cvtColor(without_NIR, cv2.COLOR_BGR2RGB)
+            red_channel = without_NIR[:, :, 0]
+            Nir_band = cv2.subtract(red_channel_NIR, red_channel)
+            Nir_band_resized = cv2.resize(Nir_band, (W,H))
+            cv2.imwrite(os.path.join(subdirectory, "NIR band.png"), Nir_band_resized)
+
+            final_five_band = np.dstack((four_band, Nir_band_resized))
+            final_five_band = np.clip(final_five_band, 0, 255).astype(np.uint8)
+            final_five_band_reordered = np.transpose(final_five_band, (2, 0, 1))
+
+
+            transform = from_origin(0, 100, 1, 1)  # Adjust as needed
+            final_path = os.path.join(subdirectory, "final_5_band.tif")
+
+            # Save the final 5-band image as a TIFF
+            with rasterio.open(final_path, 'w', driver='GTiff', 
+                               height=final_five_band_reordered.shape[1],
+                               width=final_five_band_reordered.shape[2],
+                               count=final_five_band_reordered.shape[0],
+                               dtype=final_five_band_reordered.dtype,
+                               transform=transform) as dst:
+                dst.write(final_five_band_reordered)
+
+            print("final_five_band dtype:", final_five_band_reordered.dtype)
 
 @GRAPHify
 def main(trigger):
@@ -396,16 +662,17 @@ def main(trigger):
         timestamp = READ_TTCLOCK(lepton_track(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTClock=root_clock)
 
 
-        # take a new photo
+        # take new photos
         #image = take_photo(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000)
 
-        image = TTFinishByOtherwise(take_photo(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=image_planb(), TTWillContinue=False)
-        
+        #        image = TTFinishByOtherwise(take_photo(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=image_planb(), TTWillContinue=False)
+        images = TTFinishByOtherwise(take_two_photo(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=image_planb(), TTWillContinue=False)
+
         # Call lepton and capture sequentially to get temperature and IR image
         # from Flir Lepton
         #runlepton = lepton_record(trigger)
 
-        runlepton = TTFinishByOtherwise(lepton_record(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=TTSingleRunTimeout(lepton_planb(), TTTimeout=10_000_000), TTWillContinue=True)
+        lepton = TTFinishByOtherwise(lepton_record(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=TTSingleRunTimeout(lepton_planb(), TTTimeout=10_000_000), TTWillContinue=True)
 
         # get IMU data
         imu_data = TTFinishByOtherwise(imu_values(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), 
@@ -419,12 +686,14 @@ def main(trigger):
                                        TTWillContinue=True)
         
         # Save exif/xmp data to image file
-        runexif = exif(image, gps_exif, imu_data)
+        add_exif = exif(images, gps_exif, imu_data)
 
         # classification test on single file
         #run_tf_classify = tf_classify(image)
 
-        # Segformer 5 band test
-        segformer()
+        multi_coreg(images, lepton)
+
+        # Segformer 5 band
+        segformer(images[0][0])
 
         #reset = TTSingleRunTimeout(lepton_planb(), TTTimeout=1_000_000)
