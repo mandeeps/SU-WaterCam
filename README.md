@@ -227,10 +227,17 @@ now install adafruit_circuitpython_mpu6050 to use the MPU6050 in Python
 ### Adafruit BNO055 IMU
 pip install adafruit-circuitpython-bno055 in the venv
 
+### Adafruit BNO085 IMU 
+pip install adafruit-circuitpython-bno08x in the venv
+
 ### Calibrate the IMU prior to use:
 With the MPU6050 IMU stable and flat, run the mpu6050 calibration script to save offset values.
 
 TODO: Calibrate BNO055
+TODO: Calibrate BNO085
+
+### Optical Camera 
+Desolder the photo resistor/light sensor from the camera. Solder a wire so the IR filter can be manually controlled. The wire is soldered to the third point from the bottom of the camera on the backside and connected to pin #40 on the Pi for use with the take_nir_photos.py script. See photos in instructions directory.
 
 ### Quectel EC25 Modem and GPS
 sudo apt install gpsd gpsd-clients
@@ -443,6 +450,20 @@ now you can run the install for lang-segment-anything
 Run running_test.py 
 
 TinySAM - 
+
+## Clone SD Card 
+If you need to clone/copy a Pi microSD card:
+
+on a Linux/*nix system use dd to copy the entire device. Make sure you have enough free space first. Use lsblk to determine the location of the SD card. Clone the entire disk, not a partition.
+
+sudo dd bs=4M if=/dev/mmcblk0 of=sd_clone conv=fsync status=progress
+
+You might need to run dd with sudo if your user account does not have access to the SD device. Change the owner of the new file if so.
+
+If you only want the image as a backup or won't be flashing new SD cards with it for a while, use PiShrink to save some space: https://github.com/Drewsif/PiShrink
+
+For creating new SD cards with the file you copied use dd as above but with the input and output reversed to write to a blank SD card. Always check you are writing to the correct device when you use dd. For more information on this: https://www.pragmaticlinux.com/2020/12/how-to-clone-your-raspberry-pi-sd-card-in-linux/ 
+
 
 ## Old Pi Zero 32-bit Instructions 
 Written assuming you are using a Raspberry Pi Zero with headers installed
