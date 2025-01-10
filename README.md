@@ -104,7 +104,7 @@ Test the SD cards with F3: https://github.com/AltraMayor/f3
 ## Raspberry Pi 4 with Flir camera, IMU, and Quectel Cellular modem+GPS
 Ideally we will have an image that can be flashed onto an SD card for new builds.
 
-Installation from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS lite to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location). Once configured setup Tailscale, Tailscale SSH, and then disable regular ssh logins.
+Installation from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS lite to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location). Once configured setup Tailscale, Tailscale SSH, and then disable regular ssh logins - if this is done key expiry must be disabled for systems deployed in the field to avoid being locked out of remote access. 
 
 https://www.raspberrypi.com/software/
 
