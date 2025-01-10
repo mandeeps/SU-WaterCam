@@ -104,7 +104,7 @@ Test the SD cards with F3: https://github.com/AltraMayor/f3
 ## Raspberry Pi 4 with Flir camera, IMU, and Quectel Cellular modem+GPS
 Ideally we will have an image that can be flashed onto an SD card for new builds.
 
-Installation from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS lite to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location) 
+Installation from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS lite to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location). Once configured setup Tailscale, Tailscale SSH, and then disable regular ssh logins.
 
 https://www.raspberrypi.com/software/
 
@@ -404,8 +404,12 @@ If you are using the mDot on the default Pi TX/RX pins you need to remove "conso
 
 For deployment we'll want the mDot to have a seperate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data.
 
-### Tailscale for remote login over cellular data
+### Tailscale for remote login over cellular connection
 https://tailscale.com/download
+
+SSH can be limited to only devices on tailnet:
+tailscale up --ssh
+Disabling sshd and only using Tailscale SSH limits access to users in the tailnet.
 
 Install and use mosh for high-latency cellular connections
 sudo apt install mosh
@@ -472,7 +476,7 @@ and the Adafruit MLX90640 sensor
 Flash the provided disk image onto the microSD card if not already done
 
 If installing regular Raspbian/RaspberryPi OS image from scratch:
-in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc.,
+in raspi-config set timezone, enable camera, i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc.,
 use apt to install python3-pandas and libgpiod-dev: sudo apt install libgpiod-dev python3-pandas
 
 Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
