@@ -104,7 +104,7 @@ Test the SD cards with F3: https://github.com/AltraMayor/f3
 ## Raspberry Pi 4 with Flir camera, IMU, and Quectel Cellular modem+GPS
 Ideally we will have an image that can be flashed onto an SD card for new builds.
 
-Installation from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS lite to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location). Once configured setup Tailscale, Tailscale SSH, and then disable regular ssh logins - if this is done key expiry must be disabled for systems deployed in the field to avoid being locked out of remote access. 
+Installation from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS lite to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location) 
 
 https://www.raspberrypi.com/software/
 
@@ -200,6 +200,8 @@ As of 2024-07-22 this project has moved to Bookworm.
 Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, (we use system-site-packages to copy over pandas and other installed modules)
 activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
 or manually with pip install compress_pickle adafruit-blinka gpiozero piexif py-gpsd2 python-xmp-toolkit
+
+Set default Python to the venv by adding 'source /home/pi/SU-WaterCam/venv/bin/activate' to the end of your .bashrc file.
 
 If using MLX90640 thermal sensor also install: adafruit_circuitpython-mlx90640.
 If using MPU6050 IMU install: adafruit_circuitpython_mpu6050.
@@ -404,12 +406,8 @@ If you are using the mDot on the default Pi TX/RX pins you need to remove "conso
 
 For deployment we'll want the mDot to have a seperate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data.
 
-### Tailscale for remote login over cellular connection
+### Tailscale for remote login over cellular data
 https://tailscale.com/download
-
-SSH can be limited to only devices on tailnet:
-tailscale up --ssh
-Disabling sshd and only using Tailscale SSH limits access to users in the tailnet.
 
 Install and use mosh for high-latency cellular connections
 sudo apt install mosh
@@ -476,7 +474,7 @@ and the Adafruit MLX90640 sensor
 Flash the provided disk image onto the microSD card if not already done
 
 If installing regular Raspbian/RaspberryPi OS image from scratch:
-in raspi-config set timezone, enable camera, i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc.,
+in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc.,
 use apt to install python3-pandas and libgpiod-dev: sudo apt install libgpiod-dev python3-pandas
 
 Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
