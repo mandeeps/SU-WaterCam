@@ -1,110 +1,88 @@
-# Build Guide / How To
-
-# See ticktalk branch for current work
-
-### Project requires a Raspberry Pi 
-or compatible single board computer with GPIO, I2C, SPI etc.,
+# Build Guide
 
 ## Parts List
 
-* Case
+- Raspberry Pi 4B
 
-    https://www.amazon.com/LMioEtool-Dustproof-Waterproof-Electrical-Transparent/dp/B07PK8K8S2
+- [Case 150x150x90 mm or larger](https://www.amazon.com/LMioEtool-Dustproof-Waterproof-Electrical-Transparent/dp/B07PK84N5D)
 
-* Raspberry Pi Zero for original PoC
-    https://www.adafruit.com/product/2885
+- [Optical Camera w/ controllable NIR filter (IR-CUT)](https://www.amazon.com/Dorhea-Raspberry-Camera-Automatic-Adjustable/dp/B07DNSSDGG/136-0027955-5919373) - should come with a cable to connect to the Pi 4B
 
-    Raspberry Pi Zero 2, 3B, or 4 for 64-bit compatibility and using PyTorch
-    
-* Optical Camera
+- WittyPi 4 power management: [Witty Pi 4 HAT - RTC & Power Management for Raspberry Pi : ID 5704 : Adafruit Industries](https://www.adafruit.com/product/5704)
 
-    https://www.amazon.com/Dorhea-Raspberry-Camera-Automatic-Adjustable/dp/B07DNSSDGG/ref=pd_bxgy_img_2/136-0027955-5919373?pd_rd_w=2vD2j&pf_rd_p=fd3ebcd0-c1a2-44cf-aba2-bbf4810b3732&pf_rd_r=GYFEFWF9TX4TQ2CJAENW&pd_rd_r=47fda39a-7777-432d-9d94-af7113524711&pd_rd_wg=zb2az&pd_rd_i=B07DNSSDGG&psc=1
+        Witty Pi 4 supports 3A power output for the Raspberry Pi 4
 
-    If using a Pi Zero make sure to get a camera cable that will fit the smaller
-    CSI connector on the Zero!
-    https://www.adafruit.com/product/3157
+        [CR2032 Battery for WittyPi 4](https://www.adafruit.com/product/654)
 
-* WittyPi 3 Mini
+- Stacking header for accessing GPIO after adding custom PCB: [GPIO Stacking Header for Pi A+/B+/Pi 2/Pi 3 [Extra-long 2x20 Pins] : ID 2223 : Adafruit Industries](https://www.adafruit.com/product/2223)
 
-    https://www.adafruit.com/product/2223
-    
-    Witty Pi 4 supports 3A output for the Raspberry Pi 4, currently testing if 3 is sufficient for our needs
-    
-* Stacking header to attach WittyPi to RPi and still access pins for peripherals
+- Flir Lepton 3.5 and Flir Breakout Board v2
 
-    https://www.adafruit.com/product/5038
+        [Flir Breakout board 2.0](https://www.mouser.com/ProductDetail/Teledyne-FLIR-Lepton/250-0577-00?qs=DRkmTr78QARne0IUCYtsyA%3D%3D)
+        [Flir Lepton 3.5](https://www.mouser.com/ProductDetail/Teledyne-FLIR-Lepton/500-0771-01?qs=DRkmTr78QAQNv%2FBEKfCn%252BQ%3D%3D)
 
-* Adafruit MLX90640 Thermal Sensor
+- [Stemma QT cables to connect Adafruit sensors](https://www.adafruit.com/product/4397)
 
-    https://www.adafruit.com/product/4407
+- [BNO085 IMU](https://www.adafruit.com/product/4754)
 
-    or
+- [Voltaic V50 Battery](https://voltaicsystems.com/v50/) or other battery
 
-    https://www.adafruit.com/product/4469
+        We are using Voltaic battery packs because they do not auto-shutdown during low power draw, which is important for this system as it will be in low-power mode most of the time and losing power then would prevent it from starting back up.
 
-    or better, such as Flir Lepton
-    
-* Flir Lepton and breakout board
+- MicroSD cards - preferably higher capacity than needed (at least 64GB), consider "high endurance" or "industrial" (for temperature tolerance) cards: https://www.dzombak.com/blog/2023/12/Choosing-the-right-SD-card-for-your-Pi.html
+  
+  Example: [SanDisk High Endurance microSD](https://shop.sandisk.com/products/memory-cards/microsd-cards/sandisk-high-endurance-uhs-i-microsd?sku=SDSQQNR-064G-GN6IA)
+  
+  Test the SD cards with F3 Fight Flash Fraud to verify they are legit: https://github.com/AltraMayor/f3
 
-    Breakout board 2.0: https://www.mouser.com/ProductDetail/Teledyne-FLIR-Lepton/250-0577-00?qs=DRkmTr78QARne0IUCYtsyA%3D%3D
-    Lepton 3.5: https://www.mouser.com/ProductDetail/Teledyne-FLIR-Lepton/500-0771-01?qs=DRkmTr78QAQNv%2FBEKfCn%252BQ%3D%3D
+       TODO: Alternatively boot from USB SSD
 
-* Stemma QT cables to connect Adafruit sensors
+* USB C cables
 
-    https://www.adafruit.com/product/4397
+* Ethernet cable - so you can connect to a network for updates and initial configuration. I shared the WiFi connection on my laptop with the Pi over Ethernet using Network Manager's connection sharing on Linux. Other operating systems have similar functionality.
 
-* Battery
+* [Serial TTL USB adapter cable](https://www.adafruit.com/product/954) - useful for logging into the Pi before networking has been configured, and for debugging/troubleshooting.
 
-    https://voltaicsystems.com/v50/ or other battery.
+* Cellular modem with USB Adapter board
+  
+  [Quectel EC25 Cellular Modem](https://www.amazon.com/Quectel-LTE-EC25-AF-Mini-PCIe/dp/B082SL8KY1)
+  
+  [Cell Modem USB Carrier/Adapter with SIM Card Slot](https://www.amazon.com/gp/product/B07YY5967K)
+  
+  [Antennas for Modem and GPS]() - need 3 antennas, 2 for cellular and 1 for GPS
+  
+  [Cables to connect Antennas to Cell Modem]()
+  
+  [USB Right Angle Up Adapter Cable for Modem](https://www.amazon.com/Antrader-Degree-Extension-Converter-Adapter/dp/B07F7Y21GW)
+  
+  SIM Card for Cell Modem
 
-    We are using Voltaic battery packs because they do not auto-shutdown during low power draw, which is important for this system as it will be in low-power mode most of the time and losing power then would prevent it from starting back up.
-
-    Get the appropriate cables to connect whatever battery you are using to the 
-    WittyPi. For the Pi 4 use a dual USB to single micro Y splitter cable to supply adequate power from the Voltaic pack, like:
-    
-    https://www.amazon.com/StarTech-com-Cable-External-Drive-Micro/dp/B0047AALW6/ref=psdc_172456_t2_B00L1K1OIA?th=1
-
-    https://www.amazon.com/zdyCGTime-Adapter-Charging-Samsung-Extension/dp/B07QTQ157W/ref=sr_1_11?keywords=dual+micro+usb+adapter&sr=8-11
-    
-    If using a plain LiPo battery instead of a USB power bank like 
-    the Voltaic get a charger that will also let you connect the battery to 
-    the microUSB port on the WittyPi like:
-
-    https://www.adafruit.com/product/2465
-
-    Or connect the LiPo to the exposed WittyPi power pads with jumper cables following the instructions in the WittyPi manual. If using the Adafruit USB charger you'll need to solder the included USB header on or else solder a micro USB cable directly to the output so it can be connected to the WittyPi.
-    
-    If you use a regular USB power bank / portable phone charger you'll need
-    to adjust some WittyPi settings so it draws more power when the RPi is off to
-    avoid the power bank shutting off all power. This will decrease battery life. 
-
-* MicroSD cards - preferably higher capacity than needed for wear-leveling, consider high endurance or industrial (for temperature tolerance) cards: https://www.dzombak.com/blog/2023/12/Choosing-the-right-SD-card-for-your-Pi.html 
-
-Test the SD cards with F3: https://github.com/AltraMayor/f3
-
-* Micro USB cables, preferably 2 if using a Pi Zero so you can configure it as a network device and login over the data USB, with the other powering the WittyPi.
-
-* Ethernet cable for Pi 3B, 4 - so you can connect to a network for updates and initial configuration. I shared the wifi connection on my laptop with the Pi over ethernet using Network Manager's connection sharing on Linux. Other operating systems have similar functionality.
-
-* Serial TTL cable - useful for logging into the Pi before networking has been configured, and for debugging. Also useful for connecting the mDot LoRa module to Pi models other than the 4.
-
-    https://www.adafruit.com/product/954
-    or similar serial cable.
-
-* Cellular modem
-    https://www.amazon.com/Quectel-LTE-EC25-AF-Mini-PCIe/dp/B082SL8KY1
-    
-    https://www.amazon.com/gp/product/B07YY5967K
-
-* mDot LoRa module
+* Multitech mDot LoRa module
     https://www.multitech.com/brands/multiconnect-mdot
+  
+    Antenna for mDot
+  
+  2mm pitch header cable for mDot
+  
+  
+  
+  Conformal coating and silicone sealant for water-resistance  
+  
+  
+  
+  ### Setup Raspberry Pi 4 with Flir Camera, IMU, and Quectel Cellular modem+GPS
 
-    https://www.multitech.com/documents/publications/manuals/s000612_DB9.pdf#%5B%7B%22num%22%3A217%2C%22gen%22%3A0%7D%2C%7B%22name%22%3A%22XYZ%22%7D%2C0%2C682.7%2C0%5D
+![](documentation_assets/cbbc013483ece19e1ff6cbd77a34d63fbe3192e2.png)
 
-## Raspberry Pi 4 with Flir camera, IMU, and Quectel Cellular modem+GPS
-Ideally we will have an image that can be flashed onto an SD card for new builds.
+Refer to this for GPIO pin numbers
 
-Installation from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS lite to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location) 
+
+
+Eventually we will have an image file that can be flashed onto an SD card for new builds.
+
+
+
+If installing from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS Lite (Bookworm) to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location) 
 
 https://www.raspberrypi.com/software/
 
@@ -113,6 +91,8 @@ After flashing, add enable_uart=1 at the end of the /boot/config.txt file. Inser
 https://www.jeffgeerling.com/blog/2021/attaching-raspberry-pis-serial-console-uart-debugging
 
 Use a serial cable to connect to the console and use sudo raspi-config to configure the device settings (locale, timezone, predictable network names, etc.,) and select Network Manager in place of dhcpcd in networking settings.
+
+
 https://learn.adafruit.com/adafruits-raspberry-pi-lesson-5-using-a-console-cable/software-installation-windows
 
 Leave GPU memory at the default of 32 MB, PiCamera2 will not need more and the camera will not work with less.
@@ -127,10 +107,12 @@ Verify the Pi is on the latest firmware with rpi-eeprom-update.
 
 Helpful tools: sudo apt install git tmux htop rpicam-apps
 Serial console application: tio [https://github.com/tio/tio] or other (screen, minicom, etc.,)
-Install your preferred editor, which should be neovim, and aptitude if you want a TUI for apt
+Install your preferred editor (which should be neovim) and aptitude if you want a TUI for apt
 
 Set /boot/config.txt options:
-### Disable LEDs to save a little power
+
+###### Disable LEDs to save a little power
+
 dtparam=act_led_trigger=none
 dtparam=act_led_activelow=off
 dtparam=pwr_led_activelow=off
@@ -145,22 +127,27 @@ or:
 dtparam=eth_led0=14
 dtparam=eth_led1=14
 
-### disable audio
+###### disable audio
+
 dtparam=audio=off
 
-### disable wireless, we won't use WiFi or Bluetooth
+###### disable wireless, we won't use WiFi or Bluetooth past setup
+
 dtoverlay=disable-wifi
 dtoverlay=disable-bt
 dtoverlay=pi3-disable-wifi
 dtoverlay=pi3-disable-bt
 
-### I2C clock stretching for BNO055 IMU
+###### I2C clock stretching for BNO055 IMU
+
 dtparam=i2c_arm_baudrate=10000
 
-### Add to /boot/cmdline.txt - Flir SPI settings
+###### Add to /boot/cmdline.txt - Flir SPI settings
+
 spidev.bufsiz=131072
 
-### SD Card settings
+###### SD Card settings
+
 Disable swap and set noatime to prolong SD card life: sudo swapoff --all, sudo apt purge dphys-swapfile.
 
 Add noatime,commit=60 settings to ext4 partitions in /etc/fstab - noatime prevents writing access times to files, commit collects and delays writes to every N seconds. Data loss will be limited to the last N seconds of writes if power is lost. Do NOT change the /boot partition settings, it is a vfat filesystem and these options will not work and will cause the Pi to not boot.
@@ -169,7 +156,8 @@ Set temp directories like /tmp, /var/tmp to mount in RAM, ex. tmpfs /var/tmp tmp
 
 Use a larger SD card size than needed so you have free space for automatic wear-leveling (is this a thing on cheap SD cards?)
 
-### Optional Tweaks
+##### Optional Tweaks
+
 You can disable services we won't be needing to speed up boot slightly (~3s)
 sudo systemctl disable man-db.timer wpa_supplicant keyboard-setup triggerhappy
 
@@ -178,13 +166,15 @@ If there are issues with taking high-resolution images use the vc4-kms-v3d drive
 Can also add nohdmi to the vc4-kms-v3d line to disable HDMI ports and save ~30mA
 
 ### Power Management
-Next, configure the WittyPi 3 Mini for power management.
-Download: wget http://www.uugear.com/repo/WittyPi3/install.sh
+
+Next, configure the WittyPi 4 for power management.
+Download: wget http://www.uugear.com/repo/WittyPi4/install.sh
 Install: sudo sh install.sh
 Shutdown the Pi, install the WittyPi onto the Pi using the extended headers
 Reboot, then run wittyPi.sh from the wittypi directory to configure the schedule.
 
 ### SU-WaterCam setup
+
 Clone the public git repo: https://github.com/mandeeps/SU-WaterCam.git
 Compile lepton.c and capture.c for the device. Install build-essential if not already done: sudo apt install build-essential. Then cd to the SU-WaterCam/tools directory and run: 
 gcc lepton.c -o lepton && gcc capture.c -o capture
@@ -195,53 +185,38 @@ Use apt to install these packages: sudo apt install libgpiod-dev python3-pandas 
 
 Make sure picamera2 is installed as system package, not through pip
 
-We need to use virtual environments for Python on Debian-derivatives like Raspberry Pi OS starting with Debian 12 (codenamed Bookworm).
-As of 2024-07-22 this project has moved to Bookworm.
 Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, (we use system-site-packages to copy over pandas and other installed modules)
 activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
 or manually with pip install compress_pickle adafruit-blinka gpiozero piexif py-gpsd2 python-xmp-toolkit
 
 Set default Python to the venv by adding 'source /home/pi/SU-WaterCam/venv/bin/activate' to the end of your .bashrc file.
 
-If using MLX90640 thermal sensor also install: adafruit_circuitpython-mlx90640.
-If using MPU6050 IMU install: adafruit_circuitpython_mpu6050.
-If using BNO055 IMU: pip install adafruit-circuitpython-bno055 in the venv.
-
-### If using Adafruit MPU6050 IMU:
-Change the WittyPi 3 i2c address to avoid a conflict. The WittyPi 3 uses 0x68 for the RTC, and 0x69 for its microcontroller. The RTC address cannot be changed, but the microcontroller address can. The MPU6050 uses 0x68 by default. First solder the connection on the back of the MPU6050 board to change its i2c address to 0x69. Then change the WittyPi 3 microcontroller i2c address to something else, like 0x70 by following the instructions in the manual. WittyPi 4 does not require this.
-
-Change the Witty Pi 3 microcontroller I2C address: i2cset -y 1 0x69 9 0x70
-
-Edit the utilities.sh file in the wittypi directory and change I2C_MC_ADDRESS=0x69 to 0x70
-
-Then shutdown the system: sudo halt
-
-Disconnect the power to the wittypi 3, reconnect it, start the system up
-
-Check the i2c settings changed: i2cdetect -y 1
-
-Run the wittypi script to verify ./wittypi/wittyPi.sh
-
-Note changing the microcontroller address seems to interfere with displaying power draw using wittyPi.sh despite having changed the address in utilities.sh
-
-now install adafruit_circuitpython_mpu6050 to use the MPU6050 in Python
-
 ### Adafruit BNO055 IMU
+
 pip install adafruit-circuitpython-bno055 in the venv
 
-### Adafruit BNO085 IMU 
+### Adafruit BNO085 IMU
+
 pip install adafruit-circuitpython-bno08x in the venv
 
 ### Calibrate the IMU prior to use:
-With the MPU6050 IMU stable and flat, run the mpu6050 calibration script to save offset values.
 
-TODO: Calibrate BNO055
-TODO: Calibrate BNO085
+TODO add instructions
 
-### Optical Camera 
-Desolder the photo resistor/light sensor from the camera. Solder a wire so the IR filter can be manually controlled. The wire is soldered to the third point from the bottom of the camera on the backside and connected to pin #40 on the Pi for use with the take_nir_photos.py script. See photos in instructions directory.
+Calibrate BNO055 
+
+Calibrate BNO085
+
+### Optical Camera
+
+Desolder the photo resistor/light sensor from the camera. Solder a wire so the IR filter can be manually controlled. The wire is soldered to the third point from the bottom of the camera on the backside and connected to pin #40 on the Pi for use with the take_nir_photos.py script.
+
+
 
 ### Quectel EC25 Modem and GPS
+
+Install the miniPCIE card into the USB adapter
+
 sudo apt install gpsd gpsd-clients
 
 Remove and purge udhcpcd and openresolv: sudo apt purge udhcpcd openresolv
@@ -271,7 +246,6 @@ If using a different cellular modem change the ids to the appropriate ones, use 
 Reduce the priority of the cellular modem so Ethernet is preferred while you are building the unit and still installing updates: https://superuser.com/a/1603124
 
 sudo nmcli con mod Quectel ipv4.route-metric 100 and do the same for ipv6
-
 
 Might need to reboot before next step...
 
@@ -315,7 +289,9 @@ Stackoverflow mirror: https://code.whatever.social/questions/6146131/python-gps-
 
 ### Flir Lepton Breakout board wiring
 
-![Raspberry Pi GPIO Header](../46ab385d/pi-gpio.png)
+![Raspberry Pi GPIO Header](documentation_assets/54ae0311ce729fee2c56db6e9898af8cf892b79e.jpg)
+
+Image source: [Lepton/docs/RaspberryPiGuide.md at main · FLIR/Lepton · GitHub](https://github.com/FLIR/Lepton/blob/main/docs/RaspberryPiGuide.md)
 
 8 female-female jumper cables needed.
 At least 2 should be splitters to share I2C with other devices.
@@ -358,6 +334,7 @@ Binaries are from https://github.com/lukevanhorn/Lepton3
 Thanks Luke Van Horn! Also, thanks to Max Lipitz for the tip about the output containing the temperature values in degrees Kelvin.
 
 #### Leptonic for live thermal image stream
+
 We're setting up an unused Pi 3 for collecting thermal images for coregistration - using leptonic from github, a forked branch that can be built on Debian 12 Bookworm
 
 https://github.com/rob-coco/leptonic/tree/bookworm-update
@@ -372,19 +349,8 @@ npm start in frontend directory then
 127.0.0.1:3000 in your browser
 
 ### Multitech mDot LoRa module
-The default mDot firmware is set up for UART. The WittyPi can tell if the Raspberry Pi is off by reading the TX pin, which should be set low when the Pi shuts down. The mDot seems to interfere with this, keeping the TX pin on the Pi set high and preventing the WittyPi from cutting off power to the system. There are several possible workarounds for this:
 
-* Option #1 - Use something other than the WittyPi. We already have several and it works well otherwise, so this is not a good option.
-
-* Option #2 - Use something other than the mDot. We also have several of these, so this is not an ideal option.
-
-* Option #3 - Use a USB-Serial adapter to connect the mDot to the Pi instead of the UART pins. This would increase power draw and add another component to the deployed build, so it is not ideal but better than the first two. This is the option I am using on non-4 model Pis.
-
-The non-4 models only expose one UART on GPIO at a time, so using the USB adapter may be the only easy option for those. For a Pi 3 or other non-4, connect the Adafruit USB-serial adapter to the USB port. Connect the mDot TX to the white RX header, and the mDot RX to the green TX header. Use minicom or screen with the settings listed in the mDot manual to connect to the appropriate device, it will be /dev/ttyUSBx where x is a number. Check dmesg to see what device the adapter is: dmesg | grep "cp210x"
-
-* Option #4 - Modify the mDot firmware to keep its RX pin low. We do not have a devkit for this device yet so this is not possible right now. The same applies to modifying the firmware to use I2C instead. Maybe we could use a resistor to connect to ground?
-
-* Option #5 - Turn on alternative UART pins on the Pi 4 and use those to connect to the mDot instead of the pin the WittyPi reads to determine the Pi's state. This is the option I am currently using for our Pi 4s. Upside is we can use the serial console for debugging and use the mDot at the same time.
+The default mDot firmware is set up for UART. The WittyPi can tell if the Raspberry Pi is off by reading the TX pin, which should be set low when the Pi shuts down. The mDot seems to interfere with this, keeping the TX pin on the Pi set high and preventing the WittyPi from cutting off power to the system. So turn on alternative UART pins on the Pi 4B and use those to connect to the mDot instead.
 
 By adding dtoverlay=uart5 to /boot/config.txt on a Pi 4 we can use pin 32 for TX and pin 33 for RX. On the Pi 4, make sure "enable_uart=1" is in the /boot/config.txt file, and add dtoverlay=uart5. Save and reboot. Connect the TX pin on the mDot to pin #33 on the Pi and connect the RX pin on the mDot to pin #32 on the Pi.
 
@@ -402,11 +368,10 @@ Stop bits 1
 
 Hardware/software flow control off
 
-If you are using the mDot on the default Pi TX/RX pins you need to remove "console=serial0,115200 console=tty1" from /boot/cmdline.txt on the Pi if you've been using a serial connection to the Pi for debugging. Reboot the Pi for this to take effect.
-
 For deployment we'll want the mDot to have a seperate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data.
 
 ### Tailscale for remote login over cellular data
+
 https://tailscale.com/download
 
 Install and use mosh for high-latency cellular connections
@@ -415,6 +380,7 @@ sudo apt install mosh
 Use an appropriate client for your own device.
 
 ### Remote Video Streaming
+
 with libcamera-apps-lite installed run:
 
 libcamera-vid -t 0 --inline --listen -o tcp://0.0.0.0:8888
@@ -422,38 +388,14 @@ libcamera-vid -t 0 --inline --listen -o tcp://0.0.0.0:8888
 On your machine connected to the Pi (over Tailscale or directly) use VLC to stream the video using 'open network stream' and enter tcp/h264://PI_ADDRESS_OR_HOSTNAME:8888 with the appropriate IP address and port number. 
 
 ### Pytorch
+
 pip install torch torchvision (in the venv)
 
 Model based on FloodNet data set and DeepLab
 FloodNet: https://ieeexplore.ieee.org/document/9460988
 
-### lang segment anything
+## Clone SD Card
 
-lang-segment-anything needs older Python version than what is available in current raspberrypi os.
-
-https://github.com/luca-medeiros/lang-segment-anything/tree/main
-
-So first install pyenv to install an older python
-
-sudo apt-get install build-essential zlib1g-dev libffi-dev libssl-dev libbz2-dev libreadline-dev libsqlite3-dev liblzma-dev
-
-curl https://pyenv.run | bash
-
-add to .bashrc as instructed
-
-pyenv install 3.8
-
-switch to python 3.8 with pyenv local 3.8
-
-Use local for the current directory, or global use 3.8 for everything
-
-now you can run the install for lang-segment-anything
-
-Run running_test.py 
-
-TinySAM - 
-
-## Clone SD Card 
 If you need to clone/copy a Pi microSD card:
 
 on a Linux/*nix system use dd to copy the entire device. Make sure you have enough free space first. Use lsblk to determine the location of the SD card. Clone the entire disk, not a partition.
@@ -465,72 +407,3 @@ You might need to run dd with sudo if your user account does not have access to 
 If you only want the image as a backup or won't be flashing new SD cards with it for a while, use PiShrink to save some space: https://github.com/Drewsif/PiShrink
 
 For creating new SD cards with the file you copied use dd as above but with the input and output reversed to write to a blank SD card. Always check you are writing to the correct device when you use dd. For more information on this: https://www.pragmaticlinux.com/2020/12/how-to-clone-your-raspberry-pi-sd-card-in-linux/ 
-
-
-## Old Pi Zero 32-bit Instructions 
-Written assuming you are using a Raspberry Pi Zero with headers installed
-and the Adafruit MLX90640 sensor
-
-Flash the provided disk image onto the microSD card if not already done
-
-If installing regular Raspbian/RaspberryPi OS image from scratch:
-in raspi-config set timezone, enable camera, ssh and i2c, set static IP address, reduce GPU memory to 128 minimum for optical camera, change default password, etc.,
-use apt to install python3-pandas and libgpiod-dev: sudo apt install libgpiod-dev python3-pandas
-
-Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
-or manually use pip to install dependencies: python3 -m pip install compress_pickle adafruit-blinka adafruit_circuitpython-mlx90640 gpiozero adafruit_circuitpython_mpu6050
-
-It's easier to connect the optical camera before installing the WittyPi.
-Be careful with the connector and the cable, IME ribbon cables and ZIF
-sockets are fragile. While the cable can flex it should not be folded. Be careful
-you don't break the socket clip by using too much force.
-For the RPi Zero you'll want to replace any cable
-included with the camera with the correct RPi Zero camera cable.
-
-Insert the larger end of the RPi camera ribbon cable into the optical camera by gently
-pulling the black plastic clip out and inserting the cable in, making sure
-the exposed side with the gold pins is facing down. Secure the cable by
-pusing the plastic clip back in.
-
-Now on the Raspberry Pi end, gently pull forward the black plastic clip on the CSI camera connector.
-Insert the cable into the connector making sure the exposed side is down.
-Push the black plastic clip back into place.
-
-Install stacking header onto the Raspberry Pi header making sure it is
-firmly in place.
-
-Install WittyPi 3 Mini onto the extended headers making sure it is in place.
-
-Once the WittyPi is installed you can connect your thermal sensor.
-See the reference Raspberry Pi Zero image
-
-Connect the Stemma QT cable to the Adafruit MLX90640 sensor, either socket works
-
-Connect the red header cable to pin 1, the 3.3v pin on the top left
-
-Connect the blue header cable to pin 3, the GPIO data pin just below pin 1
-
-Connect the yellow header cable to pin 5, the GPIO clock pin just below pin 3
-
-Connect the black header cable to pin 6, the Ground pin just right of pin 5
-
-Make sure your battery is charged.
-Connect the battery to the WittyPi micro USB port. Either directly with a 
-cable if using a Voltaic power pack, or through the charger if using a lipo battery.
-Press the button on the WittyPi to check if everything turns on. Check the LEDs
-
-Log into the Pi and use the WittyPi program to set the schedule (and increase idle power use if using a normal power bank that isn't intended for IoT devices/doesn't have an always-on mode. Voltaic batteries should not need this.)
-
-https://cdn-shop.adafruit.com/product-files/5038/5038_WittyPi3Mini_UserManual.pdf
-
-If you have a computer set up to connect to the RPi Zero using USB-OTG networking
-
-https://learn.adafruit.com/turning-your-raspberry-pi-zero-into-a-usb-gadget/ethernet-gadget
-
-https://artivis.github.io/post/2020/pi-zero/
-
-you can plug a micro USB cable into the data port of the RPi (the middle port of the three)
-and the other end into your computer. Assuming your computer configuration is correct you
-should be able to use SSH to access the Zero. If you are not using a Zero
-you'll need to use a serial connection to connect to the Pi or configure ethernet or wifi networking on the Pi to SSH in.
-Or just plug in a monitor and keyboard.
