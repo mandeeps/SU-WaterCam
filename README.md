@@ -21,13 +21,17 @@
         [Flir Breakout board 2.0](https://www.mouser.com/ProductDetail/Teledyne-FLIR-Lepton/250-0577-00?qs=DRkmTr78QARne0IUCYtsyA%3D%3D)
         [Flir Lepton 3.5](https://www.mouser.com/ProductDetail/Teledyne-FLIR-Lepton/500-0771-01?qs=DRkmTr78QAQNv%2FBEKfCn%252BQ%3D%3D)
 
-- [Stemma QT cables to connect Adafruit sensors](https://www.adafruit.com/product/4397)
+- [Stemma QT header cables to connect Adafruit sensors to Pi](https://www.adafruit.com/product/4397), plus [Stemma QT to Stemma QT cable](https://www.adafruit.com/product/4210) for connecting Adafruit sensors to other Adafruit sensors
 
-- [BNO085 IMU](https://www.adafruit.com/product/4754)
+- [Adafruit BNO085 IMU](https://www.adafruit.com/product/4754) - for motion detection / orientation reporting
 
-- [Voltaic V50 Battery](https://voltaicsystems.com/v50/) or other battery
+- [Adafruit AHT20](https://www.adafruit.com/product/4566) Temperature and Humidity Sensor - for monitoring device health
 
-        We are using Voltaic battery packs because they do not auto-shutdown during low power draw, which is important for this system as it will be in low-power mode most of the time and losing power then would prevent it from starting back up.
+- [Voltaic V50 Battery](https://voltaicsystems.com/v50/) or V75 or other battery
+
+        We are using Voltaic battery packs because they do not auto-shutdown during low power draw, which is important for this system as it will be in low-power mode most of the time and losing power then would prevent it from starting back up. They are intended to be directly charged from 6V solar panels. If using a battery that is not always-on configure the WittyPi to draw more power when idle to avoid losing power.
+
+- [Solar Panels](https://voltaicsystems.com/10-watt-panel-etfe/) - 6 volt panel if charging Voltaic battery pack directly  
 
 - MicroSD cards - preferably higher capacity than needed (at least 64GB), consider "high endurance" or "industrial" (for temperature tolerance) cards: https://www.dzombak.com/blog/2023/12/Choosing-the-right-SD-card-for-your-Pi.html
   
@@ -49,49 +53,62 @@
   
   [Cell Modem USB Carrier/Adapter with SIM Card Slot](https://www.amazon.com/gp/product/B07YY5967K)
   
-  [Antennas for Modem and GPS]() - need 3 antennas, 2 for cellular and 1 for GPS
+  [Antennas for Modem and GPS](https://www.amazon.com/Antenna-698-2700MHZ-Universal-Directional-Wireless/dp/B08XBSYT8N) - need 3 antennas, 2 for cellular and 1 for GPS
   
-  [Cables to connect Antennas to Cell Modem]()
+  [Cables to connect Antennas to Cell Modem](https://www.amazon.com/Coaxial-Pigtail-Antenna-Bulkhead-Extender/dp/B098QH631G) - get appropriate cables to connect to uFL on the cellular board. SMA male antennas need SMA female cables.
   
   [USB Right Angle Up Adapter Cable for Modem](https://www.amazon.com/Antrader-Degree-Extension-Converter-Adapter/dp/B07F7Y21GW)
   
-  SIM Card for Cell Modem
+  SIM Card for Cell Modem - 1nce for example
 
 * Multitech mDot LoRa module
     https://www.multitech.com/brands/multiconnect-mdot
   
-    Antenna for mDot
+    [Antenna for mDot](https://www.amazon.com/915MHz-LoRa-Antenna-Indoor-Cable/dp/B0CTXKBMH9) - SMA male connector needed on 915 MHz antenna 
   
-  2mm pitch header cable for mDot
+    2mm pitch header cable for connecting mDot to Raspberry Pi
+
+* 
+* LWIR transmission window material
   
+  Conformal coating
   
+  Silicone sealant for water-resistance
   
-  Conformal coating and silicone sealant for water-resistance  
+  [Copper or aluminum heatsinks](https://www.amazon.com/GeeekPi-Heatsinks-Conductive-Electronic-Compatible/dp/B0C7Z27Q3R) for Raspberry Pi
+  
+  Anti-fog spray/hydrophobic coating for lens
+  
+  Dessicant packs
   
   
   
   ### Setup Raspberry Pi 4 with Flir Camera, IMU, and Quectel Cellular modem+GPS
+  
+  Refer to this image for GPIO pin numbers
 
 ![](documentation_assets/cbbc013483ece19e1ff6cbd77a34d63fbe3192e2.png)
-
-Refer to this for GPIO pin numbers
 
 
 
 Eventually we will have an image file that can be flashed onto an SD card for new builds.
 
+<details>
+<summary>If and only if installing software from scratch:</summary>
 
+Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS Lite (Bookworm) to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location)
 
-If installing from scratch: Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS Lite (Bookworm) to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location) 
 
 https://www.raspberrypi.com/software/
 
+
 After flashing, add enable_uart=1 at the end of the /boot/config.txt file. Insert the SD card in the Pi, attach power and boot it up.
+
 
 https://www.jeffgeerling.com/blog/2021/attaching-raspberry-pis-serial-console-uart-debugging
 
-Use a serial cable to connect to the console and use sudo raspi-config to configure the device settings (locale, timezone, predictable network names, etc.,) and select Network Manager in place of dhcpcd in networking settings.
 
+Use a serial cable to connect to the console and use sudo raspi-config to configure the device settings (locale, timezone, predictable network names, etc.,) and select Network Manager in place of dhcpcd in networking settings.
 
 https://learn.adafruit.com/adafruits-raspberry-pi-lesson-5-using-a-console-cable/software-installation-windows
 
@@ -173,7 +190,7 @@ Install: sudo sh install.sh
 Shutdown the Pi, install the WittyPi onto the Pi using the extended headers
 Reboot, then run wittyPi.sh from the wittypi directory to configure the schedule.
 
-### SU-WaterCam setup
+### SU-WaterCam software setup from scratch
 
 Clone the public git repo: https://github.com/mandeeps/SU-WaterCam.git
 Compile lepton.c and capture.c for the device. Install build-essential if not already done: sudo apt install build-essential. Then cd to the SU-WaterCam/tools directory and run: 
@@ -203,19 +220,83 @@ pip install adafruit-circuitpython-bno08x in the venv
 
 TODO add instructions
 
-Calibrate BNO055 
+Calibrate BNO055
 
 Calibrate BNO085
 
+</details>
+
+
+
+## Hardware Setup
+
+Current order of installation:
+
+
+
+Insert microSD, modify and install NIR camera, install passive heatsink, install WittyPi 4 with CR2032 battery, connect cellular modem, connect Flir Lepton, connect mDot, power on and test device before installing into case.
+
+
+
+Drill holes for cameras and external power (and optionally antennas if too large to fit within or signal blocked) into case, place components and battery into case, install cameras, connect antennas. Power on and test device.
+
+
+
+Connect to solar panel power. Apply silicone sealant to all openings into case, and install LWIR transmission window for Lepton. Check water-resistance before field installation.
+
+
+
 ### Optical Camera
 
-Desolder the photo resistor/light sensor from the camera. Solder a wire so the IR filter can be manually controlled. The wire is soldered to the third point from the bottom of the camera on the backside and connected to pin #40 on the Pi for use with the take_nir_photos.py script.
+Desolder the photo resistor/light sensor from the Dorhea IR-CUT camera. Solder a wire so the IR filter can be manually controlled by the Pi. The wire is soldered to the third point from the bottom of the camera on the backside and connected to pin #40 on the Pi for use with the take_nir_photos.py script.
 
+Before removing the photoresistor:
 
+![](documentation_assets/eec68f83a9c776836e74e2533f9fc5d29389d65b.jpg)
+
+Solder a header cable like so:
+
+![](documentation_assets/b176dde40a564b61f8dc3d2b25897d14209191f5.jpg)
+
+It should look like this when done:
+
+![](documentation_assets/347c3f1525e4321f3e7c8eff3596e8b765fe2997.jpg)
+
+Insert the cable into the camera with the metal pins facing the board:
+
+![](documentation_assets/4d30de17d7fa64a534349d509ad71f28c22dfe91.jpg)
+
+On the Rapsberry Pi find the CAMERA slot. The other end of the ribbon cable should be installed with the metal pins facing away from the black plastic retainer towards the pins in the slot:
+
+![](documentation_assets/6d00c3ddceb155d7bbed6e278a3615e26f77ac0a.jpg)
 
 ### Quectel EC25 Modem and GPS
 
-Install the miniPCIE card into the USB adapter
+Install the miniPCIE card into the USB adapter. The mini PCIE card is the component on top and the USB adapter is the component on the bottom of this image:
+
+![](documentation_assets/0467104137c0c19fa75ce0755bab2f464fd42280.jpg)
+
+The card can only fit into the adapter one way:
+
+![](documentation_assets/dadb613d101c3772d56f3ad7641b17da2c42b2d8.jpg)
+
+The MAIN and DIV UFL ports should connect to cellular antennas using UFL to SMA cables, and the GNSS slot is for a GPS antenna. Read this before connecting anything to UFL connectors: [Three Quick Tips About Using U.FL - SparkFun Learn](https://learn.sparkfun.com/tutorials/three-quick-tips-about-using-ufl/all)
+
+The UFL connectors on the cables can be easy to damage, consider using a tool like this for installing and removing the cables: [U.FL Push/Pull Tool](https://www.sparkfun.com/u-fl-push-pull-tool.html)
+
+![](documentation_assets/2fc42bb090cdef121de22d49cad3dfb411cf9cad.jpg)
+
+Use a right-angle USB adapter cable to make connecting to the Raspberry Pi easier:
+
+![](documentation_assets/75cf3c2b92f0e262d8e373dfd5fdc7fbf23100d0.jpg)
+
+
+
+Also consider taping or otherwise securing the connections once everything is installed in the waterproof case to reduce the chance of disconnections during field installation.
+
+<details>
+
+<summary>Cellular Modem Manual Software Setup</summary>
 
 sudo apt install gpsd gpsd-clients
 
@@ -287,15 +368,20 @@ sources:
 https://sigquit.wordpress.com/2012/03/29/enabling-gps-location-in-modemmanager/
 Stackoverflow mirror: https://code.whatever.social/questions/6146131/python-gps-module-reading-latest-gps-data
 
+</details>
+
 ### Flir Lepton Breakout board wiring
 
 ![Raspberry Pi GPIO Header](documentation_assets/54ae0311ce729fee2c56db6e9898af8cf892b79e.jpg)
 
 Image source: [Lepton/docs/RaspberryPiGuide.md at main · FLIR/Lepton · GitHub](https://github.com/FLIR/Lepton/blob/main/docs/RaspberryPiGuide.md)
 
-8 female-female jumper cables needed.
-At least 2 should be splitters to share I2C with other devices.
 
+
+Eventually we will have a PCB to connect the Lepton breakout board and Raspberry Pi.
+
+<details>
+<summary>Manual Lepton Breakout Board Wiring</summary>
 Orient the back of the breakout board towards yourself. The front is the side with the socket for the Lepton camera.
 Let's call the pins that are closest to you pins 1 through 10, starting from the left and going to the right. Right is the side with the mini ZIF connector on top (the white plastic bit above the QR code sticker)
 Let's call the pins on the bottom (away from you) pins A through J
@@ -320,7 +406,7 @@ CS pin (pin #24, right across from CLK, aka CE0, GPIO 8) connects to pin 5 on th
 
 The VSYNC pin is Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board.
 
-Reset pin on the breakout is pin I following the convention declared above. Connect it to an arbritrary GPIO pin on Pi that is set high by default (options are 0-8) 
+Reset pin on the breakout is pin I following the convention declared above. Connect it to an arbritrary GPIO pin on Pi that is set high by default (options are 0-8)
 
 I am using GPIO 6 (pin 31 on the Pi) in the lepton_reset.py script. We need a pin that is high by default because the breakout board reset triggers on low.
 
@@ -332,6 +418,12 @@ Examine the created files to verify things are working.
 Binaries are from https://github.com/lukevanhorn/Lepton3
 
 Thanks Luke Van Horn! Also, thanks to Max Lipitz for the tip about the output containing the temperature values in degrees Kelvin.
+</details>
+
+
+
+<details>
+<summary>Additional Software for Lepton</summary>
 
 #### Leptonic for live thermal image stream
 
@@ -347,6 +439,7 @@ Port forward, first ssh into pi and run leptonic on /dev/spidev0.0, then open an
 Run the leptonic web server on your own machine, it's too much for the Pi 3 to do both: 
 npm start in frontend directory then
 127.0.0.1:3000 in your browser
+</details>
 
 ### Multitech mDot LoRa module
 
