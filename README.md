@@ -1,3 +1,11 @@
+Prerequisite Knowledge:
+Basic Linux, electronics, general computer troubleshooting
+
+Helpful Resources:
+Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
+
+
+
 # Build Guide
 
 ## Parts List
@@ -189,6 +197,8 @@ Download: wget http://www.uugear.com/repo/WittyPi4/install.sh
 Install: sudo sh install.sh
 Shutdown the Pi, install the WittyPi onto the Pi using the extended headers
 Reboot, then run wittyPi.sh from the wittypi directory to configure the schedule.
+
+Remove uwi since we will not be using it: sudo systemctl disable uwi, then rm the uwi directory.
 
 ### SU-WaterCam software setup from scratch
 
