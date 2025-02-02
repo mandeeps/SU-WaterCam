@@ -66,7 +66,9 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   [Cables to connect Antennas to Cell Modem](https://www.amazon.com/Coaxial-Pigtail-Antenna-Bulkhead-Extender/dp/B098QH631G) - get appropriate cables to connect to uFL on the cellular board. SMA male antennas need SMA female cables.
   
   [USB Right Angle Up Adapter Cable for Modem](https://www.amazon.com/Antrader-Degree-Extension-Converter-Adapter/dp/B07F7Y21GW)
-  
+
+    Right Angle adapters for connecting the battery may be useful if using a small case.
+
   SIM Card for Cell Modem - 1nce for example
 
 * Multitech mDot LoRa module
@@ -89,6 +91,9 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   
   Dessicant packs
   
+  [Stemma QT to header cables](http://adafru.it/4397)
+
+  Assorted female-female header cables for connecting components 
   
   
   ### Setup Raspberry Pi 4 with Flir Camera, IMU, and Quectel Cellular modem+GPS
@@ -394,7 +399,8 @@ Eventually we will have a PCB to connect the Lepton breakout board and Raspberry
 <summary>Manual Lepton Breakout Board Wiring</summary>
 Orient the back of the breakout board towards yourself. The front is the side with the socket for the Lepton camera.
 Let's call the pins that are closest to you pins 1 through 10, starting from the left and going to the right. Right is the side with the mini ZIF connector on top (the white plastic bit above the QR code sticker)
-Let's call the pins on the bottom (away from you) pins A through J
+Let's call the pins on the bottom (away from you) pins A through J.
+
 Pin 1 is for power, so wire that to the 3.3V power pin on the Pi. See the Flir Lepton Wiring image for help.
 We can use the top pin of the two pins without jumpers on the back of the board (side towards you right now) for ground. In other words, the pin with nothing covering it that is closest to the white ZIF socket towards the top is the ground pin, so connect it to the ground pin on the Pi.
 
@@ -477,10 +483,18 @@ For deployment we'll want the mDot to have a seperate power source so we can rem
 
 https://tailscale.com/download
 
+Consider using Tailscale SSH: https://tailscale.com/kb/1193/tailscale-ssh
+
+tailscale up --ssh
+
 Install and use mosh for high-latency cellular connections
 sudo apt install mosh
 
 Use an appropriate client for your own device.
+
+### Filebrowser remote file access
+
+Helpful when using a system interactively for data collection: https://github.com/filebrowser/Filebrowser
 
 ### Remote Video Streaming
 
@@ -509,4 +523,12 @@ You might need to run dd with sudo if your user account does not have access to 
 
 If you only want the image as a backup or won't be flashing new SD cards with it for a while, use PiShrink to save some space: https://github.com/Drewsif/PiShrink
 
+sudo pishrink.sh -a -Z image_file
+
 For creating new SD cards with the file you copied use dd as above but with the input and output reversed to write to a blank SD card. Always check you are writing to the correct device when you use dd. For more information on this: https://www.pragmaticlinux.com/2020/12/how-to-clone-your-raspberry-pi-sd-card-in-linux/ 
+
+## Manual Data Collection 
+
+If you need to take a unit out in the field to collect data you can add a couple of wires to a button to trigger the cameras and use the button-service-gpiozero.py script with GPIO Zero installed: https://github.com/gpiozero/gpiozero 
+
+We are using a simple pushbutton on a perboard with two header cables connected to pin #29 and ground on the Pi. Autostart the script with systemd (or alt init)
