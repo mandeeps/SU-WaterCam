@@ -4,8 +4,6 @@ Basic Linux, electronics, general computer troubleshooting
 Helpful Resources:
 Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
-
-
 # Build Guide
 
 ## Parts List
@@ -66,9 +64,9 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   [Cables to connect Antennas to Cell Modem](https://www.amazon.com/Coaxial-Pigtail-Antenna-Bulkhead-Extender/dp/B098QH631G) - get appropriate cables to connect to uFL on the cellular board. SMA male antennas need SMA female cables.
   
   [USB Right Angle Up Adapter Cable for Modem](https://www.amazon.com/Antrader-Degree-Extension-Converter-Adapter/dp/B07F7Y21GW)
-
+  
     Right Angle adapters for connecting the battery may be useful if using a small case.
-
+  
   SIM Card for Cell Modem - 1nce for example
 
 * Multitech mDot LoRa module
@@ -79,6 +77,7 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
     2mm pitch header cable for connecting mDot to Raspberry Pi
 
 * 
+
 * LWIR transmission window material
   
   Conformal coating
@@ -92,17 +91,14 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   Dessicant packs
   
   [Stemma QT to header cables](http://adafru.it/4397)
-
+  
   Assorted female-female header cables for connecting components 
-  
-  
-  ### Setup Raspberry Pi 4 with Flir Camera, IMU, and Quectel Cellular modem+GPS
-  
+
+### Setup Raspberry Pi 4 with Flir Camera, IMU, and Quectel Cellular modem+GPS
+
   Refer to this image for GPIO pin numbers
 
 ![](documentation_assets/cbbc013483ece19e1ff6cbd77a34d63fbe3192e2.png)
-
-
 
 Eventually we will have an image file that can be flashed onto an SD card for new builds.
 
@@ -111,21 +107,17 @@ Eventually we will have an image file that can be flashed onto an SD card for ne
 
 Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS Lite (Bookworm) to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location)
 
-
 https://www.raspberrypi.com/software/
-
 
 After flashing, add enable_uart=1 at the end of the /boot/config.txt file. Insert the SD card in the Pi, attach power and boot it up.
 
-
 https://www.jeffgeerling.com/blog/2021/attaching-raspberry-pis-serial-console-uart-debugging
-
 
 Use a serial cable to connect to the console and use sudo raspi-config to configure the device settings (locale, timezone, predictable network names, etc.,) and select Network Manager in place of dhcpcd in networking settings.
 
 https://learn.adafruit.com/adafruits-raspberry-pi-lesson-5-using-a-console-cable/software-installation-windows
 
-Leave GPU memory at the default of 32 MB, PiCamera2 will not need more and the camera will not work with less.
+Witihin raspi-config, leave GPU memory at the default of 32 MB, PiCamera2 will not need more and the camera will not work with less.
 
 Use sudo nmtui to configure the ethernet connection to a static IP, with your computer IP as the gateway and DNS server if you are sharing your Internet connection with the Pi. Otherwise configure for whatever network setup you have.
 
@@ -172,7 +164,7 @@ dtoverlay=pi3-disable-bt
 
 dtparam=i2c_arm_baudrate=10000
 
-###### Add to /boot/cmdline.txt - Flir SPI settings
+###### Add to /boot/cmdline.txt - Flir Lepton SPI settings
 
 spidev.bufsiz=131072
 
@@ -241,25 +233,15 @@ Calibrate BNO085
 
 </details>
 
-
-
 ## Hardware Setup
 
 Current order of installation:
 
-
-
 Insert microSD, modify and install NIR camera, install passive heatsink, install WittyPi 4 with CR2032 battery, connect cellular modem, connect Flir Lepton, connect mDot, power on and test device before installing into case.
-
-
 
 Drill holes for cameras and external power (and optionally antennas if too large to fit within or signal blocked) into case, place components and battery into case, install cameras, connect antennas. Power on and test device.
 
-
-
 Connect to solar panel power. Apply silicone sealant to all openings into case, and install LWIR transmission window for Lepton. Check water-resistance before field installation.
-
-
 
 ### Optical Camera
 
@@ -304,8 +286,6 @@ The UFL connectors on the cables can be easy to damage, consider using a tool li
 Use a right-angle USB adapter cable to make connecting to the Raspberry Pi easier:
 
 ![](documentation_assets/75cf3c2b92f0e262d8e373dfd5fdc7fbf23100d0.jpg)
-
-
 
 Also consider taping or otherwise securing the connections once everything is installed in the waterproof case to reduce the chance of disconnections during field installation.
 
@@ -391,8 +371,6 @@ Stackoverflow mirror: https://code.whatever.social/questions/6146131/python-gps-
 
 Image source: [Lepton/docs/RaspberryPiGuide.md at main · FLIR/Lepton · GitHub](https://github.com/FLIR/Lepton/blob/main/docs/RaspberryPiGuide.md)
 
-
-
 Eventually we will have a PCB to connect the Lepton breakout board and Raspberry Pi.
 
 <details>
@@ -401,10 +379,14 @@ Orient the back of the breakout board towards yourself. The front is the side wi
 Let's call the pins that are closest to you pins 1 through 10, starting from the left and going to the right. Right is the side with the mini ZIF connector on top (the white plastic bit above the QR code sticker)
 Let's call the pins on the bottom (away from you) pins A through J.
 
-Pin 1 is for power, so wire that to the 3.3V power pin on the Pi. See the Flir Lepton Wiring image for help.
+![Flir Lepton Breakout 2.0 Pins](documentation_assets/d0cf10945c10c618cd43d86e5a04483159c54ba9.jpg)
+
+
+Image by Kaitlyn Gilmore (https://github.com/kmgmore)
+
 We can use the top pin of the two pins without jumpers on the back of the board (side towards you right now) for ground. In other words, the pin with nothing covering it that is closest to the white ZIF socket towards the top is the ground pin, so connect it to the ground pin on the Pi.
 
-TODO: upload photos of Lepton wiring
+Wiring diagram: ![](documentation_assets/3d352206a6508c0c4cf506a1cf869aee435c1609.png)
 
 Because we need I2C for other peripherals, use splitter cables for the two I2C pins (SDA and SCL) on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU. Another pair of split cables is useful for 3.3V and ground.
 
@@ -434,9 +416,8 @@ Examine the created files to verify things are working.
 Binaries are from https://github.com/lukevanhorn/Lepton3
 
 Thanks Luke Van Horn! Also, thanks to Max Lipitz for the tip about the output containing the temperature values in degrees Kelvin.
+
 </details>
-
-
 
 <details>
 <summary>Additional Software for Lepton</summary>
@@ -455,6 +436,7 @@ Port forward, first ssh into pi and run leptonic on /dev/spidev0.0, then open an
 Run the leptonic web server on your own machine, it's too much for the Pi 3 to do both: 
 npm start in frontend directory then
 127.0.0.1:3000 in your browser
+
 </details>
 
 ### Multitech mDot LoRa module
@@ -527,7 +509,7 @@ sudo pishrink.sh -a -Z image_file
 
 For creating new SD cards with the file you copied use dd as above but with the input and output reversed to write to a blank SD card. Always check you are writing to the correct device when you use dd. For more information on this: https://www.pragmaticlinux.com/2020/12/how-to-clone-your-raspberry-pi-sd-card-in-linux/ 
 
-## Manual Data Collection 
+## Manual Data Collection
 
 If you need to take a unit out in the field to collect data you can add a couple of wires to a button to trigger the cameras and use the button-service-gpiozero.py script with GPIO Zero installed: https://github.com/gpiozero/gpiozero 
 
