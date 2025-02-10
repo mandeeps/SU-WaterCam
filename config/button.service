@@ -1,0 +1,8 @@
+[Unit]
+Description=Python script to perform an action on button press - like taking photos
+
+[Service]
+ExecStart=/home/pi/SU-WaterCam/button-service-gpiozero.py
+
+[Install]
+WantedBy=multi-user.target
