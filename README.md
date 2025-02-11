@@ -100,7 +100,19 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
 Flash the current SD card image file to an unused microSD card: https://github.com/WaterCam-Team/sd-images
 
-You can use the [Raspberry Pi Imager's](https://www.raspberrypi.com/software/) custom OS option to write the image file to a SD card. Simply click "Choose OS", scroll all the way down, select "use custom" and pick the file you downloaded, then click "Choose Storage" and pick your microSD card. You don't need to customize settings or options, just write the image. Once it's been written to, you can insert it in a Pi 4B and let it boot. It will automatically expand the filesystem to the full size of the card, so it will take some time on the first boot.  
+You can use the [Raspberry Pi Imager's](https://www.raspberrypi.com/software/) custom OS option to write the image file to a SD card. Simply click "Choose OS", scroll all the way down, select "use custom" and pick the file you downloaded, then click "Choose Storage" and pick your microSD card. You don't need to customize settings or options, just write the image - so select "No" when asked if you want to customize Once it's been written to, you can insert it in a Pi 4B and let it boot. It will automatically expand the filesystem to the full size of the card, so it will take some time on the first boot.
+
+
+
+![](documentation_assets/bcd9d389c7d8c39c88697b759497f1da00b67ebd.png)
+
+
+
+![](documentation_assets/3af2c25188e40bd1c3ace9675425503e22912e5f.png)
+
+
+
+![](documentation_assets/5ed495bf21c9f0b7e8dbba226d64e3f9005d6ed3.png)
 
 <details>
 <summary>If and only if installing software from scratch:</summary>
