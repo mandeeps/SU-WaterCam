@@ -299,9 +299,9 @@ Use a right-angle USB adapter cable to make connecting to the Raspberry Pi easie
 
 Also consider taping or otherwise securing the connections once everything is installed in the waterproof case to reduce the chance of disconnections during field installation.
 
+We are using antennas with SMA connectors.
 
-
-![]()
+![](documentation_assets/34b96308e30f523aaaaa2f566dca810633f00a76.jpg)
 
 <details>
 
@@ -403,11 +403,7 @@ Wiring diagram: ![](documentation_assets/3d352206a6508c0c4cf506a1cf869aee435c160
 
 Because we need I2C for other peripherals, use splitter cables for the two I2C pins (SDA and SCL) on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU. Another pair of split cables is useful for 3.3V and ground.
 
-
-
 Split cables for I2C or power: ![](documentation_assets/7e29c180907652779bcfb4910261e28d7ace73b9.jpg)
-
-
 
 The SDA pin on the Pi (pin #3) will connect to pin C on the breakout board (side away from you) - use a splitter
 
