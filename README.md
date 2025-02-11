@@ -47,7 +47,7 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
        TODO: Alternatively boot from USB SSD
 
-* USB C cables
+* USB C cables, preferably right angle ones for smaller cases
 
 * Ethernet cable - so you can connect to a network for updates and initial configuration. I shared the WiFi connection on my laptop with the Pi over Ethernet using Network Manager's connection sharing on Linux. Other operating systems have similar functionality.
 
@@ -76,11 +76,9 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   
     2mm pitch header cable for connecting mDot to Raspberry Pi
 
-* 
-
-* LWIR transmission window material
+* LWIR (8-14 micron range) transmission window material- [Edmund Optics](https://www.edmundoptics.com/f/infrared-ir-material-windows/12440/)
   
-  Conformal coating
+  [Conformal coating](https://www.digikey.com/en/products/detail/mg-chemicals/419D-55ML/9657990) to protect electronics from water - make sure it is not applied to any connectors
   
   Silicone sealant for water-resistance
   
@@ -92,7 +90,7 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   
   [Stemma QT to header cables](http://adafru.it/4397)
   
-  Assorted female-female header cables for connecting components 
+  Assorted female-female header cables for connecting components
 
 ### Setup Raspberry Pi 4 with Flir Camera, IMU, and Quectel Cellular modem+GPS
 
@@ -100,7 +98,9 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
 ![](documentation_assets/cbbc013483ece19e1ff6cbd77a34d63fbe3192e2.png)
 
-Eventually we will have an image file that can be flashed onto an SD card for new builds.
+Flash the current SD card image file to an unused microSD card: https://github.com/WaterCam-Team/sd-images
+
+You can use the [Raspberry Pi Imager's](https://www.raspberrypi.com/software/) custom OS option to write the image file to a SD card. Simply click "Choose OS", scroll all the way down, select "use custom" and pick the file you downloaded, then click "Choose Storage" and pick your microSD card. You don't need to customize settings or options, just write the image. Once it's been written to, you can insert it in a Pi 4B and let it boot. It will automatically expand the filesystem to the full size of the card, so it will take some time on the first boot.  
 
 <details>
 <summary>If and only if installing software from scratch:</summary>
@@ -237,11 +237,21 @@ Calibrate BNO085
 
 Current order of installation:
 
-Insert microSD, modify and install NIR camera, install passive heatsink, install WittyPi 4 with CR2032 battery, connect cellular modem, connect Flir Lepton, connect mDot, power on and test device before installing into case.
+Modify NIR camera, install passive heatsink, install WittyPi 4 with CR2032 battery, connect NIR camera, connect cellular modem, connect Flir Lepton, connect mDot, insert microSD card, power on and test device before installing into case.
 
-Drill holes for cameras and external power (and optionally antennas if too large to fit within or signal blocked) into case, place components and battery into case, install cameras, connect antennas. Power on and test device.
+Drill holes for cameras and external power (and antennas if too large to fit within or signal blocked) into case, place components and battery into case, install cameras, connect antennas. Power on and test device.
 
-Connect to solar panel power. Apply silicone sealant to all openings into case, and install LWIR transmission window for Lepton. Check water-resistance before field installation.
+Apply silicone sealant to all openings into case, and install LWIR transmission window for Lepton. Check water-resistance before field installation. Connect to solar panel power.
+
+### WittyPi 4 Setup
+
+Software is already configured on the SD filesystem image. If installing from scratch follow installation instructions for the WittyPi software before installing the WittyPi hardware. Install the heatsink, standoffs, and connect the camera ribbon cable before placing the WittyPi on the GPIO pins. Screw down the hardware so it stays attached.
+
+![](documentation_assets/7ce15b847e44b105a40b4778baad01e8f0e9f551.jpg)
+
+![](documentation_assets/8deb5aae3a5800af7e9d395a6f87936314861b8d.jpg)
+
+![](documentation_assets/c1d7138e826d38308d0de53d9a0b22b73c01b322.jpg)
 
 ### Optical Camera
 
@@ -288,6 +298,10 @@ Use a right-angle USB adapter cable to make connecting to the Raspberry Pi easie
 ![](documentation_assets/75cf3c2b92f0e262d8e373dfd5fdc7fbf23100d0.jpg)
 
 Also consider taping or otherwise securing the connections once everything is installed in the waterproof case to reduce the chance of disconnections during field installation.
+
+
+
+![]()
 
 <details>
 
@@ -381,7 +395,6 @@ Let's call the pins on the bottom (away from you) pins A through J.
 
 ![Flir Lepton Breakout 2.0 Pins](documentation_assets/d0cf10945c10c618cd43d86e5a04483159c54ba9.jpg)
 
-
 Image by Kaitlyn Gilmore (https://github.com/kmgmore)
 
 We can use the top pin of the two pins without jumpers on the back of the board (side towards you right now) for ground. In other words, the pin with nothing covering it that is closest to the white ZIF socket towards the top is the ground pin, so connect it to the ground pin on the Pi.
@@ -389,6 +402,12 @@ We can use the top pin of the two pins without jumpers on the back of the board 
 Wiring diagram: ![](documentation_assets/3d352206a6508c0c4cf506a1cf869aee435c1609.png)
 
 Because we need I2C for other peripherals, use splitter cables for the two I2C pins (SDA and SCL) on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU. Another pair of split cables is useful for 3.3V and ground.
+
+
+
+Split cables for I2C or power: ![](documentation_assets/7e29c180907652779bcfb4910261e28d7ace73b9.jpg)
+
+
 
 The SDA pin on the Pi (pin #3) will connect to pin C on the breakout board (side away from you) - use a splitter
 
@@ -441,6 +460,8 @@ npm start in frontend directory then
 
 ### Multitech mDot LoRa module
 
+![](documentation_assets/061a1062380fe75a2678be59c9096459d0c45049.png)
+
 The default mDot firmware is set up for UART. The WittyPi can tell if the Raspberry Pi is off by reading the TX pin, which should be set low when the Pi shuts down. The mDot seems to interfere with this, keeping the TX pin on the Pi set high and preventing the WittyPi from cutting off power to the system. So turn on alternative UART pins on the Pi 4B and use those to connect to the mDot instead.
 
 By adding dtoverlay=uart5 to /boot/config.txt on a Pi 4 we can use pin 32 for TX and pin 33 for RX. On the Pi 4, make sure "enable_uart=1" is in the /boot/config.txt file, and add dtoverlay=uart5. Save and reboot. Connect the TX pin on the mDot to pin #33 on the Pi and connect the RX pin on the mDot to pin #32 on the Pi.
@@ -459,6 +480,8 @@ Stop bits 1
 
 Hardware/software flow control off
 
+Or just use Tio instead of minicom
+
 For deployment we'll want the mDot to have a seperate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data.
 
 ### Tailscale for remote login over cellular data
@@ -469,7 +492,9 @@ Consider using Tailscale SSH: https://tailscale.com/kb/1193/tailscale-ssh
 
 tailscale up --ssh
 
-Install and use mosh for high-latency cellular connections
+Make sure the device is [tagged](https://tailscale.com/kb/1068/tags) and not using a personal Tailscale account. See tailscale-acl.txt in config directory for an example of Access Control List rules to permit SSH into tagged devices.
+
+Consider installing and using mosh for high-latency cellular connections
 sudo apt install mosh
 
 Use an appropriate client for your own device.
@@ -513,4 +538,4 @@ For creating new SD cards with the file you copied use dd as above but with the 
 
 If you need to take a unit out in the field to collect data you can add a couple of wires to a button to trigger the cameras and use the button-service-gpiozero.py script with GPIO Zero installed: https://github.com/gpiozero/gpiozero 
 
-We are using a simple pushbutton on a perboard with two header cables connected to pin #29 and ground on the Pi. Autostart the script with systemd (or alt init)
+We are using a simple pushbutton on a perboard with two header cables connected to pin #29 and ground on the Pi. Autostart the script with systemd using the button.service file in the config directory. Copy the button.service file to /etc/systemd/system, then run sudo systemctl daemon-reload, sudo systemctl enable button.service, and sudo systemctl start button.service
