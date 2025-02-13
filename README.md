@@ -8,11 +8,15 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
 ## Parts List
 
+**WaterCam Unit**
+
 - Raspberry Pi 4B
+
+- [Copper or aluminum heatsink](https://www.amazon.com/GeeekPi-Heatsinks-Conductive-Electronic-Compatible/dp/B0C7Z27Q3R) for Raspberry Pi
 
 - [Case 150x150x90 mm or larger](https://www.amazon.com/LMioEtool-Dustproof-Waterproof-Electrical-Transparent/dp/B07PK84N5D)
 
-- [Optical Camera w/ controllable NIR filter (IR-CUT)](https://www.amazon.com/Dorhea-Raspberry-Camera-Automatic-Adjustable/dp/B07DNSSDGG/136-0027955-5919373) - should come with a cable to connect to the Pi 4B
+- [Optical Camera w/ controllable NIR filter (IR-CUT)](https://www.amazon.com/Dorhea-Raspberry-Camera-Automatic-Adjustable/dp/B07DNSSDGG/136-0027955-5919373) - should come with a ribbon cable to connect to the Pi 4B
 
 - WittyPi 4 power management: [Witty Pi 4 HAT - RTC & Power Management for Raspberry Pi : ID 5704 : Adafruit Industries](https://www.adafruit.com/product/5704)
 
@@ -20,14 +24,19 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
         [CR2032 Battery for WittyPi 4](https://www.adafruit.com/product/654)
 
-- Stacking header for accessing GPIO after adding custom PCB: [GPIO Stacking Header for Pi A+/B+/Pi 2/Pi 3 [Extra-long 2x20 Pins] : ID 2223 : Adafruit Industries](https://www.adafruit.com/product/2223)
-
 - Flir Lepton 3.5 and Flir Breakout Board v2
+  
+  - [Flir Breakout board 2.0](https://www.mouser.com/ProductDetail/Teledyne-FLIR-Lepton/250-0577-00?qs=DRkmTr78QARne0IUCYtsyA%3D%3D)
+  
+  - [Flir Lepton 3.5](https://www.mouser.com/ProductDetail/Teledyne-FLIR-Lepton/500-0771-01?qs=DRkmTr78QAQNv%2FBEKfCn%252BQ%3D%3D)
 
-        [Flir Breakout board 2.0](https://www.mouser.com/ProductDetail/Teledyne-FLIR-Lepton/250-0577-00?qs=DRkmTr78QARne0IUCYtsyA%3D%3D)
-        [Flir Lepton 3.5](https://www.mouser.com/ProductDetail/Teledyne-FLIR-Lepton/500-0771-01?qs=DRkmTr78QAQNv%2FBEKfCn%252BQ%3D%3D)
+- [Female/Female Jumper Wires](https://www.adafruit.com/product/266) - to connect Flir until we get a custom PCB made
 
-- [Stemma QT header cables to connect Adafruit sensors to Pi](https://www.adafruit.com/product/4397), plus [Stemma QT to Stemma QT cable](https://www.adafruit.com/product/4210) for connecting Adafruit sensors to other Adafruit sensors
+- LWIR (8-14 micron range) transmission window material to protect Flir - [Edmund Optics](https://www.edmundoptics.com/f/infrared-ir-material-windows/12440/)
+
+- [Stemma QT header cables to connect Adafruit sensors to Pi](https://www.adafruit.com/product/4397)
+
+- plus [Stemma QT to Stemma QT cable](https://www.adafruit.com/product/4210) for chaining Adafruit sensors to other Adafruit sensors
 
 - [Adafruit BNO085 IMU](https://www.adafruit.com/product/4754) - for motion detection / orientation reporting
 
@@ -37,23 +46,19 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
         We are using Voltaic battery packs because they do not auto-shutdown during low power draw, which is important for this system as it will be in low-power mode most of the time and losing power then would prevent it from starting back up. They are intended to be directly charged from 6V solar panels. If using a battery that is not always-on configure the WittyPi to draw more power when idle to avoid losing power.
 
-- [Solar Panels](https://voltaicsystems.com/10-watt-panel-etfe/) - 6 volt panel if charging Voltaic battery pack directly  
+- [Solar Panel](https://voltaicsystems.com/10-watt-panel-etfe/) - 6 volt panel if charging Voltaic battery pack directly  
 
-- MicroSD cards - preferably higher capacity than needed (at least 64GB), consider "high endurance" or "industrial" (for temperature tolerance) cards: https://www.dzombak.com/blog/2023/12/Choosing-the-right-SD-card-for-your-Pi.html
+- MicroSD card - preferably higher capacity than needed (at least 64GB), consider "high endurance" or "industrial" (for temperature tolerance) cards: https://www.dzombak.com/blog/2023/12/Choosing-the-right-SD-card-for-your-Pi.html
   
   Example: [SanDisk High Endurance microSD](https://shop.sandisk.com/products/memory-cards/microsd-cards/sandisk-high-endurance-uhs-i-microsd?sku=SDSQQNR-064G-GN6IA)
   
   Test the SD cards with F3 Fight Flash Fraud to verify they are legit: https://github.com/AltraMayor/f3
 
-       TODO: Alternatively boot from USB SSD
+       TODO: Alternatively boot from USB SSD - this has pros/cons
 
-* USB C cables, preferably right angle ones for smaller cases
+* USB C cable to connect Voltaic V50 to WittyPi 4, preferably right angle ones for smaller cases
 
-* Ethernet cable - so you can connect to a network for updates and initial configuration. I shared the WiFi connection on my laptop with the Pi over Ethernet using Network Manager's connection sharing on Linux. Other operating systems have similar functionality.
-
-* [Serial TTL USB adapter cable](https://www.adafruit.com/product/954) - useful for logging into the Pi before networking has been configured, and for debugging/troubleshooting.
-
-* Cellular modem with USB Adapter board
+* Cellular modem with USB Adapter board:
   
   [Quectel EC25 Cellular Modem](https://www.amazon.com/Quectel-LTE-EC25-AF-Mini-PCIe/dp/B082SL8KY1)
   
@@ -63,34 +68,41 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   
   [Cables to connect Antennas to Cell Modem](https://www.amazon.com/Coaxial-Pigtail-Antenna-Bulkhead-Extender/dp/B098QH631G) - get appropriate cables to connect to uFL on the cellular board. SMA male antennas need SMA female cables.
   
-  [USB Right Angle Up Adapter Cable for Modem](https://www.amazon.com/Antrader-Degree-Extension-Converter-Adapter/dp/B07F7Y21GW)
+  [USB A Right Angle Up Adapter Cable for Modem](https://www.amazon.com/Antrader-Degree-Extension-Converter-Adapter/dp/B07F7Y21GW) - if the modem board does not otherwise fit in your case. The 150x150x90 case is too small to directly install the modem into the USB port on the Raspberry Pi.
   
-    Right Angle adapters for connecting the battery may be useful if using a small case.
-  
-  SIM Card for Cell Modem - 1nce for example
+  SIM Card for Cell Modem - 1nce for example has a data plan targeting IoT devices
 
-* Multitech mDot LoRa module
-    https://www.multitech.com/brands/multiconnect-mdot
+* [Multitech mDot LoRa module](https://www.multitech.com/brands/multiconnect-mdot)
   
-    [Antenna for mDot](https://www.amazon.com/915MHz-LoRa-Antenna-Indoor-Cable/dp/B0CTXKBMH9) - SMA male connector needed on 915 MHz antenna 
+  - [Antenna for mDot](https://www.amazon.com/915MHz-LoRa-Antenna-Indoor-Cable/dp/B0CTXKBMH9) - SMA male connector needed on 915 MHz antenna
   
-    2mm pitch header cable for connecting mDot to Raspberry Pi
+  - [Female-Female 2.54 to 2.0mm Jumper Wires](https://www.adafruit.com/product/1919) - 2mm pitch header cables for connecting mDot to Raspberry Pi until we get a custom PCB made
 
-* LWIR (8-14 micron range) transmission window material- [Edmund Optics](https://www.edmundoptics.com/f/infrared-ir-material-windows/12440/)
+* Cable gland to let solar panel power cable into case
   
-  [Conformal coating](https://www.digikey.com/en/products/detail/mg-chemicals/419D-55ML/9657990) to protect electronics from water - make sure it is not applied to any connectors
   
-  Silicone sealant for water-resistance
   
-  [Copper or aluminum heatsinks](https://www.amazon.com/GeeekPi-Heatsinks-Conductive-Electronic-Compatible/dp/B0C7Z27Q3R) for Raspberry Pi
+  **optional items we are evaluating**
   
-  Anti-fog spray/hydrophobic coating for lens
+  - Anti-fog spray/hydrophobic coating for lens
   
-  Dessicant packs
+  - Desiccant packs - for example https://sensorpros.com/products/druck-dri-can-desiccant?variant=3272716801 or https://www.amazon.com/Silica-Gel-Packets-Indicating-Electronics/dp/B0B2DNLZ4K - will need to be dried for reuse
   
-  [Stemma QT to header cables](http://adafru.it/4397)
   
-  Assorted female-female header cables for connecting components
+  
+  **Tools and accessories - do not order multiples**
+  
+  - [Conformal coating](https://www.digikey.com/en/products/detail/mg-chemicals/419D-55ML/9657990) to protect electronics from water - make sure it is not applied to any connectors
+  
+  - Silicone sealant for water-resistance - use to seal holes in case
+  
+  - Ethernet cable - so you can connect to a network for updates and initial configuration. I shared the WiFi connection on my laptop with the Pi over Ethernet using Network Manager's connection sharing on Linux. Other operating systems have similar functionality.
+  
+  - [Serial TTL USB adapter cable](https://www.adafruit.com/product/954) - useful for logging into the Pi before networking has been configured, and for debugging/troubleshooting.
+  
+  - Drill for creating openings in case for cable gland, antenna sockets (if antennas don't fit in the case or need to be external), and camera aperatures
+
+
 
 ### Setup Raspberry Pi 4 with Flir Camera, IMU, and Quectel Cellular modem+GPS
 
@@ -102,15 +114,9 @@ Flash the current SD card image file to an unused microSD card: https://github.c
 
 You can use the [Raspberry Pi Imager's](https://www.raspberrypi.com/software/) custom OS option to write the image file to a SD card. Simply click "Choose OS", scroll all the way down, select "use custom" and pick the file you downloaded, then click "Choose Storage" and pick your microSD card. You don't need to customize settings or options, just write the image - so select "No" when asked if you want to customize Once it's been written to, you can insert it in a Pi 4B and let it boot. It will automatically expand the filesystem to the full size of the card, so it will take some time on the first boot.
 
-
-
 ![](documentation_assets/bcd9d389c7d8c39c88697b759497f1da00b67ebd.png)
 
-
-
 ![](documentation_assets/3af2c25188e40bd1c3ace9675425503e22912e5f.png)
-
-
 
 ![](documentation_assets/5ed495bf21c9f0b7e8dbba226d64e3f9005d6ed3.png)
 
@@ -311,7 +317,7 @@ Use a right-angle USB adapter cable to make connecting to the Raspberry Pi easie
 
 Also consider taping or otherwise securing the connections once everything is installed in the waterproof case to reduce the chance of disconnections during field installation.
 
-We are using antennas with SMA connectors.
+We are using antennas with SMA connectors https://store.rokland.com/blogs/news/connectors-101-rp-sma-vs-sma
 
 ![](documentation_assets/34b96308e30f523aaaaa2f566dca810633f00a76.jpg)
 
@@ -500,7 +506,7 @@ Consider using Tailscale SSH: https://tailscale.com/kb/1193/tailscale-ssh
 
 tailscale up --ssh
 
-Make sure the device is [tagged](https://tailscale.com/kb/1068/tags) and not using a personal Tailscale account. See tailscale-acl.txt in config directory for an example of Access Control List rules to permit SSH into tagged devices.
+Make sure the device is [tagged](https://tailscale.com/kb/1068/tags) and not using a personal Tailscale account. See tailscale-acl.txt in config directory for an example of Access Control List rules to permit SSH into tagged devices. Forbid tagged devices from accessing other tagged devices for security.
 
 Consider installing and using mosh for high-latency cellular connections
 sudo apt install mosh
