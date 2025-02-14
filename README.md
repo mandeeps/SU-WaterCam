@@ -79,30 +79,24 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   - [Female-Female 2.54 to 2.0mm Jumper Wires](https://www.adafruit.com/product/1919) - 2mm pitch header cables for connecting mDot to Raspberry Pi until we get a custom PCB made
 
 * Cable gland to let solar panel power cable into case
-  
-  
-  
+
   **optional items we are evaluating**
-  
-  - Anti-fog spray/hydrophobic coating for lens
-  
-  - Desiccant packs - for example https://sensorpros.com/products/druck-dri-can-desiccant?variant=3272716801 or https://www.amazon.com/Silica-Gel-Packets-Indicating-Electronics/dp/B0B2DNLZ4K - will need to be dried for reuse
-  
-  
-  
+
+- Anti-fog spray/hydrophobic coating for lens
+
+- Desiccant packs - for example https://sensorpros.com/products/druck-dri-can-desiccant?variant=3272716801 or https://www.amazon.com/Silica-Gel-Packets-Indicating-Electronics/dp/B0B2DNLZ4K - will need to be dried for reuse
+
   **Tools and accessories - do not order multiples**
-  
-  - [Conformal coating](https://www.digikey.com/en/products/detail/mg-chemicals/419D-55ML/9657990) to protect electronics from water - make sure it is not applied to any connectors
-  
-  - Silicone sealant for water-resistance - use to seal holes in case
-  
-  - Ethernet cable - so you can connect to a network for updates and initial configuration. I shared the WiFi connection on my laptop with the Pi over Ethernet using Network Manager's connection sharing on Linux. Other operating systems have similar functionality.
-  
-  - [Serial TTL USB adapter cable](https://www.adafruit.com/product/954) - useful for logging into the Pi before networking has been configured, and for debugging/troubleshooting.
-  
-  - Drill for creating openings in case for cable gland, antenna sockets (if antennas don't fit in the case or need to be external), and camera aperatures
 
+- [Conformal coating](https://www.digikey.com/en/products/detail/mg-chemicals/419D-55ML/9657990) to protect electronics from water - make sure it is not applied to any connectors
 
+- Silicone sealant for water-resistance - use to seal holes in case
+
+- Ethernet cable - so you can connect to a network for updates and initial configuration. I shared the WiFi connection on my laptop with the Pi over Ethernet using Network Manager's connection sharing on Linux. Other operating systems have similar functionality.
+
+- [Serial TTL USB adapter cable](https://www.adafruit.com/product/954) - useful for logging into the Pi before networking has been configured, and for debugging/troubleshooting.
+
+- Drill for creating openings in case for cable gland, antenna sockets (if antennas don't fit in the case or need to be external), and camera aperatures
 
 ### Setup Raspberry Pi 4 with Flir Camera, IMU, and Quectel Cellular modem+GPS
 
@@ -496,7 +490,7 @@ Hardware/software flow control off
 
 Or just use Tio instead of minicom
 
-For deployment we'll want the mDot to have a seperate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data.
+For deployment we'll want the mDot to have a separate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data. This will require routing power directly from the WittyPi 4 to the mDot, connecting the mDot to a mosfet which triggers the WittyPi switch, and modifying the firmware.
 
 ### Tailscale for remote login over cellular data
 
@@ -529,7 +523,7 @@ On your machine connected to the Pi (over Tailscale or directly) use VLC to stre
 
 pip install torch torchvision (in the venv)
 
-Model based on FloodNet data set and DeepLab
+old model based on FloodNet data set and DeepLab
 FloodNet: https://ieeexplore.ieee.org/document/9460988
 
 ## Clone SD Card

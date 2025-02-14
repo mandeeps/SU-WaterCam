@@ -1,8 +1,17 @@
 {
-	// watercam tag can be added by admins
+	// Define watercam tag for devices
 	"tagOwners": {
 		"tag:watercam": ["autogroup:admin"],
 	},
+
+  "acls": [
+  // Comment out the rule allowing all connections
+		{
+			"action": "accept",
+			"src":    ["autogroup:member"],
+			"dst":    ["tag:watercam:*"],
+		},
+  ],
 
 	// Define users and devices that can use Tailscale SSH.
 	"ssh": [
@@ -13,6 +22,7 @@
 			"dst":    ["autogroup:self"],
 			"users":  ["autogroup:nonroot"],
 		},
+
     // allow users to log into watercams
 		{
 			"action": "accept",
@@ -21,4 +31,14 @@
 			"users":  ["pi"],
 		},
 	],
+
+	// Test access rules every time they're saved.
+	"tests": [
+		{
+			"src":    "SPECIFIC USER ACCOUNT TO TEST WITH",
+			"proto":  "tcp",
+			"accept": ["tag:desktop:22", "tag:watercam:22"],
+		},
+	],
+
 }
