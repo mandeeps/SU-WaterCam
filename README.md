@@ -38,7 +38,7 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
 - plus [Stemma QT to Stemma QT cable](https://www.adafruit.com/product/4210) for chaining Adafruit sensors to other Adafruit sensors
 
-- [Adafruit BNO085 IMU](https://www.adafruit.com/product/4754) - for motion detection / orientation reporting
+- [Adafruit BNO085 IMU](https://www.adafruit.com/product/4754) or 055 IMU- for motion detection / orientation reporting
 
 - [Adafruit AHT20](https://www.adafruit.com/product/4566) Temperature and Humidity Sensor - for monitoring device health
 
@@ -56,7 +56,7 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
        TODO: Alternatively boot from USB SSD - this has pros/cons
 
-* USB C cable to connect Voltaic V50 to WittyPi 4, preferably right angle ones for smaller cases
+* Dual USB-A to single USB-C cable to connect Voltaic power pack to WittyPi 4, preferably with right angle connectors for smaller cases. Only the USB-A ports on the Voltaic packs are always on, and each outputs 2.5A max, 3A together, so we need a Y power adapter.
 
 * Cellular modem with USB Adapter board:
   
@@ -66,7 +66,7 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   
   [Antennas for Modem and GPS](https://www.amazon.com/Antenna-698-2700MHZ-Universal-Directional-Wireless/dp/B08XBSYT8N) - need 3 antennas, 2 for cellular and 1 for GPS
   
-  [Cables to connect Antennas to Cell Modem](https://www.amazon.com/Coaxial-Pigtail-Antenna-Bulkhead-Extender/dp/B098QH631G) - get appropriate cables to connect to uFL on the cellular board. SMA male antennas need SMA female cables.
+  [Cables to connect Antennas to Cell Modem](https://www.amazon.com/Coaxial-Pigtail-Antenna-Bulkhead-Extender/dp/B098QH631G) - get appropriate cables to connect to uFL on the cellular board. SMA male antennas need SMA female cables, RP-SMA antennas likewise need the correct cables.
   
   [USB A Right Angle Up Adapter Cable for Modem](https://www.amazon.com/Antrader-Degree-Extension-Converter-Adapter/dp/B07F7Y21GW) - if the modem board does not otherwise fit in your case. The 150x150x90 case is too small to directly install the modem into the USB port on the Raspberry Pi.
   
@@ -74,18 +74,17 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
 * [Multitech mDot LoRa module](https://www.multitech.com/brands/multiconnect-mdot)
   
-  - [Antenna for mDot](https://www.amazon.com/915MHz-LoRa-Antenna-Indoor-Cable/dp/B0CTXKBMH9) - SMA male connector needed on 915 MHz antenna
+  - [Antenna for mDot](https://www.amazon.com/915MHz-LoRa-Antenna-Indoor-Cable/dp/B0CTXKBMH9) - RP-SMA connector needed on 915 MHz antenna
   
   - [Female-Female 2.54 to 2.0mm Jumper Wires](https://www.adafruit.com/product/1919) - 2mm pitch header cables for connecting mDot to Raspberry Pi until we get a custom PCB made
 
 * Cable gland to let solar panel power cable into case
-
+  
   **optional items we are evaluating**
-
 - Anti-fog spray/hydrophobic coating for lens
 
 - Desiccant packs - for example https://sensorpros.com/products/druck-dri-can-desiccant?variant=3272716801 or https://www.amazon.com/Silica-Gel-Packets-Indicating-Electronics/dp/B0B2DNLZ4K - will need to be dried for reuse
-
+  
   **Tools and accessories - do not order multiples**
 
 - [Conformal coating](https://www.digikey.com/en/products/detail/mg-chemicals/419D-55ML/9657990) to protect electronics from water - make sure it is not applied to any connectors
@@ -267,7 +266,11 @@ Software is already configured on the SD filesystem image. If installing from sc
 
 ### Optical Camera
 
-Desolder the photo resistor/light sensor from the Dorhea IR-CUT camera. Solder a wire so the IR filter can be manually controlled by the Pi. The wire is soldered to the third point from the bottom of the camera on the backside and connected to pin #40 on the Pi for use with the take_nir_photos.py script.
+Desolder the photo resistor/light sensor from the Dorhea IR-CUT camera. You could remove it by snipping the two leads that connect it to the board, or apply heat with a soldering iron to the two leads and use a solder sucker or solder wick to detach them. 
+
+Solder a wire so the IR filter can be manually controlled by the Pi. The wire is soldered to the third point from the bottom of the camera on the backside and connected to pin #40 on the Pi for use with the take_nir_photos.py script.
+
+
 
 Before removing the photoresistor:
 
@@ -277,7 +280,7 @@ Solder a header cable like so:
 
 ![](documentation_assets/b176dde40a564b61f8dc3d2b25897d14209191f5.jpg)
 
-It should look like this when done:
+It should look like this when done, the light sensor is gone and the wire will let us manually control the filter:
 
 ![](documentation_assets/347c3f1525e4321f3e7c8eff3596e8b765fe2997.jpg)
 
@@ -311,9 +314,13 @@ Use a right-angle USB adapter cable to make connecting to the Raspberry Pi easie
 
 Also consider taping or otherwise securing the connections once everything is installed in the waterproof case to reduce the chance of disconnections during field installation.
 
-We are using antennas with SMA connectors https://store.rokland.com/blogs/news/connectors-101-rp-sma-vs-sma
+Some of our cellular antennas use SMA connectors. Going forward we will stick with RP-SMA because that is what the mDot uses.
+
+ https://store.rokland.com/blogs/news/connectors-101-rp-sma-vs-sma
 
 ![](documentation_assets/34b96308e30f523aaaaa2f566dca810633f00a76.jpg)
+
+SMA connectors
 
 <details>
 
@@ -492,6 +499,12 @@ Or just use Tio instead of minicom
 
 For deployment we'll want the mDot to have a separate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data. This will require routing power directly from the WittyPi 4 to the mDot, connecting the mDot to a mosfet which triggers the WittyPi switch, and modifying the firmware.
 
+### Solar Power
+
+Voltaic battery packs should be connected to solar panels using the connector on the side of the batter pack. Older models used micro-USB and newer ones use USB-C. The USB-C port on the top can be used for reading the battery level. The full-size USB-A ports are the ones that provide always-on power. Voltaic packs support pass-through charging from solar panels.
+
+According to Voltaic: "The SBU pins still correlate to ½ of the cell voltage, so while the battery cell voltage ranges from approximately 3.2V (empty) to 4.2V (full charge), the corresponding SBU pin voltage ranges from 1.6V to 2.1V. We recommend that customers currently reading the cell voltage from the D+ pin make the necessary hardware changes to read from the A8/B8 SBU pins."
+
 ### Tailscale for remote login over cellular data
 
 https://tailscale.com/download
@@ -547,3 +560,57 @@ For creating new SD cards with the file you copied use dd as above but with the 
 If you need to take a unit out in the field to collect data you can add a couple of wires to a button to trigger the cameras and use the button-service-gpiozero.py script with GPIO Zero installed: https://github.com/gpiozero/gpiozero 
 
 We are using a simple pushbutton on a perboard with two header cables connected to pin #29 and ground on the Pi. Autostart the script with systemd using the button.service file in the config directory. Copy the button.service file to /etc/systemd/system, then run sudo systemctl daemon-reload, sudo systemctl enable button.service, and sudo systemctl start button.service
+
+
+
+***References and Helpful Resources***
+
+**Raspberry Pi**
+
+https://pinout.xyz/
+
+**Flir Lepton**
+
+[Home · groupgets/LeptonModule Wiki · GitHub](https://github.com/groupgets/LeptonModule/wiki)
+
+[Flir Lepton Thermal Camera Breakout | Hackaday.io](https://hackaday.io/project/3000-flir-lepton-thermal-camera-breakout)
+
+[GitHub - maxritter/diy-thermocam: A do-it-yourself thermal imager, compatible with the FLIR Lepton 2.5, 3.1R and 3.5 sensor with Arduino firmware](https://github.com/maxritter/diy-thermocam)
+
+[GitHub - themainframe/leptonic: A web GUI and several utilities for working with FLIR® Lepton® 3 LWIR camera modules.](https://github.com/themainframe/leptonic)
+
+[Flir Lepton hacking](https://www.electricstuff.co.uk/lepton.html)
+
+[GitHub - groupgets/LeptonModule: Code for getting started with the FLIR Lepton breakout board](https://github.com/groupgets/LeptonModule)
+
+[FLIR Lepton Hookup Guide - SparkFun Learn](https://learn.sparkfun.com/tutorials/flir-lepton-hookup-guide)
+
+[Lepton/docs/RaspberryPiGuide.md at main · FLIR/Lepton · GitHub](https://github.com/FLIR/Lepton/blob/main/docs/RaspberryPiGuide.md)
+
+https://groups.google.com/g/flir-lepton?pli=1
+
+[GitHub - alexanderdyson/openmv_flir_object_detection](https://github.com/alexanderdyson/openmv_flir_object_detection)
+
+[GitHub - danjulio/lepton: Code and libraries to use a FLIR Lepton Thermal Imaging Camera Module](https://github.com/danjulio/lepton/)
+
+[lepton/raspberrypi at master · danjulio/lepton · GitHub](https://github.com/danjulio/lepton/tree/master/raspberrypi)
+
+https://anthony.lepors.fr/raspi-thermo-cam/installation-de-leptonmodule/
+
+https://www.pureengineering.com/projects/lepton
+
+[GitHub - lukevanhorn/Lepton3: Lepton 3 for the Raspberry Pi](https://github.com/lukevanhorn/Lepton3)
+
+**Multitech mDot LoRa module**
+
+https://os.mbed.com/cookbook/Interfacing-with-Python
+
+https://os.mbed.com/cookbook/Interfacing-Using-RPC
+
+**Voltaic Battery**
+
+["The two USB-A ports function the  same. Connecting a USB-A cable activates a mechanical switch, which puts the battery into Always On mode. Removing the cable puts that battery into Auto Off mode. If you supply power into the battery via the top USB-C PD port, the Always On function of the USB-A ports is deactivated. We recommend using the side port for power input in any Always On application."](https://blog.voltaicsystems.com/updated-usb-c-pd-and-always-on-for-v25-v50-v75-batteries/)
+
+**Quectel Cellular Modem**
+
+**IR CUT Camera**
