@@ -264,13 +264,17 @@ Software is already configured on the SD filesystem image. If installing from sc
 
 ![](documentation_assets/c1d7138e826d38308d0de53d9a0b22b73c01b322.jpg)
 
+Do not forget the standoffs or the heatsink.
+
+![](documentation_assets/9fd8a11848d66d34ae5db15fa999623c757845e8.jpg)
+
+![](documentation_assets/af0f806f363bde1f74ca0b620472bda475cecb96.jpg)
+
 ### Optical Camera
 
 Desolder the photo resistor/light sensor from the Dorhea IR-CUT camera. You could remove it by snipping the two leads that connect it to the board, or apply heat with a soldering iron to the two leads and use a solder sucker or solder wick to detach them. 
 
 Solder a wire so the IR filter can be manually controlled by the Pi. The wire is soldered to the third point from the bottom of the camera on the backside and connected to pin #40 on the Pi for use with the take_nir_photos.py script.
-
-
 
 Before removing the photoresistor:
 
@@ -477,13 +481,23 @@ npm start in frontend directory then
 
 ![](documentation_assets/061a1062380fe75a2678be59c9096459d0c45049.png)
 
-The default mDot firmware is set up for UART. The WittyPi can tell if the Raspberry Pi is off by reading the TX pin, which should be set low when the Pi shuts down. The mDot seems to interfere with this, keeping the TX pin on the Pi set high and preventing the WittyPi from cutting off power to the system. So turn on alternative UART pins on the Pi 4B and use those to connect to the mDot instead.
+The default mDot firmware is set up for UART. The WittyPi can tell if the Raspberry Pi is off by reading the TX pin, which should be set low when the Pi shuts down. The mDot seems to interfere with this, keeping the TX pin on the Pi set high and preventing the WittyPi from cutting off power to the system. So we turn on alternative UART pins on the Pi 4B and use those to connect to the mDot instead on our default OS images.
 
-By adding dtoverlay=uart5 to /boot/config.txt on a Pi 4 we can use pin 32 for TX and pin 33 for RX. On the Pi 4, make sure "enable_uart=1" is in the /boot/config.txt file, and add dtoverlay=uart5. Save and reboot. Connect the TX pin on the mDot to pin #33 on the Pi and connect the RX pin on the mDot to pin #32 on the Pi.
+To do this manually: add dtoverlay=uart5 to /boot/config.txt on a Pi 4 so we can use pin 32 for TX and pin 33 for RX. On the Pi 4, make sure "enable_uart=1" is in the /boot/config.txt file, and add dtoverlay=uart5. Save and reboot. Connect the TX pin on the mDot to pin #33 on the Pi and connect the RX pin on the mDot to pin #32 on the Pi.
 
-The power pin (VOD, pin # 1) on the mDot can be connected to the 5V or 3.3V power pin on the Pi. Connect ground (pin 10 on the mDot) to a free ground pin. Connect the mDot UART TX (transmit, pin #2) to the Pi RX (receive) pin (#10 default, pin #33 if using uart5), and the mDot RX pin (#3) to the Pi TX pin (#8 default, pin #32 using uart5).
+**mDot wiring**
 
-On the Pi run sudo minicom -s -D /dev/serial0 to connect to the mDot if it is on the default TX/RX pins, minicom -s -D /dev/ttyAMA1 if on uart5, and issue AT commands. Use the settings specified in the mDot manual:
+The power pin (VOD, pin # 1) on the mDot can be connected to the 5V or 3.3V power pin on the Pi. Connect ground (pin 10 on the mDot) to a free ground pin. Connect the mDot UART TX (transmit, pin #2) to the Pi RX (receive) pin (pin #33 if using uart5), and the mDot RX pin (#3) to the Pi TX pin (pin #32 using uart5).
+
+On the Pi run tio /dev/ttyAMA1 and issue AT commands to control the mDot, see the mDot AT reference document in the instructions directory. For example, "ATI" will tell you the installed firmware version.
+
+
+
+if using minicom or screen:
+
+sudo minicom -s -D /dev/serial0 to connect to the mDot if it is on the default TX/RX pins, minicom -s -D /dev/ttyAMA1 if on uart5,
+
+Use the settings specified in the mDot manual:
 
 Baud rate 115200
 
@@ -494,8 +508,6 @@ Parity N
 Stop bits 1
 
 Hardware/software flow control off
-
-Or just use Tio instead of minicom
 
 For deployment we'll want the mDot to have a separate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data. This will require routing power directly from the WittyPi 4 to the mDot, connecting the mDot to a mosfet which triggers the WittyPi switch, and modifying the firmware.
 
@@ -560,8 +572,6 @@ For creating new SD cards with the file you copied use dd as above but with the 
 If you need to take a unit out in the field to collect data you can add a couple of wires to a button to trigger the cameras and use the button-service-gpiozero.py script with GPIO Zero installed: https://github.com/gpiozero/gpiozero 
 
 We are using a simple pushbutton on a perboard with two header cables connected to pin #29 and ground on the Pi. Autostart the script with systemd using the button.service file in the config directory. Copy the button.service file to /etc/systemd/system, then run sudo systemctl daemon-reload, sudo systemctl enable button.service, and sudo systemctl start button.service
-
-
 
 ***References and Helpful Resources***
 
