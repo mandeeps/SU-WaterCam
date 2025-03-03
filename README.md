@@ -254,22 +254,6 @@ Drill holes for cameras and external power (and antennas if too large to fit wit
 
 Apply silicone sealant to all openings into case, and install LWIR transmission window for Lepton. Check water-resistance before field installation. Connect to solar panel power.
 
-### WittyPi 4 Setup
-
-Software is already configured on the SD filesystem image. If installing from scratch follow installation instructions for the WittyPi software before installing the WittyPi hardware. Install the heatsink, standoffs, and connect the camera ribbon cable before placing the WittyPi on the GPIO pins. Screw down the hardware so it stays attached.
-
-![](documentation_assets/7ce15b847e44b105a40b4778baad01e8f0e9f551.jpg)
-
-![](documentation_assets/8deb5aae3a5800af7e9d395a6f87936314861b8d.jpg)
-
-![](documentation_assets/c1d7138e826d38308d0de53d9a0b22b73c01b322.jpg)
-
-Do not forget the standoffs or the heatsink.
-
-![](documentation_assets/9fd8a11848d66d34ae5db15fa999623c757845e8.jpg)
-
-![](documentation_assets/af0f806f363bde1f74ca0b620472bda475cecb96.jpg)
-
 ### Optical Camera
 
 Desolder the photo resistor/light sensor from the Dorhea IR-CUT camera. You could remove it by snipping the two leads that connect it to the board, or apply heat with a soldering iron to the two leads and use a solder sucker or solder wick to detach them. 
@@ -295,6 +279,23 @@ Insert the cable into the camera with the metal pins facing the board:
 On the Rapsberry Pi find the CAMERA slot. The other end of the ribbon cable should be installed with the metal pins facing away from the black plastic retainer towards the pins in the slot:
 
 ![](documentation_assets/6d00c3ddceb155d7bbed6e278a3615e26f77ac0a.jpg)
+
+### WittyPi 4 Setup
+
+Software is already configured on the SD filesystem image. If installing from scratch follow installation instructions for the WittyPi software before installing the WittyPi hardware. Install the heatsink, standoffs, and connect the camera ribbon cable before placing the WittyPi on the GPIO pins. Screw down the hardware so it stays attached.
+
+![](documentation_assets/7ce15b847e44b105a40b4778baad01e8f0e9f551.jpg)
+
+![](documentation_assets/8deb5aae3a5800af7e9d395a6f87936314861b8d.jpg)
+
+![](documentation_assets/c1d7138e826d38308d0de53d9a0b22b73c01b322.jpg)
+
+Do not forget the standoffs or the heatsink.
+
+![](documentation_assets/9fd8a11848d66d34ae5db15fa999623c757845e8.jpg)
+
+![](documentation_assets/af0f806f363bde1f74ca0b620472bda475cecb96.jpg)
+
 
 ### Quectel EC25 Modem and GPS
 
