@@ -1,5 +1,8 @@
 #!/usr/bin/env python
 # PiCamera2 streaming video example
+# We are using it to help focus the optical camera
+# Go to your web browser and enter the IP address or hostname of the Pi you are running this on with the port number: 8080
+# If you are using Tailscale you can use the IP/hostname it tells you
 
 import io
 import logging
@@ -78,7 +81,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
             self.send_error(404)
             self.end_headers()
 
-# Class to handle streaming server
+# Class to handle streaming server 
 class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
@@ -91,7 +94,7 @@ picam2.start_recording(JpegEncoder(), FileOutput(output))
 
 try:
     # Set up and start the streaming server
-    address = ('', 8000)
+    address = ('', 8080)
     server = StreamingServer(address, StreamingHandler)
     server.serve_forever()
 finally:

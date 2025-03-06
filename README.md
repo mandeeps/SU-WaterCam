@@ -514,7 +514,7 @@ For deployment we'll want the mDot to have a separate power source so we can rem
 
 ### Solar Power
 
-Voltaic battery packs should be connected to solar panels using the connector on the side of the batter pack. Older models used micro-USB and newer ones use USB-C. The USB-C port on the top can be used for reading the battery level. The full-size USB-A ports are the ones that provide always-on power. Voltaic packs support pass-through charging from solar panels.
+Voltaic battery packs should be connected to solar panels using the connector on the side of the battery pack. Older models used micro-USB and newer ones use USB-C. The USB-C port on the top can be used for reading the battery level. The full-size USB-A ports are the ones that provide always-on power. Voltaic packs support pass-through charging from solar panels.
 
 According to Voltaic: "The SBU pins still correlate to ½ of the cell voltage, so while the battery cell voltage ranges from approximately 3.2V (empty) to 4.2V (full charge), the corresponding SBU pin voltage ranges from 1.6V to 2.1V. We recommend that customers currently reading the cell voltage from the D+ pin make the necessary hardware changes to read from the A8/B8 SBU pins."
 
