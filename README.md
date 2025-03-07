@@ -120,7 +120,7 @@ Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS Lite (B
 
 https://www.raspberrypi.com/software/
 
-After flashing, add enable_uart=1 at the end of the /boot/config.txt file. Insert the SD card in the Pi, attach power and boot it up.
+After flashing, add `enable_uart=1` at the end of the /boot/config.txt file. Insert the SD card in the Pi, attach power and boot it up.
 
 https://www.jeffgeerling.com/blog/2021/attaching-raspberry-pis-serial-console-uart-debugging
 
@@ -136,9 +136,9 @@ Now you can use ssh to login to the Pi after connecting it to your computer with
 
 Once you've logged in and are sharing an internet connection from your computer to the Pi, run sudo apt update and sudo apt upgrade
 
-Verify the Pi is on the latest firmware with rpi-eeprom-update.
+Verify the Pi is on the latest firmware with `rpi-eeprom-update`.
 
-Helpful tools: sudo apt install git tmux htop rpicam-apps
+Helpful tools: `sudo apt install git tmux htop rpicam-apps`
 Serial console application: tio [https://github.com/tio/tio] or other (screen, minicom, etc.,)
 Install your preferred editor (which should be neovim) and aptitude if you want a TUI for apt
 
@@ -181,11 +181,11 @@ spidev.bufsiz=131072
 
 ###### SD Card settings
 
-Disable swap and set noatime to prolong SD card life: sudo swapoff --all, sudo apt purge dphys-swapfile.
+Disable swap and set noatime to prolong SD card life: `sudo swapoff --all`, `sudo apt purge dphys-swapfile`.
 
-Add noatime,commit=60 settings to ext4 partitions in /etc/fstab - noatime prevents writing access times to files, commit collects and delays writes to every N seconds. Data loss will be limited to the last N seconds of writes if power is lost. Do NOT change the /boot partition settings, it is a vfat filesystem and these options will not work and will cause the Pi to not boot.
+Add `noatime,commit=60` settings to ext4 partitions in /etc/fstab - noatime prevents writing access times to files, commit collects and delays writes to every N seconds. Data loss will be limited to the last N seconds of writes if power is lost. Do NOT change the /boot partition settings, it is a vfat filesystem and these options will not work and will cause the Pi to not boot.
 
-Set temp directories like /tmp, /var/tmp to mount in RAM, ex. tmpfs /var/tmp tmpfs nodev,nosuid,size=20M 0 0 in fstab
+Set temp directories like /tmp, /var/tmp to mount in RAM, ex. `tmpfs /var/tmp tmpfs nodev,nosuid,size=20M 0 0` in fstab
 
 Use a larger SD card size than needed so you have free space for automatic wear-leveling (is this a thing on cheap SD cards?)
 
@@ -211,28 +211,28 @@ Remove uwi since we will not be using it: sudo systemctl disable uwi, then rm th
 ### SU-WaterCam software setup from scratch
 
 Clone the public git repo: https://github.com/mandeeps/SU-WaterCam.git
-Compile lepton.c and capture.c for the device. Install build-essential if not already done: sudo apt install build-essential. Then cd to the SU-WaterCam/tools directory and run: 
-gcc lepton.c -o lepton && gcc capture.c -o capture
+Compile lepton.c and capture.c for the device. Install build-essential if not already done: `sudo apt install build-essential`. Then cd to the SU-WaterCam/tools directory and run: 
+`gcc lepton.c -o lepton && gcc capture.c -o capture`
 
-Copy to the root of the SU-WaterCam directory: From tools directory, run "cp lepton ../." and "cp capture ../."
+Copy to the root of the SU-WaterCam directory: From tools directory, run `cp lepton ../.` and `cp capture ../.`
 
-Use apt to install these packages: sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2 python3-rasterio
+Use apt to install these packages: `sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2 python3-rasterio`
 
 Make sure picamera2 is installed as system package, not through pip
 
-Create a virtual environment with python -m venv --system-site-packages /home/pi/SU-WaterCam/venv, (we use system-site-packages to copy over pandas and other installed modules)
-activate with source /home/pi/SU-WaterCam/venv/bin/activate, and then install modules with pip install -r /home/pi/SU-WaterCam/requirements.txt
-or manually with pip install compress_pickle adafruit-blinka gpiozero piexif py-gpsd2 python-xmp-toolkit
+Create a virtual environment with `python -m venv --system-site-packages /home/pi/SU-WaterCam/venv`, (we use system-site-packages to copy over pandas and other installed modules)
+activate with `source /home/pi/SU-WaterCam/venv/bin/activate`, and then install modules with `pip install -r /home/pi/SU-WaterCam/requirements.txt`
+or manually with `pip install compress_pickle adafruit-blinka gpiozero piexif py-gpsd2 python-xmp-toolkit`
 
 Set default Python to the venv by adding 'source /home/pi/SU-WaterCam/venv/bin/activate' to the end of your .bashrc file.
 
 ### Adafruit BNO055 IMU
 
-pip install adafruit-circuitpython-bno055 in the venv
+`pip install adafruit-circuitpython-bno055` in the venv
 
 ### Adafruit BNO085 IMU
 
-pip install adafruit-circuitpython-bno08x in the venv
+`pip install adafruit-circuitpython-bno08x` in the venv
 
 ### Calibrate the IMU prior to use:
 
@@ -331,19 +331,19 @@ SMA connectors
 
 <summary>Cellular Modem Manual Software Setup</summary>
 
-sudo apt install gpsd gpsd-clients
+`sudo apt install gpsd gpsd-clients`
 
-Remove and purge udhcpcd and openresolv: sudo apt purge udhcpcd openresolv
-Reconfigure current network devices with network manager to retain local networking during setup - sudo nmtui is easiest way
+Remove and purge udhcpcd and openresolv: `sudo apt purge udhcpcd openresolv`
+Reconfigure current network devices with network manager to retain local networking during setup - `sudo nmtui` is easiest way
 Make sure /etc/network/interfaces has no references to devices you want NM to manage
 
 Then configure the cellular modem and verify everything works as expected after restarts
-sudo mmcli -m 0 --simple-connect='apn=iot.1nce.net' Replace apn as appropriate
+`sudo mmcli -m 0 --simple-connect='apn=iot.1nce.net'` Replace apn as appropriate
 
-Setup connection with NetworkManager: sudo nmcli c add type gsm ifname cdc-wdm0 con-name Quectel apn iot.1nce.net
+Setup connection with NetworkManager: `sudo nmcli c add type gsm ifname cdc-wdm0 con-name Quectel apn iot.1nce.net`
 
 On Bookworm:
-sudo mmcli -m 0 –-location-enable-gps-unmanaged -- to tell ModemManager to start the GPS on the Quectel EC25 but not control it, so gpsd can manage it instead
+`sudo mmcli -m 0 –-location-enable-gps-unmanaged` -- to tell ModemManager to start the GPS on the Quectel EC25 but not control it, so gpsd can manage it instead
 Enable gps.service in the git config directory so this will be done automatically on boot.
 
 Bullseye: ModemManager on Bullseye doesn't support --location-enable-gps-unmanaged for the Quectel EC25 apparently, and since RaspberryPi OS has not officially released a Bookworm-based version yet, we are using Bullseye and working around this by creating a custom Udev rule to tell ModemManager to ignore the GPS:
@@ -359,7 +359,7 @@ If using a different cellular modem change the ids to the appropriate ones, use 
 
 Reduce the priority of the cellular modem so Ethernet is preferred while you are building the unit and still installing updates: https://superuser.com/a/1603124
 
-sudo nmcli con mod Quectel ipv4.route-metric 100 and do the same for ipv6
+`sudo nmcli con mod Quectel ipv4.route-metric 100` and do the same for ipv6
 
 Might need to reboot before next step...
 
@@ -510,7 +510,7 @@ Stop bits 1
 
 Hardware/software flow control off
 
-For deployment we'll want the mDot to have a separate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data. This will require routing power directly from the WittyPi 4 to the mDot, connecting the mDot to a mosfet which triggers the WittyPi switch, and modifying the firmware.
+For deployment we'll want the mDot to have a separate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data. This will require routing power directly from the WittyPi 4 to the mDot, connecting a GPIO pin on the mDot to a mosfet which triggers the WittyPi switch pin, and modifying the firmware.
 
 ### Solar Power
 
@@ -524,9 +524,11 @@ https://tailscale.com/download
 
 Consider using Tailscale SSH: https://tailscale.com/kb/1193/tailscale-ssh
 
-tailscale up --ssh
+`tailscale up --ssh`
 
-Make sure the device is [tagged](https://tailscale.com/kb/1068/tags) and not using a personal Tailscale account. See tailscale-acl.txt in config directory for an example of Access Control List rules to permit SSH into tagged devices. Forbid tagged devices from accessing other tagged devices for security.
+Make sure the device is [tagged](https://tailscale.com/kb/1068/tags) and not using a personal Tailscale account. See tailscale-acl.txt in config directory for an example of Access Control List rules to permit SSH into tagged devices. Forbid tagged devices from accessing other tagged devices for security. 
+
+Do not clone SD cards from Pis with Tailscale already configured so you can install that SD card on a new Pi. Each device should be connected to Tailscale individually and not share keys.
 
 Consider installing and using mosh for high-latency cellular connections
 sudo apt install mosh
@@ -537,17 +539,27 @@ Use an appropriate client for your own device.
 
 Helpful when using a system interactively for data collection: https://github.com/filebrowser/Filebrowser
 
+Install, then run:
+
+```
+filebrowser config init 
+filebrowser users add USER PASSWORD
+filebrowser config set --address 0.0.0.0
+```
+
+Then you can create a SystemD service like the example in the config directory. Move it to /etc/systemd/system, run `sudo systemctl daemon-reload` and `sudo systemctl enable --now filebrowser` to run.
+
 ### Remote Video Streaming
 
 with libcamera-apps-lite installed run:
 
-libcamera-vid -t 0 --inline --listen -o tcp://0.0.0.0:8888
+`libcamera-vid -t 0 --inline --listen -o tcp://0.0.0.0:8888`
 
 On your machine connected to the Pi (over Tailscale or directly) use VLC to stream the video using 'open network stream' and enter tcp/h264://PI_ADDRESS_OR_HOSTNAME:8888 with the appropriate IP address and port number. 
 
 ### Pytorch
 
-pip install torch torchvision (in the venv)
+`pip install torch torchvision` (in the venv)
 
 old model based on FloodNet data set and DeepLab
 FloodNet: https://ieeexplore.ieee.org/document/9460988
@@ -558,15 +570,15 @@ If you need to clone/copy a Pi microSD card:
 
 on a Linux/*nix system use dd to copy the entire device. Make sure you have enough free space first. Use lsblk to determine the location of the SD card. Clone the entire disk, not a partition.
 
-sudo dd bs=4M if=/dev/mmcblk0 of=sd_clone conv=fsync status=progress
+`sudo dd bs=4M if=/dev/mmcblk0 of=sd_clone conv=fsync status=progress`
 
 You might need to run dd with sudo if your user account does not have access to the SD device. Change the owner of the new file if so.
 
 If you only want the image as a backup or won't be flashing new SD cards with it for a while, use PiShrink to save some space: https://github.com/Drewsif/PiShrink
 
-sudo pishrink.sh -a -Z image_file
+`sudo pishrink.sh -a -Z image_file`
 
-For creating new SD cards with the file you copied use dd as above but with the input and output reversed to write to a blank SD card. Always check you are writing to the correct device when you use dd. For more information on this: https://www.pragmaticlinux.com/2020/12/how-to-clone-your-raspberry-pi-sd-card-in-linux/ 
+For creating new SD cards with the file you copied use dd as above but with the input and output reversed to write to a blank SD card. ALWAYS check you are writing to the correct device when you use dd. For more information on this: https://www.pragmaticlinux.com/2020/12/how-to-clone-your-raspberry-pi-sd-card-in-linux/ 
 
 ## Manual Data Collection
 
