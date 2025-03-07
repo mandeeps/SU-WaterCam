@@ -8,6 +8,7 @@ from os import path, makedirs, chdir
 from datetime import datetime
 from picamera2 import Picamera2
 from gpiozero import LED
+import add_metadata
 
 logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s',
     encoding='utf-8', level=logging.DEBUG)
@@ -29,6 +30,8 @@ def take_photo(directory: str, nir: str) -> str:
         picam2.start_and_capture_file(image, show_preview=False)
     except Exception:
         logging.error("Camera failed to capture")
+
+    add_metadata(image)
     return image
 
 def main(filepath: str) -> str:
@@ -36,6 +39,9 @@ def main(filepath: str) -> str:
     directory = path.join(filepath, date)
     if not path.exists(directory):
         makedirs(directory)   
+
+    # get IMU and GPS data if available to add to photos
+    
 
     # Adjust GPIO as appropriate. We are using GPIO 21, pin 40
     pin = LED(21)
