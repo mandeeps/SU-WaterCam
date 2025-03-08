@@ -2,16 +2,41 @@
 dtparam=i2c_arm=on
 dtparam=i2s=on
 dtparam=spi=on
+dtparam=i2c1=on
 
 # Disable audio
 dtparam=audio=off
 
-# Disable DRM VC4 V3D driver so we can disable HDMI with tvservice -o
-#dtoverlay=vc4-fkms-v3d
+# Specify camera sensor to speed up boot
+camera_auto_detect=0
+dtoverlay=ov5647
 
+# Disable display detection to speed up boot
+# Comment out if you want a display for debugging
+display_auto_detect=0
+
+# Specify minimum RAM for GPU
+gpu_mem=32
+
+# Disable splash screen and boot option selection delay
+disable_splash=1
+boot_delay=0
+
+# Enable DRM VC4 V3D driver - Note HDMI is disabled for power savings
+# Remove 'nohdmi' option if you need HDMI output for debugging
+dtoverlay=vc4-kms-v3d,cma-320,nohdmi
+
+# Run in 64-bit mode
+arm_64bit=1
+
+# Run as fast as firmware / board allows
+arm_boost=1
+
+# serial terminal access
 enable_uart=1
 
 # Disable wireless
+# Comment out if you need wireless during debugging
 dtoverlay=disable-wifi
 dtoverlay=disable-bt
 dtoverlay=pi3-disable-wifi
@@ -24,10 +49,12 @@ dtparam=pwr_led_trigger=none
 dtparam=pwr_led_activelow=off
 dtparam=eth_led0=14
 dtparam=eth_led1=14
-dtparam=i2c1=on
+
+# enable alt UARTs to connect to mDot without interfering with WittyPi
+dtoverlay=uart5
 dtoverlay=pi3-miniuart-bt
 dtoverlay=miniuart-bt
 core_freq=250
 
 # I2C clock stretching for BNO055 IMU
-dtparam=i2c_arm_baudrate=10000
+dtparam=i2c_arm_baudrate=400000
