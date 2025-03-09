@@ -1,7 +1,9 @@
 #!/usr/bin/env python
-# Take two photos with Dorhea IR-Cut camera
-# one with NIR filter in place and one without
+# Take two photos with Dorhea IR-Cut Camera
+# One with NIR filter in place and one without
 # Set GPIO HIGH to include NIR in the red band and LOW for normal photo
+# Call add_metadata to get info from IMU and GPS
+# Run lepton and capture binaries to save data from Flir in same directory
 
 import logging
 from os import path, makedirs, chdir
@@ -31,17 +33,27 @@ def take_photo(directory: str, nir: str) -> str:
     except Exception:
         logging.error("Camera failed to capture")
 
+    # get IMU and GPS data and save into image EXIF and XMP
     add_metadata(image)
     return image
+
+def flir(directory):
+    # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
+    chdir(directory)
+    try:
+        subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True)
+    except:
+        logging.error("Check Lepton state - capture failed")
+    try:
+        subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True)
+    except:
+        logging.error("Check Lepton state - radiometery failed")
 
 def main(filepath: str) -> str:
     date = datetime.now().strftime('%Y%m%d-%H%M')
     directory = path.join(filepath, date)
     if not path.exists(directory):
         makedirs(directory)   
-
-    # get IMU and GPS data if available to add to photos
-    
 
     # Adjust GPIO as appropriate. We are using GPIO 21, pin 40
     pin = LED(21)
@@ -64,16 +76,9 @@ if __name__ == '__main__':
     else:
         filepath = "/home/pi/SU-WaterCam/images/"
 
+    # take photos: optical and NIR
     name, directory = main(filepath)
-    print(f"Photo: {name}")
 
-    # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
-    chdir(directory)
-    try:
-        subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True)
-    except:
-        logging.error("Check Lepton state - capture failed")
-    try:
-        subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True)
-    except:
-        logging.error("Check Lepton state - radiometery failed")
+    print(f"Photo: {name}")
+    # take FLIR photo and get temperature data from Lepton
+    flir(directory)

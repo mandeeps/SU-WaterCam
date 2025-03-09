@@ -1,0 +1,14 @@
+[Unit]
+Description=Run main Watercam Python script (non TTPython variant)
+Requires=network-online.target 
+After=network-online.target
+
+[Service]
+User=pi
+Group=pi
+Type=idle
+WorkingDirectory=/home/pi/SU-WaterCam
+ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/tools/watercam.py
+
+[Install]
+WantedBy=multi-user.target

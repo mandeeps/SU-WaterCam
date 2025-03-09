@@ -9,6 +9,7 @@ import piexif
 import piexif.helper
 from libxmp import XMPFiles, consts
 import bn055_imu
+import gpsd2
 
 # setup
 logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s', encoding='utf-8', level=logging.DEBUG)

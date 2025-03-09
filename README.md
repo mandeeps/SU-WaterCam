@@ -206,6 +206,15 @@ Install: sudo sh install.sh
 Shutdown the Pi, install the WittyPi onto the Pi using the extended headers
 Reboot, then run wittyPi.sh from the wittypi directory to configure the schedule.
 
+Install doas with `sudo apt install doas -y`
+
+Create /etc/doas.conf and add:
+
+`permit nopass <username> cmd reboot
+permit nopass <username> cmd shutdown`
+
+We will run `doas shutdown` to power down the Pi in a script that is run as a non-root user. This lets us save power by turning off the Pi after it has completed its tasks and we can turn it back on at a regular interval with the WittyPi schedule.
+
 Remove uwi since we will not be using it: sudo systemctl disable uwi, then rm the uwi directory.
 
 ### SU-WaterCam software setup from scratch
@@ -441,7 +450,7 @@ CLK pin on the Pi (pin #23) will connect to pin D on the breakout
 
 CS pin (pin #24, right across from CLK, aka CE0, GPIO 8) connects to pin 5 on the breakout board
 
-The VSYNC pin is Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board.
+The VSYNC pin is Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board - TODO this is also used by the WittyPi 4 and we need to check if that is an issue.
 
 Reset pin on the breakout is pin I following the convention declared above. Connect it to an arbritrary GPIO pin on Pi that is set high by default (options are 0-8)
 
@@ -510,7 +519,7 @@ Stop bits 1
 
 Hardware/software flow control off
 
-For deployment we'll want the mDot to have a separate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data. This will require routing power directly from the WittyPi 4 to the mDot, connecting a GPIO pin on the mDot to a mosfet which triggers the WittyPi switch pin, and modifying the firmware.
+For deployment we'll want the mDot to have a separate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data. This will require routing power directly from the WittyPi 4 using the unpopulated 7 pin header on the WittyPi to the mDot, connecting a GPIO pin on the mDot to a mosfet which triggers the WittyPi switch pin, and modifying the firmware so this can be triggered with a LoRa packet.
 
 ### Solar Power
 
