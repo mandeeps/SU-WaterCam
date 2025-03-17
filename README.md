@@ -105,7 +105,9 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
 Flash the current SD card image file to an unused microSD card: https://github.com/WaterCam-Team/sd-images
 
-You can use the [Raspberry Pi Imager's](https://www.raspberrypi.com/software/) custom OS option to write the image file to a SD card. Simply click "Choose OS", scroll all the way down, select "use custom" and pick the file you downloaded, then click "Choose Storage" and pick your microSD card. You don't need to customize settings or options, just write the image - so select "No" when asked if you want to customize Once it's been written to, you can insert it in a Pi 4B and let it boot. It will automatically expand the filesystem to the full size of the card, so it will take some time on the first boot.
+You can use the [Raspberry Pi Imager's](https://www.raspberrypi.com/software/) custom OS option to write the image file to a SD card. Simply click "Choose OS", scroll all the way down, select "use custom" and pick the file you downloaded, then click "Choose Storage" and pick your microSD card. You don't need to customize settings or options, just write the image - so select "No" when asked if you want to customize Once it's been written to, you can insert it in a Pi 4B and let it boot. It will automatically expand the filesystem to the full size of the card, so it will take some time on the first boot. Do not interrupt this, just let it run.
+
+You can connect to the system using a serial cable. Once it's connected to a network (via nmtui or other) synchronize the time (manually or with wittypi.sh) and change the hostname with `sudo hostnamectl set-hostname NEWNAME`. Verify that the 127.0.0.1 entry in /etc/hosts matches this new hostname and is not still using the base image name. Then you can add the device to Tailscale with an ACL tag: go to Tailscale Admin, click "Add device", select Linux server, add an ACL tag, and generate the install script.
 
 ![](documentation_assets/bcd9d389c7d8c39c88697b759497f1da00b67ebd.png)
 
