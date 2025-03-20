@@ -37,7 +37,7 @@ def main():
     # Once the for loop has finished we should be able to trigger a shutdown
     # Use with a WittyPi schedule that turns the system on regularly
     # I am using "doas shutdown" with a /etc/doas.conf configured for user pi 
-    call("doas shutdown", shell=True)
+    call("doas /usr/sbin/shutdown", shell=True)
 
 if __name__ == "__main__":
     main()
