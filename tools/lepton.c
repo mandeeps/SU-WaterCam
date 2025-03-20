@@ -116,18 +116,18 @@ static void save_pgm_file(void)
         exit(1);
     }
 
-    for(i = 0; i < 240; i++)
+/***    for(i = 0; i < 240; i++)
     {        
         for(j = 0; j < 80; j++)
         {
             if (lepton_image[i][j] > maxval) {
                 maxval = lepton_image[i][j];
             }
-            /*if (lepton_image[i][j] < minval) {
+            if (lepton_image[i][j] < minval) {
                 minval = lepton_image[i][j];
-            }*/
+            }
         }
-    }
+    } **/
     //printf("maxval = %u\n",maxval);
     
     //fprintf(f,"P2\n160 120\n%u\n",maxval); //-minval); For exact temp

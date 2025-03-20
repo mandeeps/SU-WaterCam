@@ -23,7 +23,7 @@ try:
 except Exception:
     logging.error("Camera loading error")
 
-def take_photo(directory: str, nir: str) -> str:   
+def take_photo(directory: str, nir: str) -> str:
     time = datetime.now().strftime('%Y%m%d-%H%M%S')
     image = path.join(directory, f'{time}-NIR-{nir}.jpg')
     print(f'taking photo: {image}')
@@ -34,7 +34,7 @@ def take_photo(directory: str, nir: str) -> str:
         logging.error("Camera failed to capture")
 
     # get IMU and GPS data and save into image EXIF and XMP
-    add_metadata(image)
+    add_metadata.add_metadata(image)
     return image
 
 def flir(directory):
@@ -53,13 +53,13 @@ def main(filepath: str) -> str:
     date = datetime.now().strftime('%Y%m%d-%H%M')
     directory = path.join(filepath, date)
     if not path.exists(directory):
-        makedirs(directory)   
+        makedirs(directory)
 
     # Adjust GPIO as appropriate. We are using GPIO 21, pin 40
     pin = LED(21)
     pin.off()
     print(f"Pin state is: {pin.value}")
-    
+
     basename = take_photo(directory, "OFF")
 
     pin.on()
@@ -67,7 +67,7 @@ def main(filepath: str) -> str:
 
     return basename, directory
 
-    
+
 if __name__ == '__main__':
     import sys
     import subprocess

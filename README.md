@@ -44,7 +44,7 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
 - [Voltaic V50 Battery](https://voltaicsystems.com/v50/) or V75 or other battery
 
-        We are using Voltaic battery packs because they do not auto-shutdown during low power draw, which is important for this system as it will be in low-power mode most of the time and losing power then would prevent it from starting back up. They are intended to be directly charged from 6V solar panels. If using a battery that is not always-on configure the WittyPi to draw more power when idle to avoid losing power.
+        We are using Voltaic battery packs because they do not auto-shutdown during low power draw, which is important for this system as it will be in low-power mode most of the time and losing power then would prevent it from starting back up. They are intended to be directly charged from 6V solar panels using a barrel jack to usb-c (micro for older verions) adapter. If using a battery that is not always-on configure the WittyPi to draw more power when idle to avoid losing power.
 
 - [Solar Panel](https://voltaicsystems.com/10-watt-panel-etfe/) - 6 volt panel if charging Voltaic battery pack directly  
 
@@ -96,6 +96,8 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 - [Serial TTL USB adapter cable](https://www.adafruit.com/product/954) - useful for logging into the Pi before networking has been configured, and for debugging/troubleshooting.
 
 - Drill for creating openings in case for cable gland, antenna sockets (if antennas don't fit in the case or need to be external), and camera aperatures
+
+- microSD reader if you do not have one
 
 ### Setup Raspberry Pi 4 with Flir Camera, IMU, and Quectel Cellular modem+GPS
 
@@ -293,7 +295,7 @@ On the Rapsberry Pi find the CAMERA slot. The other end of the ribbon cable shou
 
 ### WittyPi 4 Setup
 
-Software is already configured on the SD filesystem image. If installing from scratch follow installation instructions for the WittyPi software before installing the WittyPi hardware. Install the heatsink, standoffs, and connect the camera ribbon cable before placing the WittyPi on the GPIO pins. Screw down the hardware so it stays attached.
+Software is already configured on the SD filesystem image. If installing from scratch follow installation instructions for the WittyPi software before installing the WittyPi hardware. Install the heatsink, standoffs, and connect the camera ribbon cable before placing the WittyPi on the GPIO pins. Screw down the hardware so it stays attached. Create a startup script or SystemD service to run the WittyPi network time synchronization when networking is available to get an accurate system time - WittyPi stock software disables Chrony, systemd-timesyncd, etc.,
 
 ![](documentation_assets/7ce15b847e44b105a40b4778baad01e8f0e9f551.jpg)
 
