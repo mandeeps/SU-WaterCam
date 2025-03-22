@@ -63,6 +63,7 @@ def main(filepath: str) -> str:
     basename = take_photo(directory, "OFF")
 
     pin.on()
+    print(f"Pin state is: {pin.value}")
     take_photo(directory, "ON")
 
     return basename, directory

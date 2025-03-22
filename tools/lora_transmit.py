@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 
 import struct
-import sys
 import serial
 
 # Configure the serial port
@@ -59,6 +58,7 @@ def transmit(content):
             ser.close()
 
 if __name__ == "__main__":
+    import sys
     file = sys.argv[1]
     bits = load_file(file)
     transmit(bits)

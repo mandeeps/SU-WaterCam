@@ -2,6 +2,7 @@
 
 # Fatemeh Rezaei
 # https://github.com/rzfatemeh
+# with some edits to allow use as a module 
 
 import cv2
 import os
@@ -12,12 +13,10 @@ import SimpleITK as sitk
 # import tifffile
 import rasterio
 from rasterio.transform import from_origin
-
 # import matplotlib.pyplot as plt
 # import time
 # from cv2 import dnn_superres
 # import matplotlib
-
 
 def mutual_information_registration(fixed_image_path, moving_image_path):
     # Read the fixed (optical) and moving (thermal) images
@@ -87,12 +86,8 @@ def mutual_information_registration(fixed_image_path, moving_image_path):
     )
 
     # Print the final metric value and the optimizer's stopping condition
-    print("Final metric value: {0}".format(registration_method.GetMetricValue()))
-    print(
-        "Optimizer's stopping condition, {0}".format(
-            registration_method.GetOptimizerStopConditionDescription()
-        )
-    )
+    print(f"Final metric value: {registration_method.GetMetricValue()}")
+    print(f"Optimizer's stopping condition, {registration_method.GetOptimizerStopConditionDescription()}")
 
     # Resample the thermal image to align with the fixed image using the final transform
     moving_resampled = sitk.Resample(
@@ -160,102 +155,110 @@ def find_bounding_box(image):
     return int(x_min), int(y_min), int(x_max), int(y_max)
 
 
-# Path to the directory
-base_dir = r"./coreg-test"
+def coreg(directory):
+    # Path to the directory
+    base_dir = directory # r"./coreg-test"
 
-# Get a list of all folder in the base directory
-subdirectories = [
-    os.path.join(base_dir, d)
-    for d in os.listdir(base_dir)
-    if os.path.isdir(os.path.join(base_dir, d))
-]
+# Get a list of all folders in the base directory
+    subdirectories = [
+        os.path.join(base_dir, d)
+        for d in os.listdir(base_dir)
+        if os.path.isdir(os.path.join(base_dir, d))
+    ]
 
 # Loop through each folder and process the image pairs
-for subdirectory in subdirectories:
-    # Get the fixed (optical) and moving (thermal) image filenames
-    nir_on_image_path = None
-    nir_off_image_path = None
-    moving_image_filename = None
-    print(subdirectory)
+    for subdirectory in subdirectories:
+        # Get the fixed (optical) and moving (thermal) image filenames
+        nir_on_image_path = None
+        nir_off_image_path = None
+        moving_image_filename = None
+        print(subdirectory)
 
-    for filename in os.listdir(subdirectory):
-        if filename.endswith("-NIR-OFF.jpg"):
-            nir_off_image_path = os.path.join(subdirectory, filename)
-        elif filename.endswith("-NIR-ON.jpg"):
-            nir_on_image_path = os.path.join(subdirectory, filename)
-        elif filename.endswith(".pgm"):
-            moving_image_filename = filename
+        for filename in os.listdir(subdirectory):
+            if filename.endswith("-NIR-OFF.jpg"):
+                nir_off_image_path = os.path.join(subdirectory, filename)
+            elif filename.endswith("-NIR-ON.jpg"):
+                nir_on_image_path = os.path.join(subdirectory, filename)
+            elif filename.endswith(".pgm"):
+                moving_image_filename = filename
 
-    moving_image_path = os.path.join(subdirectory, moving_image_filename)
+        moving_image_path = os.path.join(subdirectory, moving_image_filename)
 
-    # Convert the PGM image to JPG with proper normalization
-    image = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
-    image_normalized = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
-    image_normalized = image_normalized.astype(np.uint8)
-    jpg_path = os.path.splitext(moving_image_path)[0] + ".jpg"
-    cv2.imwrite(jpg_path, image_normalized)
+        # Convert the PGM image to JPG with proper normalization
+        image = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
+        image_normalized = cv2.normalize(image, None, 0, 255, cv2.NORM_MINMAX)
+        image_normalized = image_normalized.astype(np.uint8)
+        jpg_path = os.path.splitext(moving_image_path)[0] + ".jpg"
+        cv2.imwrite(jpg_path, image_normalized)
 
-    # Save the output images
-    output_filename = f"registered.jpg"
-    cropped_output_filename = f"cropped.jpg"
-    final_image_filename = f"4_band_with_thermal.tif"
-    # final_cropped_filename = f"4_band_with_thermal_cropped.tif"
+        # Save the output images
+        output_filename = f"registered.jpg"
+        cropped_output_filename = f"cropped.jpg"
+        final_image_filename = f"4_band_with_thermal.tif"
+        # final_cropped_filename = f"4_band_with_thermal_cropped.tif"
 
-    if not os.path.exists(output_filename) or not os.path.exists(
-        cropped_output_filename
-    ):
-        # Perform the registration and get the final transform
-        transform, output, cropped_output, four_band = mutual_information_registration(
-            nir_off_image_path, jpg_path
-        )
+        if not os.path.exists(output_filename) or not os.path.exists(
+            cropped_output_filename
+        ):
+            # Perform the registration and get the final transform
+            transform, output, cropped_output, four_band = mutual_information_registration(
+                nir_off_image_path, jpg_path
+            )
 
-        cv2.imwrite(os.path.join(subdirectory, output_filename), output)
-        cv2.imwrite(os.path.join(subdirectory, cropped_output_filename), cropped_output)
-        cv2.imwrite(os.path.join(subdirectory, final_image_filename), four_band)
-        # cv2.imwrite(os.path.join(subdirectory, final_cropped_filename), four_band_cropped)
-        W = four_band.shape[1]
-        H = four_band.shape[0]
+            cv2.imwrite(os.path.join(subdirectory, output_filename), output)
+            cv2.imwrite(os.path.join(subdirectory, cropped_output_filename), cropped_output)
+            cv2.imwrite(os.path.join(subdirectory, final_image_filename), four_band)
+            # cv2.imwrite(os.path.join(subdirectory, final_cropped_filename), four_band_cropped)
+            W = four_band.shape[1]
+            H = four_band.shape[0]
 
-        # extract NIR and add as band
-        NIR = cv2.imread(nir_on_image_path)
-        NIR = cv2.cvtColor(NIR, cv2.COLOR_BGR2RGB)
-        red_channel_NIR = NIR[:, :, 0]
-        without_NIR = cv2.imread(nir_off_image_path)
-        without_NIR = cv2.cvtColor(without_NIR, cv2.COLOR_BGR2RGB)
-        red_channel = without_NIR[:, :, 0]
-        Nir_band = cv2.subtract(red_channel_NIR, red_channel)
-        Nir_band_resized = cv2.resize(Nir_band, (W, H))
-        cv2.imwrite(os.path.join(subdirectory, "NIR band.png"), Nir_band_resized)
+            # extract NIR and add as band
+            NIR = cv2.imread(nir_on_image_path)
+            NIR = cv2.cvtColor(NIR, cv2.COLOR_BGR2RGB)
+            red_channel_NIR = NIR[:, :, 0]
+            without_NIR = cv2.imread(nir_off_image_path)
+            without_NIR = cv2.cvtColor(without_NIR, cv2.COLOR_BGR2RGB)
+            red_channel = without_NIR[:, :, 0]
+            Nir_band = cv2.subtract(red_channel_NIR, red_channel)
+            Nir_band_resized = cv2.resize(Nir_band, (W, H))
+            cv2.imwrite(os.path.join(subdirectory, "NIR band.png"), Nir_band_resized)
 
-        final_five_band = np.dstack((four_band, Nir_band_resized))
-        final_five_band = np.clip(final_five_band, 0, 255).astype(np.uint8)
-        final_five_band_reordered = np.transpose(final_five_band, (2, 0, 1))
+            final_five_band = np.dstack((four_band, Nir_band_resized))
+            final_five_band = np.clip(final_five_band, 0, 255).astype(np.uint8)
+            final_five_band_reordered = np.transpose(final_five_band, (2, 0, 1))
 
-        transform = from_origin(0, 100, 1, 1)  # Adjust as needed
-        final_path = os.path.join(subdirectory, "final_5_band.tif")
+            transform = from_origin(0, 100, 1, 1)  # Adjust as needed
+            final_path = os.path.join(subdirectory, "final_5_band.tif")
 
-        # Save the final 5-band image as a TIFF
-        with rasterio.open(
-            final_path,
-            "w",
-            driver="GTiff",
-            height=final_five_band_reordered.shape[1],
-            width=final_five_band_reordered.shape[2],
-            count=final_five_band_reordered.shape[0],
-            dtype=final_five_band_reordered.dtype,
-            transform=transform,
-        ) as dst:
-            dst.write(final_five_band_reordered)
+            # Save the final 5-band image as a TIFF
+            with rasterio.open(
+                final_path,
+                "w",
+                driver="GTiff",
+                height=final_five_band_reordered.shape[1],
+                width=final_five_band_reordered.shape[2],
+                count=final_five_band_reordered.shape[0],
+                dtype=final_five_band_reordered.dtype,
+                transform=transform,
+            ) as dst:
+                dst.write(final_five_band_reordered)
 
-        print("final_five_band dtype:", final_five_band_reordered.dtype)
+            print("final_five_band dtype:", final_five_band_reordered.dtype)
 
-        # print("final_five_band shape:", final_five_band.shape)
-        #
-        # print("fhbsadkjfbksdbfksdbfjsdbfsdvhfhjsdfvdshvfs")
-        # print(final_five_band[100:110,100:110,4])
-        # print("fhbsadkjfbksdbfksdbfjsdbfsdvhfhjsdfvdshvfs")
-        # print("Min value in final_five_band:", np.mean(final_five_band))
-        # print("Max value in final_five_band:", np.median(final_five_band))
-        # print(final_five_band)
+            # print("final_five_band shape:", final_five_band.shape)
+            #
+            # print("fhbsadkjfbksdbfksdbfjsdbfsdvhfhjsdfvdshvfs")
+            # print(final_five_band[100:110,100:110,4])
+            # print("fhbsadkjfbksdbfksdbfjsdbfsdvhfhjsdfvdshvfs")
+            # print("Min value in final_five_band:", np.mean(final_five_band))
+            # print("Max value in final_five_band:", np.median(final_five_band))
+            # print(final_five_band)
 
-        # tifffile.imwrite(final_path, final_five_band)
+            # tifffile.imwrite(final_path, final_five_band)
+
+
+if __name__ == "__main__":
+    import sys
+    directory = sys.argv[1]
+    print(f"Running coregistration on files in directory: {directory}")
+    coreg(directory)

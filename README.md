@@ -587,7 +587,7 @@ on a Linux/*nix system use dd to copy the entire device. Make sure you have enou
 
 You might need to run dd with sudo if your user account does not have access to the SD device. Change the owner of the new file if so.
 
-If you only want the image as a backup or won't be flashing new SD cards with it for a while, use PiShrink to save some space: https://github.com/Drewsif/PiShrink
+If you only want the image as a backup, want to share it online, or won't be flashing new SD cards with it for a while, use PiShrink to save some space: https://github.com/Drewsif/PiShrink
 
 `sudo pishrink.sh -a -Z image_file`
 
@@ -597,7 +597,7 @@ For creating new SD cards with the file you copied use dd as above but with the 
 
 If you need to take a unit out in the field to collect data you can add a couple of wires to a button to trigger the cameras and use the button-service-gpiozero.py script with GPIO Zero installed: https://github.com/gpiozero/gpiozero 
 
-We are using a simple pushbutton on a perboard with two header cables connected to pin #29 and ground on the Pi. Autostart the script with systemd using the button.service file in the config directory. Copy the button.service file to /etc/systemd/system, then run sudo systemctl daemon-reload, sudo systemctl enable button.service, and sudo systemctl start button.service
+We are using a simple pushbutton on a perfboard with two header cables connected to pin #29 and ground on the Pi. Autostart the script with systemd using the button.service file in the config directory. Copy the button.service file to /etc/systemd/system, then run sudo systemctl daemon-reload, sudo systemctl enable button.service, and sudo systemctl start button.service
 
 ***References and Helpful Resources***
 
@@ -637,11 +637,22 @@ https://www.pureengineering.com/projects/lepton
 
 [GitHub - lukevanhorn/Lepton3: Lepton 3 for the Raspberry Pi](https://github.com/lukevanhorn/Lepton3)
 
+**UUGear WittyPi4**
+
+Alternative implementation using more standard modern Linux subsystems: https://github.com/trackIT-Systems/wittypi4 - will investigate later
+Python interface to WittyPi4: https://github.com/Eagleshot/WittyPi4Python
+
+Note that the stock software disables network time sync software like Chrony, systemd-timesyncd, ntpd, etc.,
+
 **Multitech mDot LoRa module**
 
 https://os.mbed.com/cookbook/Interfacing-with-Python
 
 https://os.mbed.com/cookbook/Interfacing-Using-RPC
+
+With mbed being EoL'd by ARM, consider mbed community edition for future work: https://github.com/mbed-ce
+
+GCC ARM toolchain can be used for mbed in place of ARM CC
 
 **Voltaic Battery**
 

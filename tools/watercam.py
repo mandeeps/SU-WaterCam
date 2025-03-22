@@ -6,17 +6,28 @@ import logging
 import time
 from time import sleep
 from subprocess import call
-import take_nir_photos # has functions for Flir Lepton and IR-CUT cameras
+from subprocess import Popen
+import take_nir_photos # has functions for IR-CUT camera and Lepton
+import coreg_multiple
 
-def main():
+def main(autostart:bool = True):
     # setup
     logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s', encoding='utf-8', level=logging.DEBUG)
     last_print = time.monotonic()
     filepath = "/home/pi/SU-WaterCam/images/"
 
+    segformer_location = "/home/pi/git/segformer_5band"
+    segformer_python = "/home/pi/miniforge3/envs/5band/bin/python"
+    segformer_coreg = "/home/pi/git/segformer_5band/tools/segment_coreg.py"
+
+    # Sync time if network available by calling WittyPi script. WittyPi stock software disables other network time software like Chrony and systemd-timesyncd, so either we do time sync their way or use alternative software for the WittyPi 4 like: https://github.com/trackIT-Systems/wittypi4
+    if autostart:
+        from witty_pi_4 import WittyPi4
+        WittyPi4().sync_time_with_network()
+
     # Delay between iterations
     interval = 15
-    # How many sets of photos to take per iteration
+    # How many sets of photos (1 NIR, 1 RGB, 1 LWIR) to take per boot
     limit = 10
 
     for _ in range(limit):
@@ -31,13 +42,23 @@ def main():
             print(f"Photo: {name}")
             # take FLIR photo and get temperature data from Lepton
             take_nir_photos.flir(directory)
+
+            # call coregistration script on new photos
+            coreg_multiple.coreg(directory)
+            
+            # run 5 band SegFormer on coreg photos 
+            Popen([segformer_python, segformer_coreg], cwd=segformer_location)
+
+            # transmit results
+
         else:
             sleep(interval)
 
+    if autostart:
     # Once the for loop has finished we should be able to trigger a shutdown
     # Use with a WittyPi schedule that turns the system on regularly
     # I am using "doas shutdown" with a /etc/doas.conf configured for user pi 
-    call("doas /usr/sbin/shutdown", shell=True)
+        call("doas /usr/sbin/shutdown", shell=True)
 
 if __name__ == "__main__":
-    main()
+    main(False)
