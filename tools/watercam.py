@@ -26,7 +26,7 @@ def main(autostart:bool = True):
         WittyPi4().sync_time_with_network()
 
     # Delay between iterations
-    interval = 15
+    interval = 31
     # How many sets of photos (1 NIR, 1 RGB, 1 LWIR) to take per boot
     limit = 10
 

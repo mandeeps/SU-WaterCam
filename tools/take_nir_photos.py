@@ -78,8 +78,8 @@ if __name__ == '__main__':
         filepath = "/home/pi/SU-WaterCam/images/"
 
     # take photos: optical and NIR
-    name, directory = main(filepath)
+    nir_off_name, directory = main(filepath)
 
-    print(f"Photo: {name}")
+    print(f"Photo path: {directory}")
     # take FLIR photo and get temperature data from Lepton
     flir(directory)
