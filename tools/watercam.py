@@ -10,7 +10,8 @@ from subprocess import Popen
 import take_nir_photos # has functions for IR-CUT camera and Lepton
 import coreg_multiple
 
-def main(autostart:bool = True):
+def main(autostart:bool = False):
+    print(f"Will Shutdown: {autostart}")
     # setup
     logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s', encoding='utf-8', level=logging.DEBUG)
     last_print = time.monotonic()
@@ -21,38 +22,40 @@ def main(autostart:bool = True):
     segformer_coreg = "/home/pi/git/segformer_5band/tools/segment_coreg.py"
 
     # Sync time if network available by calling WittyPi script. WittyPi stock software disables other network time software like Chrony and systemd-timesyncd, so either we do time sync their way or use alternative software for the WittyPi 4 like: https://github.com/trackIT-Systems/wittypi4
-    if autostart:
-        from witty_pi_4 import WittyPi4
-        WittyPi4().sync_time_with_network()
+#    if autostart:
+    from witty_pi_4 import WittyPi4
+    WittyPi4().sync_time_with_network()
 
     # Delay between iterations
-    interval = 31
+    interval = 60
     # How many sets of photos (1 NIR, 1 RGB, 1 LWIR) to take per boot
-    limit = 10
+    limit = 5
 
     for _ in range(limit):
         current = time.monotonic()
         # only proceed to recording data if past interval time
-        if current - last_print >= interval:
-            last_print = current
+        #if current - last_print >= interval:
+        #    last_print = current
 
             # take photos: optical and NIR
-            name, directory = take_nir_photos.main(filepath)
+        name, directory = take_nir_photos.main(filepath)
 
-            print(f"Photo: {name}")
+        print(f"Photo: {name}")
             # take FLIR photo and get temperature data from Lepton
-            take_nir_photos.flir(directory)
+        print("Take Flir captures")
+        take_nir_photos.flir(directory)
 
             # call coregistration script on new photos
-            coreg_multiple.coreg(directory)
+        print("Run coreg")
+        coreg_multiple.coreg(directory)
             
             # run 5 band SegFormer on coreg photos 
-            Popen([segformer_python, segformer_coreg], cwd=segformer_location)
+        Popen([segformer_python, segformer_coreg], cwd=segformer_location)
 
             # transmit results
 
-        else:
-            sleep(interval)
+        #else:
+        sleep(interval)
 
     if autostart:
     # Once the for loop has finished we should be able to trigger a shutdown
@@ -61,4 +64,5 @@ def main(autostart:bool = True):
         call("doas /usr/sbin/shutdown", shell=True)
 
 if __name__ == "__main__":
-    main(False)
+    import sys
+    main(sys.argv[1])

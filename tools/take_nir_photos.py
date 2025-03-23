@@ -11,6 +11,7 @@ from datetime import datetime
 from picamera2 import Picamera2
 from gpiozero import LED
 import add_metadata
+import subprocess
 
 logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s',
     encoding='utf-8', level=logging.DEBUG)
@@ -71,7 +72,7 @@ def main(filepath: str) -> str:
 
 if __name__ == '__main__':
     import sys
-    import subprocess
+    
     if len(sys.argv) > 1:
         filepath = sys.argv[1]
     else:
