@@ -607,6 +607,8 @@ https://pinout.xyz/
 
 **Flir Lepton**
 
+Lepton 3.5 with radiometery: 56° HFOV, 71° diagonal (f/1.1 silicon doublet)
+
 [Home · groupgets/LeptonModule Wiki · GitHub](https://github.com/groupgets/LeptonModule/wiki)
 
 [Flir Lepton Thermal Camera Breakout | Hackaday.io](https://hackaday.io/project/3000-flir-lepton-thermal-camera-breakout)
@@ -661,3 +663,13 @@ GCC ARM toolchain can be used for mbed in place of ARM CC
 **Quectel Cellular Modem**
 
 **IR CUT Camera**
+
+Our (OV5647 sensor) camera stats: 
+
+CCD size: 1/4 inch
+
+Aperture(F): 1.8
+
+Focal Length: 3.6 mm (adjustable)
+
+Field of View: 72 degrees
