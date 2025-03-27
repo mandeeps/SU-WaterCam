@@ -132,13 +132,13 @@ Use a serial cable to connect to the console and use sudo raspi-config to config
 
 https://learn.adafruit.com/adafruits-raspberry-pi-lesson-5-using-a-console-cable/software-installation-windows
 
-Witihin raspi-config, leave GPU memory at the default of 32 MB, PiCamera2 will not need more and the camera will not work with less.
+Pi Zero: within raspi-config, leave GPU memory at the default of 32 MB, PiCamera2 will not need more and the camera will not work with less.
 
 Use sudo nmtui to configure the ethernet connection to a static IP, with your computer IP as the gateway and DNS server if you are sharing your Internet connection with the Pi. Otherwise configure for whatever network setup you have.
 
 Now you can use ssh to login to the Pi after connecting it to your computer with an ethernet cable. Connection sharing can be setup using Network Manager on a Linux computer, or Windows Connection sharing, or the macOS equivalent.
 
-Once you've logged in and are sharing an internet connection from your computer to the Pi, run sudo apt update and sudo apt upgrade
+Once you've logged in and have an internet connection on the Pi, run `sudo apt update` and `sudo apt upgrade`
 
 Verify the Pi is on the latest firmware with `rpi-eeprom-update`.
 
@@ -168,37 +168,43 @@ dtparam=eth_led1=14
 
 dtparam=audio=off
 
-###### disable wireless, we won't use WiFi or Bluetooth past setup
+###### disable wireless - Obviously leave this out if you are using Wifi on the Pi
 
 dtoverlay=disable-wifi
 dtoverlay=disable-bt
 dtoverlay=pi3-disable-wifi
 dtoverlay=pi3-disable-bt
 
-###### I2C clock stretching for BNO055 IMU
+###### I2C clock stretching for BNO055 IMU - only set this if there are issues with the BNO IMU
 
 dtparam=i2c_arm_baudrate=10000
 
-###### Add to /boot/cmdline.txt - Flir Lepton SPI settings
+###### Pi Zero: add to /boot/cmdline.txt - Flir Lepton SPI settings
 
 spidev.bufsiz=131072
 
 ###### SD Card settings
 
-Disable swap and set noatime to prolong SD card life: `sudo swapoff --all`, `sudo apt purge dphys-swapfile`.
+Disable swap and set noatime to prolong SD card life by decreasing writes: `sudo swapoff --all`, `sudo apt purge dphys-swapfile`.
 
 Add `noatime,commit=60` settings to ext4 partitions in /etc/fstab - noatime prevents writing access times to files, commit collects and delays writes to every N seconds. Data loss will be limited to the last N seconds of writes if power is lost. Do NOT change the /boot partition settings, it is a vfat filesystem and these options will not work and will cause the Pi to not boot.
 
 Set temp directories like /tmp, /var/tmp to mount in RAM, ex. `tmpfs /var/tmp tmpfs nodev,nosuid,size=20M 0 0` in fstab
 
-Use a larger SD card size than needed so you have free space for automatic wear-leveling (is this a thing on cheap SD cards?)
+Other options include logging to a USB drive, or setting the SD to write-protected and using a USB drive for all write operations.
+
+Use a larger SD card size than needed so you have free space for automatic wear-leveling (is this a thing on cheap SD cards?) 
+
+Industrial or "high endurance" cards should offer better durability. SLC flash would be ideal but is expensive.
 
 ##### Optional Tweaks
 
 You can disable services we won't be needing to speed up boot slightly (~3s)
-sudo systemctl disable man-db.timer wpa_supplicant keyboard-setup triggerhappy
+sudo systemctl disable man-db.timer keyboard-setup triggerhappy
 
-If there are issues with taking high-resolution images use the vc4-kms-v3d driver with options: dtoverlay=vc4-kms-v3d,cma-320
+If you are not using wifi you could also disable wpa_supplicant
+
+Outdated (Bullseye specific): If there are issues with taking high-resolution images use the vc4-kms-v3d driver with options: dtoverlay=vc4-kms-v3d,cma-320
 
 Can also add nohdmi to the vc4-kms-v3d line to disable HDMI ports and save ~30mA
 
@@ -235,7 +241,7 @@ Make sure picamera2 is installed as system package, not through pip
 
 Create a virtual environment with `python -m venv --system-site-packages /home/pi/SU-WaterCam/venv`, (we use system-site-packages to copy over pandas and other installed modules)
 activate with `source /home/pi/SU-WaterCam/venv/bin/activate`, and then install modules with `pip install -r /home/pi/SU-WaterCam/requirements.txt`
-or manually with `pip install compress_pickle adafruit-blinka gpiozero piexif py-gpsd2 python-xmp-toolkit`
+or manually with `pip install compress_pickle adafruit-blinka gpiozero piexif py-gpsd2 python-xmp-toolkit` and other contents of requirements.txt
 
 Set default Python to the venv by adding 'source /home/pi/SU-WaterCam/venv/bin/activate' to the end of your .bashrc file.
 
@@ -269,7 +275,7 @@ Apply silicone sealant to all openings into case, and install LWIR transmission 
 
 ### Optical Camera
 
-Desolder the photo resistor/light sensor from the Dorhea IR-CUT camera. You could remove it by snipping the two leads that connect it to the board, or apply heat with a soldering iron to the two leads and use a solder sucker or solder wick to detach them. 
+Remove the photo resistor (light sensor) from the Dorhea IR-CUT camera. You could remove it by snipping the two leads that connect it to the board, or apply heat with a soldering iron to the two leads and use a solder sucker or solder wick to detach them. 
 
 Solder a wire so the IR filter can be manually controlled by the Pi. The wire is soldered to the third point from the bottom of the camera on the backside and connected to pin #40 on the Pi for use with the take_nir_photos.py script.
 
@@ -440,7 +446,7 @@ Wiring diagram: ![](documentation_assets/3d352206a6508c0c4cf506a1cf869aee435c160
 
 Because we need I2C for other peripherals, use splitter cables for the two I2C pins (SDA and SCL) on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU. Another pair of split cables is useful for 3.3V and ground.
 
-Split cables for I2C or power: ![](documentation_assets/7e29c180907652779bcfb4910261e28d7ace73b9.jpg)
+Split Y cables for I2C or power: ![](documentation_assets/7e29c180907652779bcfb4910261e28d7ace73b9.jpg)
 
 The SDA pin on the Pi (pin #3) will connect to pin C on the breakout board (side away from you) - use a splitter
 
