@@ -5,7 +5,8 @@ Description=Python script to perform an action on button press - like taking pho
 User=pi
 Group=pi
 Type=idle
-ExecStart=/home/pi/SU-WaterCam/button-service-gpiozero.py
+WorkingDirectory=/home/pi/SU-WaterCam
+ExecStart=/home/pi/SU-WaterCam/venv/bin/python3 /home/pi/SU-WaterCam/button-service-gpiozero.py
 
 [Install]
 WantedBy=multi-user.target

@@ -462,6 +462,8 @@ CS pin (pin #24, right across from CLK, aka CE0, GPIO 8) connects to pin 5 on th
 
 The VSYNC pin is Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board - TODO this is also used by the WittyPi 4 and we need to check if that is an issue.
 
+NOTE: it is not strictly necessary to connect I2C to use the Lepton 
+
 Reset pin on the breakout is pin I following the convention declared above. Connect it to an arbritrary GPIO pin on Pi that is set high by default (options are 0-8)
 
 I am using GPIO 6 (pin 31 on the Pi) in the lepton_reset.py script. We need a pin that is high by default because the breakout board reset triggers on low.

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/pi/SU-WaterCam/venv/bin/python3
 
 # This version uses GPIO Zero instead of the RPi.GPIO library
 

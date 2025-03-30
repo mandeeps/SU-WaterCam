@@ -15,7 +15,7 @@ dtoverlay=ov5647
 # Comment out if you want a display for debugging
 display_auto_detect=0
 
-# Specify minimum RAM for GPU
+# Specify minimum RAM for GPU - camera needs 32 MB
 gpu_mem=32
 
 # Disable splash screen and boot option selection delay
@@ -60,3 +60,4 @@ core_freq=250
 # https://learn.adafruit.com/circuitpython-on-raspberrypi-linux/i2c-clock-stretching
 # 400,000 stock. 10,000 if there are issues with BNO IMU
 dtparam=i2c_arm_baudrate=400000
+
