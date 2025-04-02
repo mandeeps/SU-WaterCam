@@ -6,13 +6,13 @@
 # spawning another Python process and starting PiCamera2 every time photos are
 # taken. This is helpful on the Pi Zero
 
-import subprocess
-from gpiozero import Button
-from signal import pause
 from os import path, makedirs, chdir
 from datetime import datetime
+import subprocess
+from signal import pause
 from picamera2 import Picamera2
 from gpiozero import LED
+from gpiozero import Button
 
 filepath = "/home/pi/SU-WaterCam/images/"
 
@@ -20,7 +20,7 @@ try:
     picam2 = Picamera2()
     config = picam2.create_still_configuration(main={"format": "RGB888", "size": (2592,1944)})
     picam2.configure(config)
-    # picam2.start() -- do not start outside start_and_capture function as this interferes with Flir Lepton! (for some reason I don't understand)
+    # picam2.start() -- do not start outside start_and_capture, interferes with Flir Lepton
 except Exception:
     print("Camera loading error")
 
@@ -44,14 +44,17 @@ def flir(directory):
     # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
     chdir(directory)
     try:
-        subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True)
-    except:
+        subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True, timeout=20)
+    except subprocess.TimeoutExpired:
         print("Check Lepton state - capture failed")
-    try:
-        subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True)
-    except:
-        print("Check Lepton state - radiometery failed")
+        subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
 
+    try:
+        subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        print("Check Lepton state - radiometery failed")
+        subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
+        
 def photos(filepath: str) -> str:
     date = datetime.now().strftime('%Y%m%d-%H%M')
     directory = path.join(filepath, date)
