@@ -315,7 +315,6 @@ Do not forget the standoffs or the heatsink.
 
 ![](documentation_assets/af0f806f363bde1f74ca0b620472bda475cecb96.jpg)
 
-
 ### Quectel EC25 Modem and GPS
 
 Install the miniPCIE card into the USB adapter. The mini PCIE card is the component on top and the USB adapter is the component on the bottom of this image:
@@ -442,7 +441,7 @@ Image by Kaitlyn Gilmore (https://github.com/kmgmore)
 
 We can use the top pin of the two pins without jumpers on the back of the board (side towards you right now) for ground. In other words, the pin with nothing covering it that is closest to the white ZIF socket towards the top is the ground pin, so connect it to the ground pin on the Pi.
 
-Wiring diagram: ![](documentation_assets/3d352206a6508c0c4cf506a1cf869aee435c1609.png)
+Wiring diagram: ![](documentation_assets/0a718f94c73913a869e2781ee76c43f7fe2155cb.png)
 
 Because we need I2C for other peripherals, use splitter cables for the two I2C pins (SDA and SCL) on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU. Another pair of split cables is useful for 3.3V and ground.
 
@@ -450,7 +449,7 @@ Split Y cables for I2C or power: ![](documentation_assets/7e29c180907652779bcfb4
 
 The SDA pin on the Pi (pin #3) will connect to pin C on the breakout board (side away from you) - use a splitter
 
-The SCL pin on the Pi (pin #5) will connect to pin 4 on the breakout board (side towards you) - use a splitter
+The SCL pin on the Pi (pin #5) will connect to pin 4 on the breakout board (side towards you) - use a splitter - image has been corrected to match this
 
 MOSI on the Pi (pin #19) connects to pin E on the breakout
 
@@ -512,8 +511,6 @@ To do this manually: add dtoverlay=uart5 to /boot/config.txt on a Pi 4 so we can
 The power pin (VOD, pin # 1) on the mDot can be connected to the 5V or 3.3V power pin on the Pi. Connect ground (pin 10 on the mDot) to a free ground pin. Connect the mDot UART TX (transmit, pin #2) to the Pi RX (receive) pin (pin #33 if using uart5), and the mDot RX pin (#3) to the Pi TX pin (pin #32 using uart5).
 
 On the Pi run tio /dev/ttyAMA1 and issue AT commands to control the mDot, see the mDot AT reference document in the instructions directory. For example, "ATI" will tell you the installed firmware version.
-
-
 
 if using minicom or screen:
 
@@ -589,7 +586,7 @@ FloodNet: https://ieeexplore.ieee.org/document/9460988
 
 If you need to clone/copy a Pi microSD card:
 
-on a Linux/*nix system use dd to copy the entire device. Make sure you have enough free space first. Use lsblk to determine the location of the SD card. Clone the entire disk, not a partition.
+on a Linux/*nix system use dd to copy the entire device. Make sure you have enough free space first. Use lsblk to determine the location of the SD card! Clone the entire disk, not a partition.
 
 `sudo dd bs=4M if=/dev/mmcblk0 of=sd_clone conv=fsync status=progress`
 
