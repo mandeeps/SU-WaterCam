@@ -41,14 +41,16 @@ def take_photo(directory: str, nir: str) -> str:
 def flir(directory):
     # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
     chdir(directory)
+     try:
+        subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        print("Check Lepton state - capture failed")
+        subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
     try:
-        subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True)
-    except:
-        logging.error("Check Lepton state - capture failed")
-    try:
-        subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True)
-    except:
-        logging.error("Check Lepton state - radiometery failed")
+        subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True, timeout=20)
+    except subprocess.TimeoutExpired:
+        print("Check Lepton state - radiometery failed")
+        subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
 
 def main(filepath: str) -> str:
     date = datetime.now().strftime('%Y%m%d-%H%M')
