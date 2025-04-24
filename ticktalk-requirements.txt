@@ -1,0 +1,12 @@
+astor # optional assistance in compilation
+astunparse
+# apt install libgraphviz
+pygraphviz # conda requires 'conda install --channel conda-forge pygraphviz' and 'pydot' as well
+intervaltree
+networkx # for DFG viewing
+matplotlib # optional visualization
+multiprocess
+requests # required for HTTP post output (if not storing output in a log)
+simpy # conda install -c conda-forge simpy/conda install conda-forge::simpy
+sphinx_rtd_theme # used to create the docs
+timedinput # needs pip install
