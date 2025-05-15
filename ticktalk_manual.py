@@ -1,6 +1,6 @@
 from take_nir_photos import flir, take_two_photos
 
-@SQify
+@STREAMify
 def get_time(trigger):
     from datetime import datetime
     from os import path, makedirs
@@ -36,7 +36,7 @@ def ttmain(trigger):
     with TTClock.root() as root_clock:
        # main(trigger, "/home/pi")
        #x = test(trigger)
-       dirname = get_time(trigger, TTClock=root_clock, TTPeriod=10_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000)
+       dirname = get_time(trigger)
        x = take_two_photos(trigger, dirname)
        lepton = flir(dirname)
        y = call_shutdown(lepton, x)
