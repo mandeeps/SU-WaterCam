@@ -666,7 +666,7 @@ def main(trigger):
         #image = take_photo(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000)
 
         #        image = TTFinishByOtherwise(take_photo(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=image_planb(), TTWillContinue=False)
-        images = TTFinishByOtherwise(take_two_photo(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=image_planb(), TTWillContinue=False)
+        images = TTFinishByOtherwise(take_two_photos(sample_window, TTClock=root_clock, TTPeriod=3000000, TTPhase=0, TTDataIntervalWidth=250000), TTTimeDeadline=timestamp + timeout_val, TTPlanB=image_planb(), TTWillContinue=False)
 
         # Call lepton and capture sequentially to get temperature and IR image
         # from Flir Lepton
