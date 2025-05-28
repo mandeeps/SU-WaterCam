@@ -42,7 +42,7 @@ def take_photo(directory: str, nir: str) -> str:
 def flir(directory):
     # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
     chdir(directory)
-     try:
+    try:
         subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True, timeout=20)
     except subprocess.TimeoutExpired:
         print("Check Lepton state - capture failed")
