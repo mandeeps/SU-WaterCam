@@ -72,7 +72,7 @@ def take_two_photos(trigger, directory):
     from picamera2 import Picamera2
     from gpiozero import LED
 #    from .tools import add_metadata
-    from take_nir_photos import take_photo
+    from tt_take_photos import take_photo
     import sys
     sys.path.insert(0, "/home/pi/SU-WaterCam/tools")
 
