@@ -43,18 +43,18 @@ def flir(directory):
     # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
     chdir(directory)
     try:
-        subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True, timeout=20)
+        subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True, timeout=5)
     except subprocess.TimeoutExpired:
         print("Check Lepton state - capture failed")
         subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
     try:
-        subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True, timeout=20)
+        subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True, timeout=5)
     except subprocess.TimeoutExpired:
         print("Check Lepton state - radiometery failed")
         subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
 
 def main(filepath: str) -> str:
-    date = datetime.now().strftime('%Y%m%d-%H%M')
+    date = datetime.now().strftime('%Y%m%d-%H%M%S')
     directory = path.join(filepath, date)
     if not path.exists(directory):
         makedirs(directory)

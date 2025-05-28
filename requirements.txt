@@ -17,3 +17,4 @@ adafruit-circuitpython-ahtx0
 # coreg script
 rasterio
 simpleitk
+tifffile
