@@ -1,4 +1,5 @@
-#!/usr/bin/env python
+#!/home/pi/SU-WaterCam/venv/bin/python
+
 # Take two photos with Dorhea IR-Cut Camera
 # One with NIR filter in place and one without
 # Set GPIO HIGH to include NIR in the red band and LOW for normal photo
@@ -74,7 +75,6 @@ def main(filepath: str) -> str:
 
 if __name__ == '__main__':
     import sys
-    
     if len(sys.argv) > 1:
         filepath = sys.argv[1]
     else:
