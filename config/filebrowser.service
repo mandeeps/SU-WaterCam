@@ -1,0 +1,14 @@
+[Unit]
+Description=Filebrowser for accessing WaterCam files
+Requires=network-online.target 
+After=network-online.target
+
+[Service]
+User=pi
+Group=pi
+Type=idle
+WorkingDirectory=/home/pi
+ExecStart=/home/pi/filebrowser -r SU-WaterCam/images
+
+[Install]
+WantedBy=multi-user.target
