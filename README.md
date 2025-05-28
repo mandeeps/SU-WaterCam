@@ -441,7 +441,9 @@ Image by Kaitlyn Gilmore (https://github.com/kmgmore)
 
 We can use the top pin of the two pins without jumpers on the back of the board (side towards you right now) for ground. In other words, the pin with nothing covering it that is closest to the white ZIF socket towards the top is the ground pin, so connect it to the ground pin on the Pi.
 
-Wiring diagram: ![](documentation_assets/0a718f94c73913a869e2781ee76c43f7fe2155cb.png)
+Wiring diagram: 
+
+![](documentation_assets/0a718f94c73913a869e2781ee76c43f7fe2155cb.png)
 
 Because we need I2C for other peripherals, use splitter cables for the two I2C pins (SDA and SCL) on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU. Another pair of split cables is useful for 3.3V and ground.
 
