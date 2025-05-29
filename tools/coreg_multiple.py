@@ -223,14 +223,14 @@ def coreg(directory):
         ) as dst:
             dst.write(final_five_band_reordered)
 
-        print("final_five_band dtype:", final_five_band_reordered.dtype)
+#        print("final_five_band dtype:", final_five_band_reordered.dtype)
 
-        print("final_five_band shape:", final_five_band.shape)
+#        print("final_five_band shape:", final_five_band.shape)
         
-        print(final_five_band[100:110,100:110,4])
-        print("Min value in final_five_band:", np.mean(final_five_band))
-        print("Max value in final_five_band:", np.median(final_five_band))
-        print(final_five_band)
+#        print(final_five_band[100:110,100:110,4])
+#        print("Min value in final_five_band:", np.mean(final_five_band))
+#        print("Max value in final_five_band:", np.median(final_five_band))
+#        print(final_five_band)
 
         tifffile.imwrite(final_path, final_five_band)
 

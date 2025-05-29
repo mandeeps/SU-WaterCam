@@ -8,7 +8,14 @@ from fractions import Fraction
 import piexif
 import piexif.helper
 from libxmp import XMPFiles, consts
-import bno055_imu
+
+try:
+    import bno055_imu
+except ImportError:
+    print("BNO055 import issue")
+except:
+    print("BNO055 hardware issue")
+
 import gpsd2
 
 # setup
