@@ -9,76 +9,98 @@
  * @returns {{data: object}} Object representing the decoded payload.
  */
 function decodeUplink(input) {
-
   const bytes = input.bytes;
   const view = new DataView(Uint8Array.from(bytes).buffer);
   let offset = 0;
 
-  const schema = {
-    '00-01': { type: 'uint32', name: 'timestamp' },
-    '01-04': { type: 'uint32', name: 'emergency_status' },
-    '01-05': { type: 'uint32', name: 'health_status' },
-    '01-06': { type: 'uint32', name: 'movement_threshold' },
-    '02-01': { type: 'uint32', name: 'battery_percent' },
-    '03-01': { type: 'float3', name: 'tilt_roll_yaw' },
-    '04-01': { type: 'float3', name: 'lat_lon_z' },
-    '05-01': { type: 'float',  name: 'temperature_celsius' },
-    '06-01': { type: 'uint32', name: 'relative_humidity_percent' },
-    '07-17': { type: 'uint32', name: 'camera_flood_detected' },
-    '07-27': { type: 'uint32', name: 'camera_flood_growing' },
-    '08-18': { type: 'blob',   name: 'flood_bitmap_compressed' },
-    '09-19': { type: 'uint32', name: 'status_area_threshold' },
-    '09-29': { type: 'uint32', name: 'stage_threshold' },
-    '09-39': { type: 'uint32', name: 'monitoring_frequency' },
-    '09-49': { type: 'uint32', name: 'emergency_frequency' },
-    '09-59': { type: 'uint32', name: 'neighborhood_emergency_frequency' },
-  };
-
   const result = {};
 
   while (offset < view.byteLength) {
-    if (offset + 2 > view.byteLength) break;
-
     const channel = view.getUint8(offset++);
     const type = view.getUint8(offset++);
-    const key = `${channel.toString(16).padStart(2, '0')}-${type.toString(16).padStart(2, '0')}`;
-    const def = schema[key];
+    const key = `${channel.toString(16)}-${type.toString(16)}`;
 
-    if (!def) {
-      result[`unknown_${channel}_${type}`] = 'unrecognized field';
-      break;
-    }
-
-    let value;
-
-    if (def.type === 'uint32') {
-      value = view.getUint32(offset, false); offset += 4;
-    } else if (def.type === 'float') {
-      value = view.getFloat32(offset, false); offset += 4;
-    } else if (def.type === 'float3') {
-      value = [
-        view.getFloat32(offset, false),
-        view.getFloat32(offset + 4, false),
-        view.getFloat32(offset + 8, false)
-      ];
-      offset += 12;
-    } else if (def.type === 'blob') {
-      const len = view.getUint16(offset, false);
-      offset += 2;
-      const blob = [];
-      for (let i = 0; i < len; i++) {
-        blob.push(view.getUint8(offset++));
+    switch (key) {
+      case '0-1':
+        result.timestamp = view.getUint32(offset, false);
+        offset += 4;
+        break;
+      case '1-4':
+        result.emergency_status = view.getUint8(offset++);
+        break;
+      case '1-5':
+        result.health_status = view.getUint8(offset++);
+        break;
+      case '1-6':
+        result.movement_threshold = view.getUint8(offset++);
+        break;
+      case '2-1':
+        result.battery_percent = view.getUint8(offset++);
+        break;
+      case '3-1':
+        result.tilt_roll_yaw = [
+          view.getFloat32(offset, false),
+          view.getFloat32(offset + 4, false),
+          view.getFloat32(offset + 8, false)
+        ];
+        offset += 12;
+        break;
+      case '4-1':
+        result.lat_lon_z = [
+          view.getFloat32(offset, false),
+          view.getFloat32(offset + 4, false),
+          view.getFloat32(offset + 8, false)
+        ];
+        offset += 12;
+        break;
+      case '5-1':
+        result.temperature_celsius = view.getFloat32(offset, false);
+        offset += 4;
+        break;
+      case '6-1':
+        result.relative_humidity = view.getUint8(offset++);
+        break;
+      case '7-17':
+        result.camera_flood_detected = view.getUint8(offset++);
+        break;
+      case '7-27':
+        result.camera_flood_growing = view.getUint8(offset++);
+        break;
+      case '8-18': {
+        const len = view.getUint16(offset, false);
+        offset += 2;
+        const bitmap = [];
+        for (let i = 0; i < len; i++) bitmap.push(view.getUint8(offset++));
+        result.flood_bitmap_compressed = bitmap;
+        break;
       }
-      value = blob;
+      case '9-19':
+        result.status_area_threshold = view.getUint8(offset++);
+        break;
+      case '9-29':
+        result.stage_threshold = view.getUint8(offset++);
+        break;
+      case '9-39':
+        result.monitoring_frequency = view.getUint16(offset, false);
+        offset += 2;
+        break;
+      case '9-49':
+        result.emergency_frequency = view.getUint16(offset, false);
+        offset += 2;
+        break;
+      case '9-59':
+        result.neighborhood_emergency_frequency = view.getUint16(offset, false);
+        offset += 2;
+        break;
+      default:
+        offset = view.byteLength; // Stop on unknown
+        break;
     }
-
-    // Add both raw key and friendly name
-    result[def.name] = value;
-    result[key] = value;
   }
 
   return { data: result };
 }
+
 
 /**
  * Encode downlink function.
