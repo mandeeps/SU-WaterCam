@@ -227,6 +227,10 @@ We will run `doas shutdown` to power down the Pi in a script that is run as a no
 
 Remove uwi since we will not be using it: sudo systemctl disable uwi, then rm the uwi directory.
 
+If there are issues with power management check the firmware version the WittyPi is using and upgrade if needed using these instructions (current avrdude worked on Bookworm when I tried on May 30 2025): https://www.uugear.com/portfolio/compile-flash-firmware-for-witty-pi-4/#rtc_offset_value
+
+Remember to save and restore the clock offset as the instructions say.
+
 ### SU-WaterCam software setup from scratch
 
 Clone the public git repo: https://github.com/mandeeps/SU-WaterCam.git
@@ -429,8 +433,8 @@ Image source: [Lepton/docs/RaspberryPiGuide.md at main · FLIR/Lepton · GitHub]
 
 Eventually we will have a PCB to connect the Lepton breakout board and Raspberry Pi.
 
-<details>
-<summary>Manual Lepton Breakout Board Wiring</summary>
+
+Manual Lepton Breakout Board Wiring
 Orient the back of the breakout board towards yourself. The front is the side with the socket for the Lepton camera.
 Let's call the pins that are closest to you pins 1 through 10, starting from the left and going to the right. Right is the side with the mini ZIF connector on top (the white plastic bit above the QR code sticker)
 Let's call the pins on the bottom (away from you) pins A through J.
@@ -445,13 +449,13 @@ Wiring diagram:
 
 ![](documentation_assets/0a718f94c73913a869e2781ee76c43f7fe2155cb.png)
 
-Because we need I2C for other peripherals, use splitter cables for the two I2C pins (SDA and SCL) on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU. Another pair of split cables is useful for 3.3V and ground.
+Note: I2C is not required for getting data from the Lepton, but is useful for changing its configuration. Because we need I2C for other peripherals, use splitter cables for the two I2C pins (SDA and SCL) on the Pi. So get or make two cables that each have a female header on one end and a male and female header on the other end. One female end connects to a pin on the Raspberry Pi GPIO header, and the other two ends are for the Flir breakout board and a peripheral like the Adafruit IMU. Another pair of split cables is useful for 3.3V (or 5V) and ground.
 
 Split Y cables for I2C or power: ![](documentation_assets/7e29c180907652779bcfb4910261e28d7ace73b9.jpg)
 
-The SDA pin on the Pi (pin #3) will connect to pin C on the breakout board (side away from you) - use a splitter
+If using I2C: The SDA pin on the Pi (pin #3) will connect to pin C on the breakout board (side away from you) - use a splitter
 
-The SCL pin on the Pi (pin #5) will connect to pin 4 on the breakout board (side towards you) - use a splitter - image has been corrected to match this
+I2C: The SCL pin on the Pi (pin #5) will connect to pin 4 on the breakout board (side towards you) - use a splitter - image has been corrected to match this
 
 MOSI on the Pi (pin #19) connects to pin E on the breakout
 
@@ -461,9 +465,9 @@ CLK pin on the Pi (pin #23) will connect to pin D on the breakout
 
 CS pin (pin #24, right across from CLK, aka CE0, GPIO 8) connects to pin 5 on the breakout board
 
-The VSYNC pin is Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board - TODO this is also used by the WittyPi 4 and we need to check if that is an issue.
+We are not using this but I am leaving the note here for reference: the VSYNC pin is Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board - This GPIO is also used by the WittyPi 4 and that might cause an issue. Our software does not currently use vsync anyway, so this can be ignored.
 
-NOTE: it is not strictly necessary to connect I2C to use the Lepton 
+
 
 Reset pin on the breakout is pin I following the convention declared above. Connect it to an arbritrary GPIO pin on Pi that is set high by default (options are 0-8)
 
@@ -478,10 +482,7 @@ Binaries are from https://github.com/lukevanhorn/Lepton3
 
 Thanks Luke Van Horn! Also, thanks to Max Lipitz for the tip about the output containing the temperature values in degrees Kelvin.
 
-</details>
 
-<details>
-<summary>Additional Software for Lepton</summary>
 
 #### Leptonic for live thermal image stream
 

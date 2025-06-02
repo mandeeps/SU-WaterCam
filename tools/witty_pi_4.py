@@ -1,5 +1,6 @@
 ### https://github.com/Eagleshot/WittyPi4Python
-### all credit https://github.com/Eagleshot
+### credit https://github.com/Eagleshot
+# minor edit to add network check before syncing time
 
 '''A python module for interacting with the Witty Pi 4 board'''
 from subprocess import check_output, STDOUT
@@ -30,11 +31,15 @@ class WittyPi4:
         '''Sync Witty Pi 4 clock with network time'''
 
         # See: https://www.uugear.com/forums/technial-support-discussion/witty-pi-4-how-to-synchronise-time-with-internet-on-boot/
-        try:
-            output = self.run_command("net_to_system && system_to_rtc")
-            logging.info("Time synchronized with network: %s", output)
-        except Exception as e:
-            logging.error("Could not synchronize time with network: %s", str(e))
+
+        if self.run_command("has_internet"):
+            try:
+                output = self.run_command("net_to_system && system_to_rtc")
+                logging.info("Time synchronized with network: %s", output)
+            except Exception as e:
+                logging.error("Could not synchronize time with network: %s", str(e))
+        else:
+            logging.error("No internet detected")
 
     def get_temperature(self) -> float:
         '''Gets the current temperature reading from the Witty Pi 4 in °C'''
