@@ -44,16 +44,38 @@ def call_shutdown(state):
         print("\n shutdown \n")
         sys.exit("shutdown") # schedule system shutdown and exit program
 
+@SQify
+def flir_planb():
+    print("\n reset lepton \n")
+    from gpiozero import DigitalOutputDevice, DigitalInputDevice
+    from time import sleep
+
+    reset_pin = 6
+    reset = DigitalOutputDevice(reset_pin, active_high=True, initial_value=True)
+    reset.off()
+    sleep(1.0)
+    reset.on()
+    reset.close()
+    reset_input = DigitalInputDevice(reset_pin)
+    print(f"Pin {reset_pin}: {reset_input.value}")
+
 @GRAPHify
 def ttmain(trigger):
     with TTClock.root() as root_clock:
 # main(trigger, "/home/pi") #x = test(trigger)
 
-        dirname = get_time(trigger, TTClock=root_clock, TTPeriod=10_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000)
-        photo = take_two_photos(trigger, dirname, TTPeriod=10_000_000, TTPersistent=True)
-        lepton = flir(dirname, TTPeriod=10_000_000, TTPersistent=True)
+        token, dirname = get_time(trigger, TTClock=root_clock, TTPeriod=10_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000)
+        photo = take_two_photos(trigger, dirname, TTPersistent=True)
+
+        lepton_file = flir(dirname) #, TTClock=root_clock, TTPeriod=1_000_000, TTPhase=0, TTDataInterval=400_000)
+
+        deadline_time = READ_TTCLOCK(token, TTClock=root_clock) + 5_000_000
+
+        lepton = TTFinishByOtherwise(lepton_file, TTTimeDeadline=deadline_time, TTPlanB=flir_planb(), TTWillContinue=False)
+
+        # flir(dirname, TTPeriod=10_000_000, TTPersistent=True)
         
-        coreg_state = coregistration(dirname, lepton, photo)
-        segformer_state = segformer(dirname, coreg_state)
+        coreg_state = coregistration(dirname, lepton, photo, TTPersistent=True)
+        segformer_state = segformer(dirname, coreg_state, TTPersistent=True)
 
         y = call_shutdown(segformer_state)

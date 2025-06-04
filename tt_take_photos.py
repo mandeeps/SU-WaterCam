@@ -46,7 +46,7 @@ def flir(directory):
         subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True, timeout=5)
     except:
         logging.error("Check Lepton state - capture failed")
-        subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
+#        subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
         #sleep(1)
     else:
         print(f"change name to include {date}")
@@ -56,7 +56,7 @@ def flir(directory):
         subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True, timeout=5)
     except:
         logging.error("Check Lepton state - radiometery failed")
-        subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
+#        subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
     else:
         print(f"change name to include {date}")
         rename("lepton_temp_0000.csv", f"temperatures_{date}.csv")
