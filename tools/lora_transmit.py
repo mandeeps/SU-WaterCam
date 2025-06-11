@@ -1,9 +1,8 @@
 #!/usr/bin/env python
 
 import struct
-import serial
 import ast
-import json
+import serial
 
 # Format
 # Channel 00 Type 01 Time stamp UNIX
@@ -103,6 +102,27 @@ sensor_data = {
     (0x09, 0x59): 0                 # Neighborhood emergency status freq
 }
 
+# formatting
+sensor_packet = {
+    'timestamp' : val,
+    'emergency_status' : val,
+    'health_status' : val,
+    'movement_threshold' : val,
+    'battery_percent' : val,
+    'tilt_roll_yaw' : val,
+    'lat_lon_z' : val,
+    'temperature_celsius' : val,
+    'relative_humidity' : val,
+    'camera_flood_detected' : val,
+    'camera_flood_growing' : val,
+    'flood_bitmap_compressed' : val,
+    'status_area_threshold' : val,
+    'stage_threshold' : val,
+    'monitoring_frequency' : val,
+    'emergency_frequency' : val,
+    'neighborhood_emergency_frequency' : val
+}
+
 def pack_sensor_data(data_dict):
     packed = b""
 
@@ -162,8 +182,12 @@ encoded = compressed_encoding({
     "lat_lon_z": [40.7128, -74.0060, 12.5],
     "relative_humidity": 55
 })
-print(encoded.hex())
+#print(encoded.hex())
 
+# example sending AT commands directly, so the mDot does not need to be placed into 
+# serial data mode. This will allow us to use it as a Class C device
+
+# lora_transmit.transmit("AT+SEND=test\r\n".encode())
 
 def transmit_from_watercam(data):
     print("handle data from watercam sensors")

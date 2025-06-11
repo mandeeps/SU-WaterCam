@@ -1,6 +1,6 @@
 # Interfaces needed for peripherals
 dtparam=i2c_arm=on
-dtparam=i2s=on
+dtparam=i2s=off
 dtparam=spi=on
 dtparam=i2c1=on
 
@@ -15,7 +15,7 @@ dtoverlay=ov5647
 # Comment out if you want a display for debugging
 display_auto_detect=0
 
-# Specify minimum RAM for GPU - camera needs 32 MB
+# This does not apply if using VC4 KMS. Specify minimum RAM for GPU - camera needs 32 MB
 gpu_mem=32
 
 # Disable splash screen and boot option selection delay
@@ -48,9 +48,9 @@ dtoverlay=pi3-disable-bt
 dtparam=act_led_trigger=none
 dtparam=act_led_activelow=off
 dtparam=pwr_led_trigger=none
-dtparam=pwr_led_activelow=off
-dtparam=eth_led0=14
-dtparam=eth_led1=14
+dtparam=pwr_led_activelow=on # try off
+dtparam=eth_led0=4 # 14 on Pi3?
+dtparam=eth_led1=4
 
 # enable alt UARTs to connect to mDot without interfering with WittyPi
 dtoverlay=uart5
