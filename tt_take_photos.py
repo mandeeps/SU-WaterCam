@@ -23,7 +23,7 @@ def take_photo(directory: str, nir: str, picam2) -> str:
         logging.error("Camera failed to capture")
 
     # get IMU and GPS data and save into image EXIF and XMP
-    add_metadata.add_metadata(image)
+    add_metadata(image)
 #    return image
 
 @SQify
