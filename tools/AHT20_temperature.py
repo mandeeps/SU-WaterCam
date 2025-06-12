@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
 # get temp & humidity reading from Adafruit AHT20
-from time import sleep
-from datetime import datetime
-from csv import DictWriter
-
 import board
 import adafruit_ahtx0
 
 SENSOR = adafruit_ahtx0.AHTx0(board.I2C())
-FILE = '/home/pi/SU-WaterCam/data/temp_humidity.csv'
 
-RUN = True
-
-def main():
-    while RUN:
+def record_csv():
+    from time import sleep
+    from datetime import datetime
+    from csv import DictWriter
+    FILE = '/home/pi/SU-WaterCam/data/temp_humidity.csv'
+    
+    while True:
         row = {'Time':datetime.now().strftime('%Y%m%d-%H%M%S'),
                'Temp': '%0.1f C' % SENSOR.temperature, 'Humidity': '%0.1f %%' %
                SENSOR.relative_humidity}
@@ -25,6 +23,11 @@ def main():
 
         sleep(60)
 
+def get_aht20():
+    data = {"temperature_celsius": "%0.1f" % SENSOR.temperature,
+            "relative_humidity": "%0.1f %%" % SENSOR.relative_humidity}
+    return data
+
 if __name__ == '__main__':
     import sys
-    sys.exit(main())
+    sys.exit(record_csv())

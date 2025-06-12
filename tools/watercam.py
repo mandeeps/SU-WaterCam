@@ -10,6 +10,15 @@ from subprocess import Popen
 import take_nir_photos # has functions for IR-CUT camera and Lepton
 import coreg_multiple
 
+try:
+    from lora_transmit import transmit_from_watercam
+except ImportError:
+    print("Error: importing lora transmit function")
+try:
+    from AHT20_temperature import get_aht20
+except ImportError:
+    print("Error: importing AHT20")
+
 def main(autostart:bool = True):
     print(f"Will shutdown: {autostart}")
     # setup
@@ -38,21 +47,23 @@ def main(autostart:bool = True):
         #if current - last_print >= interval:
         last_print = current
 
-            # take photos: optical and NIR
+        # take photos: optical and NIR
         name, directory = take_nir_photos.main(filepath)
 
         print(f"Photo: {name}")
-            # take FLIR photo and get temperature data from Lepton
+        # take FLIR photo and get temperature data from Lepton
         print("Taking Flir captures")
         take_nir_photos.flir(directory)
 
-            # call coregistration script on new photo
+        # call coregistration script on new photo
         print("Run coreg")
         coreg_multiple.coreg(directory)
-            # run 5 band SegFormer on coreg photos
-            # Popen([segformer_python, segformer_coreg], cwd=segformer_location)
+        # run 5 band SegFormer on coreg photos
+        # Popen([segformer_python, segformer_coreg], cwd=segformer_location)
 
-            # transmit results
+        data_dict = get_aht20()        
+        # transmit over lora
+        transmit_from_watercam(data_dict)
 
 #        else:
         sleep(interval)
@@ -60,8 +71,10 @@ def main(autostart:bool = True):
     if autostart:
     # Once the for loop has finished we should be able to trigger a shutdown
     # Use with a WittyPi schedule that turns the system on regularly
-    # I am using "doas shutdown" with a /etc/doas.conf configured for user pi 
+    # I am using "doas shutdown" with a /etc/doas.conf configured for user pi
         call("doas /usr/sbin/shutdown", shell=True)
+
+    # WittyPi suggests pulling GPIO-4 low to signal it to shutdown instead
 
 if __name__ == "__main__":
     main(True)

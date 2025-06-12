@@ -46,18 +46,9 @@ def call_shutdown(state):
 
 @SQify
 def flir_planb():
+    from tools.lepton_reset_gpiozero import reset
     print("\n reset lepton \n")
-    from gpiozero import DigitalOutputDevice, DigitalInputDevice
-    from time import sleep
-
-    reset_pin = 6
-    reset = DigitalOutputDevice(reset_pin, active_high=True, initial_value=True)
-    reset.off()
-    sleep(1.0)
-    reset.on()
-    reset.close()
-    reset_input = DigitalInputDevice(reset_pin)
-    print(f"Pin {reset_pin}: {reset_input.value}")
+    reset()
 
 @GRAPHify
 def ttmain(trigger):

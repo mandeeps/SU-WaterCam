@@ -7,20 +7,24 @@
 from gpiozero import DigitalOutputDevice, DigitalInputDevice
 from time import sleep
 
+def reset():
 # GPIO 6 corresponds to pin 31 (BCM numbering)
-reset_pin = 6
+    reset_pin = 6
 
 # Set up the pin as an output device, defaulting to HIGH
-reset = DigitalOutputDevice(reset_pin, active_high=True, initial_value=True)
+    reset = DigitalOutputDevice(reset_pin, active_high=True, initial_value=True)
 
 # Pull LOW for 1 second to trigger reset
-reset.off()
-sleep(1.0)
+    reset.off()
+    sleep(1.0)
 
 # Return to default HIGH state
-reset.on()
+    reset.on()
 
 # Release the pin and read as input
-reset.close()
-reset_input = DigitalInputDevice(reset_pin)
-print(f"Pin {reset_pin}: {reset_input.value}")
+    reset.close()
+    reset_input = DigitalInputDevice(reset_pin)
+    print(f"Pin {reset_pin}: {reset_input.value}")
+
+if __name__ == "__main__":
+    reset()

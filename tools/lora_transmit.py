@@ -37,7 +37,6 @@ ser = serial.Serial(
 if not ser.is_open:
     print("Serial port is not open. Check the connection.")
 
-
 def load_file(filename):
     with open(filename, 'r') as f:
         data = f.read()
@@ -65,7 +64,7 @@ def format_dictionary(data):
             print(f"Unsupported value type: {type(v)} for key '{k}'")
 
 
-def transmit(content):
+def transmit_serial(content):
     # Send the formatted data over UART/Serial
     try:
         # Ensure the serial connection is ready to send
@@ -189,9 +188,13 @@ encoded = compressed_encoding({
 
 # lora_transmit.transmit("AT+SEND=test\r\n".encode())
 
-def transmit_from_watercam(data):
+def transmit_from_watercam(data_dict):
     print("handle data from watercam sensors")
-    print(data)
+    print(data_dict)
+
+    packet = compressed_encoding(data_dict)
+    transmit(f"AT+SENDB={packet}\r\n".encode())
+
 
 if __name__ == "__main__":
     #    import sys
@@ -201,4 +204,3 @@ if __name__ == "__main__":
 #    bits = pack_sensor_data(bits)
 #    transmit(bits)
     transmit(encoded)
-    
