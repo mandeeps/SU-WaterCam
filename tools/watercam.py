@@ -15,9 +15,13 @@ try:
 except ImportError:
     print("Error: importing lora transmit function")
 try:
-    from AHT20_temperature import get_aht20
+    from aht20_temperature import get_aht20
 except ImportError:
     print("Error: importing AHT20")
+try:
+    from bno055_imu import get_orientation
+except ImportError:
+    print("Error: IMU import")
 
 def main(autostart:bool = True):
     print(f"Will shutdown: {autostart}")
@@ -61,7 +65,9 @@ def main(autostart:bool = True):
         # run 5 band SegFormer on coreg photos
         # Popen([segformer_python, segformer_coreg], cwd=segformer_location)
 
-        data_dict = get_aht20()        
+        data_dict = get_aht20()
+        data_dict.update(get_orientation())
+
         # transmit over lora
         transmit_from_watercam(data_dict)
 

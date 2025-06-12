@@ -102,25 +102,25 @@ sensor_data = {
 }
 
 # formatting
-sensor_packet = {
-    'timestamp' : val,
-    'emergency_status' : val,
-    'health_status' : val,
-    'movement_threshold' : val,
-    'battery_percent' : val,
-    'tilt_roll_yaw' : val,
-    'lat_lon_z' : val,
-    'temperature_celsius' : val,
-    'relative_humidity' : val,
-    'camera_flood_detected' : val,
-    'camera_flood_growing' : val,
-    'flood_bitmap_compressed' : val,
-    'status_area_threshold' : val,
-    'stage_threshold' : val,
-    'monitoring_frequency' : val,
-    'emergency_frequency' : val,
-    'neighborhood_emergency_frequency' : val
-}
+#sensor_packet = {
+#    'timestamp' : val,
+#    'emergency_status' : val,
+#    'health_status' : val,
+#    'movement_threshold' : val,
+#    'battery_percent' : val,
+#    'tilt_roll_yaw' : val,
+#    'lat_lon_z' : val,
+#    'temperature_celsius' : val,
+#    'relative_humidity' : val,
+#    'camera_flood_detected' : val,
+#    'camera_flood_growing' : val,
+#    'flood_bitmap_compressed' : val,
+#    'status_area_threshold' : val,
+#    'stage_threshold' : val,
+#    'monitoring_frequency' : val,
+#    'emergency_frequency' : val,
+#    'neighborhood_emergency_frequency' : val
+#}
 
 def pack_sensor_data(data_dict):
     packed = b""
@@ -193,7 +193,8 @@ def transmit_from_watercam(data_dict):
     print(data_dict)
 
     packet = compressed_encoding(data_dict)
-    transmit(f"AT+SENDB={packet}\r\n".encode())
+    data = packet.hex()
+    transmit(f"AT+SENDB={data}\r\n".encode())
 
 
 if __name__ == "__main__":

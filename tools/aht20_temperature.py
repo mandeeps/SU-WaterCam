@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
 # get temp & humidity reading from Adafruit AHT20
 import board
-import adafruit_ahtx0
+
+try:
+    import adafruit_ahtx0
+except ImportError:
+    print("Error: AHT20 import")
+except:
+    print("Error: AHT20 hardware")
 
 SENSOR = adafruit_ahtx0.AHTx0(board.I2C())
 
@@ -24,8 +30,8 @@ def record_csv():
         sleep(60)
 
 def get_aht20():
-    data = {"temperature_celsius": "%0.1f" % SENSOR.temperature,
-            "relative_humidity": "%0.1f %%" % SENSOR.relative_humidity}
+    data = {"temperature_celsius": float("%0.1f" % SENSOR.temperature),
+            "relative_humidity": int(float("%0.1f" % SENSOR.relative_humidity))}
     return data
 
 if __name__ == '__main__':

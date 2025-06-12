@@ -5,7 +5,12 @@
 import time
 import logging
 import board
-import adafruit_bno055
+try:
+    import adafruit_bno055
+except ImportError:
+    print("Error: BNO055 import")
+except Error:
+    print("Error: BNO055 device")
 
 i2c = board.I2C()
 sensor = adafruit_bno055.BNO055_I2C(i2c)
@@ -26,6 +31,9 @@ def get_values() -> dict:
         "Magnetic":sensor.magnetic, "Gyro":sensor.gyro, "Euler":sensor.euler,
         "Quaternion":sensor.quaternion, "Linear":sensor.linear_acceleration,
         "Gravity":sensor.gravity}
+
+def get_orientation():
+    return {"tilt_roll_yaw": sensor.euler}
 
 def offset():
     offset_accel = []

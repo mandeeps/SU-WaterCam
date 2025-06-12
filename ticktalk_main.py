@@ -13,7 +13,7 @@ def get_time(trigger):
 
 @SQify
 def coregistration(dirname, lepton_state, photo_state):
-    from coreg_multiple import coreg
+    from tools.coreg_multiple import coreg
     print("\n running coreg \n")
     filepath = coreg(dirname)
     print(f"\n {filepath} \n")
