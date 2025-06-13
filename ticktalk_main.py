@@ -50,6 +50,32 @@ def flir_planb():
     print("\n reset lepton \n")
     reset()
 
+def lora_token():
+    from ticktalkpython.Clock import TTClock
+    from ticktalkpython.TTToken import TTToken
+    from ticktalkpython.Time import TTTime
+    import pickle
+    from tools.lora_transmit import transmit
+
+    root_clock = TTClock.root()
+    # Create a time-tagged token using that interval and the derived clock
+    time_1 = TTTime(root_clock, 2, 1024)
+
+    from tools.bno055 import get_orientation
+    from tools.aht20 import get_aht20
+
+    data = get_orientation()
+    data.update(get_aht20)
+
+    token_1 = TTToken(2, None)
+
+    payload = pickle.dumps(token_1)
+    payload_hex = payload.hex()
+    deserialized_token = pickle.loads(payload)
+
+    transmit(f"AT+SENDB={payload_hex}\r\n".encode)
+
+
 @GRAPHify
 def ttmain(trigger):
     with TTClock.root() as root_clock:

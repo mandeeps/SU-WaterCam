@@ -64,7 +64,7 @@ def format_dictionary(data):
             print(f"Unsupported value type: {type(v)} for key '{k}'")
 
 
-def transmit_serial(content):
+def transmit(content):
     # Send the formatted data over UART/Serial
     try:
         # Ensure the serial connection is ready to send
