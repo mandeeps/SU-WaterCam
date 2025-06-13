@@ -50,6 +50,7 @@ def flir_planb():
     print("\n reset lepton \n")
     reset()
 
+@SQify
 def lora_token():
     from ticktalkpython.Clock import TTClock
     from ticktalkpython.TTToken import TTToken
@@ -61,11 +62,11 @@ def lora_token():
     # Create a time-tagged token using that interval and the derived clock
     time_1 = TTTime(root_clock, 2, 1024)
 
-    from tools.bno055 import get_orientation
-    from tools.aht20 import get_aht20
+    from tools.bno055_imu import get_orientation
+    from tools.aht20_temperature import get_aht20
 
     data = get_orientation()
-    data.update(get_aht20)
+    data.update(get_aht20())
 
     token_1 = TTToken(2, None)
 
@@ -73,7 +74,7 @@ def lora_token():
     payload_hex = payload.hex()
     deserialized_token = pickle.loads(payload)
 
-    transmit(f"AT+SENDB={payload_hex}\r\n".encode)
+    transmit(f"AT+SENDB={payload_hex}\r\n".encode())
 
 
 @GRAPHify
@@ -91,6 +92,7 @@ def ttmain(trigger):
         lepton = TTFinishByOtherwise(lepton_file, TTTimeDeadline=deadline_time, TTPlanB=flir_planb(), TTWillContinue=False)
 
         # flir(dirname, TTPeriod=10_000_000, TTPersistent=True)
+        lora_return = lora_token()
         
         coreg_state = coregistration(dirname, lepton, photo, TTPersistent=True)
         segformer_state = segformer(dirname, coreg_state, TTPersistent=True)
