@@ -18,3 +18,4 @@ adafruit-circuitpython-ahtx0
 rasterio
 simpleitk
 tifffile
+opencv-python

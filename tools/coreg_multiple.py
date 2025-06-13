@@ -232,7 +232,7 @@ def coreg(directory):
 #        print("Max value in final_five_band:", np.median(final_five_band))
 #        print(final_five_band)
 
-        tifffile.imwrite(final_path, final_five_band)
+#        tifffile.imwrite(final_path, final_five_band)
 
 
 if __name__ == "__main__":

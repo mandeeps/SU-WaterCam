@@ -71,9 +71,9 @@ def transmit(content):
         ser.flush()
         # Write the data to the serial port
         ser.write(content)
-        print("Data transmitted successfully!")
+        print("Data sent to mDot successfully!")
     except Exception as e:
-        print(f"Transmission error: {e}")
+        print(f"Error sending to mDot: {e}")
 
     finally:
         if 'ser' in locals():
