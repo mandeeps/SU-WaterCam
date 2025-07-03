@@ -83,5 +83,21 @@ def get_loc():
 
     return gps_data
 
+def get_lat_lon():
+    current = get_loc()
+    
+    data = dict((k, current[k]) for k in ["Latitude", "Longitude", "Altitude"] if k in current)
+
+# if we have no GPS data return False. If we have Lat/Long but not Alt return dict 
+# with Alt as 0.
+    if not "Longitude" in data:
+        return False
+    if not "Latitude" in data:
+        return False
+    if not "Altitude" in data:
+        data["Altitude"] = 0
+
+    return {'lat_lon_z' : (data["Latitude"], data["Longitude"], data["Altitude"])}
+
 if __name__ == "__main__":
     print(get_loc())

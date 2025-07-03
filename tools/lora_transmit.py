@@ -1,10 +1,8 @@
 #!/usr/bin/env python
-
 import struct
-import ast
 import serial
 
-# Format
+# Data Format
 # Channel 00 Type 01 Time stamp UNIX
 # Channel 01 Type 04 emergency status 0/1 where 0 is monitoring & 1 is emergency
 # 01 05 health 0/1 where 0 is normal operation
@@ -26,7 +24,8 @@ import serial
 
 # Configure the serial port
 ser = serial.Serial(
-    port = '/dev/ttyAMA1',  # Replace with correct UART device
+    port = '/dev/ttyAMA5',  # Replace with correct UART device
+    # should be AMA5 if using alternate UART on Pi 4 as in README 
     baudrate = 115200,
     parity = serial.PARITY_NONE,
     stopbits = serial.STOPBITS_ONE,
@@ -36,33 +35,6 @@ ser = serial.Serial(
 
 if not ser.is_open:
     print("Serial port is not open. Check the connection.")
-
-def load_file(filename):
-    with open(filename, 'r') as f:
-        data = f.read()
-
-    data = ast.literal_eval(data)
-    return data
-
-def format_dictionary(data):
-    if not data:
-        print("No data received")
-        return
-
-    # Format each key-value pair into bytes (efficient format)
-    formatted_data = b""
-    for k, v in data.items():
-        if isinstance(v, int):
-            # For integers, pack into 4-byte unsigned integer
-            formatted_data += struct.pack(">I", v)
-        elif isinstance(v, str):
-            # For strings, encode as UTF-8 and add length prefix
-            encoded_str = v.encode("utf-8")
-            len_byte = struct.pack(">B", len(encoded_str))
-            formatted_data += len_byte + encoded_str
-        else:
-            print(f"Unsupported value type: {type(v)} for key '{k}'")
-
 
 def transmit(content):
     # Send the formatted data over UART/Serial
@@ -78,68 +50,6 @@ def transmit(content):
     finally:
         if 'ser' in locals():
             ser.close()
-
-# formatting and default payload
-# without conversion
-sensor_data = {
-    (0x00, 0x01): 0,         # UNIX timestamp
-    (0x01, 0x04): 0,                  # Emergency status (0 or 1)
-    (0x01, 0x05): 0,                  # Health status
-    (0x01, 0x06): 0,                  # Movement threshold crossed
-    (0x02, 0x01): 0,                 # Battery percent
-    (0x03, 0x01): (0.0, 0.0, 0.0),    # Tilt/roll/yaw
-    (0x04, 0x01): (0.0, 0.0, 0.0),  # Lat/lon/z
-    (0x05, 0x01): 0,              # Temp in Celsius
-    (0x06, 0x01): 0,                 # Relative humidity
-    (0x07, 0x17): 0,                  # Camera flood detected
-    (0x07, 0x27): 0,                  # New local max
-    (0x08, 0x18): b'\x00\x01\xFE\xFF', # Compressed bitmap (placeholder binary)
-    (0x09, 0x19): 0,                 # Status area threshold %
-    (0x09, 0x29): 0,                 # Stage threshold %
-    (0x09, 0x39): 0,                 # Monitoring freq
-    (0x09, 0x49): 0,                 # Emergency freq
-    (0x09, 0x59): 0                 # Neighborhood emergency status freq
-}
-
-# formatting
-#sensor_packet = {
-#    'timestamp' : val,
-#    'emergency_status' : val,
-#    'health_status' : val,
-#    'movement_threshold' : val,
-#    'battery_percent' : val,
-#    'tilt_roll_yaw' : val,
-#    'lat_lon_z' : val,
-#    'temperature_celsius' : val,
-#    'relative_humidity' : val,
-#    'camera_flood_detected' : val,
-#    'camera_flood_growing' : val,
-#    'flood_bitmap_compressed' : val,
-#    'status_area_threshold' : val,
-#    'stage_threshold' : val,
-#    'monitoring_frequency' : val,
-#    'emergency_frequency' : val,
-#    'neighborhood_emergency_frequency' : val
-#}
-
-def pack_sensor_data(data_dict):
-    packed = b""
-
-    for (channel, type_), value in data_dict.items():
-        packed += struct.pack("BB", channel, type_)
-
-        if isinstance(value, int):
-            packed += struct.pack(">I", value)  # 4-byte big-endian unsigned int
-        elif isinstance(value, float):
-            packed += struct.pack(">f", value)  # 4-byte float
-        elif isinstance(value, tuple) and all(isinstance(x, float) for x in value):
-            packed += struct.pack(">" + "f" * len(value), *value)  # Multiple floats
-        elif isinstance(value, bytes):
-            length = len(value)
-            packed += struct.pack(">H", length) + value  # 2-byte length prefix + binary
-        else:
-            raise ValueError(f"Unsupported data type for ({channel}, {type_}): {value}")
-    return packed
 
 def compressed_encoding(data):
     packet = bytearray()
@@ -171,7 +81,7 @@ def compressed_encoding(data):
 
     return bytes(packet)
 
-encoded = compressed_encoding({
+example_packet = compressed_encoding({
     "timestamp": 1748892908,
     "emergency_status": 1,
     "health_status": 1,
@@ -181,14 +91,13 @@ encoded = compressed_encoding({
     "lat_lon_z": [40.7128, -74.0060, 12.5],
     "relative_humidity": 55
 })
-#print(encoded.hex())
 
 # example sending AT commands directly, so the mDot does not need to be placed into 
 # serial data mode. This will allow us to use it as a Class C device
-
 # lora_transmit.transmit("AT+SEND=test\r\n".encode())
 
 def transmit_from_watercam(data_dict):
+    # example for direct use
     print("handle data from watercam sensors")
     print(data_dict)
 
@@ -196,12 +105,5 @@ def transmit_from_watercam(data_dict):
     data = packet.hex()
     transmit(f"AT+SENDB={data}\r\n".encode())
 
-
 if __name__ == "__main__":
-    #    import sys
-#    file = sys.argv[1]
-#    bits = load_file(file)
-
-#    bits = pack_sensor_data(bits)
-#    transmit(bits)
-    transmit(encoded)
+    transmit(example_packet)

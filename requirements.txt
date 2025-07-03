@@ -17,5 +17,7 @@ adafruit-circuitpython-ahtx0
 # coreg script
 rasterio
 simpleitk
-tifffile
 opencv-python
+
+# bitmap compression
+brotli

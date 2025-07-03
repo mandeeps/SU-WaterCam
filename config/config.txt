@@ -16,7 +16,7 @@ dtoverlay=ov5647
 display_auto_detect=0
 
 # This does not apply if using VC4 KMS. Specify minimum RAM for GPU - camera needs 32 MB
-gpu_mem=32
+#gpu_mem=32
 
 # Disable splash screen and boot option selection delay
 disable_splash=1
@@ -63,3 +63,5 @@ core_freq=250
 # 400,000 stock. 10,000 if there are issues with BNO IMU
 dtparam=i2c_arm_baudrate=400000
 
+# for Lepton - test impact
+spidev.bufsiz=131072

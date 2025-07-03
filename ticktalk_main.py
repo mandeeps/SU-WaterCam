@@ -23,12 +23,11 @@ def coregistration(dirname, lepton_state, photo_state):
 def segformer(filepath, coreg_state): # operate on coregistered image file
     import subprocess
     segformer_python = "/home/pi/miniforge3/envs/5band/bin/python"
-    segformer_test = "/home/pi/git/segformer_5band/tools/test_no_label.py"
 
-    segformer_coreg = "/home/pi/git/segformer_5band/tools/segment_coreg.py"
-
-    subprocess.Popen([segformer_python, segformer_test], cwd="/home/pi/git/segformer_5band")
-    return True
+    segformer_coreg = "/home/pi/git/segformer_5band/segment_tiff_5band.py"
+    segmented_file = filepath + "/final_5_band.tiff"
+    subprocess.Popen([segformer_python, segformer_coreg, segmented_file], cwd="/home/pi/git/segformer_5band").wait()
+    return segmented_file
 
 @SQify
 def call_shutdown(state):
@@ -39,10 +38,12 @@ def call_shutdown(state):
     
     print(f"\n Iteration: {sq_state['count']} \n")
     
-    limit = 3
+    limit = 5
     if sq_state['count'] == limit:
         print("\n shutdown \n")
-        sys.exit("shutdown") # schedule system shutdown and exit program
+        # using an /etc/doas.conf configured for user pi
+        call("doas /usr/sbin/shutdown", shell=True) # shutdown Pi
+        sys.exit("shutdown") # exit program
 
 @SQify
 def flir_planb():
@@ -51,36 +52,51 @@ def flir_planb():
     reset()
 
 @SQify
-def lora_token():
+def compress_bitmap(segmented_file):
+    # handle calling compression function once that performs reasonably on a Pi 4
+    return True
+
+@SQify
+def lora_token(bitmap):
     from ticktalkpython.Clock import TTClock
     from ticktalkpython.TTToken import TTToken
     from ticktalkpython.Time import TTTime
     import pickle
     from tools.lora_transmit import transmit
+    from tools.lora_transmit import compressed_encoding
+    from ticktalkpython.Tag import TTTag
+    from ticktalkpython import NetworkInterfaceLoRa
+    from tools.bno055_imu import get_orientation
+    from tools.aht20_temperature import get_aht20
+    from tools.get_gps import get_lat_lon
 
     root_clock = TTClock.root()
     # Create a time-tagged token using that interval and the derived clock
     time_1 = TTTime(root_clock, 2, 1024)
-
-    from tools.bno055_imu import get_orientation
-    from tools.aht20_temperature import get_aht20
+    recipient_device = 0xFF
+    context = 1
+    sq_name = 4
 
     data = get_orientation()
     data.update(get_aht20())
+    gps = get_lat_lon()
+    if gps:
+        data.update(get_lat_lon())
+    # add other values (device health, battery, gps, flood status, etc.,)
 
-    token_1 = TTToken(2, None)
+    packet = compressed_encoding(data)
 
-    payload = pickle.dumps(token_1)
-    payload_hex = payload.hex()
-    deserialized_token = pickle.loads(payload)
+    token_1 = TTToken(data, time_1, False,
+    TTTag(context, sq_name, 4, recipient_device))
 
-    transmit(f"AT+SENDB={payload_hex}\r\n".encode())
-
+    lora_msg = NetworkInterfaceLoRa.TTLoRaMessage(token_1, recipient_device)
+    encoded_msg = lora_msg.encode_token()
+    data = encoded_msg.hex()
+    transmit(f"AT+SENDB={data}\r\n".encode())
 
 @GRAPHify
 def ttmain(trigger):
     with TTClock.root() as root_clock:
-# main(trigger, "/home/pi") #x = test(trigger)
 
         token, dirname = get_time(trigger, TTClock=root_clock, TTPeriod=10_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000)
         photo = take_two_photos(trigger, dirname, TTPersistent=True)
@@ -91,10 +107,8 @@ def ttmain(trigger):
 
         lepton = TTFinishByOtherwise(lepton_file, TTTimeDeadline=deadline_time, TTPlanB=flir_planb(), TTWillContinue=False)
 
-        # flir(dirname, TTPeriod=10_000_000, TTPersistent=True)
-        lora_return = lora_token()
-        
         coreg_state = coregistration(dirname, lepton, photo, TTPersistent=True)
-        segformer_state = segformer(dirname, coreg_state, TTPersistent=True)
-
-        y = call_shutdown(segformer_state)
+        seg_result = segformer(dirname, coreg_state, TTPersistent=True)
+        bitmap = compress_bitmap(seg_result)
+        lora_return = lora_token(bitmap)
+        y = call_shutdown(lora_return)

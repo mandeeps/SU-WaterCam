@@ -227,7 +227,7 @@ We will run `doas shutdown` to power down the Pi in a script that is run as a no
 
 Remove uwi since we will not be using it: sudo systemctl disable uwi, then rm the uwi directory.
 
-If there are issues with power management check the firmware version the WittyPi is using and upgrade if needed using these instructions (current avrdude worked on Bookworm when I tried on May 30 2025): https://www.uugear.com/portfolio/compile-flash-firmware-for-witty-pi-4/#rtc_offset_value
+If there are issues with power management check the firmware version the WittyPi is using and upgrade if needed using these instructions (might need a Pi with Bullseye installed, worked for me on Bookworm with kernel 6.1): https://www.uugear.com/portfolio/compile-flash-firmware-for-witty-pi-4/#rtc_offset_value
 
 Remember to save and restore the clock offset as the instructions say.
 
@@ -433,7 +433,6 @@ Image source: [Lepton/docs/RaspberryPiGuide.md at main · FLIR/Lepton · GitHub]
 
 Eventually we will have a PCB to connect the Lepton breakout board and Raspberry Pi.
 
-
 Manual Lepton Breakout Board Wiring
 Orient the back of the breakout board towards yourself. The front is the side with the socket for the Lepton camera.
 Let's call the pins that are closest to you pins 1 through 10, starting from the left and going to the right. Right is the side with the mini ZIF connector on top (the white plastic bit above the QR code sticker)
@@ -467,8 +466,6 @@ CS pin (pin #24, right across from CLK, aka CE0, GPIO 8) connects to pin 5 on th
 
 We are not using this but I am leaving the note here for reference: the VSYNC pin is Pin #11, GPIO 17 on the Pi connected to pin H on the breakout board - This GPIO is also used by the WittyPi 4 and that might cause an issue. Our software does not currently use vsync anyway, so this can be ignored.
 
-
-
 Reset pin on the breakout is pin I following the convention declared above. Connect it to an arbritrary GPIO pin on Pi that is set high by default (options are 0-8)
 
 I am using GPIO 6 (pin 31 on the Pi) in the lepton_reset.py script. We need a pin that is high by default because the breakout board reset triggers on low.
@@ -481,8 +478,6 @@ Examine the created files to verify things are working.
 Binaries are from https://github.com/lukevanhorn/Lepton3
 
 Thanks Luke Van Horn! Also, thanks to Max Lipitz for the tip about the output containing the temperature values in degrees Kelvin.
-
-
 
 #### Leptonic for live thermal image stream
 
@@ -505,13 +500,18 @@ npm start in frontend directory then
 
 ![](documentation_assets/061a1062380fe75a2678be59c9096459d0c45049.png)
 
-The default mDot firmware is set up for UART. The WittyPi can tell if the Raspberry Pi is off by reading the TX pin, which should be set low when the Pi shuts down. The mDot seems to interfere with this, keeping the TX pin on the Pi set high and preventing the WittyPi from cutting off power to the system. So we turn on alternative UART pins on the Pi 4B and use those to connect to the mDot instead on our default OS images.
+The default mDot firmware is set up for UART. The WittyPi can tell if the Raspberry Pi is off by reading the TX pin, which should be set low when the Pi shuts down. Keeping the mDot powered on through the WittyPi keeps the TX pin on the Pi set high and prevents the WittyPi from cutting off power to the Raspberry Pi. So we turn on alternative UART pins on the Pi 4B and use those to connect to the mDot instead on our default OS images.
 
-To do this manually: add dtoverlay=uart5 to /boot/config.txt on a Pi 4 so we can use pin 32 for TX and pin 33 for RX. On the Pi 4, make sure "enable_uart=1" is in the /boot/config.txt file, and add dtoverlay=uart5. Save and reboot. Connect the TX pin on the mDot to pin #33 on the Pi and connect the RX pin on the mDot to pin #32 on the Pi.
+To do this manually: add dtoverlay=uart5 to /boot/config.txt on a Pi 4 so we can use pin 32 for TX and pin 33 for RX. On the Pi 4, make sure "enable_uart=1" is in the /boot/config.txt file, and add "dtoverlay=uart5". Save and reboot. Connect the TX pin on the mDot to pin #33 on the Pi and connect the RX pin on the mDot to pin #32 on the Pi.
 
 **mDot wiring**
 
-The power pin (VOD, pin # 1) on the mDot can be connected to the 5V or 3.3V power pin on the Pi. Connect ground (pin 10 on the mDot) to a free ground pin. Connect the mDot UART TX (transmit, pin #2) to the Pi RX (receive) pin (pin #33 if using uart5), and the mDot RX pin (#3) to the Pi TX pin (pin #32 using uart5).
+The power pin (VOD, pin # 1) on the mDot should be connected to 3.3V on the WittyPi. Connect ground (pin 10 on the mDot) to the ground pin on the WittyPi. Connect the mDot UART TX (transmit, pin #2) to the Pi RX (receive) pin (pin #33 if using uart5), and the mDot RX pin (#3) to the Pi TX pin (pin #32 using uart5).
+
+
+For the remote start over Lora function, the WittyPi ground should be connected to both the mDot ground and a mosfet's source. The mosfet drain should be connected to the WittyPi switch pin. The mosfet gate should be connected to both the mDot output pin PB_1 and the WittyPi ground with a resistor. The mDot input pin PA_6 should be connected to a GPIO on the Raspberry Pi that is set HIGH when the Raspberry Pi is turned on, we are using GPIO 5 (pin 29) on the Raspberry Pi. 
+
+
 
 On the Pi run tio /dev/ttyAMA1 and issue AT commands to control the mDot, see the mDot AT reference document in the instructions directory. For example, "ATI" will tell you the installed firmware version.
 
