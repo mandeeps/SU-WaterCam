@@ -14,9 +14,9 @@ def get_time(trigger):
 @SQify
 def coregistration(dirname, lepton_state, photo_state):
     from tools.coreg_multiple import coreg
-    print("\n running coreg \n")
+    print(f"\n running coreg on {dirname}\n")
     filepath = coreg(dirname)
-    print(f"\n {filepath} \n")
+    print(f"\n {filepath} images registered \n")
     return True
 
 @SQify
@@ -27,22 +27,23 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
     segformer_coreg = "/home/pi/git/segformer_5band/segment_tiff_5band.py"
     segmented_file = filepath + "/final_5_band.tiff"
     subprocess.Popen([segformer_python, segformer_coreg, segmented_file], cwd="/home/pi/git/segformer_5band").wait()
-    return segmented_file
+    return filepath + "/final_5_band_segmentation.png"
 
 @SQify
 def call_shutdown(state):
     import sys
+    from subprocess import call
 
     global sq_state
     sq_state['count'] = sq_state.get('count', 0) + 1
     
     print(f"\n Iteration: {sq_state['count']} \n")
     
-    limit = 5
+    limit = 3
     if sq_state['count'] == limit:
         print("\n shutdown \n")
         # using an /etc/doas.conf configured for user pi
-        call("doas /usr/sbin/shutdown", shell=True) # shutdown Pi
+        #call("doas /usr/sbin/shutdown", shell=True) # shutdown Pi
         sys.exit("shutdown") # exit program
 
 @SQify
@@ -53,8 +54,11 @@ def flir_planb():
 
 @SQify
 def compress_bitmap(segmented_file):
-    # handle calling compression function once that performs reasonably on a Pi 4
-    return True
+    from tools.compress_segmented import compress_image
+    print(f"Compressing {segmented_file} for transmission")
+    bitmap_dict = compress_image(segmented_file)
+    print(f"Completed compressing {segmented_file}")
+    return bitmap_dict['compressed_data'] # this is the byte data
 
 @SQify
 def lora_token(bitmap):
@@ -91,8 +95,15 @@ def lora_token(bitmap):
 
     lora_msg = NetworkInterfaceLoRa.TTLoRaMessage(token_1, recipient_device)
     encoded_msg = lora_msg.encode_token()
-    data = encoded_msg.hex()
-    transmit(f"AT+SENDB={data}\r\n".encode())
+    packet = encoded_msg.hex()
+    transmit(f"AT+SENDB={packet}\r\n".encode())
+
+    token_2 = TTToken(bitmap, time_1, False,
+    TTTag(context, sq_name, 4, recipient_device))
+    lora_msg2 = NetworkInterfaceLoRa.TTLoRaMessage(token_2, recipient_device)
+    encoded_msg2 = lora_msg2.encode_token()
+    packet2 = encoded_msg2.hex()
+    transmit(f"AT+SENDB={packet2}\r\n".encode())
 
 @GRAPHify
 def ttmain(trigger):

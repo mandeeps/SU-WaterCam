@@ -106,4 +106,10 @@ def transmit_from_watercam(data_dict):
     transmit(f"AT+SENDB={data}\r\n".encode())
 
 if __name__ == "__main__":
-    transmit(example_packet)
+    from sys import argv
+    if len(argv) == 1:
+        transmit(example_packet)
+    else:
+        with open(argv[1], 'rb') as file:
+            contents = file.read().hex()
+            transmit(f"AT+SENDB={contents}\r\n".encode())

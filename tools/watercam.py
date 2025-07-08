@@ -9,6 +9,8 @@ from subprocess import call
 from subprocess import Popen
 import take_nir_photos # has functions for IR-CUT camera and Lepton
 import coreg_multiple
+from compress_segmented import compress_image
+from lora_transmit import transmit, transmit_from_watercam
 
 try:
     from lora_transmit import transmit_from_watercam
@@ -32,17 +34,17 @@ def main(autostart:bool = True):
 
     segformer_location = "/home/pi/git/segformer_5band"
     segformer_python = "/home/pi/miniforge3/envs/5band/bin/python"
-    segformer_coreg = "/home/pi/git/segformer_5band/tools/test_no_label.py"
+    segformer_coreg = "/home/pi/git/segformer_5band/segment_tiff_5band.py"
 
     # Sync time if network available by calling WittyPi script. WittyPi stock software disables other network time software like Chrony and systemd-timesyncd, so either we do time sync their way or use alternative software for the WittyPi 4 like: https://github.com/trackIT-Systems/wittypi4
     #if autostart:
-    from witty_pi_4 import WittyPi4
-    WittyPi4().sync_time_with_network()
+#    from witty_pi_4 import WittyPi4
+#    WittyPi4().sync_time_with_network()
 
     # Delay between iterations
-    interval = 60
+    interval = 60 # 10 for testing
     # How many sets of photos (1 NIR, 1 RGB, 1 LWIR) to take per boot
-    limit = 5
+    limit = 5 # reduce for testing
 
     for _ in range(limit):
         current = time.monotonic()
@@ -63,14 +65,23 @@ def main(autostart:bool = True):
         print("Run coreg")
         coreg_multiple.coreg(directory)
         # run 5 band SegFormer on coreg photos
-        # Popen([segformer_python, segformer_coreg], cwd=segformer_location)
+        tiff = directory + "/final_5_band.tiff"
+        Popen([segformer_python, segformer_coreg, tiff], cwd=segformer_location).wait()
+
+        bitmap_dict = compress_image(directory + "/final_5_band_segmentation.png")
+        print(bitmap_dict['compressed_data'])
+        bit_bytes = bitmap_dict['compressed_data'].hex()
+        print(bit_bytes)
 
         data_dict = get_aht20()
         data_dict.update(get_orientation())
 
         # transmit over lora
         transmit_from_watercam(data_dict)
-
+        sleep(5)
+        print("Transmitting bitmap data")
+        transmit(f"AT+SENDB={bit_bytes}\r\n".encode())
+        print("sent to mDot")
 #        else:
         sleep(interval)
 

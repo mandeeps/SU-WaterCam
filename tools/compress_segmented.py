@@ -6,6 +6,7 @@ import sys
 import numpy as np
 from PIL import Image
 import brotli
+from pathlib import Path
 
 # --- Utility functions ---
 def to_binary(img: Image.Image) -> np.ndarray:
@@ -13,6 +14,7 @@ def to_binary(img: Image.Image) -> np.ndarray:
     # Otsu's method or mean threshold
     threshold = np.mean(arr) if arr.std() < 1e-3 else otsu(arr)
     return (arr > threshold).astype(np.uint8)
+
 def otsu(arr):
     hist, bins = np.histogram(arr.flatten(), bins=256, range=(0,256))
     total = arr.size
@@ -111,6 +113,80 @@ def find_best_size(img, max_bytes, min_size=32):
             high = mid - 1
     return best
 
+def compress_image(input_path, max_bytes=242, min_size=32, output_path=None, save_images=True):
+    """
+    Compress an image to binary format with size constraint.
+    
+    Args:
+        input_path (str or Path): Path to input image
+        max_bytes (int): Maximum compressed size in bytes (default: 242)
+        min_size (int): Minimum image dimension (default: 32)
+        output_path (str or Path, optional): Path for compressed output file
+        save_images (bool): Whether to save intermediate images (default: True)
+    
+    Returns:
+        dict: Dictionary containing compression results:
+            - 'success' (bool): Whether compression was successful
+            - 'compressed_data' (bytes): The compressed data (if successful)
+            - 'width' (int): Final image width (if successful)
+            - 'height' (int): Final image height (if successful)
+            - 'method' (int): Compression method used (if successful)
+            - 'total_size' (int): Total compressed size (if successful)
+            - 'used_image_path' (str): Path to saved used image (if save_images=True)
+            - 'decompressed_image_path' (str): Path to saved decompressed image (if save_images=True)
+    """
+    input_path = Path(input_path)
+    
+    # Load and compress image
+    img = Image.open(input_path)
+    result = find_best_size(img, max_bytes, min_size)
+    
+    if not result:
+        return {'success': False}
+    
+    arr_bin, comp, method, header = result
+    total_size = len(header) + len(comp)
+    
+    # Determine output directory (same as input file)
+    output_dir = input_path.parent
+    
+    # Generate output paths
+    if output_path is None:
+        output_path = output_dir / f"{input_path.stem}_compressed.bin"
+    else:
+        output_path = Path(output_path)
+    
+    # Save compressed file
+    with open(output_path, 'wb') as f:
+        f.write(header + comp)
+    
+    result_dict = {
+        'success': True,
+        'compressed_data': header + comp,
+        'width': arr_bin.shape[1],
+        'height': arr_bin.shape[0],
+        'method': method,
+        'total_size': total_size,
+        'compressed_file_path': str(output_path)
+    }
+    
+    if save_images:
+        # Save used image and decompressed image to same directory
+        used_path = output_dir / f"{input_path.stem}_used_for_compression.png"
+        decompressed_path = output_dir / f"{input_path.stem}_decompressed.png"
+        
+        Image.fromarray(arr_bin*255).save(used_path)
+        
+        # Verify decompression
+        arr2 = decompress(header + comp)
+        assert np.array_equal(arr_bin, arr2), 'Decompression mismatch!'
+        Image.fromarray(arr2*255).save(decompressed_path)
+        
+        result_dict['used_image_path'] = str(used_path)
+        result_dict['decompressed_image_path'] = str(decompressed_path)
+    
+    return result_dict
+
 def main():
     import argparse
     parser = argparse.ArgumentParser()
@@ -118,38 +194,21 @@ def main():
     parser.add_argument('--max-bytes', type=int, default=242)
     parser.add_argument('--min-size', type=int, default=32)
     parser.add_argument('--output', default=None)
+    parser.add_argument('--no-images', action='store_true', help='Skip saving intermediate images')
     args = parser.parse_args()
 
-    img = Image.open(args.input)
-    result = find_best_size(img, args.max_bytes, args.min_size)
-    if result:
-        arr_bin, comp, method, header = result
-        print(f"Success at {arr_bin.shape[1]}x{arr_bin.shape[0]}: {len(header)+len(comp)} bytes")
-        
-        # Determine output directory (same as input file)
-        from pathlib import Path
-        input_path = Path(args.input)
-        output_dir = input_path.parent
-        
-        # Generate output paths
-        if args.output:
-            output_path = args.output
-        else:
-            output_path = output_dir / f"{input_path.stem}_compressed.bin"
-        
-        # Save compressed file
-        with open(output_path, 'wb') as f:
-            f.write(header+comp)
-        
-        # Save used image and decompressed image to same directory
-        used_path = output_dir / f"{input_path.stem}_used_for_compression.png"
-        decompressed_path = output_dir / f"{input_path.stem}_decompressed.png"
-        
-        Image.fromarray(arr_bin*255).save(used_path)
-        arr2 = decompress(header+comp)
-        assert np.array_equal(arr_bin, arr2), 'Decompression mismatch!'
-        Image.fromarray(arr2*255).save(decompressed_path)
-        print('Decompression verified.')
+    result = compress_image(
+        input_path=args.input,
+        max_bytes=args.max_bytes,
+        min_size=args.min_size,
+        output_path=args.output,
+        save_images=not args.no_images
+    )
+    
+    if result['success']:
+        print(f"Success at {result['width']}x{result['height']}: {result['total_size']} bytes")
+        if not args.no_images:
+            print('Decompression verified.')
     else:
         print('Could not compress to target size.')
 

@@ -356,11 +356,17 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
         cached = load_transform_parameters(directory)
         if cached is not None:
             cached_transform, loaded_path = cached
-            if validate_transform_compatibility(cached_transform, fixed_image_path, moving_image_path):
+            # Check transform type and parameter length
+            expected_transform = create_transform(config.TRANSFORM_TYPE)
+            if (
+                type(cached_transform) == type(expected_transform)
+                and len(cached_transform.GetParameters()) == len(expected_transform.GetParameters())
+                and validate_transform_compatibility(cached_transform, fixed_image_path, moving_image_path)
+            ):
                 logger.info(f"Using cached transform parameters from {loaded_path}")
                 return apply_cached_transform(fixed_image_path, moving_image_path, cached_transform)
             else:
-                logger.info(f"Cached transform from {loaded_path} is not compatible. Will generate a new transform.")
+                logger.info(f"Cached transform from {loaded_path} is not compatible with current config. Will generate a new transform.")
     elif position_changed:
         logger.info("Position changed flag is True - forcing new registration")
     fixed_image_cv = cv2.imread(fixed_image_path, cv2.IMREAD_UNCHANGED)
@@ -483,7 +489,7 @@ def save_metadata_summary(directory: str, output_paths: dict, image_info: dict) 
     logger.info(f"Saved metadata summary: {metadata_file}")
 
 
-def coreg(directory: str, position_changed: bool = False) -> None:
+def coreg(directory: str, position_changed: bool = False) -> str:
     try:
         nir_off_path, nir_on_path, lwir_path = validate_input_files(directory)
         # Loading LWIR image
@@ -541,6 +547,7 @@ def coreg(directory: str, position_changed: bool = False) -> None:
             logger.info("  - final_5_band.tiff: Original 5-band format (B,G,R,Thermal,NIR)")
             logger.info("  - color_preserved_5_band.tiff: Color-preserved format (R,G,B,Thermal,NIR)")
             logger.info("  - coregistration_metadata.json: Processing metadata")
+            return directory
         else:
             logger.info("All output files already exist. Skipping processing.")
     except ValueError:
