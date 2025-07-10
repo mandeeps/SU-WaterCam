@@ -189,7 +189,7 @@ Disable swap and set noatime to prolong SD card life by decreasing writes: `sudo
 
 Add `noatime,commit=60` settings to ext4 partitions in /etc/fstab - noatime prevents writing access times to files, commit collects and delays writes to every N seconds. Data loss will be limited to the last N seconds of writes if power is lost. Do NOT change the /boot partition settings, it is a vfat filesystem and these options will not work and will cause the Pi to not boot.
 
-Set temp directories like /tmp, /var/tmp to mount in RAM, ex. `tmpfs /var/tmp tmpfs nodev,nosuid,size=20M 0 0` in fstab
+Set temp directories like /tmp to mount in RAM, ex. `tmpfs /tmp tmpfs nodev,nosuid,size=20M 0 0` in fstab: https://wiki.archlinux.org/title/Tmpfs
 
 Other options include logging to a USB drive, or setting the SD to write-protected and using a USB drive for all write operations.
 
@@ -239,7 +239,7 @@ Compile lepton.c and capture.c for the device. Install build-essential if not al
 
 Copy to the root of the SU-WaterCam directory: From tools directory, run `cp lepton ../.` and `cp capture ../.`
 
-Use apt to install these packages: `sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2 python3-rasterio`
+Use apt to install these packages: `sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2 python3-rasterio python3-gdal python3-pygraphviz python3-opencv`
 
 Make sure picamera2 is installed as system package, not through pip
 

@@ -24,9 +24,9 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
     import subprocess
     segformer_python = "/home/pi/miniforge3/envs/5band/bin/python"
 
-    segformer_coreg = "/home/pi/git/segformer_5band/segment_tiff_5band.py"
+    segformer_coreg = "/home/pi/segformer_5band/segment_tiff_5band.py"
     segmented_file = filepath + "/final_5_band.tiff"
-    subprocess.Popen([segformer_python, segformer_coreg, segmented_file], cwd="/home/pi/git/segformer_5band").wait()
+    subprocess.Popen([segformer_python, segformer_coreg, segmented_file], cwd="/home/pi/segformer_5band").wait()
     return filepath + "/final_5_band_segmentation.png"
 
 @SQify
