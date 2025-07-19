@@ -2,7 +2,6 @@
 # Main script for controlling automated WaterCam functions when running in field on a schedule
 # When the system wakes up this script will run functions from take_nir_photos to save images and data from the optical and Flir Lepton cameras and metadata from the IMU and GPS
 
-import logging
 import time
 from time import sleep
 from subprocess import call
@@ -10,10 +9,9 @@ from subprocess import Popen
 import take_nir_photos # has functions for IR-CUT camera and Lepton
 import coreg_multiple
 from compress_segmented import compress_image
-from lora_transmit import transmit, transmit_from_watercam
 
 try:
-    from lora_transmit import transmit_from_watercam
+    from lora_transmit import transmit_from_watercam, transmit
 except ImportError:
     print("Error: importing lora transmit function")
 try:
@@ -28,7 +26,6 @@ except ImportError:
 def main(autostart:bool = True):
     print(f"Will shutdown: {autostart}")
     # setup
-    logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s', encoding='utf-8', level=logging.DEBUG)
     last_print = time.monotonic()
     filepath = "/home/pi/SU-WaterCam/images/"
 

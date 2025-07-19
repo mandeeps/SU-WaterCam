@@ -3,7 +3,6 @@
 # Based on Adafruit example
 
 import time
-import logging
 import board
 import busio
 import adafruit_bno08x
@@ -41,9 +40,9 @@ def temperature() -> int:
     return result
 
 def get_values() -> dict:
-    return {"Temperature":bno.temperature, "Accelerometer":sensor.acceleration,
-        "Magnetic":bno.magnetic, "Gyro":sensor.gyro, "Euler":sensor.euler,
-        "Quaternion":bno.quaternion, "Linear":sensor.linear_acceleration,
+    return {"Temperature":bno.temperature, "Accelerometer":bno.acceleration,
+        "Magnetic":bno.magnetic, "Gyro":bno.gyro, "Euler":bno.euler,
+        "Quaternion":bno.quaternion, "Linear":bno.linear_acceleration,
         "Gravity":bno.gravity}
 
 def offset():
@@ -61,7 +60,7 @@ def offset():
             for i in range(3):
                 offset_gyro.append(float(file.readline().rstrip()))
     except IOError:
-        logging.error("Offset file does not exist")
+        print("Offset file does not exist")
 
 def main():
     while True:

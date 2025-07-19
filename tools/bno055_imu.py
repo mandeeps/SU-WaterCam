@@ -3,7 +3,6 @@
 # Based on Adafruit example
 
 import time
-import logging
 import board
 try:
     import adafruit_bno055
@@ -50,7 +49,7 @@ def offset():
             for i in range(3):
                 offset_gyro.append(float(file.readline().rstrip()))
     except IOError:
-        logging.error("Offset file does not exist")
+        print("Offset file does not exist")
 
 def main():
     while True:

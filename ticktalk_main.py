@@ -47,7 +47,7 @@ def call_shutdown(state):
         sys.exit("shutdown") # exit program
 
 @SQify
-def flir_planb():
+def flir_planb(dummy):
     from tools.lepton_reset_gpiozero import reset
     print("\n reset lepton \n")
     reset()
@@ -109,14 +109,14 @@ def lora_token(bitmap):
 def ttmain(trigger):
     with TTClock.root() as root_clock:
 
-        token, dirname = get_time(trigger, TTClock=root_clock, TTPeriod=10_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000)
+        token, dirname = get_time(trigger, TTClock=root_clock, TTPeriod=60_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000)
         photo = take_two_photos(trigger, dirname, TTPersistent=True)
 
         lepton_file = flir(dirname) #, TTClock=root_clock, TTPeriod=1_000_000, TTPhase=0, TTDataInterval=400_000)
 
         deadline_time = READ_TTCLOCK(token, TTClock=root_clock) + 5_000_000
 
-        lepton = TTFinishByOtherwise(lepton_file, TTTimeDeadline=deadline_time, TTPlanB=flir_planb(), TTWillContinue=False)
+        lepton = TTFinishByOtherwise(lepton_file, TTTimeDeadline=deadline_time, TTPlanB=TTSingleRunTimeout(flir_planb(token), TTTimeout=3_000_000), TTWillContinue=False)
 
         coreg_state = coregistration(dirname, lepton, photo, TTPersistent=True)
         seg_result = segformer(dirname, coreg_state, TTPersistent=True)

@@ -83,6 +83,8 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   **optional items we are evaluating**
 - Anti-fog spray/hydrophobic coating for lens
 
+- Breather valve to allow moisture and heat to exit the bottom of the case
+
 - Desiccant packs - for example https://sensorpros.com/products/druck-dri-can-desiccant?variant=3272716801 or https://www.amazon.com/Silica-Gel-Packets-Indicating-Electronics/dp/B0B2DNLZ4K - will need to be dried for reuse
   
   **Tools and accessories - do not order multiples**
@@ -584,6 +586,13 @@ On your machine connected to the Pi (over Tailscale or directly) use VLC to stre
 
 old model based on FloodNet data set and DeepLab
 FloodNet: https://ieeexplore.ieee.org/document/9460988
+
+### Boot Speed and Power Optimization
+If the cellular modem is not needed, networking and USB can be disabled to reduce boot time and power consumption. NetworkManager and ModemManager can be disabled.
+
+uhubctl for turning off USB: https://github.com/mvp/uhubctl
+
+Overclocking by small amounts is being investigated. Reducing the time spent operating would allow the system to return to an off state faster, possibly reducing overall power consumption compared to running at a lower clock rate.
 
 ## Clone SD Card
 

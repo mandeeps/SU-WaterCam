@@ -1,8 +1,8 @@
 #!/usr/bin/env python
+
 """Multispectral Image Coregistration Script"""
 import argparse
 import json
-import logging
 import os
 import sys
 from typing import Optional, Tuple
@@ -12,9 +12,6 @@ import numpy as np
 import pandas as pd
 import rasterio
 from rasterio.transform import from_origin
-
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-logger = logging.getLogger(__name__)
 
 class CoregistrationConfig:
     MAX_IMAGE_SIZE = 1000
@@ -56,15 +53,15 @@ def normalize_image(image: np.ndarray, min_val: float = 0.0, max_val: float = 25
 
 def validate_image_file(image_path: str, expected_extensions: Optional[list] = None) -> bool:
     if not os.path.exists(image_path):
-        logger.error(f"Image file does not exist: {image_path}")
+        print(f"Image file does not exist: {image_path}")
         return False
     if expected_extensions and os.path.splitext(image_path)[1].lower() not in expected_extensions:
-        logger.error(f"Image file has unexpected extension: {os.path.splitext(image_path)[1].lower()}, expected: {expected_extensions}")
+        print(f"Image file has unexpected extension: {os.path.splitext(image_path)[1].lower()}, expected: {expected_extensions}")
         return False
     try:
         return cv2.imread(image_path, cv2.IMREAD_UNCHANGED) is not None
     except Exception as e:
-        logger.error(f"Error reading image file {image_path}: {e}")
+        print(f"Error reading image file {image_path}: {e}")
         return False
 
 
@@ -115,8 +112,8 @@ def validate_input_files(directory: str) -> Tuple[str, str, str]:
         missing_files.append("*.pgm")
     if missing_files:
         error_msg = f"Missing required files in {directory}: {', '.join(missing_files)}"
-        logger.error(error_msg)
-        logger.info(f"Available files: {files}")
+        print(error_msg)
+        print(f"Available files: {files}")
         raise ValueError(error_msg)
     assert nir_off_image is not None
     assert nir_on_image is not None
@@ -158,7 +155,7 @@ def save_transform_parameters(transform: sitk.Transform, directory: str, metadat
             json.dump(transform_data, f, indent=2)
         return True
     except Exception as e:
-        logger.error(f"Failed to save transform parameters: {e}")
+        print(f"Failed to save transform parameters: {e}")
         return False
 
 
@@ -184,14 +181,14 @@ def load_transform_parameters(directory: str) -> Optional[tuple[sitk.Transform, 
             "CompositeTransform": lambda: sitk.CompositeTransform(2)
         }
         if transform_type not in transform_map:
-            logger.warning(f"Unknown transform type: {transform_type}")
+            print(f"Unknown transform type: {transform_type}")
             return None
         transform = transform_map[transform_type]()
         transform.SetParameters(parameters)
         transform.SetFixedParameters(fixed_parameters)
         return (transform, transform_path)
     except Exception as e:
-        logger.error(f"Failed to load transform parameters: {e}")
+        print(f"Failed to load transform parameters: {e}")
         return None
 
 
@@ -200,7 +197,7 @@ def validate_transform_compatibility(transform: sitk.Transform, fixed_image_path
         fixed_image = cv2.imread(fixed_image_path, cv2.IMREAD_UNCHANGED)
         moving_image = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
         if fixed_image is None or moving_image is None:
-            logger.warning("Cannot validate transform - failed to load images")
+            print("Cannot validate transform - failed to load images")
             return False
         if (fixed_image.shape[0] > config.MAX_IMAGE_SIZE or fixed_image.shape[1] > config.MAX_IMAGE_SIZE):
             width = int(fixed_image.shape[1] * config.SCALE_PERCENT / 100)
@@ -208,15 +205,15 @@ def validate_transform_compatibility(transform: sitk.Transform, fixed_image_path
             expected_size = (height, width)
         else:
             expected_size = fixed_image.shape[:2]
-        logger.info(f"Transform validation passed for image size: {expected_size}")
+        print(f"Transform validation passed for image size: {expected_size}")
         return True
     except Exception as e:
-        logger.warning(f"Transform validation failed: {e}")
+        print(f"Transform validation failed: {e}")
         return False
 
 
 def apply_cached_transform(fixed_image_path: str, moving_image_path: str, cached_transform: sitk.Transform, temperature_data: Optional[np.ndarray] = None) -> Tuple[sitk.Transform, np.ndarray, np.ndarray]:
-    logger.info("Applying cached transform to images...")
+    print("Applying cached transform to images...")
     fixed_image_cv = cv2.imread(fixed_image_path, cv2.IMREAD_UNCHANGED)
     moving_image_cv = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
     if fixed_image_cv is None:
@@ -224,7 +221,7 @@ def apply_cached_transform(fixed_image_path: str, moving_image_path: str, cached
     if moving_image_cv is None:
         raise ValueError(f"Could not load moving image: {moving_image_path}")
     if (fixed_image_cv.shape[0] > config.MAX_IMAGE_SIZE or fixed_image_cv.shape[1] > config.MAX_IMAGE_SIZE):
-        logger.info(f"Resizing large images by {config.SCALE_PERCENT}%")
+        print(f"Resizing large images by {config.SCALE_PERCENT}%")
         width = int(fixed_image_cv.shape[1] * config.SCALE_PERCENT / 100)
         height = int(fixed_image_cv.shape[0] * config.SCALE_PERCENT / 100)
         dim = (width, height)
@@ -297,7 +294,7 @@ def estimate_initial_transform(fixed_image: sitk.Image, moving_image: sitk.Image
         try:
             return sitk.CenteredTransformInitializer(fixed_image, moving_image, transform, initializer)
         except Exception as e:
-            logger.warning(f"Transform initializer failed: {e}")
+            print(f"Transform initializer failed: {e}")
     return transform
 
 
@@ -314,7 +311,7 @@ def try_multiple_registration_strategies(fixed_image_path: str, moving_image_pat
             config.REGISTRATION_METRIC = original_metric
             return transform, output, four_band
         except Exception as e:
-            logger.warning(f"Best strategy failed: {e}")
+            print(f"Best strategy failed: {e}")
             config.TRANSFORM_TYPE = original_transform
             config.REGISTRATION_METRIC = original_metric
             raise
@@ -324,7 +321,7 @@ def try_multiple_registration_strategies(fixed_image_path: str, moving_image_pat
     best_strategy = None
     # Trying multiple registration strategies
     for i, strategy in enumerate(strategies):
-        logger.info(f"Strategy {i+1}/{len(strategies)}: {strategy['transform']} transform with {strategy['metric']} metric")
+        print(f"Strategy {i+1}/{len(strategies)}: {strategy['transform']} transform with {strategy['metric']} metric")
         try:
             original_transform = config.TRANSFORM_TYPE
             original_metric = config.REGISTRATION_METRIC
@@ -342,10 +339,10 @@ def try_multiple_registration_strategies(fixed_image_path: str, moving_image_pat
                 best_strategy = strategy
                 # New best strategy found
         except Exception as e:
-            logger.warning(f"Strategy {strategy} failed: {e}")
+            print(f"Strategy {strategy} failed: {e}")
             continue
     if best_result is None:
-        logger.error("All registration strategies failed")
+        print("All registration strategies failed")
         raise ValueError("All registration strategies failed")
     # Best strategy selected
     return best_result
@@ -363,12 +360,12 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
                 and len(cached_transform.GetParameters()) == len(expected_transform.GetParameters())
                 and validate_transform_compatibility(cached_transform, fixed_image_path, moving_image_path)
             ):
-                logger.info(f"Using cached transform parameters from {loaded_path}")
+                print(f"Using cached transform parameters from {loaded_path}")
                 return apply_cached_transform(fixed_image_path, moving_image_path, cached_transform)
             else:
-                logger.info(f"Cached transform from {loaded_path} is not compatible with current config. Will generate a new transform.")
+                print(f"Cached transform from {loaded_path} is not compatible with current config. Will generate a new transform.")
     elif position_changed:
-        logger.info("Position changed flag is True - forcing new registration")
+        print("Position changed flag is True - forcing new registration")
     fixed_image_cv = cv2.imread(fixed_image_path, cv2.IMREAD_UNCHANGED)
     moving_image_cv = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
     if fixed_image_cv is None:
@@ -377,7 +374,7 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
         raise ValueError(f"Could not load moving image: {moving_image_path}")
     original_fixed_size = fixed_image_cv.shape[:2]
     if (fixed_image_cv.shape[0] > config.MAX_IMAGE_SIZE or fixed_image_cv.shape[1] > config.MAX_IMAGE_SIZE):
-        logger.info(f"Resizing large images by {config.SCALE_PERCENT}%")
+        print(f"Resizing large images by {config.SCALE_PERCENT}%")
         width = int(fixed_image_cv.shape[1] * config.SCALE_PERCENT / 100)
         height = int(fixed_image_cv.shape[0] * config.SCALE_PERCENT / 100)
         dim = (width, height)
@@ -420,11 +417,11 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
         registration_method.SmoothingSigmasAreSpecifiedInPhysicalUnitsOff()
     # Starting registration
     final_transform = registration_method.Execute(sitk.Cast(fixed_image_sitk, sitk.sitkFloat32), sitk.Cast(moving_image_sitk, sitk.sitkFloat32))
-    logger.info(f"Final metric value: {registration_method.GetMetricValue()}")
-    logger.info(f"Optimizer's stopping condition: {registration_method.GetOptimizerStopConditionDescription()}")
+    print(f"Final metric value: {registration_method.GetMetricValue()}")
+    print(f"Optimizer's stopping condition: {registration_method.GetOptimizerStopConditionDescription()}")
     if hasattr(final_transform, "GetParameters"):
         params = final_transform.GetParameters()
-        logger.info(f"Transform parameters: {params}")
+        print(f"Transform parameters: {params}")
     if directory:
         metadata = {"fixed_image": os.path.basename(fixed_image_path), "moving_image": os.path.basename(moving_image_path), "transform_type": config.TRANSFORM_TYPE, "metric": config.REGISTRATION_METRIC, "image_size": fixed_image_cv_resized.shape[:2]}
         save_transform_parameters(final_transform, directory, metadata)
@@ -463,7 +460,7 @@ def save_multiband_tiff(image_data: np.ndarray, output_path: str, transform_para
     transform = from_origin(*transform_params)
     with rasterio.open(output_path, "w", driver="GTiff", height=image_data.shape[1], width=image_data.shape[2], count=image_data.shape[0], dtype=image_data.dtype, transform=transform) as dst:
         dst.write(image_data)
-    logger.info(f"Saved multiband TIFF: {output_path}")
+    print(f"Saved multiband TIFF: {output_path}")
 
 
 def save_color_preserved_tiff(rgb_data: np.ndarray, thermal_data: np.ndarray, nir_data: np.ndarray, output_path: str, transform_params: Tuple = config.DEFAULT_TRANSFORM_ORIGIN + config.DEFAULT_TRANSFORM_SCALE) -> None:
@@ -478,7 +475,7 @@ def save_color_preserved_tiff(rgb_data: np.ndarray, thermal_data: np.ndarray, ni
         for i, description in enumerate(band_descriptions, 1):
             dst.set_band_description(i, description)
         dst.update_tags(CREATOR="Coregistration Script", DESCRIPTION="Color-preserved multispectral data with RGB, Thermal, and NIR bands", BAND_COUNT=str(stacked_data.shape[0]), DATA_SOURCES="Optical (RGB), Thermal (LWIR), NIR (NIR-ON/NIR-OFF difference)")
-    logger.info(f"Saved color-preserved TIFF: {output_path}")
+    print(f"Saved color-preserved TIFF: {output_path}")
 
 
 def save_metadata_summary(directory: str, output_paths: dict, image_info: dict) -> None:
@@ -486,7 +483,7 @@ def save_metadata_summary(directory: str, output_paths: dict, image_info: dict) 
     metadata = {"timestamp": pd.Timestamp.now().isoformat(), "output_files": output_paths, "image_info": image_info, "processing_parameters": {"max_image_size": config.MAX_IMAGE_SIZE, "scale_percent": config.SCALE_PERCENT, "registration_metric": config.REGISTRATION_METRIC, "transform_type": config.TRANSFORM_TYPE, "thermal_colormap": str(config.THERMAL_COLORMAP), "invert_thermal": config.INVERT_THERMAL}, "band_descriptions": {"final_5_band.tiff": ["Band 1: Blue Channel (Optical)", "Band 2: Green Channel (Optical)", "Band 3: Red Channel (Optical)", "Band 4: Thermal Data (Normalized 0-255)", "Band 5: NIR Band (NIR-ON minus NIR-OFF)"], "color_preserved_5_band.tiff": ["Band 1: Red Channel (Optical)", "Band 2: Green Channel (Optical)", "Band 3: Blue Channel (Optical)", "Band 4: Thermal Data (Normalized 0-255)", "Band 5: NIR Band (NIR-ON minus NIR-OFF)"]}}
     with open(metadata_file, "w") as f:
         json.dump(metadata, f, indent=2)
-    logger.info(f"Saved metadata summary: {metadata_file}")
+    print(f"Saved metadata summary: {metadata_file}")
 
 
 def coreg(directory: str, position_changed: bool = False) -> str:
@@ -501,7 +498,7 @@ def coreg(directory: str, position_changed: bool = False) -> str:
         output_paths = {name: os.path.join(directory, filename) for name, filename in output_filenames.items()}
         if not all(os.path.exists(path) for path in [output_paths["five_band"], output_paths["color_preserved"], output_paths["nir_band"], output_paths["metadata"]]):
             # Performing image registration
-            logger.info(get_thermal_colormap_info())
+            print(get_thermal_colormap_info())
             try:
                 transform, output, four_band = try_multiple_registration_strategies(nir_off_path, lwir_path, directory, position_changed, lwir_normalized)
                 cv2.imwrite(output_paths["registered"], output)
@@ -539,21 +536,21 @@ def coreg(directory: str, position_changed: bool = False) -> str:
                 save_metadata_summary(directory, output_paths, image_info)
                 # Metadata summary saved
             except Exception as e:
-                logger.warning(f"Failed to save metadata summary: {e}")
+                print(f"Failed to save metadata summary: {e}")
 
-            logger.info("Coregistration completed successfully!")
-            logger.info(f"Output files saved in: {directory}")
-            logger.info("Files created:")
-            logger.info("  - final_5_band.tiff: Original 5-band format (B,G,R,Thermal,NIR)")
-            logger.info("  - color_preserved_5_band.tiff: Color-preserved format (R,G,B,Thermal,NIR)")
-            logger.info("  - coregistration_metadata.json: Processing metadata")
+            print("Coregistration completed successfully!")
+            print(f"Output files saved in: {directory}")
+            print("Files created:")
+            print("  - final_5_band.tiff: Original 5-band format (B,G,R,Thermal,NIR)")
+            print("  - color_preserved_5_band.tiff: Color-preserved format (R,G,B,Thermal,NIR)")
+            print("  - coregistration_metadata.json: Processing metadata")
             return directory
         else:
-            logger.info("All output files already exist. Skipping processing.")
+            print("All output files already exist. Skipping processing.")
     except ValueError:
         raise
     except Exception as e:
-        logger.error(f"Unexpected error during coregistration: {str(e)}")
+        print(f"Unexpected error during coregistration: {str(e)}")
         raise RuntimeError(f"Coregistration failed: {str(e)}")
 
 

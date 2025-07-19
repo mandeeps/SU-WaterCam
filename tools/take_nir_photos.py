@@ -6,16 +6,12 @@
 # Call add_metadata to get info from IMU and GPS
 # Run lepton and capture binaries to save data from Flir in same directory
 
-import logging
+import subprocess
 from os import path, makedirs, chdir
 from datetime import datetime
 from picamera2 import Picamera2
 from gpiozero import LED
 import add_metadata
-import subprocess
-
-logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s',
-    encoding='utf-8', level=logging.DEBUG)
 
 try:
     picam2 = Picamera2()
@@ -23,7 +19,7 @@ try:
     picam2.configure(config)
     # picam2.start() -- do not start outside start_and_capture function as this interferes with Flir Lepton! (for some reason I don't understand)
 except Exception:
-    logging.error("Camera loading error")
+    print("Camera loading error")
 
 def take_photo(directory: str, nir: str) -> str:
     time = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -33,7 +29,7 @@ def take_photo(directory: str, nir: str) -> str:
     try:
         picam2.start_and_capture_file(image, show_preview=False)
     except Exception:
-        logging.error("Camera failed to capture")
+        print("Camera failed to capture")
 
     # get IMU and GPS data and save into image EXIF and XMP
     add_metadata.add_metadata(image)

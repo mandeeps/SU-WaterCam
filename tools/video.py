@@ -5,7 +5,6 @@
 # If you are using Tailscale you can use the IP/hostname it tells you
 
 import io
-import logging
 import socketserver
 from http import server
 from threading import Condition
@@ -73,7 +72,7 @@ class StreamingHandler(server.BaseHTTPRequestHandler):
                     self.wfile.write(frame)
                     self.wfile.write(b'\r\n')
             except Exception as e:
-                logging.warning(
+                print(
                     'Removed streaming client %s: %s',
                     self.client_address, str(e))
         else:

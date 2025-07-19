@@ -2,7 +2,7 @@
 dtparam=i2c_arm=on
 dtparam=i2s=off
 dtparam=spi=on
-dtparam=i2c1=on
+#dtparam=i2c1=on
 
 # Disable audio
 dtparam=audio=off
@@ -56,7 +56,9 @@ dtparam=eth_led1=4
 dtoverlay=uart5
 dtoverlay=pi3-miniuart-bt
 dtoverlay=miniuart-bt
-core_freq=250
+
+# run at max clock rate during boot, int is duration in seconds 
+initial_turbo=30
 
 # I2C clock stretching for BNO055 IMU
 # https://learn.adafruit.com/circuitpython-on-raspberrypi-linux/i2c-clock-stretching

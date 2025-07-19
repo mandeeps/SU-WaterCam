@@ -8,7 +8,6 @@
 from ticktalkpython.SQ import SQify
 
 def take_photo(directory: str, nir: str, picam2) -> str:
-    import logging
     from os import path #, makedirs, chdir
     from datetime import datetime
     from tools.add_metadata import add_metadata
@@ -20,15 +19,13 @@ def take_photo(directory: str, nir: str, picam2) -> str:
     try:
         picam2.start_and_capture_file(image, show_preview=False)
     except Exception:
-        logging.error("Camera failed to capture")
+        print("Camera failed to capture")
 
     # get IMU and GPS data and save into image EXIF and XMP
     add_metadata(image)
-#    return image
 
 @SQify
 def flir(directory):
-    import logging
     from os import chdir, rename #path, makedirs, chdir
     from time import sleep
     import subprocess 
@@ -40,7 +37,7 @@ def flir(directory):
     try:
         subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True, timeout=5)
     except:
-        logging.error("Check Lepton state - capture failed")
+        print("Check Lepton state - capture failed")
     else:
         print(f"change name to include {date}")
         rename("IMG_0000.pgm", f"lepton_{date}.pgm")
@@ -48,7 +45,7 @@ def flir(directory):
     try:
         subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True, timeout=5)
     except:
-        logging.error("Check Lepton state - radiometery failed")
+        print("Check Lepton state - radiometery failed")
     else:
         print(f"change name to include {date}")
         rename("lepton_temp_0000.csv", f"temperatures_{date}.csv")
@@ -58,18 +55,11 @@ def flir(directory):
 
 @SQify
 def take_two_photos(trigger, directory):
-    import logging
-#    from os import path, makedirs, chdir
-#    from datetime import datetime
     from picamera2 import Picamera2
     from gpiozero import LED
-#    from .tools import add_metadata
     from tt_take_photos import take_photo
     import sys
     sys.path.insert(0, "/home/pi/SU-WaterCam/tools")
-
-    logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s', encoding='utf-8', level=logging.DEBUG)
-
 
     global sq_state
     try:
@@ -81,7 +71,7 @@ def take_two_photos(trigger, directory):
             sq_state['picam'] = picam2
         picam2 = sq_state['picam']
     except Exception:
-        logging.error("Camera loading error")
+        print("Camera loading error")
     
     # Adjust GPIO as appropriate. We are using GPIO 21, pin 40
     pin = LED(21)

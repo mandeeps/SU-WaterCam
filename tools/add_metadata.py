@@ -2,7 +2,6 @@
 # embed GPS/IMU data into image EXIF
 # Takes image path as parameter
 
-import logging
 import time
 from fractions import Fraction
 import piexif
@@ -19,13 +18,10 @@ except:
 import gpsd2
 
 # setup
-logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s', encoding='utf-8', level=logging.DEBUG)
-
 try:
     gpsd2.connect()
 except Exception as error:
-    logging.error("GPS error")
-    logging.exception('')
+    print("GPS Error")
 
 # two helper functions from https://gist.github.com/c060604/8a51f8999be12fc2be498e9ca56adc72
 def to_deg(value, loc):
@@ -62,8 +58,7 @@ def add_metadata(image):
     try:
         imu_values = bno055_imu.get_values()
     except Exception as error:
-        logging.error("IMU Error")
-        logging.exception('')
+        print("IMU Error")
     else: # log IMU data to text file
         imu = [f"\nFile: {image}\n",
             f"Time: {time.asctime(time.localtime(time.time()))}\n",
@@ -89,8 +84,7 @@ def add_metadata(image):
     try:
         packet = gpsd2.get_current()
     except Exception as error:
-        logging.error("No GPS data returned")
-        logging.exception('')
+        print("No GPS data returned")
         with open(DATA, 'a', encoding="utf8") as data:
             data.write("\nNo GPS fix \n")
     else:

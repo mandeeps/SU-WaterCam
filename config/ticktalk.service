@@ -1,14 +1,13 @@
 [Unit]
 Description=Run main Watercam Python script (TTPython variant)
-Requires=network-online.target 
 After=network-online.target
 
 [Service]
 User=pi
 Group=pi
-Type=idle
+Type=simple
 WorkingDirectory=/home/pi/SU-WaterCam
-ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/runrtm.py -s 1 output/ticktalk_main.pickle 8080
+ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/runrtm.py -d 50 -s 0 --timeout=0 /home/pi/SU-WaterCam/output/ticktalk_main.pickle 8080
 
 [Install]
 WantedBy=multi-user.target

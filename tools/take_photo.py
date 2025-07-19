@@ -2,13 +2,9 @@
 # Use picamera2 to take a photo
 # Assumes use of 5MP camera
 
-import logging
 from os import path
 from datetime import datetime
 from picamera2 import Picamera2
-
-logging.basicConfig(filename='debug.log', format='%(asctime)s %(name)-12s %(message)s',
-    encoding='utf-8', level=logging.DEBUG)
 
 try:
     picam2 = Picamera2()
@@ -16,7 +12,7 @@ try:
     picam2.configure(config)
     # picam2.start() -- do not start outside start_and_capture function as this interferes with Flir Lepton
 except Exception:
-    logging.error("Camera loading error")
+    print("Camera loading error")
 
 def main(filepath: str) -> str:
     time = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -25,7 +21,7 @@ def main(filepath: str) -> str:
     try:
         picam2.start_and_capture_file(image, show_preview=False)
     except Exception:
-        logging.error("Camera failed to capture")
+        print("Camera failed to capture")
 
     return image
 
