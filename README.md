@@ -210,6 +210,8 @@ Outdated (Bullseye specific): If there are issues with taking high-resolution im
 
 Can also add nohdmi to the vc4-kms-v3d line to disable HDMI ports and save ~30mA
 
+Limit the size of the journal by setting SystemMaxUse in /etc/systmed/journald.conf
+
 ### Power Management
 
 Next, configure the WittyPi 4 for power management.
@@ -306,6 +308,8 @@ On the Rapsberry Pi find the CAMERA slot. The other end of the ribbon cable shou
 ![](documentation_assets/6d00c3ddceb155d7bbed6e278a3615e26f77ac0a.jpg)
 
 ### WittyPi 4 Setup
+
+Solder pins to the unpopulated 7-pin header for use with the mDot. 
 
 Software is already configured on the SD filesystem image. If installing from scratch follow installation instructions for the WittyPi software before installing the WittyPi hardware. Install the heatsink, standoffs, and connect the camera ribbon cable before placing the WittyPi on the GPIO pins. Screw down the hardware so it stays attached. Create a startup script or SystemD service to run the WittyPi network time synchronization when networking is available to get an accurate system time - WittyPi stock software disables Chrony, systemd-timesyncd, etc.,
 
