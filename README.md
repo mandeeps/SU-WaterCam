@@ -83,7 +83,7 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   **optional items we are evaluating**
 - Anti-fog spray/hydrophobic coating for lens
 
-- Breather valve to allow moisture and heat to exit the bottom of the case
+- Breather valve / vent plug to allow moisture and heat to exit the bottom of the case
 
 - Desiccant packs - for example https://sensorpros.com/products/druck-dri-can-desiccant?variant=3272716801 or https://www.amazon.com/Silica-Gel-Packets-Indicating-Electronics/dp/B0B2DNLZ4K - will need to be dried for reuse
   
