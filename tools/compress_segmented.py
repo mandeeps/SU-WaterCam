@@ -113,7 +113,7 @@ def find_best_size(img, max_bytes, min_size=32):
             high = mid - 1
     return best
 
-def compress_image(input_path, max_bytes=242, min_size=32, output_path=None, save_images=True):
+def compress_image(input_path, max_bytes=242, min_size=32, output_path=None, save_images=False):
     """
     Compress an image to binary format with size constraint.
     

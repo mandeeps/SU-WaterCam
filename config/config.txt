@@ -39,9 +39,9 @@ enable_uart=1
 
 # Disable wireless
 # Comment out if you need wireless during debugging
-dtoverlay=disable-wifi
+#dtoverlay=disable-wifi
 dtoverlay=disable-bt
-dtoverlay=pi3-disable-wifi
+#dtoverlay=pi3-disable-wifi
 dtoverlay=pi3-disable-bt
 
 # Disable LEDs to save power

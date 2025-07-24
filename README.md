@@ -602,17 +602,19 @@ Overclocking by small amounts is being investigated. Reducing the time spent ope
 
 If you need to clone/copy a Pi microSD card:
 
-on a Linux/*nix system use dd to copy the entire device. Make sure you have enough free space first. Use lsblk to determine the location of the SD card! Clone the entire disk, not a partition.
+on a Linux/*nix system use dd to copy the entire device. Make sure you have enough free space first, as the filesystem image will be the same size as the SD card you are copying. Use lsblk to determine the location of the SD card! Clone the entire disk, not a partition.
 
-`sudo dd bs=4M if=/dev/mmcblk0 of=sd_clone conv=fsync status=progress`
+`dd bs=4M if=/dev/mmcblk0 of=sd_clone conv=fsync status=progress`
 
 You might need to run dd with sudo if your user account does not have access to the SD device. Change the owner of the new file if so.
 
-If you only want the image as a backup, want to share it online, or won't be flashing new SD cards with it for a while, use PiShrink to save some space: https://github.com/Drewsif/PiShrink
+If you want to share it online, use PiShrink to save space. PiShrink reduces the image to the actual used space, not the size of the entire SD card: https://github.com/Drewsif/PiShrink
 
-`sudo pishrink.sh -a -Z image_file`
+This command will also apply xz compression to the shrunk image.
 
-For creating new SD cards with the file you copied use dd as above but with the input and output reversed to write to a blank SD card. ALWAYS check you are writing to the correct device when you use dd. For more information on this: https://www.pragmaticlinux.com/2020/12/how-to-clone-your-raspberry-pi-sd-card-in-linux/ 
+`sudo pishrink.sh -aZ image_file`
+
+For creating new SD cards with the file you copied you can use Raspberry Pi Imager (or Etcher or another such tool). If you are copying an image that was compressed with PiShrink remember that the first boot will take time as the filesystem is expanded. If you use dd to write the image to an SD card you need to uncompress it first. The command for dd is as above but with the input and output reversed to write to a blank SD card. ALWAYS check you are writing to the correct device when you use dd. For more information on this: https://www.pragmaticlinux.com/2020/12/how-to-clone-your-raspberry-pi-sd-card-in-linux/ 
 
 ## Manual Data Collection
 
