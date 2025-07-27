@@ -107,7 +107,7 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
 ![](documentation_assets/cbbc013483ece19e1ff6cbd77a34d63fbe3192e2.png)
 
-Flash the current SD card image file to an unused microSD card: https://github.com/WaterCam-Team/sd-images
+Flash the current SD card image file to an unused microSD card: https://github.com/WaterCam-Team/sd-images - NOTE: GPS set up has to be done for each cellular modem individually, this might be automated in the future.
 
 You can use the [Raspberry Pi Imager's](https://www.raspberrypi.com/software/) custom OS option to write the image file to a SD card. Simply click "Choose OS", scroll all the way down, select "use custom" and pick the file you downloaded, then click "Choose Storage" and pick your microSD card. You don't need to customize settings or options, just write the image - so select "No" when asked if you want to customize Once it's been written to, you can insert it in a Pi 4B and let it boot. It will automatically expand the filesystem to the full size of the card, so it will take some time on the first boot. Do not interrupt this, just let it run.
 
@@ -370,7 +370,7 @@ Then configure the cellular modem and verify everything works as expected after 
 
 Setup connection with NetworkManager: `sudo nmcli c add type gsm ifname cdc-wdm0 con-name Quectel apn iot.1nce.net`
 
-On Bookworm:
+On Bookworm: needs to be done on every modem
 `sudo mmcli -m 0 –-location-enable-gps-unmanaged` -- to tell ModemManager to start the GPS on the Quectel EC25 but not control it, so gpsd can manage it instead
 Enable gps.service in the git config directory so this will be done automatically on boot.
 
@@ -391,14 +391,16 @@ Reduce the priority of the cellular modem so Ethernet is preferred while you are
 
 Might need to reboot before next step...
 
-Activate the GPS and enable autostart for future use -
+Activate the GPS and enable autostart for future use - needs to be done on every modem
 
-install minicom if not already available and run it:
+Turn off ModemManager for the time being, with `sudo systemctl stop ModemManager`
+
+install minicom or tio if not already available and run it:
 minicom -b 9600 -D /dev/ttyUSB2
 
 (ttyUSB2 is the AT port for the Quectel. ttyUSB1 is the GPS output port)
 
-In minicom, issue the following AT commands -
+In minicom or tio, issue the following AT commands, you should see "OK" after you hit enter. If you don't, make sure ModemManager is off. You might not see what you are typing in -
 
 Enable NMEA:
 AT+QGPSCFG="nmeasrc",1
@@ -414,6 +416,10 @@ AT+QGPSXTRA=1
 
 Quit minicom with ctrl-a, x
 These should be saved to the device's NVRAM so this should only need to be done once.
+
+Now you can restart ModemManager with `sudo systemctl start ModemManager`
+
+If you need to reboot the cellular modem, you can use `ATZ` as with other devices that accept AT commands like the mDot. See the EC25 AT commands reference in the instructions / documentation directory for more commands.
 
 Now edit /etc/default/gpsd to set the correct gps device, in this case /dev/ttyUSB1
 

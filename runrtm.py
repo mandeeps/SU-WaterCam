@@ -59,7 +59,7 @@ def send_input_tokens(graph: Graph.TTGraph,
                                     (graph, graph_inputs),
                                     Recipient.ProcessRuntimeManager)
 
-    logger.info('Sending token inputs\n\n\n')
+#    logger.info('Sending token inputs\n\n\n')
 
     runtime_manager.send_to_runtime(execute_graph_message)
 
@@ -76,19 +76,19 @@ def run_application_rtm(name,
                         in_jupyter=False):
 
     try:
-        with open(log_file_name, 'a') as logfile:
-            logfile.write(f'\nstart execution of phy ({name}) at '
-                          f'{get_readable_time(time.time())}\n')
+        #        with open(log_file_name, 'a') as logfile:
+#            logfile.write(f'\nstart execution of phy ({name}) at '
+#                          f'{get_readable_time(time.time())}\n')
 
         rtm = RuntimeManager.TTRuntimeManagerPhysical(ip, port, port + 1,
                                                       log_file_name,
                                                       output_func)
 
-        time.sleep(0.5)
+#        time.sleep(0.5)
         # timedinput doesn't play nice with jupyter notebooks, hack around it
         # It also doesn't work when running runrtm.py through a systemd unit file
         #if in_jupyter:
-        time.sleep(subscription_time)
+#        time.sleep(subscription_time)
         #else:
         #    timedinput.timedinput(
         #        f'wait for {subscription_time} secs for devices '
@@ -99,7 +99,7 @@ def run_application_rtm(name,
                                         graph, Recipient.ProcessRuntimeManager)
         rtm.send_to_runtime(instantiate_graph_msg)
 
-        time.sleep(2)
+ #       time.sleep(2)
         send_input_tokens(graph, logger, rtm)
 
         if timeout <= 0:

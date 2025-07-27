@@ -2,6 +2,7 @@
 
 from fractions import Fraction
 import gpsd2
+import time
 
 try:
     gpsd2.connect()
@@ -46,7 +47,7 @@ def get_loc():
         if packet.mode >= 2:
             gps_data = [
                 f"GPS Time UTC: {packet.time}\n",
-                f"GPS Time Local: {time.asctime(time.localtime(time.time()))}\n",
+                f"Time Local: {time.asctime(time.localtime(time.time()))}\n",
                 f"Latitude: {packet.lat} degrees\n",
                 f"Longitude: {packet.lon} degrees\n",
                 f"Track: {packet.track}\n",
