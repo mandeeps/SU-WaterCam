@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Compressor for segmented binary classified images, targeting <=242 bytes output for LoRa transmission
+Compressor for segmented binary classified images, targeting <=228 bytes output for LoRa transmission - TT token header is 14 bytes so 228 is the limit for the bitmap. If sending without a TT token, the limit is 242 bytes
 """
 import sys
 import numpy as np
@@ -113,13 +113,13 @@ def find_best_size(img, max_bytes, min_size=32):
             high = mid - 1
     return best
 
-def compress_image(input_path, max_bytes=242, min_size=32, output_path=None, save_images=False):
+def compress_image(input_path, max_bytes=228, min_size=32, output_path=None, save_images=False):
     """
     Compress an image to binary format with size constraint.
     
     Args:
         input_path (str or Path): Path to input image
-        max_bytes (int): Maximum compressed size in bytes (default: 242)
+        max_bytes (int): Maximum compressed size in bytes (default: 228)
         min_size (int): Minimum image dimension (default: 32)
         output_path (str or Path, optional): Path for compressed output file
         save_images (bool): Whether to save intermediate images (default: True)
@@ -191,7 +191,7 @@ def main():
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('input')
-    parser.add_argument('--max-bytes', type=int, default=242)
+    parser.add_argument('--max-bytes', type=int, default=228)
     parser.add_argument('--min-size', type=int, default=32)
     parser.add_argument('--output', default=None)
     parser.add_argument('--no-images', action='store_true', help='Skip saving intermediate images')

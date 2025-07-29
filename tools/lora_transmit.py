@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+from time import sleep
 import struct
 import serial
 
@@ -44,9 +45,12 @@ def transmit(content):
         # Write the data to the serial port
         ser.write(content)
         print("Data sent to mDot successfully!")
+        sleep(1)
+        line = ser.read_until()
+        print(line)
+
     except Exception as e:
         print(f"Error sending to mDot: {e}")
-
     finally:
         if 'ser' in locals():
             ser.close()
@@ -108,7 +112,7 @@ def transmit_from_watercam(data_dict):
 if __name__ == "__main__":
     from sys import argv
     if len(argv) == 1:
-        transmit(example_packet)
+        transmit(f"AT+SENDB={example_packet.hex()}\r\n".encode())
     else:
         with open(argv[1], 'rb') as file:
             contents = file.read().hex()

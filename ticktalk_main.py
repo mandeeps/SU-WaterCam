@@ -86,24 +86,20 @@ def lora_token(bitmap):
     gps = get_lat_lon()
     if gps:
         data.update(get_lat_lon())
-    # add other values (device health, battery, gps, flood status, etc.,)
+    # add other values (device health, battery, flood status, etc.,)
 
-    packet = compressed_encoding(data)
-
-    token_1 = TTToken(data, time_1, False,
-    TTTag(context, sq_name, 4, recipient_device))
-
-    lora_msg = NetworkInterfaceLoRa.TTLoRaMessage(token_1, recipient_device)
-    encoded_msg = lora_msg.encode_token()
-    packet = encoded_msg.hex()
+    encoded_data = compressed_encoding(data)
+    data_token = TTToken(data, time_1, False, TTTag(context, sq_name, 4, recipient_device))
+    data_msg = NetworkInterfaceLoRa.TTLoRaMessage(data_token, recipient_device)
+    data_encoded = data_msg.encode_token()
+    data_packet = data_encoded.hex()
     transmit(f"AT+SENDB={packet}\r\n".encode())
-
-    token_2 = TTToken(bitmap, time_1, False,
-    TTTag(context, sq_name, 4, recipient_device))
-    lora_msg2 = NetworkInterfaceLoRa.TTLoRaMessage(token_2, recipient_device)
-    encoded_msg2 = lora_msg2.encode_token()
-    packet2 = encoded_msg2.hex()
-    transmit(f"AT+SENDB={packet2}\r\n".encode())
+    
+    bitmap_token = TTToken(bitmap, time_1, False, TTTag(context, sq_name, 4, recipient_device))
+    bitmap_msg = NetworkInterfaceLoRa.TTLoRaMessage(bitmap_token, recipient_device)
+    bitmap_encoded = bitmap_msg.encode_token()
+    bitmap_packet = bitmap_encoded.hex()
+    transmit(f"AT+SENDB={bitmap_packet}\r\n".encode())
 
 @GRAPHify
 def ttmain(trigger):
