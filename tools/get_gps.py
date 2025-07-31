@@ -9,41 +9,20 @@ try:
 except Exception as error:
     print("Error: GPS connection")
 
-# two helper functions from https://gist.github.com/c060604/8a51f8999be12fc2be498e9ca56adc72
-def to_deg(value, loc):
-    """convert decimal coordinates into degrees, minutes and seconds tuple
-    Keyword arguments: value is float gps-value, loc is direction list ["S", "N"] or ["W", "E"]
-    return: tuple like (25, 13, 48.343 ,'N')
-    """
-    if value < 0:
-        loc_value = loc[0]
-    elif value > 0:
-        loc_value = loc[1]
-    else:
-        loc_value = ""
-    abs_value = abs(value)
-    deg =  int(abs_value)
-    t1 = (abs_value-deg)*60
-    minutes = int(t1)
-    sec = round((t1 - minutes)* 60, 5)
-    return (deg, minutes, sec, loc_value)
-
-def change_to_rational(number):
-    """convert a number to rational
-    Keyword arguments: number
-    return: tuple like (1, 2), (numerator, denominator)
-    """
-    f = Fraction(str(number))
-    return (f.numerator, f.denominator)
-
-def get_loc():
+def get_loc(exif=False):
     # get current gps info from gpsd
     gps_data = []
     try:
         packet = gpsd2.get_current()
+        print(f"\n packet mode: {packet.mode} \n")
+        if packet.mode < 2:
+            time.sleep(3)
+            packet = gpsd2.get_current()
+            print(f"\n packet mode: {packet.mode} \n")
     except Exception as error:
         print("No GPS data returned")
     else:
+           
         if packet.mode >= 2:
             gps_data = [
                 f"GPS Time UTC: {packet.time}\n",
@@ -60,32 +39,17 @@ def get_loc():
         if packet.mode >= 3:
             gps_data.append(f"Altitude: {packet.alt}\n")
 
-        # Conversion for exif use
-        lat_deg = to_deg(packet.lat,['S','N'])
-        lng_deg = to_deg(packet.lon,['W','E'])
-
-        exiv_lat = (change_to_rational(lat_deg[0]),
-                    change_to_rational(lat_deg[1]),
-                    change_to_rational(lat_deg[2]))
-
-        exiv_lng = (change_to_rational(lng_deg[0]),
-                    change_to_rational(lng_deg[1]),
-                    change_to_rational(lng_deg[2]))
-
-        gps_ifd = {
-                "Altitude": change_to_rational(round(packet.alt)),
-                "LatitudeRef": lat_deg[3],
-                "Latitude": exiv_lat,
-                "LongitudeRef": lng_deg[3],
-                "Longitude": exiv_lng,
-        }
-        print(exiv_lat)
-        print(exiv_lng)
-
-    return gps_data
+    if exif:
+        return (gps_data, packet)
+    else:
+        return gps_data
 
 def get_lat_lon():
     current = get_loc()
+
+    if not current:
+        time.sleep(1)
+        current = get_loc()
     
     data = dict((k, current[k]) for k in ["Latitude", "Longitude", "Altitude"] if k in current)
 
@@ -101,4 +65,13 @@ def get_lat_lon():
     return {'lat_lon_z' : (data["Latitude"], data["Longitude"], data["Altitude"])}
 
 if __name__ == "__main__":
-    print(get_loc())
+    data, packet = get_loc(exif=True)
+
+    if not data:
+        time.sleep(1)
+        data, packet = get_loc(True)
+
+    for line in data:
+        print(line)
+
+    print(packet)

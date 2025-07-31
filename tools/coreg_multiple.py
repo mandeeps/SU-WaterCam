@@ -539,11 +539,6 @@ def coreg(directory: str, position_changed: bool = False) -> str:
                 print(f"Failed to save metadata summary: {e}")
 
             print("Coregistration completed successfully!")
-            print(f"Output files saved in: {directory}")
-            print("Files created:")
-            print("  - final_5_band.tiff: Original 5-band format (B,G,R,Thermal,NIR)")
-            print("  - color_preserved_5_band.tiff: Color-preserved format (R,G,B,Thermal,NIR)")
-            print("  - coregistration_metadata.json: Processing metadata")
             return directory
         else:
             print("All output files already exist. Skipping processing.")

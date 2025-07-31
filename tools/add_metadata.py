@@ -15,15 +15,15 @@ except ImportError:
 except:
     print("BNO055 hardware issue")
 
-import gpsd2
-
-# setup
 try:
-    gpsd2.connect()
-except Exception as error:
-    print("GPS Error")
+    from get_gps import get_loc
+except ImportError:
+    print("GPS import issue")
+except:
+    print("GPS issue")
 
 # two helper functions from https://gist.github.com/c060604/8a51f8999be12fc2be498e9ca56adc72
+# These are for converting values from the GPS for exif / xmp 
 def to_deg(value, loc):
     """convert decimal coordinates into degrees, minutes and seconds tuple
     Keyword arguments: value is float gps-value, loc is direction list ["S", "N"] or ["W", "E"]
@@ -50,11 +50,12 @@ def change_to_rational(number):
     f = Fraction(str(number))
     return (f.numerator, f.denominator)
 
+
 def add_metadata(image):
     # add metadata to an image
     DATA = "/home/pi/SU-WaterCam/data/metadata_log.txt"
 
-     # get IMU data
+    # get IMU data
     try:
         imu_values = bno055_imu.get_values()
     except Exception as error:
@@ -69,6 +70,7 @@ def add_metadata(image):
         with open(DATA, 'a', encoding="utf8") as data:
             for line in imu:
                 data.writelines(line)
+        
         yaw, roll, pitch = imu_values['Euler']
 
     # Start exif handling
@@ -78,32 +80,25 @@ def add_metadata(image):
     if roll:
         user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
         exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
+        
+        # Write roll/pitch/yaw to XMP tags for Pix4D
+        xmpfile = XMPFiles(file_path=image, open_forupdate=True)
+        xmp = xmpfile.get_xmp()
+        xmp.set_property(consts.XMP_NS_DC, 'Roll', str(roll))
+        xmp.set_property(consts.XMP_NS_DC, 'Pitch', str(pitch))
+        xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
+        xmpfile.put_xmp(xmp)
+        xmpfile.close_file()
 
-    # get current gps info from gpsd
-    gps_data = []
+    # GPS: get current info from gpsd
     try:
-        packet = gpsd2.get_current()
+        # we want the entire packet returned from gpsd
+        gps_data, packet = get_loc(exif=True) 
     except Exception as error:
         print("No GPS data returned")
         with open(DATA, 'a', encoding="utf8") as data:
-            data.write("\nNo GPS fix \n")
+            data.write("\nGPS Error \n")
     else:
-        if packet.mode >= 2:
-            gps_data = [
-                f"GPS Time UTC: {packet.time}\n",
-                f"GPS Time Local: {time.asctime(time.localtime(time.time()))}\n",
-                f"Latitude: {packet.lat} degrees\n",
-                f"Longitude: {packet.lon} degrees\n",
-                f"Track: {packet.track}\n",
-                f"Satellites: {packet.sats}\n",
-                f"Error: {packet.error}\n",
-                f"Precision: {packet.position_precision()}\n",
-                f"Map URL: {packet.map_url()}\n",
-                f"Device: {gpsd2.device()}\n"]
-
-        if packet.mode >= 3:
-            gps_data.append(f"Altitude: {packet.alt}\n")
-
         # save to text file
         with open(DATA, 'a', encoding="utf8") as data:
             for line in gps_data:
@@ -143,17 +138,6 @@ def add_metadata(image):
     exif_bytes = piexif.dump(exif_data)
     # write to disk
     piexif.insert(exif_bytes, image)
-
-    # Write roll/pitch/yaw to XMP tags for Pix4D
-    if roll:
-        xmpfile = XMPFiles(file_path=image, open_forupdate=True)
-        xmp = xmpfile.get_xmp()
-        xmp.set_property(consts.XMP_NS_DC, 'Roll', str(roll))
-        xmp.set_property(consts.XMP_NS_DC, 'Pitch', str(pitch))
-        xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
-        xmpfile.put_xmp(xmp)
-        xmpfile.close_file()
-
 
 
 if __name__ == "__main__":

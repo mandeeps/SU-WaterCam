@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 from time import sleep
+from sys import getsizeof
 import struct
 import serial
 
@@ -42,12 +43,21 @@ def transmit(content):
     try:
         # Ensure the serial connection is ready to send
         ser.flush()
-        # Write the data to the serial port
-        ser.write(content)
-        print("Data sent to mDot successfully!")
-        sleep(1)
-        line = ser.read_until()
-        print(line)
+        ser.write('AT+TXS\r'.encode()) # check byte limit of next transmission
+        res = ser.read_until() # get 'AT+TXS' echo back from mDot
+        res = ser.read_until().decode() # this should be the actual response
+        print(f'Size limit of next transmission payload: {res}')
+
+        if getsizeof(content) <= int(res):
+            # Write the data to the serial port
+            ser.write(content)
+            print("Data sent to mDot successfully!")
+            line = ser.read_until() # newline response from mDot
+            #print(line)
+            line = ser.read_until().decode() # should be 'OK' response from mDot
+            print(f'Response from mDot: {line}')
+        else:
+            print('Contents larger than current lora transmission payload')
 
     except Exception as e:
         print(f"Error sending to mDot: {e}")

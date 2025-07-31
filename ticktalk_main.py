@@ -58,6 +58,8 @@ def compress_bitmap(segmented_file):
     print(f"Compressing {segmented_file} for transmission")
     bitmap_dict = compress_image(segmented_file)
     print(f"Completed compressing {segmented_file}")
+    if bitmap_dict['total_size'] > 228:
+        print("\n Bitmap > 228 bytes! \n")
     return bitmap_dict['compressed_data'] # this is the byte data
 
 @SQify
@@ -93,7 +95,7 @@ def lora_token(bitmap):
     data_msg = NetworkInterfaceLoRa.TTLoRaMessage(data_token, recipient_device)
     data_encoded = data_msg.encode_token()
     data_packet = data_encoded.hex()
-    transmit(f"AT+SENDB={packet}\r\n".encode())
+    transmit(f"AT+SENDB={data_packet}\r\n".encode())
     
     bitmap_token = TTToken(bitmap, time_1, False, TTTag(context, sq_name, 4, recipient_device))
     bitmap_msg = NetworkInterfaceLoRa.TTLoRaMessage(bitmap_token, recipient_device)
@@ -108,7 +110,7 @@ def ttmain(trigger):
         token, dirname = get_time(trigger, TTClock=root_clock, TTPeriod=60_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000)
         photo = take_two_photos(trigger, dirname, TTPersistent=True)
 
-        lepton_file = flir(dirname) #, TTClock=root_clock, TTPeriod=1_000_000, TTPhase=0, TTDataInterval=400_000)
+        lepton_file = flir(dirname)
 
         deadline_time = READ_TTCLOCK(token, TTClock=root_clock) + 5_000_000
 
