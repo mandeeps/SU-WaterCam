@@ -1,6 +1,6 @@
 [Unit]
 Description=Run main Watercam Python script (TTPython variant)
-After=network-online.target
+After=multi-user.target
 
 [Service]
 User=pi

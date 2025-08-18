@@ -543,7 +543,7 @@ Stop bits 1
 
 Hardware/software flow control off
 
-For deployment we'll want the mDot to have a separate power source so we can remotely trigger it to signal the WittyPi to boot up the system and record data. This will require routing power directly from the WittyPi 4 using the unpopulated 7 pin header on the WittyPi to the mDot, connecting a GPIO pin on the mDot to a mosfet which triggers the WittyPi switch pin, and modifying the firmware so this can be triggered with a LoRa packet.
+Add the device ID to Chirpstack as the Device EUI. You can reuse the device Network ID as the Join EUI in Chirpstack. The device Network Key is the Application Key in Chirpstack. If the mDot fails to join but does activate try to set the address, session key, and application key manually on the mDot. Reset the nonces under OTAA Keys in Chirpstack and on the mDot.
 
 ### Solar Power
 

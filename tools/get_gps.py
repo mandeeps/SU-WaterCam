@@ -1,77 +1,68 @@
 #!/home/pi/SU-WaterCam/venv/bin/python
 
-from fractions import Fraction
-import gpsd2
+import gpsd2 as gpsd # using py-gpsd2
+from typing import List, Optional, Tuple
 import time
 
-try:
-    gpsd2.connect()
-except Exception as error:
-    print("Error: GPS connection")
+gpsd.connect()
 
-def get_loc(exif=False):
-    # get current gps info from gpsd
-    gps_data = []
-    try:
-        packet = gpsd2.get_current()
-        print(f"\n packet mode: {packet.mode} \n")
-        if packet.mode < 2:
-            time.sleep(3)
-            packet = gpsd2.get_current()
-            print(f"\n packet mode: {packet.mode} \n")
-    except Exception as error:
-        print("No GPS data returned")
+def get_packet():
+    packet = gpsd.get_current()
+    print(f'Current packet mode: {packet.mode}')
+    
+    if packet.mode < 2:
+        return None
     else:
-           
-        if packet.mode >= 2:
-            gps_data = [
-                f"GPS Time UTC: {packet.time}\n",
-                f"Time Local: {time.asctime(time.localtime(time.time()))}\n",
-                f"Latitude: {packet.lat} degrees\n",
-                f"Longitude: {packet.lon} degrees\n",
-                f"Track: {packet.track}\n",
-                f"Satellites: {packet.sats}\n",
-                f"Error: {packet.error}\n",
-                f"Precision: {packet.position_precision()}\n",
-                f"Map URL: {packet.map_url()}\n",
-                f"Device: {gpsd2.device()}\n"]
+        return packet
+
+def get_location() -> List[str]:
+    packet = get_packet()
+    if not packet:
+        return []
+
+    elif packet.mode >= 2:
+        gps_data = [
+            f"GPS Time UTC: {packet.time}\n",
+            f"Time Local: {time.asctime(time.localtime(time.time()))}\n",
+            f"Latitude: {packet.lat} degrees\n",
+            f"Longitude: {packet.lon} degrees\n",
+            f"Track: {packet.track}\n",
+            f"Satellites: {packet.sats}\n",
+            f"Error: {packet.error}\n",
+            f"Precision: {packet.position_precision()}\n",
+            f"Map URL: {packet.map_url()}\n",
+            f"Device: {gpsd.device()}\n"]
 
         if packet.mode >= 3:
             gps_data.append(f"Altitude: {packet.alt}\n")
 
-    if exif:
-        return (gps_data, packet)
-    else:
         return gps_data
 
-def get_lat_lon():
-    current = get_loc()
-
-    if not current:
-        time.sleep(1)
-        current = get_loc()
+def get_lat_lon_alt() -> Tuple[float, float, float]:
+    packet = get_packet()
     
-    data = dict((k, current[k]) for k in ["Latitude", "Longitude", "Altitude"] if k in current)
+    lat = packet.lat 
+    lon = packet.lon 
+    alt = packet.alt
 
-# if we have no GPS data return False. If we have Lat/Long but not Alt return dict 
-# with Alt as 0.
-    if not "Longitude" in data:
-        return False
-    if not "Latitude" in data:
-        return False
-    if not "Altitude" in data:
-        data["Altitude"] = 0
+    return (lat, lon, alt)
 
-    return {'lat_lon_z' : (data["Latitude"], data["Longitude"], data["Altitude"])}
+def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Optional[Tuple[float, float, float]]:
+    """Get location with retry logic for better reliability."""
+    for attempt in range(max_retries):
+        location = get_packet()
+        if location:
+            return location
+        
+        if attempt < max_retries - 1:
+            time.sleep(delay)
+    
+    return None
 
 if __name__ == "__main__":
-    data, packet = get_loc(exif=True)
-
-    if not data:
-        time.sleep(1)
-        data, packet = get_loc(True)
-
+    data = get_location()
     for line in data:
         print(line)
 
-    print(packet)
+    gps = get_lat_lon_alt()
+    print(f'Lat Lon Alt: {gps}')

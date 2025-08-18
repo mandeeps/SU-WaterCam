@@ -40,10 +40,11 @@ if not ser.is_open:
 
 def transmit(content):
     # Send the formatted data over UART/Serial
+    # NOTE have a delay between transmissions to the mDot to allow time for responses
     try:
         # Ensure the serial connection is ready to send
         ser.flush()
-        ser.write('AT+TXS\r'.encode()) # check byte limit of next transmission
+        ser.write('AT+TXS\r\n'.encode()) # check byte limit of next transmission
         res = ser.read_until() # get 'AT+TXS' echo back from mDot
         res = ser.read_until().decode() # this should be the actual response
         print(f'Size limit of next transmission payload: {res}')
@@ -53,7 +54,6 @@ def transmit(content):
             ser.write(content)
             print("Data sent to mDot successfully!")
             line = ser.read_until() # newline response from mDot
-            #print(line)
             line = ser.read_until().decode() # should be 'OK' response from mDot
             print(f'Response from mDot: {line}')
         else:
