@@ -1,7 +1,7 @@
 #!/home/pi/SU-WaterCam/venv/bin/python
 
 import gpsd2 as gpsd # using py-gpsd2
-from typing import List, Optional, Tuple
+from typing import List, Optional
 import time
 
 gpsd.connect()
@@ -38,26 +38,37 @@ def get_location() -> List[str]:
 
         return gps_data
 
-def get_lat_lon_alt() -> Tuple[float, float, float]:
+def get_lat_lon_alt() -> dict:
     packet = get_packet()
     
-    lat = packet.lat 
-    lon = packet.lon 
-    alt = packet.alt
+    if not packet:
+        return {}
+    
+    try:
+        lat = packet.lat 
+        lon = packet.lon 
+        alt = packet.alt
 
-    return (lat, lon, alt)
+        return {
+            'gps_lat': lat,
+            'gps_lon': lon,
+            'gps_alt': alt
+        }
+    except AttributeError:
+        # GPS data not available
+        return {}
 
-def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Optional[Tuple[float, float, float]]:
+def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Optional[dict]:
     """Get location with retry logic for better reliability."""
     for attempt in range(max_retries):
-        location = get_packet()
+        location = get_lat_lon_alt()
         if location:
             return location
         
         if attempt < max_retries - 1:
             time.sleep(delay)
     
-    return None
+    return {}
 
 if __name__ == "__main__":
     data = get_location()
@@ -65,4 +76,11 @@ if __name__ == "__main__":
         print(line)
 
     gps = get_lat_lon_alt()
-    print(f'Lat Lon Alt: {gps}')
+    print(f'GPS Data: {gps}')
+    
+    if gps:
+        print(f'Latitude: {gps.get("gps_lat", "N/A")}')
+        print(f'Longitude: {gps.get("gps_lon", "N/A")}')
+        print(f'Altitude: {gps.get("gps_alt", "N/A")}')
+    else:
+        print('No GPS data available')

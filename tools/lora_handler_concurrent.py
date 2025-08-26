@@ -29,11 +29,20 @@ from typing import Dict, Any, Optional
 # 09 59 neighborhood emergency status freq
 
 # Reception Data Format
-# First two digits represent the command, remaining digits are the values to set
-# 10 Area Threshold - two digits representing 10% increments, example: we receive 1010 and decode as 'set aread threshold to 100%' 
-# 11 Stage Threshold - four digits continuous cm value
-# 12 Monitoring Frequency - how long to stay awake for - minute value
-# 21 Emergency status: system enters emergency mode and stops scheduled shutdowns
+# Format: [Channel][Command][Value]
+# Channel: Two digits (00-99) representing the data channel
+# Command: Two digits representing the command type
+# Value: Remaining digits representing the value to set
+# 
+# Examples:
+# 1090 -> Channel 10, Command 90, Value 0 (Area Threshold 0%)
+# 1010 -> Channel 10, Command 90, Value 10 (Area Threshold 100%)
+# 1191 -> Channel 11, Command 91, Value 1 (Stage Threshold 1 cm)
+# 1192 -> Channel 11, Command 91, Value 92 (Stage Threshold 92 cm)
+# 1292 -> Channel 12, Command 92, Value 2 (Monitoring Frequency 2 minutes)
+# 1393 -> Channel 13, Command 93, Value 3 (Emergency Frequency 3 minutes)
+# 2100 -> Channel 21, Command 00, Value 0 (Emergency status: system enters emergency mode)
+# 9900 -> Channel 99, Command 00, Value 0 (Deactivate emergency mode)
 
 class LoRaHandler:
     def __init__(self, port='/dev/ttyAMA5', config_file='lora_config.json'):
@@ -46,6 +55,9 @@ class LoRaHandler:
         self.listening = False
         self.listener_thread = None
         self.transmit_lock = threading.Lock()
+        
+        # Callback for runtime integration
+        self.runtime_callback = None
         
         # Configure the serial port
         self.ser = serial.Serial(
@@ -68,7 +80,19 @@ class LoRaHandler:
             'stage_threshold': 50,
             'monitoring_frequency': 60,
             'emergency_frequency': 5,
-            'neighborhood_emergency_frequency': 30
+            'neighborhood_emergency_frequency': 30,
+            'photo_interval': 60,
+            'transmission_enabled': True,
+            'debug_mode': False,
+            'gps_enabled': True,
+            'battery_threshold': 20,
+            'compression_level': 5,
+            'max_retransmissions': 3,
+            'auto_shutdown_enabled': True,
+            'shutdown_iteration_limit': 10,
+            'data_retention_days': 30,
+            'backup_enabled': True,
+            'emergency_mode': False
         }
         
         if os.path.exists(self.config_file):
@@ -96,10 +120,29 @@ class LoRaHandler:
         self.config[key] = value
         self.save_config(self.config)
         print(f"Updated {key} to {value}")
+        
+        # Call runtime callback if registered
+        print(f"DEBUG: Runtime callback registered: {self.runtime_callback is not None}")
+        if self.runtime_callback:
+            try:
+                print(f"DEBUG: Calling runtime callback with key='{key}', value={value}")
+                self.runtime_callback(key, value)
+                print(f"DEBUG: Runtime callback completed successfully")
+            except Exception as e:
+                print(f"Error in runtime callback for {key}: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print(f"DEBUG: No runtime callback registered")
     
     def get_config(self, key: str, default: Any = None) -> Any:
         """Get a configuration value"""
         return self.config.get(key, default)
+    
+    def set_runtime_callback(self, callback):
+        """Set callback for runtime integration updates"""
+        self.runtime_callback = callback
+        print("Runtime callback registered with LoRa handler")
     
     def start_listening(self):
         """Start the listening thread"""
@@ -124,13 +167,75 @@ class LoRaHandler:
                 if self.ser.in_waiting > 0:
                     try:
                         res = self.ser.readline().decode().strip()
+                        print(f"DEBUG: Raw received: '{res}'")
                         if res and "DATA=" in res:
                             try:
+                                print(f"DEBUG: Found DATA= in message: '{res}'")
                                 data = res.split("DATA=", 1)[1]
-                                print(f"Received: {payload}")
-                                self.decode(payload)
+                                print(f"DEBUG: Extracted data: '{data}'")
+                                print(f"DEBUG: Data type: {type(data)}")
+                                print(f"DEBUG: Data length: {len(data)}")
+                                print(f"DEBUG: Data hex: {data.encode().hex()}")
+                                print(f"DEBUG: Data repr: {repr(data)}")
+                                print(f"📡 LoRa packet received: {data}")
+                                self.decode(data)
                             except Exception as e:
                                 print(f"Error processing received data: {e}")
+                                import traceback
+                                traceback.print_exc()
+                        elif res and res.strip().isdigit() and len(res.strip()) >= 2:
+                            # Handle case where mDot sends data directly without DATA= prefix
+                            try:
+                                print(f"DEBUG: Found direct numeric message: '{res}'")
+                                data = res.strip()
+                                print(f"DEBUG: Processing direct data: '{data}'")
+                                print(f"📡 LoRa packet received (direct): {data}")
+                                self.decode(data)
+                            except Exception as e:
+                                print(f"Error processing direct data: {e}")
+                                import traceback
+                                traceback.print_exc()
+                        elif res:
+                            print(f"DEBUG: Non-DATA message: '{res}'")
+                            print(f"DEBUG: Non-DATA message hex: {res.encode().hex()}")
+                            print(f"DEBUG: Non-DATA message repr: {repr(res)}")
+                            
+                            # Check if this might be a different format of incoming data
+                            if res.startswith("RX:") or res.startswith("RX ") or "RX" in res:
+                                print(f"DEBUG: Possible RX message detected: {res}")
+                                # Extract data after RX
+                                try:
+                                    if ":" in res:
+                                        rx_data = res.split(":", 1)[1].strip()
+                                        print(f"DEBUG: Extracted RX data: '{rx_data}'")
+                                        if rx_data.isdigit():
+                                            print(f"DEBUG: Attempting to decode RX data as command: {rx_data}")
+                                            self.decode(rx_data)
+                                    else:
+                                        rx_data = res.replace("RX", "").strip()
+                                        print(f"DEBUG: Extracted RX data: '{rx_data}'")
+                                        if rx_data.isdigit():
+                                            print(f"DEBUG: Attempting to decode RX data as command: {rx_data}")
+                                            self.decode(rx_data)
+                                except Exception as e:
+                                    print(f"DEBUG: Failed to decode RX data: {e}")
+                            elif res.startswith("+") and ":" in res:
+                                print(f"DEBUG: Possible AT response message: {res}")
+                            elif res.isdigit() or res.replace('.', '').replace('-', '').isdigit():
+                                print(f"DEBUG: Possible numeric data message: {res}")
+                                # Try to decode it directly as a command
+                                try:
+                                    print(f"DEBUG: Attempting to decode numeric message as command: {res}")
+                                    self.decode(res)
+                                except Exception as e:
+                                    print(f"DEBUG: Failed to decode numeric message: {e}")
+                            elif res.strip() and len(res.strip()) >= 2:
+                                # Check if this might be a command without any prefix
+                                stripped = res.strip()
+                                print(f"DEBUG: Possible raw command message: '{stripped}'")
+                                if stripped.isdigit() and len(stripped) >= 2:
+                                    print(f"DEBUG: Attempting to decode raw command: {stripped}")
+                                    self.decode(stripped)
                     except UnicodeDecodeError:
                         # Handle binary data that can't be decoded as UTF-8
                         res_raw = self.ser.readline()
@@ -139,6 +244,8 @@ class LoRaHandler:
                     time.sleep(0.5)  # Small delay to prevent busy waiting
             except Exception as e:
                 print(f"Error in listen loop: {e}")
+                import traceback
+                traceback.print_exc()
                 time.sleep(1)  # Longer delay on error
     
     def transmit(self, content: bytes) -> bool:
@@ -578,37 +685,218 @@ class LoRaHandler:
     def decode(self, payload: str):
         """Decode incoming payload and update configuration"""
         try:
-            command = payload[:2]
-            param = payload[2:]
+            print(f"DEBUG: Decoding payload: '{payload}'")
+            print(f"DEBUG: Payload type: {type(payload)}")
+            print(f"DEBUG: Payload length: {len(payload)}")
+            print(f"DEBUG: Payload hex: {payload.encode().hex()}")
+            print(f"DEBUG: Payload repr: {repr(payload)}")
             
-            if command == '10':
-                # Area threshold - 10% increments
-                val = int(param) * 10
-                self.update_config('area_threshold', val)
-                print(f'Area threshold updated to: {val}%')
-                
-            elif command == '11':
-                # Stage threshold - continuous cm value
-                val = float(param)
-                self.update_config('stage_threshold', val)
-                print(f'Stage threshold updated to: {val} cm')
-                
-            elif command == '12':
-                # Monitoring frequency - minute value
-                val = int(param)
-                self.update_config('monitoring_frequency', val)
-                print(f'Monitoring frequency updated to: {val} minutes')
-                
-            elif payload == '21':
-                # Emergency status
+            # Track command timestamp for frequency adjustment
+            from datetime import datetime
+            self.update_config('last_lora_command_time', datetime.now().isoformat())
+            print(f"📡 LoRa command received at {datetime.now().strftime('%H:%M:%S')}")
+            
+            # Handle emergency mode command (no parameters) - legacy format
+            if payload == '21':
                 self.update_config('emergency_mode', True)
-                print('Emergency mode activated!')
+                print('🚨 Emergency mode activated!')
+                return
+            
+            # Handle new format: [Channel][Command][Value]
+            if len(payload) >= 4:
+                # Clean the payload to remove any whitespace or special characters
+                clean_payload = payload.strip()
+                print(f"DEBUG: Cleaned payload: '{clean_payload}' (length: {len(clean_payload)})")
                 
+                if len(clean_payload) >= 4:
+                    # Parse the format: [Channel][Command][Value]
+                    # Channel: 2 digits (10, 11, 12, etc.)
+                    # Command: 1 digit (9, 0, etc.)
+                    # Value: remaining digits (0, 1, 10, etc.)
+                    channel = clean_payload[:2]
+                    command = clean_payload[2:3]  # Single digit command
+                    value = clean_payload[3:]     # Remaining digits as value
+                    
+                    print(f"DEBUG: Channel: '{channel}', Command: '{command}', Value: '{value}'")
+                    print(f"DEBUG: Channel length: {len(channel)}, Command length: {len(command)}, Value length: {len(value)}")
+                    print(f"DEBUG: Channel hex: {channel.encode().hex()}, Command hex: {command.encode().hex()}, Value hex: {value.encode().hex()}")
+                    print(f"DEBUG: Channel repr: {repr(channel)}, Command repr: {repr(command)}, Value repr: {repr(value)}")
+                    
+                    # Validate that channel and command are not empty or just whitespace
+                    if not channel or channel.isspace() or not command or command.isspace():
+                        print(f"ERROR: Invalid channel or command - empty or whitespace: channel='{channel}', command='{command}'")
+                        return
+                    
+                    # Process commands based on channel and command combination
+                    if channel == '10' and command == '9':
+                        # Area threshold - value represents 10% increments
+                        try:
+                            val = int(value) * 10
+                            print(f"DEBUG: Calculated area threshold: {value} * 10 = {val}%")
+                            self.update_config('area_threshold', val)
+                            print(f'Area threshold updated to: {val}%')
+                        except ValueError as e:
+                            print(f'Invalid area threshold value: {value}, error: {e}')
+                            print(f'DEBUG: Value type: {type(value)}, Value repr: {repr(value)}')
+                            
+                    elif channel == '11' and command == '9':
+                        # Stage threshold - continuous cm value
+                        try:
+                            val = float(value)
+                            self.update_config('stage_threshold', val)
+                            print(f'Stage threshold updated to: {val} cm')
+                        except ValueError:
+                            print(f'Invalid stage threshold value: {value}')
+                            
+                    elif channel == '12' and command == '9':
+                        # Monitoring frequency - minute value
+                        try:
+                            val = int(value)
+                            self.update_config('monitoring_frequency', val)
+                            print(f'Monitoring frequency updated to: {val} minutes')
+                        except ValueError:
+                            print(f'Invalid monitoring frequency value: {value}')
+                            
+                    elif channel == '13' and command == '9':
+                        # Emergency frequency - minute value
+                        try:
+                            val = int(value)
+                            self.update_config('emergency_frequency', val)
+                            print(f'Emergency frequency updated to: {val} minutes')
+                        except ValueError:
+                            print(f'Invalid emergency frequency value: {value}')
+                            
+                    elif channel == '14' and command == '9':
+                        # Photo interval - minute value
+                        try:
+                            val = int(value)
+                            self.update_config('photo_interval', val)
+                            print(f'Photo interval updated to: {val} minutes')
+                        except ValueError:
+                            print(f'Invalid photo interval value: {value}')
+                            
+                    elif channel == '15' and command == '9':
+                        # Neighborhood emergency frequency - minute value
+                        try:
+                            val = int(value)
+                            self.update_config('neighborhood_emergency_frequency', val)
+                            print(f'Neighborhood emergency frequency updated to: {val} minutes')
+                        except ValueError:
+                            print(f'Invalid neighborhood emergency frequency value: {value}')
+                            
+                    elif channel == '20' and command == '0':
+                        # Transmission enabled/disabled
+                        try:
+                            val = bool(int(value))
+                            self.update_config('transmission_enabled', val)
+                            print(f'Transmission {"enabled" if val else "disabled"}')
+                        except ValueError:
+                            print(f'Invalid transmission enabled value: {value}')
+                            
+                    elif channel == '22' and command == '0':
+                        # Debug mode
+                        try:
+                            val = bool(int(value))
+                            self.update_config('debug_mode', val)
+                            print(f'Debug mode {"enabled" if val else "disabled"}')
+                        except ValueError:
+                            print(f'Invalid debug mode value: {value}')
+                            
+                    elif channel == '23' and command == '0':
+                        # GPS enabled/disabled
+                        try:
+                            val = bool(int(value))
+                            self.update_config('gps_enabled', val)
+                            print(f'GPS {"enabled" if val else "disabled"}')
+                        except ValueError:
+                            print(f'Invalid GPS enabled value: {value}')
+                            
+                    elif channel == '30' and command == '0':
+                        # Battery threshold
+                        try:
+                            val = int(value)
+                            self.update_config('battery_threshold', val)
+                            print(f'Battery threshold updated to: {val}%')
+                        except ValueError:
+                            print(f'Invalid battery threshold value: {value}')
+                            
+                    elif channel == '31' and command == '0':
+                        # Compression level
+                        try:
+                            val = int(value)
+                            val = max(1, min(10, val))  # Clamp between 1-10
+                            self.update_config('compression_level', val)
+                            print(f'Compression level updated to: {val}')
+                        except ValueError:
+                            print(f'Invalid compression level value: {value}')
+                            
+                    elif channel == '32' and command == '0':
+                        # Max retransmissions
+                        try:
+                            val = int(value)
+                            self.update_config('max_retransmissions', val)
+                            print(f'Max retransmissions updated to: {val}')
+                        except ValueError:
+                            print(f'Invalid max retransmissions value: {value}')
+                            
+                    elif channel == '40' and command == '0':
+                        # Auto shutdown enabled/disabled
+                        try:
+                            val = bool(int(value))
+                            self.update_config('auto_shutdown_enabled', val)
+                            print(f'Auto shutdown {"enabled" if val else "disabled"}')
+                        except ValueError:
+                            print(f'Invalid auto shutdown value: {value}')
+                            
+                    elif channel == '41' and command == '0':
+                        # Shutdown iteration limit
+                        try:
+                            val = int(value)
+                            self.update_config('shutdown_iteration_limit', val)
+                            print(f'Shutdown iteration limit updated to: {val}')
+                        except ValueError:
+                            print(f'Invalid shutdown iteration limit value: {value}')
+                            
+                    elif channel == '42' and command == '0':
+                        # Data retention days
+                        try:
+                            val = int(value)
+                            self.update_config('data_retention_days', val)
+                            print(f'Data retention updated to: {val} days')
+                        except ValueError:
+                            print(f'Invalid data retention value: {value}')
+                            
+                    elif channel == '43' and command == '0':
+                        # Backup enabled/disabled
+                        try:
+                            val = bool(int(value))
+                            self.update_config('backup_enabled', val)
+                            print(f'Backup {"enabled" if val else "disabled"}')
+                        except ValueError:
+                            print(f'Invalid backup value: {value}')
+                            
+                    elif channel == '21' and command == '0':
+                        # Emergency status: system enters emergency mode and stops scheduled shutdowns
+                        self.update_config('emergency_mode', True)
+                        print('🚨 Emergency mode activated!')
+                        
+                    elif channel == '99' and command == '0':
+                        # Deactivate emergency mode
+                        self.update_config('emergency_mode', False)
+                        print('✅ Emergency mode deactivated')
+                        
+                    else:
+                        print(f'Unknown channel/command combination: Channel {channel}, Command {command} with value: {value}')
+                else:
+                    print(f"ERROR: Cleaned payload too short for new format: '{clean_payload}' (length: {len(clean_payload)})")
+                    return
             else:
-                print(f'Unknown command: {command} with param: {param}')
+                print(f'Invalid payload format: {payload} (minimum 4 characters required for [Channel][Command][Value] format)')
                 
         except Exception as e:
             print(f"Error decoding payload '{payload}': {e}")
+            import traceback
+            traceback.print_exc()
     
     def check_mdot_status(self):
         """Check mDot status and mode"""
@@ -629,6 +917,7 @@ class LoRaHandler:
             time.sleep(1)
             
             responses = []
+            ver_success = False
             while self.ser.in_waiting > 0:
                 res = self.ser.read_until()
                 if res:
@@ -636,10 +925,16 @@ class LoRaHandler:
                         response = res.decode('utf-8').strip()
                         responses.append(response)
                         print(f"DEBUG: AT response: '{response}'")
+                        if 'OK' in response:
+                            ver_success = True
+                            print("DEBUG: AT command successful")
                     except UnicodeDecodeError:
                         response_hex = res.hex()
                         responses.append(f"BINARY:{response_hex}")
                         print(f"DEBUG: Binary AT response (hex): {response_hex}")
+                        if b'OK' in res:
+                            ver_success = True
+                            print("DEBUG: AT command successful (binary)")
            
            
             # Check join status
@@ -681,6 +976,106 @@ class LoRaHandler:
             traceback.print_exc()
             return False
     
+    def check_reception_status(self):
+        """Check if the LoRa handler is properly receiving data"""
+        try:
+            print("DEBUG: Checking LoRa reception status...")
+            
+            # Check if listener thread is running
+            if not self.listening:
+                print("WARNING: LoRa listener is not running")
+                return False
+            
+            if not self.listener_thread or not self.listener_thread.is_alive():
+                print("WARNING: LoRa listener thread is not alive")
+                return False
+            
+            # Check serial port status
+            if not self.ser.is_open:
+                print("WARNING: Serial port is not open")
+                return False
+            
+            # Check if there's data waiting
+            if self.ser.in_waiting > 0:
+                print(f"DEBUG: {self.ser.in_waiting} bytes waiting in serial buffer")
+                
+                # Read and display waiting data
+                while self.ser.in_waiting > 0:
+                    res = self.ser.read_until()
+                    if res:
+                        try:
+                            response = res.decode('utf-8').strip()
+                            print(f"DEBUG: Waiting data: '{response}'")
+                        except UnicodeDecodeError:
+                            response_hex = res.hex()
+                            print(f"DEBUG: Waiting binary data (hex): {response_hex}")
+            else:
+                print("DEBUG: No data waiting in serial buffer")
+            
+            print("DEBUG: LoRa reception status check completed")
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: Error checking reception status: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def check_mdot_data_config(self):
+        """Check mDot data reception configuration"""
+        try:
+            print("DEBUG: Checking mDot data reception configuration...")
+            
+            # Clear buffers first
+            self.ser.reset_input_buffer()
+            self.ser.reset_output_buffer()
+            
+            # Send newline to clear any partial commands
+            self.ser.write('\r\n'.encode())
+            time.sleep(0.1)
+            
+            # Check current data format configuration
+            print("DEBUG: Checking data format configuration...")
+            self.ser.write('AT+DFORMAT?\r\n'.encode())
+            time.sleep(1)
+            
+            responses = []
+            while self.ser.in_waiting > 0:
+                res = self.ser.read_until()
+                if res:
+                    try:
+                        response = res.decode('utf-8').strip()
+                        responses.append(response)
+                        print(f"DEBUG: DFORMAT response: '{response}'")
+                    except UnicodeDecodeError:
+                        response_hex = res.hex()
+                        responses.append(f"BINARY:{response_hex}")
+                        print(f"DEBUG: Binary DFORMAT response (hex): {response_hex}")
+            
+            # Check if there are any pending messages
+            print("DEBUG: Checking for pending messages...")
+            self.ser.write('AT+MSG?\r\n'.encode())
+            time.sleep(1)
+            
+            while self.ser.in_waiting > 0:
+                res = self.ser.read_until()
+                if res:
+                    try:
+                        response = res.decode('utf-8').strip()
+                        print(f"DEBUG: MSG response: '{response}'")
+                    except UnicodeDecodeError:
+                        response_hex = res.hex()
+                        print(f"DEBUG: Binary MSG response (hex): {response_hex}")
+            
+            print("DEBUG: mDot data configuration check completed")
+            return True
+            
+        except Exception as e:
+            print(f"DEBUG: Error checking mDot data config: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
    
     def close(self):
         """Clean up resources"""
@@ -688,6 +1083,22 @@ class LoRaHandler:
         if self.ser.is_open:
             self.ser.close()
         print("LoRa handler closed")
+    
+    def test_reception_format(self, test_payload: str):
+        """Test the new reception format with a sample payload"""
+        print(f"🧪 Testing reception format with payload: {test_payload}")
+        print(f"Expected format: [Channel][Command][Value]")
+        
+        if len(test_payload) >= 4:
+            channel = test_payload[:2]
+            command = test_payload[2:4]
+            value = test_payload[4:]
+            print(f"Parsed: Channel={channel}, Command={command}, Value={value}")
+            
+            # Test decoding
+            self.decode(test_payload)
+        else:
+            print(f"Invalid test payload: {test_payload} (minimum 4 characters required)")
 
 # Global instance for easy access from other modules
 _lora_handler = None
@@ -724,6 +1135,21 @@ def get_config_value(key: str, default: Any = None) -> Any:
     """Convenience function to get configuration values"""
     handler = get_lora_handler()
     return handler.get_config(key, default)
+
+def check_lora_reception():
+    """Convenience function to check LoRa reception status"""
+    handler = get_lora_handler()
+    return handler.check_reception_status()
+
+def check_mdot_data_config():
+    """Convenience function to check mDot data reception configuration"""
+    handler = get_lora_handler()
+    return handler.check_mdot_data_config()
+
+def test_reception_format(test_payload: str):
+    """Convenience function to test the new reception format"""
+    handler = get_lora_handler()
+    return handler.test_reception_format(test_payload)
 
 # Legacy functions for backward compatibility
 def transmit(content):
@@ -766,6 +1192,16 @@ if __name__ == "__main__":
                     time.sleep(1)
             except KeyboardInterrupt:
                 print("\nStopping...")
+        elif argv[1] == 'test':
+            # Test the new reception format
+            if len(argv) >= 3:
+                test_payload = argv[2]
+                handler.test_reception_format(test_payload)
+            else:
+                print("Usage: python lora_handler_concurrent.py test <payload>")
+                print("Example: python lora_handler_concurrent.py test 1090")
+                print("Example: python lora_handler_concurrent.py test 1191")
+                print("Example: python lora_handler_concurrent.py test 2100")
         # else transmit the file param
         elif argv[1] == 'binary':
             # Transmit arbitrary binary data

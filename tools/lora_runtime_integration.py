@@ -1,0 +1,605 @@
+#!/usr/bin/env python3
+"""
+LoRa Runtime Integration Module
+
+This module provides integration between LoRa incoming commands and runtime parameters
+for the ticktalk_main.py system. It allows dynamic updates to system behavior based
+on received LoRa messages.
+
+Usage:
+    from lora_runtime_integration import LoRaRuntimeManager
+    
+    # Initialize the runtime manager
+    runtime_manager = LoRaRuntimeManager()
+    
+    # Get current parameters
+    area_threshold = runtime_manager.get_parameter('area_threshold')
+    
+    # Parameters are automatically updated when LoRa commands are received
+"""
+
+import json
+import os
+import time
+import threading
+from typing import Dict, Any, Optional, Callable
+from datetime import datetime
+
+# Import the LoRa handler
+from lora_handler_concurrent import get_lora_handler, get_config_value
+
+class LoRaRuntimeManager:
+    """
+    Manages runtime parameters that can be updated via LoRa commands
+    and integrates with the ticktalk_main.py system
+    """
+    
+    def __init__(self, config_file='runtime_config.json'):
+        self.config_file = config_file
+        self.parameters = self.load_parameters()
+        self.update_callbacks = {}
+        self.lora_handler = None
+        self.listening = False
+        self.listener_thread = None
+        
+        # Initialize LoRa handler and start listening
+        self._init_lora_handler()
+    
+    def _init_lora_handler(self):
+        """Initialize LoRa handler and start listening for commands"""
+        try:
+            self.lora_handler = get_lora_handler()
+            
+            # Register callback to sync LoRa commands with runtime parameters
+            def sync_lora_command(key, value):
+                """Sync LoRa parameter updates with runtime parameters"""
+                print(f"🔄 LoRa parameter update: {key} = {value}")
+                print(f"   Current runtime value: {self.get_parameter(key)}")
+                
+                # Update the runtime parameter directly
+                self.set_parameter(key, value)
+                print(f"✅ Runtime parameter '{key}' synced to {value}")
+                print(f"   New runtime value: {self.get_parameter(key)}")
+            
+            self.lora_handler.set_runtime_callback(sync_lora_command)
+            
+            self.lora_handler.start_listening()
+            self.listening = True
+            print("✓ LoRa runtime integration initialized with command sync")
+        except Exception as e:
+            print(f"✗ Failed to initialize LoRa runtime integration: {e}")
+    
+    def load_parameters(self) -> Dict[str, Any]:
+        """Load runtime parameters from file or create defaults"""
+        default_params = {
+            # Flood detection parameters
+            'area_threshold': 10,           # Flood detection area threshold (%)
+            'stage_threshold': 50,          # Water stage threshold (cm)
+            
+            # Timing parameters
+            'monitoring_frequency': 60,     # Monitoring frequency (minutes)
+            'emergency_frequency': 5,       # Emergency transmission frequency (minutes)
+            'photo_interval': 30,           # Photo capture interval (minutes)
+            'neighborhood_emergency_frequency': 30,  # Neighborhood emergency frequency
+            
+            # System control parameters
+            'emergency_mode': False,        # Emergency mode flag
+            'transmission_enabled': True,   # Enable/disable transmissions
+            'debug_mode': False,            # Debug logging mode
+            'gps_enabled': True,            # GPS data collection
+            
+            # Performance parameters
+            'battery_threshold': 20,        # Low battery threshold (%)
+            'compression_level': 8,         # Image compression level (1-10)
+            'max_retransmissions': 3,       # Maximum retransmission attempts
+            
+            # Advanced parameters
+            'auto_shutdown_enabled': True,  # Enable automatic shutdown after iterations
+            'shutdown_iteration_limit': 3,  # Number of iterations before shutdown
+            'data_retention_days': 7,       # Days to retain data files
+            'backup_enabled': True,         # Enable data backup
+        }
+        
+        if os.path.exists(self.config_file):
+            try:
+                with open(self.config_file, 'r') as f:
+                    loaded_params = json.load(f)
+                    # Merge with defaults to ensure all parameters exist
+                    for key, value in default_params.items():
+                        if key not in loaded_params:
+                            loaded_params[key] = value
+                    return loaded_params
+            except Exception as e:
+                print(f"Error loading runtime config: {e}, using defaults")
+                return default_params
+        else:
+            self.save_parameters(default_params)
+            return default_params
+    
+    def save_parameters(self, params: Dict[str, Any]):
+        """Save runtime parameters to file"""
+        try:
+            with open(self.config_file, 'w') as f:
+                json.dump(params, f, indent=2)
+        except Exception as e:
+            print(f"Error saving runtime config: {e}")
+    
+    def get_parameter(self, key: str, default: Any = None) -> Any:
+        """Get a runtime parameter value"""
+        return self.parameters.get(key, default)
+    
+    def set_parameter(self, key: str, value: Any):
+        """Set a runtime parameter value and save to file"""
+        old_value = self.parameters.get(key)
+        self.parameters[key] = value
+        self.save_parameters(self.parameters)
+        
+        print(f"Runtime parameter '{key}' updated: {old_value} → {value}")
+        
+        # Call any registered update callbacks
+        if key in self.update_callbacks:
+            for callback in self.update_callbacks[key]:
+                try:
+                    callback(value, old_value)
+                except Exception as e:
+                    print(f"Error in parameter update callback for '{key}': {e}")
+    
+    def register_update_callback(self, parameter: str, callback: Callable):
+        """Register a callback to be called when a parameter is updated"""
+        if parameter not in self.update_callbacks:
+            self.update_callbacks[parameter] = []
+        self.update_callbacks[parameter].append(callback)
+    
+    def process_lora_payload(self, payload: str) -> bool:
+        """Process LoRa payload directly from the handler (alias for process_lora_command)"""
+        return self.process_lora_command(payload)
+    
+    def process_lora_command(self, command: str, value: Any) -> bool:
+        """Process incoming LoRa command in old format (backward compatibility)"""
+        command_mapping = {
+            # Basic flood detection commands
+            '10': lambda v: self.set_parameter('area_threshold', v * 10),  # Area threshold (10% increments)
+            '11': lambda v: self.set_parameter('stage_threshold', v),      # Stage threshold (cm)
+            
+            # Timing commands
+            '12': lambda v: self.set_parameter('monitoring_frequency', v), # Monitoring frequency (minutes)
+            '13': lambda v: self.set_parameter('emergency_frequency', v),  # Emergency frequency (minutes)
+            '14': lambda v: self.set_parameter('photo_interval', v),       # Photo interval (minutes)
+            '15': lambda v: self.set_parameter('neighborhood_emergency_frequency', v), # Neighborhood frequency
+            
+            # System control commands
+            '20': lambda v: self.set_parameter('transmission_enabled', bool(v)), # Enable/disable transmissions
+            '21': lambda v: self.set_parameter('emergency_mode', True),          # Emergency mode (no value needed)
+            '22': lambda v: self.set_parameter('debug_mode', bool(v)),           # Debug mode
+            '23': lambda v: self.set_parameter('gps_enabled', bool(v)),          # GPS enable/disable
+            
+            # Performance commands
+            '30': lambda v: self.set_parameter('battery_threshold', v),          # Battery threshold (%)
+            '31': lambda v: self.set_parameter('compression_level', max(1, min(10, v))), # Compression level
+            '32': lambda v: self.set_parameter('max_retransmissions', v),        # Max retransmissions
+            
+            # Advanced commands
+            '40': lambda v: self.set_parameter('auto_shutdown_enabled', bool(v)), # Auto shutdown
+            '41': lambda v: self.set_parameter('shutdown_iteration_limit', v),    # Shutdown limit
+            '42': lambda v: self.set_parameter('data_retention_days', v),         # Data retention
+            '43': lambda v: self.set_parameter('backup_enabled', bool(v)),        # Backup enable
+            
+            # Emergency mode deactivation
+            '99': lambda v: self.set_parameter('emergency_mode', False),          # Deactivate emergency mode
+        }
+        
+        if command in command_mapping:
+            try:
+                command_mapping[command](value)
+                return True
+            except Exception as e:
+                print(f"Error processing LoRa command '{command}' with value '{value}': {e}")
+                return False
+        else:
+            print(f"Unknown LoRa command: {command}")
+            return False
+    
+    def process_lora_payload(self, payload: str) -> bool:
+        """Process LoRa payload in new [Channel][Command][Value] format"""
+        try:
+            print(f"DEBUG: Processing LoRa command payload: '{payload}'")
+            
+            # Handle legacy format (backward compatibility)
+            if payload == '21':
+                self.set_parameter('emergency_mode', True)
+                return True
+            
+            # Handle new format: [Channel][Command][Value]
+            if len(payload) >= 4:
+                channel = payload[:2]
+                command = payload[2:4]
+                value = payload[4:]
+                
+                print(f"DEBUG: Parsed - Channel: {channel}, Command: {command}, Value: {value}")
+                
+                # Process commands based on channel and command combination
+                if channel == '10' and command == '90':
+                    # Area threshold - value represents 10% increments
+                    try:
+                        val = int(value) * 10
+                        self.set_parameter('area_threshold', val)
+                        return True
+                    except ValueError as e:
+                        print(f'Invalid area threshold value: {value}, error: {e}')
+                        return False
+                        
+                elif channel == '11' and command == '91':
+                    # Stage threshold - continuous cm value
+                    try:
+                        val = float(value)
+                        self.set_parameter('stage_threshold', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid stage threshold value: {value}')
+                        return False
+                        
+                elif channel == '12' and command == '92':
+                    # Monitoring frequency - minute value
+                    try:
+                        val = int(value)
+                        self.set_parameter('monitoring_frequency', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid monitoring frequency value: {value}')
+                        return False
+                        
+                elif channel == '13' and command == '93':
+                    # Emergency frequency - minute value
+                    try:
+                        val = int(value)
+                        self.set_parameter('emergency_frequency', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid emergency frequency value: {value}')
+                        return False
+                        
+                elif channel == '14' and command == '94':
+                    # Photo interval - minute value
+                    try:
+                        val = int(value)
+                        self.set_parameter('photo_interval', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid photo interval value: {value}')
+                        return False
+                        
+                elif channel == '15' and command == '95':
+                    # Neighborhood emergency frequency - minute value
+                    try:
+                        val = int(value)
+                        self.set_parameter('neighborhood_emergency_frequency', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid neighborhood emergency frequency value: {value}')
+                        return False
+                        
+                elif channel == '20' and command == '00':
+                    # Transmission enabled/disabled
+                    try:
+                        val = bool(int(value))
+                        self.set_parameter('transmission_enabled', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid transmission enabled value: {value}')
+                        return False
+                        
+                elif channel == '22' and command == '00':
+                    # Debug mode
+                    try:
+                        val = bool(int(value))
+                        self.set_parameter('debug_mode', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid debug mode value: {value}')
+                        return False
+                        
+                elif channel == '23' and command == '00':
+                    # GPS enabled/disabled
+                    try:
+                        val = bool(int(value))
+                        self.set_parameter('gps_enabled', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid GPS enabled value: {value}')
+                        return False
+                        
+                elif channel == '30' and command == '00':
+                    # Battery threshold
+                    try:
+                        val = int(value)
+                        self.set_parameter('battery_threshold', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid battery threshold value: {value}')
+                        return False
+                        
+                elif channel == '31' and command == '00':
+                    # Compression level
+                    try:
+                        val = int(value)
+                        val = max(1, min(10, val))  # Clamp between 1-10
+                        self.set_parameter('compression_level', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid compression level value: {value}')
+                        return False
+                        
+                elif channel == '32' and command == '00':
+                    # Max retransmissions
+                    try:
+                        val = int(value)
+                        self.set_parameter('max_retransmissions', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid max retransmissions value: {value}')
+                        return False
+                        
+                elif channel == '40' and command == '00':
+                    # Auto shutdown enabled/disabled
+                    try:
+                        val = bool(int(value))
+                        self.set_parameter('auto_shutdown_enabled', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid auto shutdown value: {value}')
+                        return False
+                        
+                elif channel == '41' and command == '00':
+                    # Shutdown iteration limit
+                    try:
+                        val = int(value)
+                        self.set_parameter('shutdown_iteration_limit', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid shutdown iteration limit value: {value}')
+                        return False
+                        
+                elif channel == '42' and command == '00':
+                    # Data retention days
+                    try:
+                        val = int(value)
+                        self.set_parameter('data_retention_days', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid data retention value: {value}')
+                        return False
+                        
+                elif channel == '43' and command == '00':
+                    # Backup enabled/disabled
+                    try:
+                        val = bool(int(value))
+                        self.set_parameter('backup_enabled', val)
+                        return True
+                    except ValueError:
+                        print(f'Invalid backup value: {value}')
+                        return False
+                        
+                elif channel == '21' and command == '00':
+                    # Emergency status: system enters emergency mode and stops scheduled shutdowns
+                    self.set_parameter('emergency_mode', True)
+                    return True
+                    
+                elif channel == '99' and command == '00':
+                    # Deactivate emergency mode
+                    self.set_parameter('emergency_mode', False)
+                    return True
+                    
+                else:
+                    print(f'Unknown channel/command combination: Channel {channel}, Command {command} with value: {value}')
+                    return False
+            else:
+                print(f'Invalid payload format: {payload} (minimum 4 characters required for [Channel][Command][Value] format)')
+                return False
+                
+        except Exception as e:
+            print(f"Error processing LoRa command '{payload}': {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def get_system_status(self) -> Dict[str, Any]:
+        """Get current system status including all parameters"""
+        return {
+            'timestamp': datetime.now().isoformat(),
+            'parameters': self.parameters.copy(),
+            'lora_status': {
+                'listening': self.listening,
+                'handler_available': self.lora_handler is not None,
+                'queue_size': self.lora_handler.transmit_queue.qsize() if self.lora_handler else 0
+            }
+        }
+    
+    def sync_with_lora_config(self):
+        """Synchronize runtime parameters with LoRa handler configuration"""
+        if not self.lora_handler:
+            print("No LoRa handler available for sync")
+            return False
+        
+        try:
+            # Get current LoRa config
+            lora_config = self.lora_handler.config
+            
+            # Update runtime parameters with any new values from LoRa
+            changes = []
+            for key, value in lora_config.items():
+                if key in self.parameters and self.parameters[key] != value:
+                    old_value = self.parameters[key]
+                    self.parameters[key] = value
+                    changes.append(f"{key}: {old_value} → {value}")
+            
+            if changes:
+                print(f"🔄 Synced {len(changes)} parameters from LoRa config:")
+                for change in changes:
+                    print(f"  {change}")
+                self.save_parameters(self.parameters)
+                return True
+            else:
+                print("✓ Runtime parameters already in sync with LoRa config")
+                return True
+                
+        except Exception as e:
+            print(f"Error syncing with LoRa config: {e}")
+            return False
+    
+    def print_status(self):
+        """Print current system status"""
+        status = self.get_system_status()
+        print(f"\n=== System Status ({status['timestamp']}) ===")
+        
+        params = status['parameters']
+        print("Flood Detection:")
+        print(f"  Area Threshold: {params['area_threshold']}%")
+        print(f"  Stage Threshold: {params['stage_threshold']} cm")
+        
+        print("\nTiming:")
+        print(f"  Monitoring Frequency: {params['monitoring_frequency']} min")
+        print(f"  Emergency Frequency: {params['emergency_frequency']} min")
+        print(f"  Photo Interval: {params['photo_interval']} min")
+        
+        print("\nSystem Control:")
+        print(f"  Emergency Mode: {params['emergency_mode']}")
+        print(f"  Transmission Enabled: {params['transmission_enabled']}")
+        print(f"  Debug Mode: {params['debug_mode']}")
+        print(f"  GPS Enabled: {params['gps_enabled']}")
+        
+        print("\nPerformance:")
+        print(f"  Battery Threshold: {params['battery_threshold']}%")
+        print(f"  Compression Level: {params['compression_level']}")
+        print(f"  Max Retransmissions: {params['max_retransmissions']}")
+        
+        print(f"\nLoRa Status: {status['lora_status']}")
+        print("=" * 50)
+    
+    def close(self):
+        """Clean up resources"""
+        self.listening = False
+        if self.lora_handler:
+            self.lora_handler.stop_listening()
+        print("LoRa runtime integration closed")
+
+# Global instance for easy access
+_runtime_manager = None
+
+def get_runtime_manager() -> LoRaRuntimeManager:
+    """Get the global runtime manager instance"""
+    global _runtime_manager
+    if _runtime_manager is None:
+        _runtime_manager = LoRaRuntimeManager()
+    return _runtime_manager
+
+def get_parameter(key: str, default: Any = None) -> Any:
+    """Convenience function to get a runtime parameter"""
+    manager = get_runtime_manager()
+    return manager.get_parameter(key, default)
+
+def set_parameter(key: str, value: Any):
+    """Convenience function to set a runtime parameter"""
+    manager = get_runtime_manager()
+    manager.set_parameter(key, value)
+
+def register_callback(parameter: str, callback: Callable):
+    """Convenience function to register a parameter update callback"""
+    manager = get_runtime_manager()
+    manager.register_update_callback(parameter, callback)
+
+def sync_lora_parameters():
+    """Convenience function to sync runtime parameters with LoRa config"""
+    manager = get_runtime_manager()
+    return manager.sync_with_lora_config()
+
+def process_lora_payload(payload: str):
+    """Convenience function to process LoRa payload in new format"""
+    manager = get_runtime_manager()
+    return manager.process_lora_payload(payload)
+
+# Integration functions for ticktalk_main.py
+def integrate_with_ticktalk():
+    """Set up integration with ticktalk_main.py system"""
+    manager = get_runtime_manager()
+    
+    # Register callbacks for ticktalk_main.py integration
+    def on_emergency_mode_changed(value, old_value):
+        if value:
+            print("🚨 EMERGENCY MODE ACTIVATED - System will increase monitoring frequency!")
+            # Could trigger immediate photo capture or other emergency actions
+        else:
+            print("✅ Emergency mode deactivated - Returning to normal operation")
+    
+    def on_transmission_enabled_changed(value, old_value):
+        if value:
+            print("📡 Transmissions enabled")
+        else:
+            print("📡 Transmissions disabled - Data will be queued but not sent")
+    
+    def on_debug_mode_changed(value, old_value):
+        if value:
+            print("🐛 Debug mode enabled - Verbose logging active")
+        else:
+            print("🐛 Debug mode disabled - Normal logging")
+    
+    def on_photo_interval_changed(value, old_value):
+        print(f"📸 Photo interval changed: {old_value} → {value} minutes")
+    
+    def on_monitoring_frequency_changed(value, old_value):
+        print(f"⏰ Monitoring frequency changed: {old_value} → {value} minutes")
+    
+    # Register the callbacks
+    manager.register_update_callback('emergency_mode', on_emergency_mode_changed)
+    manager.register_update_callback('transmission_enabled', on_transmission_enabled_changed)
+    manager.register_update_callback('debug_mode', on_debug_mode_changed)
+    manager.register_update_callback('photo_interval', on_photo_interval_changed)
+    manager.register_update_callback('monitoring_frequency', on_monitoring_frequency_changed)
+    
+    # Perform initial sync with LoRa config
+    manager.sync_with_lora_config()
+    
+    print("✓ LoRa runtime integration set up for ticktalk_main.py")
+
+# Example usage and testing
+if __name__ == "__main__":
+    # Set up integration
+    integrate_with_ticktalk()
+    
+    # Get the runtime manager
+    manager = get_runtime_manager()
+    
+    # Print initial status
+    manager.print_status()
+    
+    # Test some parameter updates using new format
+    print("\n--- Testing Parameter Updates (New Format) ---")
+    manager.process_lora_payload('1090')  # Set area threshold to 0%
+    manager.process_lora_payload('1010')  # Set area threshold to 100%
+    manager.process_lora_payload('1191')  # Set stage threshold to 1 cm
+    manager.process_lora_payload('1292')  # Set monitoring frequency to 2 min
+    manager.process_lora_payload('2100')  # Activate emergency mode
+    
+    # Print updated status
+    manager.print_status()
+    
+    # Test deactivating emergency mode
+    manager.process_lora_payload('9900')
+    manager.print_status()
+    
+    # Test some parameter updates using old format (backward compatibility)
+    print("\n--- Testing Parameter Updates (Old Format) ---")
+    manager.process_lora_command('10', 5)  # Set area threshold to 50%
+    manager.process_lora_command('11', 75)  # Set stage threshold to 75 cm
+    manager.process_lora_command('12', 30)  # Set monitoring frequency to 30 min
+    manager.process_lora_command('21', None)  # Activate emergency mode
+    
+    # Print updated status
+    manager.print_status()
+    
+    # Test deactivating emergency mode
+    manager.process_lora_command('99', None)
+    manager.print_status()
+    
+    # Clean up
+    manager.close()
+
