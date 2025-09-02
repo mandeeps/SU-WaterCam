@@ -235,6 +235,14 @@ class WittyPi4:
         # Return error if max retries reached
         return "-"
 
+    def clear_shutdown_time(self) -> None:
+        '''Clear the shutdown time from the Witty Pi 4'''
+        try:
+            self.run_command("clear_shutdown_time")
+            logging.info("Shutdown time cleared")
+        except Exception as e:
+            logging.error("Could not clear shutdown time: %s", str(e))
+
 if __name__ == "__main__":
 
     logging.basicConfig(level=logging.DEBUG)
