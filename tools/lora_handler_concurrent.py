@@ -27,6 +27,9 @@ from typing import Dict, Any, Optional
 # 09 39 monitoring freq
 # 09 49 emergency freq
 # 09 59 neighborhood emergency status freq
+# 0A 01 wittypi temperature (float, celsius)
+# 0A 02 wittypi battery voltage (float, volts)
+# 0A 03 wittypi internal voltage (float, volts)
 
 # Reception Data Format
 # Format: [Channel][Command][Value]
@@ -42,7 +45,7 @@ from typing import Dict, Any, Optional
 # 1292 -> Channel 12, Command 92, Value 2 (Monitoring Frequency 2 minutes)
 # 1393 -> Channel 13, Command 93, Value 3 (Emergency Frequency 3 minutes)
 # 2100 -> Channel 21, Command 00, Value 0 (Emergency status: system enters emergency mode)
-# 9900 -> Channel 99, Command 00, Value 0 (Deactivate emergency mode)
+# 9999 -> Emergency clear message (Deactivate emergency mode)
 
 class LoRaHandler:
     def __init__(self, port='/dev/ttyAMA5', config_file='lora_config.json'):
@@ -59,19 +62,37 @@ class LoRaHandler:
         # Callback for runtime integration
         self.runtime_callback = None
         
-        # Configure the serial port
-        self.ser = serial.Serial(
-            port=port,
-            baudrate=115200,
-            parity=serial.PARITY_NONE,
-            stopbits=serial.STOPBITS_ONE,
-            bytesize=serial.EIGHTBITS,
-            timeout=1
-        )
+        # Size limit tracking
+        self.current_size_limit = 242  # Default LoRaWAN payload size
         
-        if not self.ser.is_open:
-            print("Serial port is not open. Check the connection.")
-            raise RuntimeError("Serial port failed to open")
+        # Transmission status tracking
+        self.last_transmission_status = None
+        self.transmission_history = []
+        
+
+        
+        # Configure the serial port
+        try:
+            self.ser = serial.Serial(
+                port=port,
+                baudrate=115200,
+                parity=serial.PARITY_NONE,
+                stopbits=serial.STOPBITS_ONE,
+                bytesize=serial.EIGHTBITS,
+                timeout=1
+            )
+            
+            if not self.ser.is_open:
+                print(f"❌ Serial port {port} failed to open")
+                raise RuntimeError(f"Serial port {port} failed to open")
+                
+        except serial.SerialException as e:
+            print(f"❌ Serial port error on {port}: {e}")
+            print(f"   Check if device exists and has proper permissions")
+            raise RuntimeError(f"Serial port {port} error: {e}")
+        except Exception as e:
+            print(f"❌ Unexpected error initializing serial port {port}: {e}")
+            raise RuntimeError(f"Serial port {port} initialization failed: {e}")
     
     def load_config(self) -> Dict[str, Any]:
         """Load configuration from file or create default"""
@@ -168,74 +189,89 @@ class LoRaHandler:
                     try:
                         res = self.ser.readline().decode().strip()
                         print(f"DEBUG: Raw received: '{res}'")
-                        if res and "DATA=" in res:
+                        # Skip empty messages
+                        if not res:
+                            continue
+                        
+                        # Skip AT+SENDB= messages (these are transmission commands, not incoming data)
+                        if res.startswith('AT+SENDB='):
+                            print(f"DEBUG: Skipping transmission command echo: '{res[:50]}...'")
+                            continue
+                        
+                        # Validate message integrity before processing
+                        if not self._is_valid_message(res):
+                            print(f"⚠️ Skipping corrupted/invalid message: '{res}'")
+                            continue
+                        
+                        # Check for emergency messages FIRST (highest priority) - ANY message with "EMERGENCY" triggers emergency mode
+                        if self._is_emergency_message(res):
+                            emergency_status = self._extract_emergency_status(res)
+                            if emergency_status:
+                                print(f"🚨 EMERGENCY TRIGGERED: '{res}'")
+                                # Always activate emergency mode for any EMERGENCY message
+                                try:
+                                    from lora_runtime_integration import set_parameter
+                                    set_parameter('emergency_mode', True)
+                                    print("✅ Emergency mode activated via EMERGENCY message")
+                                except Exception as e:
+                                    print(f"⚠️ Failed to set emergency mode: {e}")
+                            continue  # Emergency messages are handled, don't process further
+                        
+                        # Check for emergency clear messages SECOND (high priority) - only "9999" turns off emergency mode  
+                        elif self._is_emergency_clear_message(res):
+                            print(f"✅ Emergency clear message received: '{res}'")
+                            # Clear emergency mode in runtime integration
                             try:
-                                print(f"DEBUG: Found DATA= in message: '{res}'")
-                                data = res.split("DATA=", 1)[1]
-                                print(f"DEBUG: Extracted data: '{data}'")
-                                print(f"DEBUG: Data type: {type(data)}")
-                                print(f"DEBUG: Data length: {len(data)}")
-                                print(f"DEBUG: Data hex: {data.encode().hex()}")
-                                print(f"DEBUG: Data repr: {repr(data)}")
-                                print(f"📡 LoRa packet received: {data}")
-                                self.decode(data)
+                                from lora_runtime_integration import set_parameter
+                                set_parameter('emergency_mode', False)
+                                print("✅ Emergency mode deactivated via '9999' clear message")
                             except Exception as e:
-                                print(f"Error processing received data: {e}")
+                                print(f"⚠️ Failed to clear emergency mode: {e}")
+                            continue  # Emergency clear messages are handled, don't process further
+                        
+                        # Look for actual LoRa data messages THIRD (priority)
+                        if self._is_lora_data(res):
+                            try:
+                                data = self._extract_lora_data(res)
+                                if data:
+                                    print(f"📡 LoRa packet received: {data}")
+                                    self.decode(data)
+                                else:
+                                    print(f"DEBUG: Could not extract LoRa data from: '{res}'")
+                            except Exception as e:
+                                print(f"Error processing LoRa data: {e}")
                                 import traceback
                                 traceback.print_exc()
-                        elif res and res.strip().isdigit() and len(res.strip()) >= 2:
-                            # Handle case where mDot sends data directly without DATA= prefix
-                            try:
-                                print(f"DEBUG: Found direct numeric message: '{res}'")
-                                data = res.strip()
-                                print(f"DEBUG: Processing direct data: '{data}'")
-                                print(f"📡 LoRa packet received (direct): {data}")
-                                self.decode(data)
-                            except Exception as e:
-                                print(f"Error processing direct data: {e}")
-                                import traceback
-                                traceback.print_exc()
-                        elif res:
-                            print(f"DEBUG: Non-DATA message: '{res}'")
-                            print(f"DEBUG: Non-DATA message hex: {res.encode().hex()}")
-                            print(f"DEBUG: Non-DATA message repr: {repr(res)}")
+                        # Check for +TXS: responses (size limit information) - SECOND priority
+                        elif self._is_txs_response(res):
+                            size_limit = self._extract_txs_size_limit(res)
+                            if size_limit is not None:
+                                print(f"📏 mDot size limit received: {size_limit} bytes")
+                                # Store the size limit for use in transmission
+                                self.current_size_limit = size_limit
+                            else:
+                                print(f"DEBUG: Could not extract size limit from TXS response: '{res}'")
+                        # Check for transmission-related responses (THIRD priority)
+                        elif self._is_transmission_response(res):
+                            status = self._extract_transmission_status(res)
+                            # Store the transmission status
+                            self.last_transmission_status = status
+                            self.transmission_history.append(status)
+                            # Keep only last 10 entries to prevent memory bloat
+                            if len(self.transmission_history) > 10:
+                                self.transmission_history.pop(0)
                             
-                            # Check if this might be a different format of incoming data
-                            if res.startswith("RX:") or res.startswith("RX ") or "RX" in res:
-                                print(f"DEBUG: Possible RX message detected: {res}")
-                                # Extract data after RX
-                                try:
-                                    if ":" in res:
-                                        rx_data = res.split(":", 1)[1].strip()
-                                        print(f"DEBUG: Extracted RX data: '{rx_data}'")
-                                        if rx_data.isdigit():
-                                            print(f"DEBUG: Attempting to decode RX data as command: {rx_data}")
-                                            self.decode(rx_data)
-                                    else:
-                                        rx_data = res.replace("RX", "").strip()
-                                        print(f"DEBUG: Extracted RX data: '{rx_data}'")
-                                        if rx_data.isdigit():
-                                            print(f"DEBUG: Attempting to decode RX data as command: {rx_data}")
-                                            self.decode(rx_data)
-                                except Exception as e:
-                                    print(f"DEBUG: Failed to decode RX data: {e}")
-                            elif res.startswith("+") and ":" in res:
-                                print(f"DEBUG: Possible AT response message: {res}")
-                            elif res.isdigit() or res.replace('.', '').replace('-', '').isdigit():
-                                print(f"DEBUG: Possible numeric data message: {res}")
-                                # Try to decode it directly as a command
-                                try:
-                                    print(f"DEBUG: Attempting to decode numeric message as command: {res}")
-                                    self.decode(res)
-                                except Exception as e:
-                                    print(f"DEBUG: Failed to decode numeric message: {e}")
-                            elif res.strip() and len(res.strip()) >= 2:
-                                # Check if this might be a command without any prefix
-                                stripped = res.strip()
-                                print(f"DEBUG: Possible raw command message: '{stripped}'")
-                                if stripped.isdigit() and len(stripped) >= 2:
-                                    print(f"DEBUG: Attempting to decode raw command: {stripped}")
-                                    self.decode(stripped)
+                            if status['success']:
+                                print(f"✅ Transmission success: {status['details'].get('confirmation', 'OK')}")
+                            else:
+                                print(f"❌ Transmission error: {status['details'].get('error', 'Unknown error')}")
+                            print(f"📡 Transmission response details: {status}")
+                            # Could trigger callbacks or update transmission status here
+                        # Then check if it's an AT command response (lower priority)
+                        elif self._is_at_response(res):
+                            print(f"DEBUG: AT response (ignoring): '{res}'")
+                        else:
+                            print(f"DEBUG: Non-LoRa message (ignoring): '{res}'")
                     except UnicodeDecodeError:
                         # Handle binary data that can't be decoded as UTF-8
                         res_raw = self.ser.readline()
@@ -244,9 +280,26 @@ class LoRaHandler:
                     time.sleep(0.5)  # Small delay to prevent busy waiting
             except Exception as e:
                 print(f"Error in listen loop: {e}")
-                import traceback
-                traceback.print_exc()
-                time.sleep(1)  # Longer delay on error
+                
+                # Handle serial port disconnection specifically
+                if "device disconnected" in str(e).lower() or "no data" in str(e).lower():
+                    print(f"⚠️ Serial port disconnected or no data available: {e}")
+                    # Check connection and attempt reconnection if needed
+                    if not self._check_serial_connection():
+                        if self._attempt_reconnection():
+                            print("✅ Reconnection successful, continuing...")
+                            continue
+                        else:
+                            print("❌ Reconnection failed, stopping listener")
+                            break
+                    else:
+                        print("⚠️ Connection appears fine, waiting before retry...")
+                        time.sleep(2)
+                        continue
+                else:
+                    import traceback
+                    traceback.print_exc()
+                    time.sleep(1)  # Longer delay on error
     
     def transmit(self, content: bytes) -> bool:
         """Transmit data with thread safety"""
@@ -264,36 +317,16 @@ class LoRaHandler:
                 self.ser.write('\r\n'.encode())
                 time.sleep(0.5)  # Brief pause to let mDot process
                 
-                # Send AT+TXS command to check size
-                print("DEBUG: Sending AT+TXS command...")
+                # Use the stored size limit (updated via listening loop)
+                size_limit = self.current_size_limit
+                print(f"DEBUG: Using stored size limit: {size_limit} bytes")
+                
+                # Optionally refresh the size limit by sending AT+TXS
+                print("DEBUG: Sending AT+TXS command to refresh size limit...")
                 self.ser.write('AT+TXS\r\n'.encode())
                 
-                # Wait a bit for mDot to process
-                time.sleep(1)
-                
-                # Read all available responses
-                responses = []
-                while self.ser.in_waiting > 0:
-                    res = self.ser.read_until()
-                    if res:
-                        try:
-                            response = res.decode('utf-8').strip()
-                            responses.append(response)
-                            print(f"DEBUG: Response: '{response}'")
-                        except UnicodeDecodeError:
-                            response_hex = res.hex()
-                            responses.append(f"BINARY:{response_hex}")
-                            print(f"DEBUG: Binary response (hex): {response_hex}")
-                
-                # Look for the size limit in responses
-                size_limit = 242  # Default size based on mDot response (LoRaWAN payload size limit)
-                for response in responses:
-                    if response.isdigit():
-                        size_limit = int(response)
-                        print(f"DEBUG: Found size limit: {size_limit} bytes")
-                        break
-                
-                print(f"DEBUG: Using size limit: {size_limit} bytes")
+                # Brief wait for mDot to process (size limit will be updated via listening loop)
+                time.sleep(0.5)
                 
                 # Calculate actual payload size and construct AT command
                 if isinstance(content, str):
@@ -674,6 +707,17 @@ class LoRaHandler:
             if 'neighborhood_emergency_frequency' in data: 
                 print(f"DEBUG: Processing neighborhood_emergency_frequency: {data['neighborhood_emergency_frequency']}")
                 add_u16(0x09, 0x59, data['neighborhood_emergency_frequency'])
+            
+            # WittyPi voltage measurements for battery status
+            if 'wittypi_temperature' in data: 
+                print(f"DEBUG: Processing wittypi_temperature: {data['wittypi_temperature']}")
+                add_f32(0x0A, 0x01, data['wittypi_temperature'])
+            if 'wittypi_battery_voltage' in data: 
+                print(f"DEBUG: Processing wittypi_battery_voltage: {data['wittypi_battery_voltage']}")
+                add_f32(0x0A, 0x02, data['wittypi_battery_voltage'])
+            if 'wittypi_internal_voltage' in data: 
+                print(f"DEBUG: Processing wittypi_internal_voltage: {data['wittypi_internal_voltage']}")
+                add_f32(0x0A, 0x03, data['wittypi_internal_voltage'])
 
             print(f"DEBUG: Final packet size: {len(packet)} bytes")
             return bytes(packet)
@@ -709,13 +753,13 @@ class LoRaHandler:
                 print(f"DEBUG: Cleaned payload: '{clean_payload}' (length: {len(clean_payload)})")
                 
                 if len(clean_payload) >= 4:
-                    # Parse the format: [Channel][Command][Value]
-                    # Channel: 2 digits (10, 11, 12, etc.)
-                    # Command: 1 digit (9, 0, etc.)
+                    # Parse the format: [Type][Command][Value]
+                    # Type: 2 digits (10, 11, 12, etc.)
+                    # Command: 2 digits (90, 01, etc.)
                     # Value: remaining digits (0, 1, 10, etc.)
                     channel = clean_payload[:2]
-                    command = clean_payload[2:3]  # Single digit command
-                    value = clean_payload[3:]     # Remaining digits as value
+                    command = clean_payload[2:4]  # Two digit command
+                    value = clean_payload[4:]     # Remaining digits as value
                     
                     print(f"DEBUG: Channel: '{channel}', Command: '{command}', Value: '{value}'")
                     print(f"DEBUG: Channel length: {len(channel)}, Command length: {len(command)}, Value length: {len(value)}")
@@ -884,6 +928,29 @@ class LoRaHandler:
                         # Deactivate emergency mode
                         self.update_config('emergency_mode', False)
                         print('✅ Emergency mode deactivated')
+                        
+                    elif channel == '50' and command == '01':
+                        # Debug status command - request comprehensive system information
+                        print('🔍 Debug status requested via LoRa command')
+                        try:
+                            from tools.lora_debug_integration import handle_debug_status_request
+                            debug_response = handle_debug_status_request()
+                            
+                            if debug_response['status'] == 'success':
+                                # Queue the debug response for transmission
+                                debug_data = debug_response['data']
+                                print(f"📤 Queuing debug response: {len(debug_data)} bytes")
+                                
+                                # Transmit the debug response
+                                self.queue_binary_transmit(debug_data)
+                                print('✅ Debug status response queued for transmission')
+                            else:
+                                print(f"❌ Debug status failed: {debug_response.get('error', 'Unknown error')}")
+                                
+                        except ImportError as e:
+                            print(f"⚠️ Debug status module not available: {e}")
+                        except Exception as e:
+                            print(f"⚠️ Failed to process debug status request: {e}")
                         
                     else:
                         print(f'Unknown channel/command combination: Channel {channel}, Command {command} with value: {value}')
@@ -1099,6 +1166,413 @@ class LoRaHandler:
             self.decode(test_payload)
         else:
             print(f"Invalid test payload: {test_payload} (minimum 4 characters required)")
+    
+    def _is_at_response(self, message: str) -> bool:
+        """Check if a message is an AT command response that should be ignored"""
+        # IMPORTANT: Check for LoRa data patterns FIRST to avoid conflicts
+        if self._is_lora_data(message):
+            return False
+        
+        # Check for transmission-related responses that need to be processed
+        if self._is_transmission_response(message):
+            return False
+        
+        # Check for TXS responses that need to be processed
+        if self._is_txs_response(message):
+            return False
+        
+        # Common AT command response patterns that should be ignored
+        at_patterns = [
+            '+NJS:',                 # Network join status
+            '+DFORMAT:',             # Data format response
+            '+MSG:',                 # Message status response
+            'AT+',                   # AT command echo
+            'AT',                    # AT command echo
+        ]
+        
+        message_upper = message.upper()
+        for pattern in at_patterns:
+            if pattern in message_upper:
+                return True
+        
+        # Check for numeric responses to AT commands (like size limits)
+        # Only consider very short numeric responses as AT responses
+        if message.isdigit() and len(message) <= 2:
+            return True
+            
+        # Check for extended AT responses that start with + but are not LoRa data
+        # This is a fallback for any other + patterns we haven't explicitly handled
+        if message.startswith('+'):
+            return True
+        
+        # If none of the above patterns match, classify as AT response (fallback)
+        # This ensures all unclassified messages are treated as AT responses
+        return True
+    
+    def _is_lora_data(self, message: str) -> bool:
+        """Check if a message contains actual LoRa data that should be decoded"""
+        # Look for LoRa data indicators
+        lora_patterns = [
+            'DATA=',                 # Explicit data prefix
+            'RX:',                   # Receive indicator
+            'RX ',                   # Receive indicator (space)
+        ]
+        
+        message_upper = message.upper()
+        for pattern in lora_patterns:
+            if pattern in message_upper:
+                return True
+        
+        # Check if it's a raw numeric command (4+ digits in [Channel][Command][Value] format)
+        # Must be exactly 4 digits for the new format, or longer for legacy
+        if message.isdigit():
+            if len(message) == 4:  # New format: [Channel][Command][Value]
+                return True
+            elif len(message) > 4:  # Legacy format or extended commands
+                return True
+            
+        return False
+    
+    def _extract_lora_data(self, message: str) -> str:
+        """Extract LoRa data from various message formats"""
+        try:
+            # Handle DATA= format
+            if "DATA=" in message:
+                data = message.split("DATA=", 1)[1]
+                return data.strip()
+            
+            # Handle RX: format
+            elif "RX:" in message:
+                rx_data = message.split("RX:", 1)[1].strip()
+                return rx_data
+            
+            # Handle RX format (space separated)
+            elif message.startswith("RX "):
+                rx_data = message[3:].strip()
+                return rx_data
+            
+            # Handle raw numeric commands
+            elif message.isdigit() and len(message) >= 4:
+                return message.strip()
+            
+            # Handle other potential formats
+            else:
+                # Try to extract any numeric data that might be a command
+                import re
+                numeric_match = re.search(r'(\d{4,})', message)
+                if numeric_match:
+                    return numeric_match.group(1)
+                
+                return None
+                
+        except Exception as e:
+            print(f"Error extracting LoRa data from '{message}': {e}")
+            return None
+    
+    def _is_emergency_message(self, message: str) -> bool:
+        """Check if a message is an emergency message from the mDot"""
+        message_upper = message.upper()
+        # Any message containing "EMERGENCY" triggers emergency mode
+        return 'EMERGENCY' in message_upper
+    
+    def _extract_emergency_status(self, message: str) -> dict:
+        """Extract emergency status information from an EMERGENCY message"""
+        try:
+            # Only return emergency status for messages containing "EMERGENCY"
+            if 'EMERGENCY' in message.upper():
+                return {
+                    'emergency_triggered': True,  # Always True for any EMERGENCY message
+                    'message': message,
+                    'timestamp': time.time()
+                }
+            else:
+                return None
+        except Exception as e:
+            print(f"Error extracting emergency status from '{message}': {e}")
+            return None
+    
+    def _is_emergency_clear_message(self, message: str) -> bool:
+        """Check if a message is an emergency clear message that should turn off emergency mode"""
+        # Only the specific message '9999' turns off emergency mode
+        return message == '9999'
+    
+    def _is_txs_response(self, message: str) -> bool:
+        """Check if a message is a +TXS: response containing size limit information"""
+        # Check for the actual mDot response format: "AT+TXS" (echo) or "242" (size limit)
+        return ("AT+TXS" in message or 
+                (message.isdigit() and len(message) <= 3))  # Size limits are typically 1-3 digits
+    
+    def _is_transmission_response(self, message: str) -> bool:
+        """Check if a message is a transmission-related AT response that needs processing"""
+        # Look for transmission-related response patterns
+        transmission_patterns = [
+            'SENDB:',                # AT+SENDB response
+            'SEND:',                 # AT+SEND response
+            'TX:',                   # Transmission status
+            'TRANSMIT:',             # Transmission status
+            'PACKET:',               # Packet information
+            'PAYLOAD:',              # Payload information
+        ]
+        
+        message_upper = message.upper()
+        for pattern in transmission_patterns:
+            if pattern in message_upper:
+                return True
+        
+        # Check for transmission confirmation messages
+        if any(keyword in message_upper for keyword in ['TRANSMITTED', 'SENT', 'DELIVERED', 'ACK']):
+            return True
+        
+        # Check for standard AT command responses that indicate success/failure
+        if any(keyword in message_upper for keyword in ['OK', 'ERROR']):
+            return True
+            
+        return False
+    
+    def _extract_txs_size_limit(self, message: str) -> int:
+        """Extract size limit from +TXS: response"""
+        try:
+            # Handle the actual mDot response format: "AT+TXS" (echo) or "242" (size limit)
+            
+            # If it's the command echo, no size limit here
+            if "AT+TXS" in message:
+                return None
+            
+            # If it's a numeric message, it might be the size limit
+            if message.isdigit() and len(message) <= 3:
+                size_limit = int(message)
+                # Validate that it's a reasonable size limit (LoRaWAN typically 1-255 bytes)
+                if 1 <= size_limit <= 255:
+                    return size_limit
+            
+            # Legacy support for +TXS: format (in case it's used elsewhere)
+            if "+TXS:" in message.upper():
+                # Extract the numeric value after +TXS:
+                size_part = message.split(":", 1)[1].strip()
+                # Remove any non-numeric characters and convert to int
+                size_str = ''.join(filter(str.isdigit, size_part))
+                if size_str:
+                    return int(size_str)
+            
+            return None
+        except Exception as e:
+            print(f"Error extracting TXS size limit from '{message}': {e}")
+            return None
+    
+    def _extract_transmission_status(self, message: str) -> dict:
+        """Extract transmission status information from AT response"""
+        try:
+            status = {
+                'success': False,
+                'message': message,
+                'details': {},
+                'timestamp': time.time()
+            }
+            
+            message_upper = message.upper()
+            
+            # Check for success indicators
+            if 'OK' in message_upper:
+                status['success'] = True
+                status['details']['confirmation'] = 'OK'
+                status['details']['type'] = 'success_response'
+            
+            # Check for error indicators
+            if 'ERROR' in message_upper:
+                status['success'] = False
+                status['details']['error'] = 'ERROR'
+                status['details']['type'] = 'error_response'
+            
+            # Extract transmission-specific information
+            if 'SENDB:' in message_upper:
+                # Extract data after SENDB:
+                data_part = message.split("SENDB:", 1)[1].strip()
+                status['details']['command'] = 'SENDB'
+                status['details']['data'] = data_part
+                status['details']['type'] = 'command_response'
+            
+            if 'SEND:' in message_upper:
+                # Extract data after SEND:
+                data_part = message.split("SEND:", 1)[1].strip()
+                status['details']['command'] = 'SEND'
+                status['details']['data'] = data_part
+                status['details']['type'] = 'command_response'
+            
+            # Check for transmission confirmation keywords
+            for keyword in ['TRANSMITTED', 'SENT', 'DELIVERED', 'ACK']:
+                if keyword in message_upper:
+                    status['success'] = True
+                    status['details']['confirmation'] = keyword
+                    status['details']['type'] = 'status_response'
+            
+            # If no specific type was identified, classify based on content
+            if 'type' not in status['details']:
+                if 'OK' in message_upper or 'ERROR' in message_upper:
+                    status['details']['type'] = 'standard_response'
+                else:
+                    status['details']['type'] = 'unknown_response'
+            
+            return status
+            
+        except Exception as e:
+            print(f"Error extracting transmission status from '{message}': {e}")
+            return {
+                'success': False,
+                'message': message,
+                'error': str(e),
+                'timestamp': time.time()
+            }
+    
+    def get_size_limit(self) -> int:
+        """Get the current payload size limit"""
+        return self.current_size_limit
+    
+    def get_last_transmission_status(self) -> dict:
+        """Get the last transmission status"""
+        return self.last_transmission_status
+    
+    def get_transmission_history(self) -> list:
+        """Get the transmission history"""
+        return self.transmission_history.copy()
+    
+
+    
+    def refresh_size_limit(self) -> bool:
+        """Manually refresh the size limit by sending AT+TXS command"""
+        try:
+            print("DEBUG: Manually refreshing size limit...")
+            # Temporarily disable listening to avoid interference
+            was_listening = self.listening
+            if was_listening:
+                self.stop_listening()
+                time.sleep(0.5)
+            
+            # Clear buffers and send AT+TXS command
+            self.ser.reset_input_buffer()
+            self.ser.write('AT+TXS\r\n'.encode())
+            time.sleep(1)
+            
+            # Read response directly to get immediate size limit
+            responses = []
+            while self.ser.in_waiting > 0:
+                res = self.ser.read_until()
+                if res:
+                    try:
+                        response = res.decode('utf-8').strip()
+                        responses.append(response)
+                        print(f"DEBUG: Manual TXS response: '{response}'")
+                        
+                        # Check if this is a +TXS: response
+                        if "+TXS:" in response.upper():
+                            size_limit = self._extract_txs_size_limit(response)
+                            if size_limit is not None:
+                                self.current_size_limit = size_limit
+                                print(f"DEBUG: Size limit refreshed to: {size_limit} bytes")
+                    except UnicodeDecodeError:
+                        response_hex = res.hex()
+                        print(f"DEBUG: Binary manual TXS response (hex): {response_hex}")
+            
+            # Re-enable listening if it was active
+            if was_listening:
+                self.start_listening()
+            
+            return True
+        except Exception as e:
+            print(f"Error refreshing size limit: {e}")
+            # Re-enable listening on error
+            if was_listening:
+                self.start_listening()
+            return False
+
+    def _is_valid_message(self, message: str) -> bool:
+        """Check if a message is valid and complete before processing"""
+        try:
+            # Skip empty or whitespace-only messages
+            if not message or message.isspace():
+                return False
+            
+            # Skip messages that are too short (likely incomplete)
+            if len(message) < 2:
+                return False
+            
+            # Skip messages that are too long (likely corrupted)
+            # Exception: Allow longer messages for debug status (AT+SENDB=...)
+            if len(message) > 100 and not message.startswith('AT+SENDB='):
+                return False
+            
+            # Skip messages with excessive special characters (likely corrupted)
+            special_char_count = sum(1 for c in message if not c.isalnum() and not c.isspace() and c not in '=:+-_.')
+            if special_char_count > len(message) * 0.3:  # More than 30% special chars
+                return False
+            
+            # Skip messages that look like corrupted data (based on actual logs)
+            corrupted_patterns = [
+                'irgncmatitw', 'ereca', 'megny_cki', 'gaeay', 
+                'nput pin hih nton takn', 'sent t gaeay', 'megny_cki=u=0',
+                'yo', 'irgncmatitw:ereca:n0,ot'
+            ]
+            message_lower = message.lower()
+            if any(pattern in message_lower for pattern in corrupted_patterns):
+                return False
+            
+            # Skip messages that are mostly non-printable characters
+            printable_ratio = sum(1 for c in message if c.isprintable()) / len(message)
+            if printable_ratio < 0.7:  # Less than 70% printable
+                return False
+            
+            # Skip messages that look like partial/corrupted emergency messages
+            if 'emergency:' in message_lower and len(message) < 20:
+                return False
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error validating message '{message}': {e}")
+            return False
+    
+    def _check_serial_connection(self) -> bool:
+        """Check if the serial port is still connected and functional"""
+        try:
+            if not self.ser or not self.ser.is_open:
+                return False
+            
+            # Try to get port status
+            self.ser.get_settings()
+            return True
+        except Exception as e:
+            print(f"Serial port connection check failed: {e}")
+            return False
+    
+    def _attempt_reconnection(self) -> bool:
+        """Attempt to reconnect to the serial port"""
+        try:
+            print("🔄 Attempting to reconnect to serial port...")
+            
+            # Close existing connection if any
+            if self.ser and self.ser.is_open:
+                self.ser.close()
+            
+            # Wait a moment before reconnecting
+            time.sleep(2)
+            
+            # Try to reconnect
+            self.ser = serial.Serial(
+                port=self.port,
+                baudrate=115200,
+                timeout=1,
+                write_timeout=1
+            )
+            
+            if self.ser.is_open:
+                print("✅ Serial port reconnection successful")
+                return True
+            else:
+                print("❌ Serial port reconnection failed")
+                return False
+                
+        except Exception as e:
+            print(f"Serial port reconnection error: {e}")
+            return False
 
 # Global instance for easy access from other modules
 _lora_handler = None
@@ -1107,8 +1581,27 @@ def get_lora_handler() -> LoRaHandler:
     """Get the global LoRa handler instance"""
     global _lora_handler
     if _lora_handler is None:
-        _lora_handler = LoRaHandler()
-        _lora_handler.start_listening()
+        try:
+            print(f"🔧 Creating new LoRaHandler instance...")
+            _lora_handler = LoRaHandler()
+            print(f"🔧 LoRaHandler created: {type(_lora_handler)}")
+            print(f"🔧 LoRaHandler class: {_lora_handler.__class__}")
+            print(f"🔧 LoRaHandler module: {_lora_handler.__class__.__module__}")
+            print(f"🔧 LoRaHandler methods: {[method for method in dir(_lora_handler) if not method.startswith('_')]}")
+            print(f"🔧 LoRaHandler has set_runtime_callback: {hasattr(_lora_handler, 'set_runtime_callback')}")
+            print(f"🔧 LoRaHandler has current_size_limit: {hasattr(_lora_handler, 'current_size_limit')}")
+            print(f"🔧 LoRaHandler has _is_emergency_message: {hasattr(_lora_handler, '_is_emergency_message')}")
+            _lora_handler.start_listening()
+            print("✅ LoRa handler initialized successfully")
+        except Exception as e:
+            print(f"❌ Failed to initialize LoRa handler: {e}")
+            print("⚠️ LoRa functionality will not be available")
+            # Don't create a mock handler - let the error propagate
+            raise RuntimeError(f"LoRa handler initialization failed: {e}")
+    else:
+        print(f"🔧 Returning existing LoRaHandler: {type(_lora_handler)}")
+        print(f"🔧 LoRaHandler methods: {[method for method in dir(_lora_handler) if not method.startswith('_')]}")
+        print(f"🔧 LoRaHandler has set_runtime_callback: {hasattr(_lora_handler, 'set_runtime_callback')}")
     return _lora_handler
 
 def transmit_data(data: Dict[str, Any]) -> bool:
@@ -1151,6 +1644,28 @@ def test_reception_format(test_payload: str):
     handler = get_lora_handler()
     return handler.test_reception_format(test_payload)
 
+def get_size_limit() -> int:
+    """Convenience function to get the current payload size limit"""
+    handler = get_lora_handler()
+    return handler.get_size_limit()
+
+def refresh_size_limit() -> bool:
+    """Convenience function to manually refresh the size limit"""
+    handler = get_lora_handler()
+    return handler.refresh_size_limit()
+
+def get_last_transmission_status() -> dict:
+    """Convenience function to get the last transmission status"""
+    handler = get_lora_handler()
+    return handler.get_last_transmission_status()
+
+def get_transmission_history() -> list:
+    """Convenience function to get the transmission history"""
+    handler = get_lora_handler()
+    return handler.get_transmission_history()
+
+
+
 # Legacy functions for backward compatibility
 def transmit(content):
     """Legacy transmit function"""
@@ -1171,7 +1686,10 @@ example_packet = {
     "temperature_celsius": 23.5,
     "tilt_roll_yaw": [0.1, 0.2, 0.3],
     "lat_lon_z": [40.7128, -74.0060, 12.5],
-    "relative_humidity": 55
+    "relative_humidity": 55,
+    "wittypi_temperature": 25.3,
+    "wittypi_battery_voltage": 3.8,
+    "wittypi_internal_voltage": 5.1
 }
 
 if __name__ == "__main__":

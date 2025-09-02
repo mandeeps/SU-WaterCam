@@ -1,6 +1,29 @@
 /**
  * Decode uplink function
  * 
+ * Data Format:
+ * Channel 00 Type 01: Timestamp (UNIX)
+ * Channel 01 Type 04: Emergency status (0/1)
+ * Channel 01 Type 05: Health status (0/1) 
+ * Channel 01 Type 06: Movement threshold (0/1)
+ * Channel 02 Type 01: Battery percent
+ * Channel 03 Type 01: Tilt/roll/yaw (3x float32)
+ * Channel 04 Type 01: Lat/lon/z coordinates (3x float32)
+ * Channel 05 Type 01: Temperature in Celsius (float32)
+ * Channel 06 Type 01: Relative humidity percent
+ * Channel 07 Type 17: Camera flood detected (0/1)
+ * Channel 07 Type 27: Camera flood growing (0/1)
+ * Channel 08 Type 18: Flood bitmap compressed binary
+ * Channel 09 Type 19: Status area threshold %
+ * Channel 09 Type 29: Stage threshold %
+ * Channel 09 Type 39: Monitoring frequency (minutes)
+ * Channel 09 Type 49: Emergency frequency (minutes)
+ * Channel 09 Type 59: Neighborhood emergency frequency (minutes)
+ * Channel 0A Type 01: WittyPi temperature (float32, Celsius)
+ * Channel 0A Type 02: WittyPi battery voltage (float32, Volts)
+ * Channel 0A Type 03: WittyPi internal voltage (float32, Volts)
+ * Channel 0B Type 01: Debug status message (JSON string)
+ * 
  * @param {object} input
  * @param {number[]} input.bytes Byte array containing the uplink payload, e.g. [255, 230, 255, 0]
  * @param {number} input.fPort Uplink fPort.
@@ -92,6 +115,35 @@ function decodeUplink(input) {
         result.neighborhood_emergency_frequency = view.getUint16(offset, false);
         offset += 2;
         break;
+      case 'a-1':
+        result.wittypi_temperature = view.getFloat32(offset, false);
+        offset += 4;
+        break;
+      case 'a-2':
+        result.wittypi_battery_voltage = view.getFloat32(offset, false);
+        offset += 4;
+        break;
+      case 'a-3':
+        result.wittypi_internal_voltage = view.getFloat32(offset, false);
+        offset += 4;
+        break;
+      case 'b-1': {
+        // Debug status message (JSON string)
+        const len = view.getUint16(offset, false);
+        offset += 2;
+        const debugBytes = [];
+        for (let i = 0; i < len; i++) {
+          debugBytes.push(view.getUint8(offset++));
+        }
+        const debugJson = String.fromCharCode(...debugBytes);
+        try {
+          result.debug_status = JSON.parse(debugJson);
+        } catch (e) {
+          result.debug_status_raw = debugJson;
+          result.debug_status_error = 'Failed to parse JSON';
+        }
+        break;
+      }
       default:
         offset = view.byteLength; // Stop on unknown
         break;
@@ -100,6 +152,64 @@ function decodeUplink(input) {
 
   return { data: result };
 }
+
+/**
+ * Example decoded output:
+ * {
+ *   "data": {
+ *     "timestamp": 1748892908,
+ *     "emergency_status": 0,
+ *     "health_status": 1,
+ *     "battery_percent": 85,
+ *     "temperature_celsius": 23.5,
+ *     "relative_humidity": 55,
+ *     "wittypi_temperature": 30.625,
+ *     "wittypi_battery_voltage": 4.73,
+ *     "wittypi_internal_voltage": 5.2
+ *   }
+ * }
+ * 
+ * Example debug status output:
+ * {
+ *   "data": {
+ *     "debug_status": {
+ *       "ts": "2025-09-02T14:08:43",
+ *       "host": "aurora",
+ *       "up": 22.4,
+ *       "cpu_t": 64.0,
+ *       "cpu_p": 8.5,
+ *       "mem_p": 56.8,
+ *       "disk_p": 100.0,
+ *       "load": 2.33,
+ *       "em": false,
+ *       "tx": true,
+ *       "lora": false,
+ *       "wp": false
+ *     }
+ *   }
+ * }
+ * 
+ * Battery Status Guide:
+ * - Battery Voltage 4.5V-5.0V: Excellent (90-100%)
+ * - Battery Voltage 4.0V-4.5V: Good (70-90%)
+ * - Battery Voltage 3.7V-4.0V: Fair (50-70%)
+ * - Battery Voltage 3.3V-3.7V: Poor (20-50%)
+ * - Battery Voltage <3.3V: Critical (<20%)
+ * 
+ * Debug Status Field Guide:
+ * - ts: Timestamp (ISO format, truncated to seconds)
+ * - host: Hostname (truncated to 8 characters)
+ * - up: System uptime in hours
+ * - cpu_t: CPU temperature in Celsius
+ * - cpu_p: CPU usage percentage
+ * - mem_p: Memory usage percentage
+ * - disk_p: Disk usage percentage
+ * - load: System load average (1 minute)
+ * - em: Emergency mode status (boolean)
+ * - tx: Transmission enabled status (boolean)
+ * - lora: LoRa handler availability (boolean)
+ * - wp: WittyPi availability (boolean)
+ */
 
 
 /**
