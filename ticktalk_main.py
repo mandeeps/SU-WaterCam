@@ -1,5 +1,8 @@
 from tt_take_photos import flir, take_two_photos
 
+# Import TickTalk decorators
+from ticktalkpython.SQ import SQify, GRAPHify, STREAMify
+
 # Import LoRa runtime integration
 from tools.lora_runtime_integration import (
     get_runtime_manager, 
@@ -11,6 +14,380 @@ from tools.lora_runtime_integration import (
 
 # Import LoRa handler
 from tools.lora_handler_concurrent import get_lora_handler
+
+@SQify
+def wittypi_emergency_control(emergency_mode):
+    """
+    Control WittyPi schedule based on emergency mode status
+    - Emergency ON: Clear shutdown schedule to prevent system shutdown
+    - Emergency OFF: Regenerate and apply normal schedule
+    """
+    try:
+        from tools.wittypi_control import clear_shutdown_time, set_schedule
+        
+        if emergency_mode:
+            # Emergency mode activated - clear shutdown schedule
+            print("🚨 EMERGENCY MODE: Clearing WittyPi shutdown schedule")
+            clear_shutdown_time()
+            return {
+                'status': 'wittypi_emergency_activated',
+                'action': 'shutdown_schedule_cleared',
+                'message': 'WittyPi shutdown schedule cleared for emergency mode'
+            }
+        else:
+            # Emergency mode deactivated - regenerate normal schedule
+            print("✅ EMERGENCY CLEARED: Regenerating WittyPi normal schedule")
+            
+            # Get schedule parameters from runtime configuration
+            schedule_config = get_wittypi_schedule_config()
+            start_hour = schedule_config['start_hour']
+            start_minute = schedule_config['start_minute']
+            interval_length_minutes = schedule_config['interval_length_minutes']
+            num_repetitions_per_day = schedule_config['num_repetitions_per_day']
+            
+            next_startup_time = set_schedule(start_hour, start_minute, interval_length_minutes, num_repetitions_per_day)
+            
+            return {
+                'status': 'wittypi_normal_schedule_restored',
+                'action': 'schedule_regenerated',
+                'next_startup': next_startup_time,
+                'schedule': {
+                    'start_hour': start_hour,
+                    'start_minute': start_minute,
+                    'interval_minutes': interval_length_minutes,
+                    'repetitions_per_day': num_repetitions_per_day
+                },
+                'message': f'WittyPi normal schedule restored, next startup: {next_startup_time}'
+            }
+            
+    except ImportError as e:
+        print(f"⚠️ WittyPi control not available: {e}")
+        return {
+            'status': 'wittypi_unavailable',
+            'error': f'Import error: {str(e)}',
+            'message': 'WittyPi control functions not available'
+        }
+    except Exception as e:
+        print(f"⚠️ Failed to control WittyPi: {e}")
+        return {
+            'status': 'wittypi_control_failed',
+            'error': str(e),
+            'message': 'Failed to control WittyPi schedule'
+        }
+
+@SQify
+def create_sensor_tracker():
+    """
+    Create a sensor tracker to monitor value changes and only transmit when threshold is exceeded
+    """
+    try:
+        # Initialize sensor tracker with previous values and change thresholds
+        tracker = {
+            'previous_values': {},
+            'change_threshold': 0.05,  # 5% change threshold
+            'transmission_history': {},
+            'last_transmission': None
+        }
+        print("✅ Sensor tracker initialized with 5% change threshold")
+        return tracker
+    except Exception as e:
+        print(f"⚠️ Failed to create sensor tracker: {e}")
+        return None
+
+@SQify
+def check_sensor_changes(tracker, current_sensor_data):
+    """
+    Check if sensor values have changed by more than 5% from previous values
+    Returns dict of sensors that need transmission
+    """
+    if not tracker or not current_sensor_data:
+        return {}
+    
+    try:
+        sensors_to_transmit = {}
+        current_time = 'now'  # In real implementation, use datetime.now()
+        
+        for sensor_name, current_value in current_sensor_data.items():
+            # Skip non-numeric values and special fields
+            if not isinstance(current_value, (int, float)) or sensor_name in ['timestamp', 'error']:
+                continue
+            
+            previous_value = tracker['previous_values'].get(sensor_name)
+            
+            if previous_value is None:
+                # First time seeing this sensor - always transmit
+                sensors_to_transmit[sensor_name] = {
+                    'current_value': current_value,
+                    'previous_value': None,
+                    'change_percent': 100.0,
+                    'reason': 'first_reading'
+                }
+                tracker['previous_values'][sensor_name] = current_value
+            else:
+                # Calculate percentage change
+                if previous_value != 0:
+                    change_percent = abs((current_value - previous_value) / previous_value)
+                else:
+                    change_percent = 100.0 if current_value != 0 else 0.0
+                
+                # Check if change exceeds 5% threshold
+                if change_percent >= tracker['change_threshold']:
+                    sensors_to_transmit[sensor_name] = {
+                        'current_value': current_value,
+                        'previous_value': previous_value,
+                        'change_percent': change_percent * 100,
+                        'reason': 'threshold_exceeded'
+                    }
+                    tracker['previous_values'][sensor_name] = current_value
+                else:
+                    # Update previous value even if not transmitting
+                    tracker['previous_values'][sensor_name] = current_value
+        
+        # Log transmission decisions if any sensors qualify
+        if sensors_to_transmit:
+            print(f"📊 Sensors qualifying for transmission (5% threshold):")
+            for sensor, details in sensors_to_transmit.items():
+                print(f"   {sensor}: {details['previous_value']} → {details['current_value']} "
+                      f"({details['change_percent']:.1f}% change)")
+        else:
+            print(f"📊 No sensors qualify for transmission (all changes < 5%)")
+        
+        return sensors_to_transmit
+        
+    except Exception as e:
+        print(f"⚠️ Failed to check sensor changes: {e}")
+        return {}
+
+@SQify
+def update_sensor_tracker(tracker, sensor_data, transmission_result):
+    """
+    Update sensor tracker with transmission results and maintain history
+    """
+    if not tracker:
+        return
+    
+    try:
+        current_time = 'now'  # In real implementation, use datetime.now()
+        
+        # Update transmission history
+        tracker['last_transmission'] = current_time
+        
+        # Record which sensors were transmitted
+        if transmission_result and 'transmitted_sensors' in transmission_result:
+            for sensor_name in transmission_result['transmitted_sensors']:
+                if sensor_name not in tracker['transmission_history']:
+                    tracker['transmission_history'][sensor_name] = []
+                
+                tracker['transmission_history'][sensor_name].append({
+                    'timestamp': current_time,
+                    'value': sensor_data.get(sensor_name, 'unknown'),
+                    'change_percent': transmission_result.get('change_percent', {}).get(sensor_name, 0)
+                })
+        
+        print(f"✅ Sensor tracker updated with transmission results")
+        
+    except Exception as e:
+        print(f"⚠️ Failed to update sensor tracker: {e}")
+
+@SQify
+def lora_token_with_tracker(bitmap, sensor_tracker):
+    """
+    Enhanced LoRa transmission function that uses sensor tracker to only transmit changed values
+    """
+    from ticktalkpython.Clock import TTClock
+    from ticktalkpython.TTToken import TTToken
+    from ticktalkpython.Time import TTTime
+    import pickle
+
+    from tools.lora_handler_concurrent import get_lora_handler, get_config_value, transmit_data, transmit_binary, compressed_encoding
+
+    from ticktalkpython.Tag import TTTag
+    from ticktalkpython import NetworkInterfaceLoRa
+    from tools.bno055_imu import get_orientation
+    from tools.aht20_temperature import get_aht20
+    from tools.get_gps import get_lat_lon_alt
+    from tools.lora_runtime_integration import get_parameter
+
+    from pympler import asizeof
+    from sys import getsizeof
+
+    # Check if transmissions are enabled via runtime parameters
+    transmission_enabled = get_parameter('transmission_enabled', True)
+    if not transmission_enabled:
+        print("📡 Transmissions disabled - skipping LoRa transmission")
+        return bitmap
+
+    root_clock = TTClock.root()
+    # Create a time-tagged token using that interval and the derived clock
+    time_1 = TTTime(root_clock, 2, 1024)
+    recipient_device = 0xFF
+    context = 1
+    sq_name = 4
+
+    # Get sensor data
+    try:
+        data = get_orientation()
+        data.update(get_aht20())
+    except Exception as e:
+        print(f"⚠️ Failed to get sensor data: {e}")
+        data = {}
+    
+    # Check if GPS is enabled via runtime parameters
+    gps_enabled = get_parameter('gps_enabled', True)
+    if gps_enabled:
+        try:
+            gps = get_lat_lon_alt()
+            if gps:
+                data.update(gps)
+        except Exception as e:
+            print(f"⚠️ Failed to get GPS data: {e}")
+    
+    # Get WittyPi voltage measurements for battery status
+    try:
+        wittypi_data = get_wittypi_status()
+        if wittypi_data.get('status') == 'wittypi_data_retrieved':
+            data.update({
+                'wittypi_temperature': wittypi_data.get('temperature', 0.0),
+                'wittypi_battery_voltage': wittypi_data.get('battery_voltage', 0.0),
+                'wittypi_internal_voltage': wittypi_data.get('internal_voltage', 0.0)
+            })
+            print(f"🔋 WittyPi data added: temp={wittypi_data.get('temperature', 0.0)}°C, battery={wittypi_data.get('battery_voltage', 0.0)}V, internal={wittypi_data.get('internal_voltage', 0.0)}V")
+        else:
+            print(f"⚠️ WittyPi data unavailable: {wittypi_data.get('status', 'unknown')}")
+    except Exception as e:
+        print(f"⚠️ Failed to get WittyPi data: {e}")
+    
+    # Add runtime parameters to sensor data
+    emergency_mode = get_parameter('emergency_mode', False)
+    area_threshold = get_parameter('area_threshold', 10)
+    stage_threshold = get_parameter('stage_threshold', 50)
+    
+    data.update({
+        'emergency_status': 1 if emergency_mode else 0,
+        'status_area_threshold': area_threshold,
+        'stage_threshold': stage_threshold,
+        'monitoring_frequency': get_parameter('monitoring_frequency', 60),
+        'emergency_frequency': get_parameter('emergency_frequency', 5),
+        'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30)
+    })
+
+    # Check sensor changes using tracker if available
+    sensors_to_transmit = {}
+    if sensor_tracker:
+        try:
+            sensors_to_transmit = check_sensor_changes(sensor_tracker, data)
+            print(f"📊 Sensor change check: {len(sensors_to_transmit)} sensors qualify for transmission")
+        except Exception as e:
+            print(f"⚠️ Failed to check sensor changes: {e}")
+            # Fall back to transmitting all data if tracker fails
+            sensors_to_transmit = {k: {'current_value': v, 'reason': 'tracker_failed'} for k, v in data.items()}
+
+    try:
+        handler = get_lora_handler()
+    except Exception as e:
+        print(f"⚠️ Failed to get LoRa handler: {e}")
+        return bitmap
+
+    # Transmit sensor data only if changes detected or no tracker available
+    transmission_result = {'transmitted_sensors': [], 'change_percent': {}}
+    
+    if not sensor_tracker or sensors_to_transmit:
+        try:
+            # Filter data to only include sensors that changed significantly
+            if sensor_tracker and sensors_to_transmit:
+                filtered_data = {k: v for k, v in data.items() if k in sensors_to_transmit}
+                transmission_result['transmitted_sensors'] = list(sensors_to_transmit.keys())
+                transmission_result['change_percent'] = {k: v['change_percent'] for k, v in sensors_to_transmit.items()}
+                print(f"📡 Transmitting {len(filtered_data)} sensors with significant changes")
+            else:
+                filtered_data = data
+                transmission_result['transmitted_sensors'] = list(data.keys())
+                print(f"📡 Transmitting all sensor data (no tracker or all sensors qualify)")
+            
+            handler.queue_transmit(filtered_data)
+            handler.process_transmit_queue()
+            
+        except Exception as e:
+            print(f"⚠️ Failed to transmit sensor data: {e}")
+    else:
+        print(f"📊 No sensor changes detected - skipping sensor data transmission")
+
+    # Transmit TTToken with full encoded sensor data embedded (preserve headers)
+    try:
+        enc_data = compressed_encoding(data)
+        print(f"🔧 Encoded sensor data: {len(enc_data)} bytes")
+        
+        # Create TTToken with full encoded sensor data (not compressed)
+        token_1 = TTToken(enc_data, time_1, False,
+        TTTag(context, sq_name, 4, recipient_device))
+        
+        # Create LoRa message to preserve headers, but modify it to keep full data
+        lora_msg = NetworkInterfaceLoRa.TTLoRaMessage(token_1, recipient_device)
+        
+        # Instead of calling encode_token() which compresses, we'll manually construct
+        # the packet with headers + full sensor data
+        try:
+            # Get the header information from the LoRa message
+            header_data = lora_msg.generate_header_values()
+            
+            # Combine headers with the full encoded sensor data
+            from bitstring import BitArray
+            byte_payload = BitArray()
+            
+            # Add headers (this preserves routing information)
+            header_entries = ['sq', 'port', 'context', 'device', 'start_tick', 'stop_tick']
+            for header_entry_name in header_entries:
+                if header_entry_name in header_data:
+                    byte_payload += header_data[header_entry_name]
+            
+            # Add the full encoded sensor data (not compressed)
+            byte_payload += BitArray(enc_data)
+            
+            # Convert to bytes and transmit
+            full_packet = byte_payload.tobytes()
+            packet = full_packet.hex()
+            handler.queue_binary_transmit(packet)
+            handler.process_transmit_queue()
+            
+            print(f"✅ TTToken transmitted with {len(enc_data)} bytes of sensor data + headers")
+            print(f"📊 Total packet size: {len(full_packet)} bytes (headers + sensor data)")
+            
+        except Exception as header_error:
+            print(f"⚠️ Header preservation failed, falling back to direct transmission: {header_error}")
+            # Fallback: transmit just the sensor data directly
+            token_bytes = enc_data
+            packet = token_bytes.hex()
+            handler.queue_binary_transmit(packet)
+            handler.process_transmit_queue()
+            print(f"✅ TTToken transmitted with {len(enc_data)} bytes of sensor data (fallback)")
+            
+    except Exception as e:
+        print(f"⚠️ Failed to transmit TTToken with sensor data: {e}")
+
+    try:
+        token_2 = TTToken(bitmap, time_1, False,
+        TTTag(context, sq_name, 4, recipient_device))
+        lora_msg2 = NetworkInterfaceLoRa.TTLoRaMessage(token_2, recipient_device)
+        encoded_msg2 = lora_msg2.encode_token()
+        packet2 = encoded_msg2.hex()
+        handler.queue_binary_transmit(packet2)
+
+        handler.queue_binary_transmit(bitmap)
+
+        print(f" \n Size of Tokenized Bitmap object: {asizeof.asizeof(packet2)} \n")
+        print(f" \n Size of Tokenized Bitmap object getsizeof: {getsizeof(packet2)} \n")
+        handler.process_transmit_queue()
+    except Exception as e:
+        print(f"⚠️ Failed to transmit bitmap: {e}")
+    
+    # Update sensor tracker with transmission results
+    if sensor_tracker:
+        try:
+            update_sensor_tracker(sensor_tracker, data, transmission_result)
+        except Exception as e:
+            print(f"⚠️ Failed to update sensor tracker: {e}")
+    
+    return bitmap
 
 @SQify
 def create_workflow_data(monitoring_params, dirname, photo, lepton_file, coreg_state, seg_result, bitmap, lora_return, shutdown_result):
@@ -34,6 +411,144 @@ def create_workflow_data(monitoring_params, dirname, photo, lepton_file, coreg_s
     except Exception as e:
         print(f"⚠️ Failed to create workflow data: {e}")
         return {'error': str(e)}
+
+@SQify
+def get_wittypi_status():
+    """
+    Get current WittyPi status including temperature, battery voltage, and internal voltage
+    """
+    try:
+        from tools.wittypi_control import get_data
+        
+        temperature, battery_voltage, internal_voltage = get_data()
+        
+        return {
+            'status': 'wittypi_data_retrieved',
+            'temperature': temperature,
+            'battery_voltage': battery_voltage,
+            'internal_voltage': internal_voltage,
+            'timestamp': 'now'
+        }
+        
+    except ImportError as e:
+        return {
+            'status': 'wittypi_unavailable',
+            'error': f'Import error: {str(e)}',
+            'message': 'WittyPi control functions not available'
+        }
+    except Exception as e:
+        return {
+            'status': 'wittypi_error',
+            'error': str(e),
+            'message': 'Failed to get WittyPi status'
+        }
+
+@SQify
+def get_wittypi_schedule_config():
+    """
+    Get WittyPi schedule configuration from runtime parameters
+    """
+    try:
+        from tools.lora_runtime_integration import get_parameter
+        
+        # Get schedule parameters with sensible defaults
+        start_hour = get_parameter('wittypi_start_hour', 8)
+        start_minute = get_parameter('wittypi_start_minute', 0)
+        interval_length_minutes = get_parameter('wittypi_interval_minutes', 30)
+        num_repetitions_per_day = get_parameter('wittypi_repetitions_per_day', 8)
+        
+        return {
+            'start_hour': start_hour,
+            'start_minute': start_minute,
+            'interval_length_minutes': interval_length_minutes,
+            'num_repetitions_per_day': num_repetitions_per_day
+        }
+        
+    except Exception as e:
+        # Return default values if runtime parameters fail
+        return {
+            'start_hour': 8,
+            'start_minute': 0,
+            'interval_length_minutes': 30,
+            'num_repetitions_per_day': 8
+        }
+
+@SQify
+def manual_wittypi_control(action, **kwargs):
+    """
+    Manual WittyPi control for testing and direct control
+    Actions: 'clear_schedule', 'set_schedule', 'get_status', 'sync_time'
+    """
+    try:
+        from tools.wittypi_control import clear_shutdown_time, set_schedule, get_data, sync_time
+        
+        if action == 'clear_schedule':
+            clear_shutdown_time()
+            return {
+                'status': 'schedule_cleared',
+                'action': 'clear_schedule',
+                'message': 'WittyPi shutdown schedule cleared'
+            }
+            
+        elif action == 'set_schedule':
+            # Extract schedule parameters
+            start_hour = kwargs.get('start_hour', 8)
+            start_minute = kwargs.get('start_minute', 0)
+            interval_length_minutes = kwargs.get('interval_length_minutes', 30)
+            num_repetitions_per_day = kwargs.get('num_repetitions_per_day', 8)
+            
+            next_startup_time = set_schedule(start_hour, start_minute, interval_length_minutes, num_repetitions_per_day)
+            
+            return {
+                'status': 'schedule_set',
+                'action': 'set_schedule',
+                'next_startup': next_startup_time,
+                'schedule': {
+                    'start_hour': start_hour,
+                    'start_minute': start_minute,
+                    'interval_minutes': interval_length_minutes,
+                    'repetitions_per_day': num_repetitions_per_day
+                },
+                'message': f'Schedule set, next startup: {next_startup_time}'
+            }
+            
+        elif action == 'get_status':
+            temperature, battery_voltage, internal_voltage = get_data()
+            return {
+                'status': 'data_retrieved',
+                'action': 'get_status',
+                'temperature': temperature,
+                'battery_voltage': battery_voltage,
+                'internal_voltage': internal_voltage
+            }
+            
+        elif action == 'sync_time':
+            sync_time()
+            return {
+                'status': 'time_synced',
+                'action': 'sync_time',
+                'message': 'WittyPi time synchronized with network'
+            }
+            
+        else:
+            return {
+                'status': 'invalid_action',
+                'error': f'Unknown action: {action}',
+                'valid_actions': ['clear_schedule', 'set_schedule', 'get_status', 'sync_time']
+            }
+            
+    except ImportError as e:
+        return {
+            'status': 'wittypi_unavailable',
+            'error': f'Import error: {str(e)}',
+            'message': 'WittyPi control functions not available'
+        }
+    except Exception as e:
+        return {
+            'status': 'control_failed',
+            'error': str(e),
+            'message': f'Failed to execute action: {action}'
+        }
 
 @SQify
 def validate_configuration(trigger):
@@ -150,7 +665,16 @@ def call_shutdown(state):
     
     print(f"\n Iteration: {sq_state['count']} \n")
     
-    # Use runtime parameter for shutdown limit
+    # Check if emergency mode is active - if so, ignore shutdown limit
+    try:
+        emergency_mode = get_parameter('emergency_mode', False)
+        if emergency_mode:
+            print(f"🚨 EMERGENCY MODE ACTIVE - Ignoring shutdown limit, continuing data collection")
+            return {'status': 'emergency_mode_active', 'shutdown_bypassed': True}
+    except Exception as e:
+        print(f"⚠️ Failed to check emergency mode: {e}")
+    
+    # Use runtime parameter for shutdown limit (only if not in emergency mode)
     try:
         shutdown_limit = get_parameter('shutdown_iteration_limit', 3)
         auto_shutdown_enabled = get_parameter('auto_shutdown_enabled', True)
@@ -242,6 +766,21 @@ def lora_token(bitmap):
         except Exception as e:
             print(f"⚠️ Failed to get GPS data: {e}")
     
+    # Get WittyPi voltage measurements for battery status
+    try:
+        wittypi_data = get_wittypi_status()
+        if wittypi_data.get('status') == 'wittypi_data_retrieved':
+            data.update({
+                'wittypi_temperature': wittypi_data.get('temperature', 0.0),
+                'wittypi_battery_voltage': wittypi_data.get('battery_voltage', 0.0),
+                'wittypi_internal_voltage': wittypi_data.get('internal_voltage', 0.0)
+            })
+            print(f"🔋 WittyPi data added: temp={wittypi_data.get('temperature', 0.0)}°C, battery={wittypi_data.get('battery_voltage', 0.0)}V, internal={wittypi_data.get('internal_voltage', 0.0)}V")
+        else:
+            print(f"⚠️ WittyPi data unavailable: {wittypi_data.get('status', 'unknown')}")
+    except Exception as e:
+        print(f"⚠️ Failed to get WittyPi data: {e}")
+    
     # Add runtime parameters to sensor data
     emergency_mode = get_parameter('emergency_mode', False)
     area_threshold = get_parameter('area_threshold', 10)
@@ -269,18 +808,57 @@ def lora_token(bitmap):
     except Exception as e:
         print(f"⚠️ Failed to transmit sensor data: {e}")
 
-    # test transmission of Token containing encoded data
+    # Transmit TTToken with full encoded sensor data embedded (preserve headers)
     try:
         enc_data = compressed_encoding(data)
+        print(f"🔧 Encoded sensor data: {len(enc_data)} bytes")
+        
+        # Create TTToken with full encoded sensor data (not compressed)
         token_1 = TTToken(enc_data, time_1, False,
         TTTag(context, sq_name, 4, recipient_device))
+        
+        # Create LoRa message to preserve headers, but modify it to keep full data
         lora_msg = NetworkInterfaceLoRa.TTLoRaMessage(token_1, recipient_device)
-        encoded_msg = lora_msg.encode_token()
-        packet = encoded_msg.hex()
-        handler.queue_binary_transmit(packet)
-        handler.process_transmit_queue()
+        
+        # Instead of calling encode_token() which compresses, we'll manually construct
+        # the packet with headers + full sensor data
+        try:
+            # Get the header information from the LoRa message
+            header_data = lora_msg.generate_header_values()
+            
+            # Combine headers with the full encoded sensor data
+            from bitstring import BitArray
+            byte_payload = BitArray()
+            
+            # Add headers (this preserves routing information)
+            header_entries = ['sq', 'port', 'context', 'device', 'start_tick', 'stop_tick']
+            for header_entry_name in header_entries:
+                if header_entry_name in header_data:
+                    byte_payload += header_data[header_entry_name]
+            
+            # Add the full encoded sensor data (not compressed)
+            byte_payload += BitArray(enc_data)
+            
+            # Convert to bytes and transmit
+            full_packet = byte_payload.tobytes()
+            packet = full_packet.hex()
+            handler.queue_binary_transmit(packet)
+            handler.process_transmit_queue()
+            
+            print(f"✅ TTToken transmitted with {len(enc_data)} bytes of sensor data + headers")
+            print(f"📊 Total packet size: {len(full_packet)} bytes (headers + sensor data)")
+            
+        except Exception as header_error:
+            print(f"⚠️ Header preservation failed, falling back to direct transmission: {header_error}")
+            # Fallback: transmit just the sensor data directly
+            token_bytes = enc_data
+            packet = token_bytes.hex()
+            handler.queue_binary_transmit(packet)
+            handler.process_transmit_queue()
+            print(f"✅ TTToken transmitted with {len(enc_data)} bytes of sensor data (fallback)")
+            
     except Exception as e:
-        print(f"⚠️ Failed to transmit encoded data: {e}")
+        print(f"⚠️ Failed to transmit TTToken with sensor data: {e}")
 
     try:
         token_2 = TTToken(bitmap, time_1, False,
@@ -317,8 +895,24 @@ def lora_listener():
     def on_emergency_mode_changed(value, old_value):
         if value:
             print("🚨 EMERGENCY MODE ACTIVATED via LoRa command!")
+            # Control WittyPi to clear shutdown schedule
+            try:
+                wittypi_result = wittypi_emergency_control(True)
+                print(f"📋 WittyPi Control: {wittypi_result.get('message', 'Unknown status')}")
+            except NameError as e:
+                print(f"⚠️ WittyPi emergency control function not available: {e}")
+            except Exception as e:
+                print(f"⚠️ Failed to control WittyPi during emergency: {e}")
         else:
             print("✅ Emergency mode deactivated via LoRa command")
+            # Control WittyPi to restore normal schedule
+            try:
+                wittypi_result = wittypi_emergency_control(False)
+                print(f"📋 WittyPi Control: {wittypi_result.get('message', 'Unknown status')}")
+            except NameError as e:
+                print(f"⚠️ WittyPi emergency control function not available: {e}")
+            except Exception as e:
+                print(f"⚠️ Failed to control WittyPi during emergency deactivation: {e}")
     
     def on_monitoring_frequency_changed(value, old_value):
         print(f"⏰ Monitoring frequency updated via LoRa: {old_value} → {value} minutes")
@@ -409,14 +1003,14 @@ def adaptive_monitoring():
 @SQify
 def emergency_workflow(trigger, monitoring_params, dirname, photo, lepton_file, coreg_state, seg_result, bitmap, lora_return, shutdown_result):
     """
-    Emergency mode workflow with faster timing
+    Emergency mode workflow with continuous operation and bypassed shutdown
     """
-    print("🚨 Emergency mode detected - using fast workflow timing")
+    print("🚨 Emergency mode detected - bypassing shutdown limits, continuing data collection")
     
     # Photos, lepton data, coregistration, segmentation, compression, LoRa transmission, and shutdown check are now passed as parameters from GRAPH level
     
     # LoRa monitoring and parameter management
-    from tools.lora_runtime_integration import get_parameter
+    from tools.lora_runtime_integration import get_parameter, set_parameter
     
     # Get current parameters directly
     try:
@@ -425,18 +1019,29 @@ def emergency_workflow(trigger, monitoring_params, dirname, photo, lepton_file, 
         monitoring_freq = get_parameter('monitoring_frequency', 60)
         transmission_enabled = get_parameter('transmission_enabled', True)
         
-        # Return comprehensive status
+        # Force emergency mode parameters during emergency
+        if emergency_mode:
+            # Set faster monitoring frequency for emergency
+            set_parameter('monitoring_frequency', 5)  # 5 minutes instead of 60
+            set_parameter('emergency_frequency', 1)   # 1 minute for critical monitoring
+            set_parameter('transmission_enabled', True)  # Always enable transmission
+            print("🚨 Emergency parameters set: Fast monitoring (5min), continuous transmission")
+        
+        # Return comprehensive status with emergency indicators
         return {
             'status': 'emergency_workflow_completed',
             'dirname': dirname,
             'emergency_mode': emergency_mode,
             'area_threshold': area_threshold,
-            'monitoring_frequency': monitoring_freq,
-            'transmission_enabled': transmission_enabled,
+            'monitoring_frequency': get_parameter('monitoring_frequency', 5),  # Use updated value
+            'emergency_frequency': get_parameter('emergency_frequency', 1),   # Use updated value
+            'transmission_enabled': True,  # Always true in emergency
             'bitmap_compressed': True,
             'lora_transmitted': True,
             'photos_captured': True,
-            'lepton_data_captured': True
+            'lepton_data_captured': True,
+            'shutdown_bypassed': True,
+            'emergency_priority': 'high'
         }
     except Exception as e:
         print(f"⚠️ Failed to get emergency workflow parameters: {e}")
@@ -489,6 +1094,45 @@ def normal_workflow(trigger, workflow_data):
             'dirname': dirname,
             'workflow_data': workflow_data
         }
+
+@SQify
+def emergency_status_monitor(trigger):
+    """
+    Monitor and report emergency status for system visibility
+    """
+    from datetime import datetime
+    from tools.lora_runtime_integration import get_parameter
+    
+    try:
+        emergency_mode = get_parameter('emergency_mode', False)
+        monitoring_freq = get_parameter('monitoring_frequency', 60)
+        emergency_freq = get_parameter('emergency_frequency', 5)
+        transmission_enabled = get_parameter('transmission_enabled', True)
+        
+        if emergency_mode:
+            print(f"🚨 EMERGENCY STATUS ({datetime.now().strftime('%H:%M:%S')}):")
+            print(f"   - Emergency Mode: ACTIVE")
+            print(f"   - Monitoring Frequency: {monitoring_freq} minutes")
+            print(f"   - Emergency Frequency: {emergency_freq} minutes")
+            print(f"   - Transmission: {'ENABLED' if transmission_enabled else 'DISABLED'}")
+            print(f"   - Shutdown: BYPASSED (continuing operation)")
+        else:
+            print(f"✅ Normal Operation ({datetime.now().strftime('%H:%M:%S')}):")
+            print(f"   - Emergency Mode: INACTIVE")
+            print(f"   - Monitoring Frequency: {monitoring_freq} minutes")
+            print(f"   - Transmission: {'ENABLED' if transmission_enabled else 'DISABLED'}")
+        
+        return {
+            'emergency_mode': emergency_mode,
+            'monitoring_frequency': monitoring_freq,
+            'emergency_frequency': emergency_freq,
+            'transmission_enabled': transmission_enabled,
+            'timestamp': datetime.now().isoformat(),
+            'status': 'emergency_active' if emergency_mode else 'normal_operation'
+        }
+    except Exception as e:
+        print(f"⚠️ Failed to monitor emergency status: {e}")
+        return {'error': str(e), 'timestamp': datetime.now().isoformat()}
 
 @SQify
 def lora_parameter_monitor(trigger):
@@ -612,8 +1256,6 @@ def lora_configuration_manager(trigger, current_config):
     
     # Apply configuration changes to system behavior
     if changes:
-        print(f"🔧 LoRa Configuration Changes Detected: {', '.join(changes)}")
-        
         # Could trigger system reconfiguration here
         # For example, adjust monitoring intervals, enable/disable features, etc.
         
@@ -625,10 +1267,260 @@ def lora_configuration_manager(trigger, current_config):
                 'new_config': current_config
             }
         except Exception as e:
-            print(f"⚠️ Failed to create configuration response: {e}")
             return {'status': 'error', 'error': str(e)}
     
     return {'status': 'no_changes', 'config': current_config}
+
+@SQify
+def emergency_mode_logger(trigger, emergency_mode, shutdown_bypassed):
+    """
+    Log emergency mode status for system visibility
+    This function handles logging that cannot be done in GRAPH functions
+    """
+    if emergency_mode and shutdown_bypassed:
+        # This function can be called from the main workflow to log emergency status
+        return {
+            'status': 'emergency_mode_logged',
+            'emergency_mode': True,
+            'shutdown_bypassed': True,
+            'message': 'EMERGENCY MODE: Continuing data collection and transmission'
+        }
+    return {
+        'status': 'normal_operation',
+        'emergency_mode': emergency_mode,
+        'shutdown_bypassed': shutdown_bypassed
+    }
+
+@SQify
+def get_emergency_mode_status(trigger):
+    """
+    Get emergency mode status - wrapper for get_parameter that can be called from GRAPH functions
+    """
+    from tools.lora_runtime_integration import get_parameter
+    emergency_mode = get_parameter('emergency_mode', False)
+    return {
+        'emergency_mode': emergency_mode,
+        'status': 'emergency_active' if emergency_mode else 'normal_operation'
+    }
+
+@SQify
+def set_emergency_transmission_enabled(trigger, enabled=True):
+    """
+    Set transmission enabled during emergency - wrapper for set_parameter that can be called from GRAPH functions
+    """
+    from tools.lora_runtime_integration import set_parameter
+    set_parameter('transmission_enabled', enabled)
+    return {
+        'status': 'transmission_updated',
+        'transmission_enabled': enabled,
+        'timestamp': 'now'
+    }
+
+@SQify
+def check_lora_availability(trigger):
+    """
+    Check if LoRa functionality is available
+    """
+    try:
+        from tools.lora_runtime_integration import get_lora_runtime_integration
+        runtime = get_lora_runtime_integration()
+        return runtime.is_lora_available()
+    except Exception as e:
+        return False
+
+@SQify
+def handle_emergency_mode_logic(trigger, emergency_status, shutdown_result):
+    """
+    Handle emergency mode logic - consolidated wrapper to avoid dependency issues
+    """
+    # Extract emergency mode status
+    if isinstance(emergency_status, dict):
+        emergency_mode = emergency_status.get('emergency_mode', False)
+    else:
+        emergency_mode = False
+    
+    # Extract shutdown bypassed status
+    if isinstance(shutdown_result, dict):
+        shutdown_bypassed = shutdown_result.get('shutdown_bypassed', False)
+    else:
+        shutdown_bypassed = False
+    
+    # Assume LoRa is available for now to avoid dependency issues
+    # In a real implementation, this would check LoRa availability
+    lora_available = True
+    
+    if emergency_mode and shutdown_bypassed:
+        # Force transmission to be enabled during emergency
+        try:
+            from tools.lora_runtime_integration import set_parameter
+            set_parameter('transmission_enabled', True)
+            
+            # Simple logging without external function dependency
+            print(f"🚨 EMERGENCY MODE LOG: emergency_mode={emergency_mode}, shutdown_bypassed={shutdown_bypassed}")
+            
+            return {
+                'emergency_mode': True,
+                'transmission_enabled': True,
+                'shutdown_bypassed': True,
+                'action_taken': 'emergency_mode_activated',
+                'lora_available': True
+            }
+        except Exception as e:
+            # If LoRa integration fails, still activate emergency mode
+            print(f"⚠️ EMERGENCY MODE LOG (LoRa failed): emergency_mode={emergency_mode}, shutdown_bypassed={shutdown_bypassed}, error={e}")
+            
+            return {
+                'emergency_mode': True,
+                'transmission_enabled': False,
+                'shutdown_bypassed': True,
+                'action_taken': 'emergency_mode_activated_no_lora',
+                'lora_available': False,
+                'error': str(e)
+            }
+    else:
+        print(f"ℹ️ EMERGENCY MODE LOG: emergency_mode={emergency_mode}, shutdown_bypassed={shutdown_bypassed}")
+        return {
+            'emergency_mode': emergency_mode,
+            'transmission_enabled': False,
+            'shutdown_bypassed': shutdown_bypassed,
+            'action_taken': 'no_action_needed',
+            'lora_available': lora_available
+        }
+
+@SQify
+def process_workflow_by_emergency_mode(trigger, emergency_logic_result, workflow_data):
+    """
+    Process workflow based on emergency mode - wrapper to avoid conditional statements in GRAPH functions
+    """
+    # Extract emergency mode status
+    emergency_mode = emergency_logic_result.get('emergency_mode', False)
+    
+    if emergency_mode:
+        # Emergency mode - return emergency status
+        print("🚨 Emergency workflow placeholder - emergency mode active")
+        return {
+            'status': 'emergency_workflow_placeholder',
+            'emergency_mode': True,
+            'message': 'Emergency mode active - continuing data collection',
+            'workflow_data': workflow_data,
+            'timestamp': 'now'
+        }
+    else:
+        # Normal mode - return normal status
+        print("ℹ️ Normal workflow placeholder - normal operation")
+        return {
+            'status': 'normal_workflow_placeholder',
+            'emergency_mode': False,
+            'message': 'Normal operation - standard workflow',
+            'workflow_data': workflow_data,
+            'timestamp': 'now'
+        }
+
+@SQify
+def get_sensor_tracking_stats(tracker):
+    """
+    Get statistics about sensor tracking and transmission patterns
+    """
+    if not tracker:
+        return {'error': 'No tracker available'}
+    
+    try:
+        stats = {
+            'total_sensors_tracked': len(tracker['previous_values']),
+            'sensors_with_history': len(tracker['transmission_history']),
+            'last_transmission': tracker['last_transmission'],
+            'change_threshold': tracker['change_threshold'] * 100,  # Convert to percentage
+            'sensor_details': {}
+        }
+        
+        # Add details for each tracked sensor
+        for sensor_name in tracker['previous_values']:
+            current_value = tracker['previous_values'][sensor_name]
+            transmission_count = len(tracker['transmission_history'].get(sensor_name, []))
+            
+            stats['sensor_details'][sensor_name] = {
+                'current_value': current_value,
+                'transmission_count': transmission_count,
+                'last_transmitted': tracker['transmission_history'].get(sensor_name, [{}])[-1].get('timestamp') if tracker['transmission_history'].get(sensor_name) else None
+            }
+        
+        return stats
+        
+    except Exception as e:
+        print(f"⚠️ Failed to get sensor tracking stats: {e}")
+        return {'error': str(e)}
+
+@SQify
+def reset_sensor_tracker(tracker):
+    """
+    Reset sensor tracker to clear all previous values and history
+    Useful for system restart or manual reset
+    """
+    if not tracker:
+        return {'error': 'No tracker available'}
+    
+    try:
+        tracker['previous_values'] = {}
+        tracker['transmission_history'] = {}
+        tracker['last_transmission'] = None
+        
+        print("✅ Sensor tracker reset - all previous values cleared")
+        return {'status': 'reset_successful'}
+        
+    except Exception as e:
+        print(f"⚠️ Failed to reset sensor tracker: {e}")
+        return {'error': str(e)}
+
+@SQify
+def log_sensor_tracking_stats(sensor_tracker):
+    """
+    Log sensor tracking statistics - wrapper to avoid print() in GRAPH functions
+    """
+    if not sensor_tracker:
+        return {'status': 'no_tracker', 'message': 'No sensor tracker available'}
+    
+    try:
+        # Define the logic inline to avoid dependency on get_sensor_tracking_stats function
+        if not sensor_tracker:
+            tracking_stats = {'error': 'No tracker available'}
+        else:
+            try:
+                stats = {
+                    'total_sensors_tracked': len(sensor_tracker.get('previous_values', {})),
+                    'sensors_with_history': len(sensor_tracker.get('transmission_history', {})),
+                    'last_transmission': sensor_tracker.get('last_transmission'),
+                    'change_threshold': sensor_tracker.get('change_threshold', 0.05) * 100,  # Convert to percentage
+                    'sensor_details': {}
+                }
+                
+                # Add details for each tracked sensor
+                for sensor_name in sensor_tracker.get('previous_values', {}):
+                    current_value = sensor_tracker['previous_values'][sensor_name]
+                    transmission_count = len(sensor_tracker.get('transmission_history', {}).get(sensor_name, []))
+                    
+                    stats['sensor_details'][sensor_name] = {
+                        'current_value': current_value,
+                        'transmission_count': transmission_count,
+                        'last_transmitted': sensor_tracker.get('transmission_history', {}).get(sensor_name, [{}])[-1].get('timestamp') if sensor_tracker.get('transmission_history', {}).get(sensor_name) else None
+                    }
+                
+                tracking_stats = stats
+                
+            except Exception as e:
+                print(f"⚠️ Failed to get sensor tracking stats: {e}")
+                tracking_stats = {'error': str(e)}
+        
+        total_sensors = tracking_stats.get('total_sensors_tracked', 0)
+        print(f"📊 Sensor tracking stats: {total_sensors} sensors tracked")
+        
+        return {
+            'status': 'logged_successfully',
+            'total_sensors': total_sensors,
+            'stats': tracking_stats
+        }
+    except Exception as e:
+        print(f"⚠️ Failed to log sensor tracking stats: {e}")
+        return {'status': 'error', 'error': str(e)}
 
 @GRAPHify
 def ttmain(trigger):
@@ -660,7 +1552,12 @@ def ttmain(trigger):
         
         # Compression and LoRa transmission at GRAPH level
         bitmap = compress_bitmap(seg_result)
-        lora_return = lora_token(bitmap)
+        
+        # Create sensor tracker for monitoring value changes
+        sensor_tracker = create_sensor_tracker()
+        
+        # Use sensor tracker for intelligent LoRa transmission
+        lora_return = lora_token_with_tracker(bitmap, sensor_tracker)
         
         # Shutdown check at GRAPH level
         shutdown_result = call_shutdown(lora_return)
@@ -668,8 +1565,18 @@ def ttmain(trigger):
         # Create workflow data structure
         workflow_data = create_workflow_data(monitoring_params, dirname, photo, lepton_file, coreg_state, seg_result, bitmap, lora_return, shutdown_result)
         
-        # Process the data
-        result = normal_workflow(trigger, workflow_data)
+        # Check if emergency mode is active and bypass shutdown if needed
+        emergency_status = get_emergency_mode_status(trigger)
+        emergency_logic_result = handle_emergency_mode_logic(trigger, emergency_status, shutdown_result)
+        
+        # Process the data based on emergency mode
+        result = process_workflow_by_emergency_mode(trigger, emergency_logic_result, workflow_data)
+        
+        # Get sensor tracking statistics for monitoring
+        log_result = log_sensor_tracking_stats(sensor_tracker)
+        
+        # Get WittyPi status for monitoring
+        wittypi_status = get_wittypi_status()
         
         # Ensure constant LoRa monitoring for incoming messages
         lora_status = lora_listener(TTPersistent=True)

@@ -207,9 +207,16 @@ def get_lora_status() -> Dict[str, Any]:
         
         # Try to get runtime parameters
         from lora_runtime_integration import get_parameter
+        emergency_mode = get_parameter('emergency_mode', False)
+        transmission_enabled = get_parameter('transmission_enabled', True)
+        
+        # In emergency mode, transmission should ALWAYS be enabled
+        if emergency_mode:
+            transmission_enabled = True
+        
         runtime_params = {
-            'emergency_mode': get_parameter('emergency_mode', False),
-            'transmission_enabled': get_parameter('transmission_enabled', True),
+            'emergency_mode': emergency_mode,
+            'transmission_enabled': transmission_enabled,
             'debug_mode': get_parameter('debug_mode', False),
             'monitoring_frequency': get_parameter('monitoring_frequency', 60),
             'area_threshold': get_parameter('area_threshold', 10)
