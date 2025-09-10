@@ -6,6 +6,9 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
 
 # Build Guide
 
+### Project requires a Raspberry Pi 
+or compatible single board computer with GPIO, I2C, SPI etc.,
+
 ## Parts List
 
 **WaterCam Unit**
@@ -79,7 +82,11 @@ Soldering: https://mightyohm.com/files/soldercomic/FullSolderComic_EN.pdf
   - [Female-Female 2.54 to 2.0mm Jumper Wires](https://www.adafruit.com/product/1919) - 2mm pitch header cables for connecting mDot to Raspberry Pi until we get a custom PCB made
 
 * Cable gland to let solar panel power cable into case
-  
+ 
+* MicroSD cards - preferably higher capacity than needed for wear-leveling, consider high endurance or industrial (for temperature tolerance) cards: https://www.dzombak.com/blog/2023/12/Choosing-the-right-SD-card-for-your-Pi.html 
+
+Test the SD cards with F3: https://github.com/AltraMayor/f3
+ 
   **optional items we are evaluating**
 - Anti-fog spray/hydrophobic coating for lens
 
@@ -493,11 +500,11 @@ Thanks Luke Van Horn! Also, thanks to Max Lipitz for the tip about the output co
 
 #### Leptonic for live thermal image stream
 
-We're setting up an unused Pi 3 for collecting thermal images for coregistration - using leptonic from github, a forked branch that can be built on Debian 12 Bookworm
+We're setting up an unused Pi 3 for collecting thermal images for coregistration - using leptonic from github
 
-https://github.com/rob-coco/leptonic/tree/bookworm-update
+https://github.com/themainframe/leptonic
 
-checkout the bookworm-update branch, compile that after installing dependencies: libzmq3-dev
+Compile after installing dependencies: libzmq3-dev
 
 Port forward, first ssh into pi and run leptonic on /dev/spidev0.0, then open another terminal and port forward with:
 ➜ ssh -L 5555:10.42.0.3:5555 pi@10.42.0.3
