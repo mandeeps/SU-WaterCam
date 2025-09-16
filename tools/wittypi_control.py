@@ -21,6 +21,37 @@ def set_schedule(start_hour, start_minute, interval_length_minutes, num_repetiti
 def clear_shutdown_time():
     witty_pi_4.clear_shutdown_time()
 
+from ticktalkpython.SQ import SQify
+
+@SQify
+def get_wittypi_status():
+    """
+    Get current WittyPi status including temperature, battery voltage, and internal voltage
+    """
+    try:
+        temperature, battery_voltage, internal_voltage = get_data()
+        
+        return {
+            'status': 'wittypi_data_retrieved',
+            'temperature': temperature,
+            'battery_voltage': battery_voltage,
+            'internal_voltage': internal_voltage,
+            'timestamp': 'now'
+        }
+        
+    except ImportError as e:
+        return {
+            'status': 'wittypi_unavailable',
+            'error': f'Import error: {str(e)}',
+            'message': 'WittyPi control functions not available'
+        }
+    except Exception as e:
+        return {
+            'status': 'wittypi_error',
+            'error': str(e),
+            'message': 'Failed to get WittyPi status'
+        }
+
 if __name__ == "__main__":
     # read optional command line arguments to set schedule if provided  
     import sys

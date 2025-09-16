@@ -23,7 +23,7 @@ to multiple SQs. An intuition of their semantics is shown in each function
 body but are actually compiled to a group of SQs.
 '''
 
-from Empty import TTEmpty
+from .Empty import TTEmpty
 
 
 def TTFinishByOtherwise(data_token_to_check, TTTimeDeadline, TTPlanB,

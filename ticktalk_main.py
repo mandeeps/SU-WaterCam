@@ -15,6 +15,9 @@ from tools.lora_runtime_integration import (
 # Import LoRa handler
 from tools.lora_handler_concurrent import get_lora_handler
 
+# Import helper functions
+from tools.wittypi_control import get_wittypi_status
+
 @SQify
 def wittypi_emergency_control(emergency_mode):
     """
@@ -209,6 +212,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     from tools.aht20_temperature import get_aht20
     from tools.get_gps import get_lat_lon_alt
     from tools.lora_runtime_integration import get_parameter
+    # Helper functions are now imported at module level
 
     from pympler import asizeof
     from sys import getsizeof
@@ -240,6 +244,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     
     # Get WittyPi voltage measurements for battery status
     try:
+        from tools.wittypi_control import get_wittypi_status
         wittypi_data = get_wittypi_status()
         if wittypi_data.get('status') == 'wittypi_data_retrieved':
             data.update({
@@ -271,6 +276,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     sensors_to_transmit = {}
     if sensor_tracker:
         try:
+            # Call check_sensor_changes directly since it's in the same module
             sensors_to_transmit = check_sensor_changes(sensor_tracker, data)
             print(f"📊 Sensor change check: {len(sensors_to_transmit)} sensors qualify for transmission")
         except Exception as e:
@@ -293,7 +299,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
             if sensor_tracker and sensors_to_transmit:
                 filtered_data = {k: v for k, v in data.items() if k in sensors_to_transmit}
                 transmission_result['transmitted_sensors'] = list(sensors_to_transmit.keys())
-                transmission_result['change_percent'] = {k: v['change_percent'] for k, v in sensors_to_transmit.items()}
+                transmission_result['change_percent'] = {k: v.get('change_percent', 0) for k, v in sensors_to_transmit.items()}
                 print(f"📡 Transmitting {len(filtered_data)} sensors with significant changes")
             else:
                 filtered_data = data
@@ -430,36 +436,7 @@ def create_workflow_data(monitoring_params, dirname, photo, lepton_file, coreg_s
         print(f"⚠️ Failed to create workflow data: {e}")
         return {'error': str(e)}
 
-@SQify
-def get_wittypi_status():
-    """
-    Get current WittyPi status including temperature, battery voltage, and internal voltage
-    """
-    try:
-        from tools.wittypi_control import get_data
-        
-        temperature, battery_voltage, internal_voltage = get_data()
-        
-        return {
-            'status': 'wittypi_data_retrieved',
-            'temperature': temperature,
-            'battery_voltage': battery_voltage,
-            'internal_voltage': internal_voltage,
-            'timestamp': 'now'
-        }
-        
-    except ImportError as e:
-        return {
-            'status': 'wittypi_unavailable',
-            'error': f'Import error: {str(e)}',
-            'message': 'WittyPi control functions not available'
-        }
-    except Exception as e:
-        return {
-            'status': 'wittypi_error',
-            'error': str(e),
-            'message': 'Failed to get WittyPi status'
-        }
+# get_wittypi_status moved to tools/wittypi_control.py
 
 @SQify
 def get_wittypi_schedule_config():
@@ -788,6 +765,7 @@ def lora_token(bitmap):
     
     # Get WittyPi voltage measurements for battery status
     try:
+        from tools.wittypi_control import get_wittypi_status
         wittypi_data = get_wittypi_status()
         if wittypi_data.get('status') == 'wittypi_data_retrieved':
             data.update({
@@ -1532,7 +1510,17 @@ def ttmain(trigger):
         # Take photos and capture lepton data at GRAPH level
         from tt_take_photos import flir, take_two_photos
         photo = take_two_photos(trigger, dirname)
+        deadline_time = READ_TTCLOCK(token, TTClock=root_clock) + 5_000_000
+        
         lepton_file = flir(dirname)
+        lepton = TTFinishByOtherwise(lepton_file, TTTimeDeadline=deadline_time, TTPlanB=TTSingleRunTimeout(flir_planb(token), TTTimeout=3_000_000), TTWillContinue=False) 
+        
+        #lepton_file = TTFinishByOtherwise(
+        #    flir(dirname, TTClock=root_clock, TTPeriod=60_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000),
+        #    TTTimeDeadline=deadline_time,
+        #    TTPlanB=TTSingleRunTimeout(flir_planb(token), TTTimeout=10_000_000),
+        #    TTWillContinue=True
+        #)
         
         # Coregistration and segmentation at GRAPH level
         coreg_state = coregistration(dirname, lepton_file, photo)
@@ -1562,9 +1550,6 @@ def ttmain(trigger):
         
         # Get sensor tracking statistics for monitoring
         log_result = log_sensor_tracking_stats(sensor_tracker)
-        
-        # Get WittyPi status for monitoring
-        wittypi_status = get_wittypi_status()
         
         # Ensure constant LoRa monitoring for incoming messages
         lora_status = lora_listener(TTPersistent=True)

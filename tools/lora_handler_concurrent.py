@@ -100,13 +100,13 @@ class LoRaHandler:
             'area_threshold': 10,
             'stage_threshold': 50,
             'monitoring_frequency': 60,
-            'emergency_frequency': 5,
+            'emergency_frequency': 30,
             'neighborhood_emergency_frequency': 30,
             'photo_interval': 60,
             'debug_mode': False,
             'max_retransmissions': 3,
             'auto_shutdown_enabled': True,
-            'shutdown_iteration_limit': 10,
+            'shutdown_iteration_limit': 2,
             'data_retention_days': 30,
             'backup_enabled': True,
             'emergency_mode': False
@@ -206,7 +206,7 @@ class LoRaHandler:
                                 print(f"🚨 EMERGENCY TRIGGERED: '{res}'")
                                 # Always activate emergency mode for any EMERGENCY message
                                 try:
-                                    from lora_runtime_integration import set_parameter
+                                    from tools.lora_runtime_integration import set_parameter
                                     set_parameter('emergency_mode', True)
                                     print("✅ Emergency mode activated via EMERGENCY message")
                                 except Exception as e:
@@ -218,7 +218,7 @@ class LoRaHandler:
                             print(f"✅ Emergency clear message received: '{res}'")
                             # Clear emergency mode in runtime integration
                             try:
-                                from lora_runtime_integration import set_parameter
+                                from tools.lora_runtime_integration import set_parameter
                                 set_parameter('emergency_mode', False)
                                 print("✅ Emergency mode deactivated via '9999' clear message")
                             except Exception as e:

@@ -9,17 +9,17 @@ import piexif.helper
 from libxmp import XMPFiles, consts
 
 try:
-    import bno055_imu
+    from tools import bno055_imu
 except ImportError:
     print("BNO055 import issue")
-except:
+except Exception:
     print("BNO055 hardware issue")
 
 try:
-    from get_gps import get_loc
+    from tools.get_gps import get_loc
 except ImportError:
     print("GPS import issue")
-except:
+except Exception:
     print("GPS issue")
 
 # two helper functions from https://gist.github.com/c060604/8a51f8999be12fc2be498e9ca56adc72

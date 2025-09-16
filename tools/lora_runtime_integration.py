@@ -144,7 +144,7 @@ class LoRaRuntimeManager:
             
             # Timing parameters
             'monitoring_frequency': 60,     # Monitoring frequency (minutes)
-            'emergency_frequency': 5,       # Emergency transmission frequency (minutes)
+            'emergency_frequency': 30,       # Emergency transmission frequency (minutes)
             'photo_interval': 30,           # Photo capture interval (minutes)
             'neighborhood_emergency_frequency': 30,  # Neighborhood emergency frequency
             
@@ -157,7 +157,7 @@ class LoRaRuntimeManager:
             
             # Advanced parameters
             'auto_shutdown_enabled': True,  # Enable automatic shutdown after iterations
-            'shutdown_iteration_limit': 3,  # Number of iterations before shutdown
+            'shutdown_iteration_limit': 2,  # Number of iterations before shutdown
             'data_retention_days': 7,       # Days to retain data files
             'backup_enabled': True,         # Enable data backup
         }

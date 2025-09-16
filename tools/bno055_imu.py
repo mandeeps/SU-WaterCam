@@ -3,20 +3,50 @@
 # Based on Adafruit example
 
 import time
-import board
+
+try:
+    import board
+except Exception:
+    board = None
+
 try:
     import adafruit_bno055
 except ImportError:
     print("Error: BNO055 import")
-except Error:
-    print("Error: BNO055 device")
+    adafruit_bno055 = None
 
-i2c = board.I2C()
-sensor = adafruit_bno055.BNO055_I2C(i2c)
+_sensor = None
 last_val = 0xFFFF
+
+
+def _get_sensor():
+    global _sensor
+    if _sensor is not None:
+        return _sensor
+    try:
+        if board is None or adafruit_bno055 is None:
+            return None
+        i2c = board.I2C()
+        _sensor = adafruit_bno055.BNO055_I2C(i2c)
+        # Warm-up: allow fusion to initialize
+        try:
+            import time as _t
+            for _ in range(20):  # ~2s max
+                e = getattr(_sensor, 'euler', None)
+                if isinstance(e, tuple) and any(v not in (None, 0.0) for v in e):
+                    break
+                _t.sleep(0.1)
+        except Exception:
+            pass
+        return _sensor
+    except Exception:
+        return None
 
 def temperature() -> int:
     global last_val  # pylint: disable=global-statement
+    sensor = _get_sensor()
+    if sensor is None:
+        return 0
     result = sensor.temperature
     if abs(result - last_val) == 128:
         result = sensor.temperature
@@ -26,13 +56,35 @@ def temperature() -> int:
     return result
 
 def get_values() -> dict:
-    return {"Temperature":sensor.temperature, "Accelerometer":sensor.acceleration,
-        "Magnetic":sensor.magnetic, "Gyro":sensor.gyro, "Euler":sensor.euler,
-        "Quaternion":sensor.quaternion, "Linear":sensor.linear_acceleration,
-        "Gravity":sensor.gravity}
+    sensor = _get_sensor()
+    if sensor is None:
+        return {}
+    return {"Temperature": sensor.temperature,
+            "Accelerometer": sensor.acceleration,
+            "Magnetic": sensor.magnetic,
+            "Gyro": sensor.gyro,
+            "Euler": sensor.euler,
+            "Quaternion": sensor.quaternion,
+            "Linear": sensor.linear_acceleration,
+            "Gravity": sensor.gravity}
 
 def get_orientation():
-    return {"tilt_roll_yaw": sensor.euler}
+    sensor = _get_sensor()
+    if sensor is None:
+        return {}
+    # Try to ensure non-zero data if possible
+    e = sensor.euler
+    if not (isinstance(e, tuple) and any(v not in (None, 0.0) for v in e)):
+        try:
+            import time as _t
+            for _ in range(20):  # ~2s max
+                e = sensor.euler
+                if isinstance(e, tuple) and any(v not in (None, 0.0) for v in e):
+                    break
+                _t.sleep(0.1)
+        except Exception:
+            pass
+    return {"tilt_roll_yaw": e}
 
 def offset():
     offset_accel = []
