@@ -1,0 +1,48 @@
+# Copyright 2021 Carnegie Mellon University
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to
+# deal in the Software without restriction, including without limitation the
+# rights to use, copy, modify, merge, publish, distribute, sublicense, and/or
+# sell copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+# DEALINGS IN THE SOFTWARE.
+
+
+from .Component import TTComponent
+from .Error import TTComponentError
+from .DataStorage import TTDataStorage
+from .Query import TTQComponent
+
+
+class TTCompute(TTComponent):
+    def __init__(self, name, cores, memory, custom_fields=None):
+        if not isinstance(cores, int) or cores <= 0:
+            raise TTComponentError(
+                "A TTCompute component's 'cores' must be a positive integer.")
+        if not isinstance(memory, TTDataStorage):
+            raise TTComponentError(
+                "A TTCompute component's 'memory' must be of type TTDataStorage.")
+        super().__init__(
+            name, {} if custom_fields is None else custom_fields, [memory])
+        self.cores = cores
+        self.memory = memory
+        self.memory.parents.append(self)
+
+
+class TTQCompute(TTQComponent):
+    pass
+
+
+def compute():
+    pass
