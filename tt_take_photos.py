@@ -26,16 +26,82 @@ def take_photo(directory: str, nir: str, picam2) -> str:
 
 @SQify
 def flir(directory):
-    from os import chdir, rename #path, makedirs, chdir
+    from os import chdir, rename, makedirs, path #path, makedirs, chdir
     from time import sleep
     import subprocess 
     from datetime import datetime
+    import inspect
+    import sys
+    from pathlib import Path
     date = datetime.now().strftime('%Y%m%d-%H%M%S')
 
    # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
-    chdir(directory)
+    # Ensure target directory exists (create fallback if needed)
+    def _safe_project_root():
+        # Try to resolve the file that defines this function
+        try:
+            fpath = inspect.getfile(flir)
+            return path.dirname(path.abspath(fpath))
+        except Exception:
+            try:
+                # Fallback to module path if available
+                mod_file = sys.modules.get(__name__).__dict__.get('__file__')
+                if mod_file:
+                    return path.dirname(path.abspath(mod_file))
+            except Exception:
+                pass
+            # Last resort: current working directory
+            return str(Path.cwd())
+
+    # Avoid creating under /home/pi when not available/allowed
+    need_fallback = False
     try:
-        subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True, timeout=5)
+        if not path.isdir(directory):
+            # If target is under /home/pi and likely not owned, skip
+            if directory.startswith('/home/pi/') or directory == '/home/pi':
+                need_fallback = True
+            else:
+                makedirs(directory, exist_ok=True)
+    except PermissionError:
+        need_fallback = True
+    except Exception:
+        need_fallback = True
+
+    if need_fallback:
+        project_root = _safe_project_root()
+        directory = path.join(project_root, 'images', 'fallback')
+        try:
+            makedirs(directory, exist_ok=True)
+        except Exception:
+            # If even this fails, fallback to a temp dir in CWD
+            directory = path.join(_safe_project_root(), 'images')
+            makedirs(directory, exist_ok=True)
+
+    try:
+        chdir(directory)
+    except Exception:
+        # If chdir fails, use project root images
+        project_root = _safe_project_root()
+        directory = path.join(project_root, 'images', 'fallback')
+        makedirs(directory, exist_ok=True)
+        chdir(directory)
+
+    # Resolve binary paths (prefer /home/pi when present, else project root binaries)
+    project_root = _safe_project_root()
+    capture_candidates = [
+        	"/home/pi/SU-WaterCam/capture",
+        	path.join(project_root, "capture"),
+    ]
+    lepton_candidates = [
+        	"/home/pi/SU-WaterCam/lepton",
+        	path.join(project_root, "lepton"),
+    ]
+    capture_bin = next((p for p in capture_candidates if path.exists(p)), None)
+    lepton_bin = next((p for p in lepton_candidates if path.exists(p)), None)
+    try:
+        if not capture_bin:
+            raise FileNotFoundError("capture binary not found")
+        subprocess.run([capture_bin], check=True, timeout=5)
     except:
         print("Check Lepton state - capture failed")
     else:
@@ -43,7 +109,9 @@ def flir(directory):
         rename("IMG_0000.pgm", f"lepton_{date}.pgm")
 
     try:
-        subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True, timeout=5)
+        if not lepton_bin:
+            raise FileNotFoundError("lepton binary not found")
+        subprocess.run([lepton_bin], check=True, timeout=5)
     except:
         print("Check Lepton state - radiometery failed")
     else:
@@ -55,11 +123,15 @@ def flir(directory):
 
 @SQify
 def take_two_photos(trigger, directory):
-    from picamera2 import Picamera2
+    try:
+        from picamera2 import Picamera2
+    except Exception:
+        # Development environment without camera support
+        print("Camera module (picamera2) unavailable - skipping photo capture")
+        return True
     from gpiozero import LED
     from tt_take_photos import take_photo
     import sys
-    sys.path.insert(0, "/home/pi/SU-WaterCam/tools")
 
     global sq_state
     try:

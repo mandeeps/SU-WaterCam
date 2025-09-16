@@ -55,12 +55,15 @@ def add_metadata(image):
     # add metadata to an image
     DATA = "/home/pi/SU-WaterCam/data/metadata_log.txt"
 
+    # Initialize IMU variables
+    roll = None
+    pitch = None
+    yaw = None
+
     # get IMU data
     try:
         imu_values = bno055_imu.get_values()
-    except Exception as error:
-        print("IMU Error")
-    else: # log IMU data to text file
+        # log IMU data to text file
         imu = [f"\nFile: {image}\n",
             f"Time: {time.asctime(time.localtime(time.time()))}\n",
             f"Accelerometer: {imu_values['Accelerometer']}\n",
@@ -72,12 +75,14 @@ def add_metadata(image):
                 data.writelines(line)
         
         yaw, roll, pitch = imu_values['Euler']
+    except Exception as error:
+        print("IMU Error")
 
     # Start exif handling
     # load original exif data
     exif_data = piexif.load(image)
     # Add roll/pitch/yaw to UserComment tag if they exist
-    if roll:
+    if roll is not None:
         user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
         exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
         
