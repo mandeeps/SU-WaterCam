@@ -42,7 +42,7 @@ def get_lat_lon_alt() -> dict:
     packet = get_packet()
     
     if not packet:
-        return {}
+        return {}, None
     
     try:
         lat = packet.lat 
@@ -53,29 +53,29 @@ def get_lat_lon_alt() -> dict:
             'gps_lat': lat,
             'gps_lon': lon,
             'gps_alt': alt
-        }
+        }, packet
     except AttributeError:
         # GPS data not available
-        return {}
+        return {}, None
 
 def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Optional[dict]:
     """Get location with retry logic for better reliability."""
     for attempt in range(max_retries):
-        location = get_lat_lon_alt()
+        location, packet = get_lat_lon_alt()
         if location:
-            return location
+            return location, packet
         
         if attempt < max_retries - 1:
             time.sleep(delay)
     
-    return {}
+    return {}, None
 
 if __name__ == "__main__":
     data = get_loc()
     for line in data:
         print(line)
 
-    gps = get_lat_lon_alt()
+    gps = get_location_with_retry()
     print(f'GPS Data: {gps}')
     
     if gps:

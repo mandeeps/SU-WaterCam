@@ -16,7 +16,7 @@ except Exception:
     print("BNO055 hardware issue")
 
 try:
-    from tools.get_gps import get_loc
+    from tools.get_gps import get_location_with_retry
 except ImportError:
     print("GPS import issue")
 except Exception:
@@ -98,7 +98,7 @@ def add_metadata(image):
     # GPS: get current info from gpsd
     try:
         # we want the entire packet returned from gpsd
-        gps_data, packet = get_loc(exif=True) 
+        gps_data, packet = get_location_with_retry() 
     except Exception as error:
         print("No GPS data returned")
         with open(DATA, 'a', encoding="utf8") as data:

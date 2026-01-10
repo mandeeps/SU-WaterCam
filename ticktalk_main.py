@@ -210,7 +210,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     from ticktalkpython import NetworkInterfaceLoRa
     from tools.bno055_imu import get_orientation
     from tools.aht20_temperature import get_aht20
-    from tools.get_gps import get_lat_lon_alt
+    from tools.get_gps import get_location_with_retry
     from tools.lora_runtime_integration import get_parameter
     # Helper functions are now imported at module level
 
@@ -236,7 +236,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     
     # Always attempt to collect GPS data
     try:
-        gps = get_lat_lon_alt()
+        gps, packet = get_location_with_retry()
         if gps:
             data.update(gps)
     except Exception as e:
@@ -732,7 +732,7 @@ def lora_token(bitmap):
     from ticktalkpython import NetworkInterfaceLoRa
     from tools.bno055_imu import get_orientation
     from tools.aht20_temperature import get_aht20
-    from tools.get_gps import get_lat_lon_alt
+    from tools.get_gps import get_location_with_retry
     from tools.lora_runtime_integration import get_parameter
 
     from pympler import asizeof
@@ -757,9 +757,11 @@ def lora_token(bitmap):
     
     # Always attempt to collect GPS data
     try:
-        gps = get_lat_lon_alt()
+        gps, packet = get_location_with_retry()
         if gps:
             data.update(gps)
+            print(f"🔍 GPS data: {gps}")
+            print(f"🔍 GPS packet: {packet}")
     except Exception as e:
         print(f"⚠️ Failed to get GPS data: {e}")
     
