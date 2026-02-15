@@ -1,0 +1,15 @@
+{
+  "area_threshold": 1000,
+  "stage_threshold": 50,
+  "monitoring_frequency": 60,
+  "emergency_frequency": 30,
+  "photo_interval": 30,
+  "neighborhood_emergency_frequency": 30,
+  "emergency_mode": false,
+  "debug_mode": false,
+  "max_retransmissions": 3,
+  "auto_shutdown_enabled": true,
+  "shutdown_iteration_limit": 2,
+  "data_retention_days": 7,
+  "backup_enabled": true
+}
