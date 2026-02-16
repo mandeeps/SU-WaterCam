@@ -97,7 +97,7 @@ def add_metadata(image):
         xmpfile.close_file()
 
     # GPS: get current info from gpsd
-    gps_data = []
+    formatted_gps_data = []
     packet = None
     
     try:
@@ -110,14 +110,14 @@ def add_metadata(image):
     
     try:
         # Get formatted GPS data for logging
-        gps_data = get_loc()
+        formatted_gps_data = get_loc()
     except Exception as error:
         print(f"No GPS data returned from get_loc: {error}")
     
     # save formatted GPS data to text file
-    if gps_data:
+    if formatted_gps_data:
         with open(DATA, 'a', encoding="utf8") as data:
-            for line in gps_data:
+            for line in formatted_gps_data:
                 data.writelines(line)
 
     # Only add EXIF GPS data if we have a valid packet
