@@ -68,7 +68,8 @@ def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Tuple[d
     """Get location with retry logic for better reliability.
     
     Returns:
-        tuple: (dict, packet) where dict contains GPS data and packet is the raw GPS packet
+        tuple: (dict, packet) where dict contains GPS data (or empty dict if unavailable) 
+               and packet is the raw GPS packet (or None if unavailable)
     """
     for attempt in range(max_retries):
         location, packet = _get_lat_lon_alt_with_packet()
