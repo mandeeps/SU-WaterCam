@@ -1,7 +1,7 @@
 #!/home/pi/SU-WaterCam/venv/bin/python
 
 import gpsd2 as gpsd # using py-gpsd2
-from typing import List, Optional
+from typing import List, Optional, Tuple, Any
 import time
 
 gpsd.connect()
@@ -38,7 +38,7 @@ def get_loc() -> List[str]:
 
         return gps_data
 
-def _get_lat_lon_alt_with_packet() -> tuple:
+def _get_lat_lon_alt_with_packet() -> Tuple[dict, Optional[Any]]:
     """Internal function that returns GPS data and packet."""
     packet = get_packet()
     
@@ -64,7 +64,7 @@ def get_lat_lon_alt() -> dict:
     gps_data, _ = _get_lat_lon_alt_with_packet()
     return gps_data
 
-def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> tuple:
+def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Tuple[dict, Optional[Any]]:
     """Get location with retry logic for better reliability.
     
     Returns:
