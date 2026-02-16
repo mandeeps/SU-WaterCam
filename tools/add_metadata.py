@@ -101,7 +101,7 @@ def add_metadata(image):
     packet = None
     
     try:
-        # Get GPS location dict and packet for EXIF data
+        # Get GPS packet for EXIF data (we discard the location dict as we use get_loc() for logging)
         _, packet = get_location_with_retry()
     except Exception as error:
         print(f"No GPS data returned from get_location_with_retry: {error}")
