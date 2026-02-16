@@ -99,13 +99,12 @@ def add_metadata(image):
     # GPS: get current info from gpsd
     gps_data = []
     packet = None
-    gps_location = None
     
     try:
         # Get GPS location dict and packet for EXIF data
-        gps_location, packet = get_location_with_retry()
+        _, packet = get_location_with_retry()
     except Exception as error:
-        print("No GPS data returned from get_location_with_retry")
+        print(f"No GPS data returned from get_location_with_retry: {error}")
         with open(DATA, 'a', encoding="utf8") as data:
             data.write("\nGPS Error \n")
     
@@ -113,7 +112,7 @@ def add_metadata(image):
         # Get formatted GPS data for logging
         gps_data = get_loc()
     except Exception as error:
-        print("No GPS data returned from get_loc")
+        print(f"No GPS data returned from get_loc: {error}")
     
     # save formatted GPS data to text file
     if gps_data:
