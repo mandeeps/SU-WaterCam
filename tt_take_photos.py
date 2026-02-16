@@ -86,14 +86,12 @@ def flir(directory):
         makedirs(directory, exist_ok=True)
         chdir(directory)
 
-    # Resolve binary paths (prefer /home/pi when present, else project root binaries)
+    # Resolve binary paths using project root
     project_root = _safe_project_root()
     capture_candidates = [
-        	"/home/pi/SU-WaterCam/capture",
         	path.join(project_root, "capture"),
     ]
     lepton_candidates = [
-        	"/home/pi/SU-WaterCam/lepton",
         	path.join(project_root, "lepton"),
     ]
     capture_bin = next((p for p in capture_candidates if path.exists(p)), None)
