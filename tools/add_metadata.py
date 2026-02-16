@@ -97,6 +97,10 @@ def add_metadata(image):
         xmpfile.close_file()
 
     # GPS: get current info from gpsd
+    gps_data = None
+    packet = None
+    gps_location = None
+    
     try:
         # Get GPS location dict and packet for EXIF data
         gps_location, packet = get_location_with_retry()
