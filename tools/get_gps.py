@@ -15,7 +15,7 @@ def get_packet():
     else:
         return packet
 
-def get_loc() -> List[str]:
+def get_location() -> List[str]:
     packet = get_packet()
     if not packet:
         return []
@@ -82,7 +82,7 @@ def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Tuple[d
     return ({}, None)
 
 if __name__ == "__main__":
-    data = get_loc()
+    data = get_location()
     for line in data:
         print(line)
 
