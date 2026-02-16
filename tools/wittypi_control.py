@@ -22,6 +22,7 @@ def clear_shutdown_time():
     witty_pi_4.clear_shutdown_time()
 
 from ticktalkpython.SQ import SQify
+from datetime import datetime, timezone
 
 @SQify
 def get_wittypi_status():
@@ -36,7 +37,7 @@ def get_wittypi_status():
             'temperature': temperature,
             'battery_voltage': battery_voltage,
             'internal_voltage': internal_voltage,
-            'timestamp': 'now'
+            'timestamp': datetime.now(timezone.utc).isoformat()
         }
         
     except ImportError as e:

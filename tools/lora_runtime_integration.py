@@ -279,7 +279,8 @@ class LoRaRuntimeManager:
             def _parse_tlv_commands(hex_payload: str):
                 try:
                     data = bytes.fromhex(hex_payload)
-                except Exception:
+                except Exception as e:
+                    print(f"Warning: Failed to parse TLV hex payload '{hex_payload}': {e}")
                     return None
                 i = 0
                 cmds = []
