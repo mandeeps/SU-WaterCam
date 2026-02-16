@@ -38,7 +38,8 @@ def get_loc() -> List[str]:
 
         return gps_data
 
-def get_lat_lon_alt() -> dict:
+def _get_lat_lon_alt_with_packet() -> tuple:
+    """Internal function that returns GPS data and packet."""
     packet = get_packet()
     
     if not packet:
@@ -58,10 +59,19 @@ def get_lat_lon_alt() -> dict:
         # GPS data not available
         return {}, None
 
-def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Optional[dict]:
-    """Get location with retry logic for better reliability."""
+def get_lat_lon_alt() -> dict:
+    """Get GPS latitude, longitude, and altitude as a dictionary."""
+    gps_data, _ = _get_lat_lon_alt_with_packet()
+    return gps_data
+
+def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> tuple:
+    """Get location with retry logic for better reliability.
+    
+    Returns:
+        tuple: (dict, packet) where dict contains GPS data and packet is the raw GPS packet
+    """
     for attempt in range(max_retries):
-        location, packet = get_lat_lon_alt()
+        location, packet = _get_lat_lon_alt_with_packet()
         if location:
             return location, packet
         
@@ -75,8 +85,9 @@ if __name__ == "__main__":
     for line in data:
         print(line)
 
-    gps = get_location_with_retry()
+    gps, packet = get_location_with_retry()
     print(f'GPS Data: {gps}')
+    print(f'GPS Packet: {packet}')
     
     if gps:
         print(f'Latitude: {gps.get("gps_lat", "N/A")}')
