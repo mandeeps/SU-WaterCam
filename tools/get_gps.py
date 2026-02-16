@@ -1,7 +1,7 @@
 #!/home/pi/SU-WaterCam/venv/bin/python
 
 import gpsd2 as gpsd # using py-gpsd2
-from typing import List, Optional
+from typing import List, Optional, Tuple, Any
 import time
 
 gpsd.connect()
@@ -15,7 +15,7 @@ def get_packet():
     else:
         return packet
 
-def get_loc() -> List[str]:
+def get_location() -> List[str]:
     packet = get_packet()
     if not packet:
         return []
@@ -38,45 +38,57 @@ def get_loc() -> List[str]:
 
         return gps_data
 
-def get_lat_lon_alt() -> dict:
+def _get_lat_lon_alt_with_packet() -> Tuple[dict, Optional[Any]]:
+    """Internal function that returns GPS data and packet."""
     packet = get_packet()
     
     if not packet:
-        return {}, None
+        return ({}, None)
     
     try:
         lat = packet.lat 
         lon = packet.lon 
         alt = packet.alt
 
-        return {
+        return ({
             'gps_lat': lat,
             'gps_lon': lon,
             'gps_alt': alt
-        }, packet
+        }, packet)
     except AttributeError:
         # GPS data not available
-        return {}, None
+        return ({}, None)
 
-def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Optional[dict]:
-    """Get location with retry logic for better reliability."""
+def get_lat_lon_alt() -> dict:
+    """Get GPS latitude, longitude, and altitude as a dictionary."""
+    gps_data, _ = _get_lat_lon_alt_with_packet()
+    return gps_data
+
+def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Tuple[dict, Optional[Any]]:
+    """Get location with retry logic for better reliability.
+    
+    Returns:
+        tuple: (dict, packet) where dict contains GPS data (or empty dict if unavailable) 
+               and packet is the raw GPS packet (or None if unavailable)
+    """
     for attempt in range(max_retries):
-        location, packet = get_lat_lon_alt()
+        location, packet = _get_lat_lon_alt_with_packet()
         if location:
-            return location, packet
+            return (location, packet)
         
         if attempt < max_retries - 1:
             time.sleep(delay)
     
-    return {}, None
+    return ({}, None)
 
 if __name__ == "__main__":
-    data = get_loc()
+    data = get_location()
     for line in data:
         print(line)
 
-    gps = get_location_with_retry()
+    gps, packet = get_location_with_retry()
     print(f'GPS Data: {gps}')
+    print(f'GPS Packet: {packet}')
     
     if gps:
         print(f'Latitude: {gps.get("gps_lat", "N/A")}')
