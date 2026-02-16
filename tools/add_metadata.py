@@ -97,56 +97,60 @@ def add_metadata(image):
         xmpfile.close_file()
 
     # GPS: get current info from gpsd
-    gps_data = None
+    gps_data = []
     packet = None
     gps_location = None
     
     try:
         # Get GPS location dict and packet for EXIF data
         gps_location, packet = get_location_with_retry()
+    except Exception as error:
+        print("No GPS data returned from get_location_with_retry")
+        with open(DATA, 'a', encoding="utf8") as data:
+            data.write("\nGPS Error \n")
+    
+    try:
         # Get formatted GPS data for logging
         gps_data = get_loc()
     except Exception as error:
-        print("No GPS data returned")
+        print("No GPS data returned from get_loc")
+    
+    # save formatted GPS data to text file
+    if gps_data:
         with open(DATA, 'a', encoding="utf8") as data:
-            data.write("\nGPS Error \n")
-    else:
-        # save formatted GPS data to text file
-        if gps_data:
-            with open(DATA, 'a', encoding="utf8") as data:
-                for line in gps_data:
-                    data.writelines(line)
+            for line in gps_data:
+                data.writelines(line)
 
-        # Only add EXIF GPS data if we have a valid packet
-        if packet:
-            # Conversion for exif use
-            lat_deg = to_deg(packet.lat,['S','N'])
-            lng_deg = to_deg(packet.lon,['W','E'])
+    # Only add EXIF GPS data if we have a valid packet
+    if packet:
+        # Conversion for exif use
+        lat_deg = to_deg(packet.lat,['S','N'])
+        lng_deg = to_deg(packet.lon,['W','E'])
 
-            exiv_lat = (change_to_rational(lat_deg[0]),
-                        change_to_rational(lat_deg[1]),
-                        change_to_rational(lat_deg[2]))
+        exiv_lat = (change_to_rational(lat_deg[0]),
+                    change_to_rational(lat_deg[1]),
+                    change_to_rational(lat_deg[2]))
 
-            exiv_lng = (change_to_rational(lng_deg[0]),
-                        change_to_rational(lng_deg[1]),
-                        change_to_rational(lng_deg[2]))
+        exiv_lng = (change_to_rational(lng_deg[0]),
+                    change_to_rational(lng_deg[1]),
+                    change_to_rational(lng_deg[2]))
 
-            gps_ifd = {
-                    piexif.GPSIFD.GPSVersionID: (2,0,0,0),
-                    piexif.GPSIFD.GPSAltitudeRef: 0,
-                    piexif.GPSIFD.GPSAltitude: change_to_rational(round(packet.alt)),
-                    piexif.GPSIFD.GPSLatitudeRef: lat_deg[3],
-                    piexif.GPSIFD.GPSLatitude: exiv_lat,
-                    piexif.GPSIFD.GPSLongitudeRef: lng_deg[3],
-                    piexif.GPSIFD.GPSLongitude: exiv_lng,
-                    piexif.GPSIFD.GPSTrack: change_to_rational(packet.track)
-            }
+        gps_ifd = {
+                piexif.GPSIFD.GPSVersionID: (2,0,0,0),
+                piexif.GPSIFD.GPSAltitudeRef: 0,
+                piexif.GPSIFD.GPSAltitude: change_to_rational(round(packet.alt)),
+                piexif.GPSIFD.GPSLatitudeRef: lat_deg[3],
+                piexif.GPSIFD.GPSLatitude: exiv_lat,
+                piexif.GPSIFD.GPSLongitudeRef: lng_deg[3],
+                piexif.GPSIFD.GPSLongitude: exiv_lng,
+                piexif.GPSIFD.GPSTrack: change_to_rational(packet.track)
+        }
 
-            # Since we have GPS data, add to Exif
-            gps_exif = {"GPS": gps_ifd}
-            print(gps_exif)
-            # add gps tag to original exif data
-            exif_data.update(gps_exif)
+        # Since we have GPS data, add to Exif
+        gps_exif = {"GPS": gps_ifd}
+        print(gps_exif)
+        # add gps tag to original exif data
+        exif_data.update(gps_exif)
 
     # Finish exif handling
     # convert to byte format for writing into file
