@@ -104,6 +104,7 @@ def offset():
         print("Offset file does not exist")
 
 def main():
+    sensor = _get_sensor()
     while True:
         time.sleep(2)
         print(f"Temperature: {sensor.temperature} degrees C")
