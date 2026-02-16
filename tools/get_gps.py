@@ -43,7 +43,7 @@ def _get_lat_lon_alt_with_packet() -> Tuple[dict, Optional[Any]]:
     packet = get_packet()
     
     if not packet:
-        return {}, None
+        return ({}, None)
     
     try:
         lat = packet.lat 
@@ -57,7 +57,7 @@ def _get_lat_lon_alt_with_packet() -> Tuple[dict, Optional[Any]]:
         }, packet
     except AttributeError:
         # GPS data not available
-        return {}, None
+        return ({}, None)
 
 def get_lat_lon_alt() -> dict:
     """Get GPS latitude, longitude, and altitude as a dictionary."""
@@ -78,7 +78,7 @@ def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Tuple[d
         if attempt < max_retries - 1:
             time.sleep(delay)
     
-    return {}, None
+    return ({}, None)
 
 if __name__ == "__main__":
     data = get_loc()
