@@ -114,7 +114,7 @@ def add_metadata(image):
                     data.writelines(line)
 
         # Only add EXIF GPS data if we have a valid packet
-        if packet and gps_location:
+        if packet:
             # Conversion for exif use
             lat_deg = to_deg(packet.lat,['S','N'])
             lng_deg = to_deg(packet.lon,['W','E'])
