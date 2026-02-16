@@ -16,7 +16,7 @@ except Exception:
     print("BNO055 hardware issue")
 
 try:
-    from tools.get_gps import get_location_with_retry
+    from tools.get_gps import get_location_with_retry, get_loc
 except ImportError:
     print("GPS import issue")
 except Exception:
@@ -97,19 +97,31 @@ def add_metadata(image):
         xmpfile.close_file()
 
     # GPS: get current info from gpsd
+    formatted_gps_data = []
+    packet = None
+    
     try:
-        # we want the entire packet returned from gpsd
-        gps_data, packet = get_location_with_retry() 
+        # Get GPS packet for EXIF data (we discard the location dict as we use get_loc() for logging)
+        _, packet = get_location_with_retry()
     except Exception as error:
-        print("No GPS data returned")
+        print(f"No GPS data returned from get_location_with_retry: {error}")
         with open(DATA, 'a', encoding="utf8") as data:
             data.write("\nGPS Error \n")
-    else:
-        # save to text file
+    
+    try:
+        # Get formatted GPS data for logging
+        formatted_gps_data = get_loc()
+    except Exception as error:
+        print(f"No GPS data returned from get_loc: {error}")
+    
+    # save formatted GPS data to text file
+    if formatted_gps_data:
         with open(DATA, 'a', encoding="utf8") as data:
-            for line in gps_data:
+            for line in formatted_gps_data:
                 data.writelines(line)
 
+    # Only add EXIF GPS data if we have a valid packet
+    if packet:
         # Conversion for exif use
         lat_deg = to_deg(packet.lat,['S','N'])
         lng_deg = to_deg(packet.lon,['W','E'])
