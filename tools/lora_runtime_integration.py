@@ -144,24 +144,20 @@ class LoRaRuntimeManager:
             
             # Timing parameters
             'monitoring_frequency': 60,     # Monitoring frequency (minutes)
-            'emergency_frequency': 5,       # Emergency transmission frequency (minutes)
+            'emergency_frequency': 30,       # Emergency transmission frequency (minutes)
             'photo_interval': 30,           # Photo capture interval (minutes)
             'neighborhood_emergency_frequency': 30,  # Neighborhood emergency frequency
             
             # System control parameters
             'emergency_mode': False,        # Emergency mode flag
-            'transmission_enabled': True,   # Enable/disable transmissions
             'debug_mode': False,            # Debug logging mode
-            'gps_enabled': True,            # GPS data collection
             
             # Performance parameters
-            'battery_threshold': 20,        # Low battery threshold (%)
-            'compression_level': 8,         # Image compression level (1-10)
             'max_retransmissions': 3,       # Maximum retransmission attempts
             
             # Advanced parameters
             'auto_shutdown_enabled': True,  # Enable automatic shutdown after iterations
-            'shutdown_iteration_limit': 3,  # Number of iterations before shutdown
+            'shutdown_iteration_limit': 2,  # Number of iterations before shutdown
             'data_retention_days': 7,       # Days to retain data files
             'backup_enabled': True,         # Enable data backup
         }
@@ -238,14 +234,10 @@ class LoRaRuntimeManager:
             '15': lambda v: self.set_parameter('neighborhood_emergency_frequency', v), # Neighborhood frequency
             
             # System control commands
-            '20': lambda v: self.set_parameter('transmission_enabled', bool(v)), # Enable/disable transmissions
             '21': lambda v: self.set_parameter('emergency_mode', True),          # Emergency mode (no value needed)
             '22': lambda v: self.set_parameter('debug_mode', bool(v)),           # Debug mode
-            '23': lambda v: self.set_parameter('gps_enabled', bool(v)),          # GPS enable/disable
             
             # Performance commands
-            '30': lambda v: self.set_parameter('battery_threshold', v),          # Battery threshold (%)
-            '31': lambda v: self.set_parameter('compression_level', max(1, min(10, v))), # Compression level
             '32': lambda v: self.set_parameter('max_retransmissions', v),        # Max retransmissions
             
             # Advanced commands
@@ -279,7 +271,81 @@ class LoRaRuntimeManager:
                 self.set_parameter('emergency_mode', True)
                 return True
             
-            # Handle new format: [Channel][Command][Value]
+            # First try TLV hex multi-command format: [ch:1B][cmd:1B][len:1B][value:len]
+            def _is_hex_string(s: str) -> bool:
+                hexdigits = set('0123456789abcdefABCDEF')
+                return len(s) % 2 == 0 and all(c in hexdigits for c in s)
+
+            def _parse_tlv_commands(hex_payload: str):
+                try:
+                    data = bytes.fromhex(hex_payload)
+                except Exception as e:
+                    print(f"Warning: Failed to parse TLV hex payload '{hex_payload}': {e}")
+                    return None
+                i = 0
+                cmds = []
+                while i + 3 <= len(data):
+                    ch = data[i]
+                    cmd = data[i+1]
+                    vlen = data[i+2]
+                    i += 3
+                    if i + vlen > len(data):
+                        return None
+                    value_bytes = data[i:i+vlen]
+                    i += vlen
+                    cmds.append((ch, cmd, value_bytes))
+                if i != len(data):
+                    return None
+                return cmds
+
+            def _to_int_be(b: bytes) -> int:
+                if not b:
+                    return 0
+                return int.from_bytes(b, byteorder='big', signed=False)
+
+            def _apply_command_tlv(ch: int, cmd: int, value_bytes: bytes):
+                channel = f"{ch:02d}"
+                command = f"{cmd:02d}"
+                val_int = _to_int_be(value_bytes)
+                if channel == '10' and command == '90':
+                    self.set_parameter('area_threshold', val_int * 10)
+                elif channel == '11' and command == '91':
+                    self.set_parameter('stage_threshold', float(val_int))
+                elif channel == '12' and command == '92':
+                    self.set_parameter('monitoring_frequency', val_int)
+                elif channel == '13' and command == '93':
+                    self.set_parameter('emergency_frequency', val_int)
+                elif channel == '14' and command == '94':
+                    self.set_parameter('photo_interval', val_int)
+                elif channel == '15' and command == '95':
+                    self.set_parameter('neighborhood_emergency_frequency', val_int)
+                elif channel == '22' and command == '00':
+                    self.set_parameter('debug_mode', bool(val_int))
+                elif channel == '31' and command == '00':
+                    pass
+                elif channel == '32' and command == '00':
+                    self.set_parameter('max_retransmissions', val_int)
+                elif channel == '40' and command == '00':
+                    self.set_parameter('auto_shutdown_enabled', bool(val_int))
+                elif channel == '41' and command == '00':
+                    self.set_parameter('shutdown_iteration_limit', val_int)
+                elif channel == '42' and command == '00':
+                    self.set_parameter('data_retention_days', val_int)
+                elif channel == '43' and command == '00':
+                    self.set_parameter('backup_enabled', bool(val_int))
+                elif channel == '21' and command == '00':
+                    self.set_parameter('emergency_mode', True)
+                elif channel == '99' and command == '00':
+                    self.set_parameter('emergency_mode', False)
+
+            if _is_hex_string(payload):
+                tlv_cmds = _parse_tlv_commands(payload)
+                if tlv_cmds is not None and len(tlv_cmds) > 0:
+                    for (ch, cmd, vbytes) in tlv_cmds:
+                        _apply_command_tlv(ch, cmd, vbytes)
+                    return True
+
+            # Handle new format: [Channel][Command][Value] (single)
             if len(payload) >= 4:
                 channel = payload[:2]
                 command = payload[2:4]
@@ -348,15 +414,7 @@ class LoRaRuntimeManager:
                         print(f'Invalid neighborhood emergency frequency value: {value}')
                         return False
                         
-                elif channel == '20' and command == '00':
-                    # Transmission enabled/disabled
-                    try:
-                        val = bool(int(value))
-                        self.set_parameter('transmission_enabled', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid transmission enabled value: {value}')
-                        return False
+                # Removed: transmission enable/disable command (always-on policy)
                         
                 elif channel == '22' and command == '00':
                     # Debug mode
@@ -368,25 +426,9 @@ class LoRaRuntimeManager:
                         print(f'Invalid debug mode value: {value}')
                         return False
                         
-                elif channel == '23' and command == '00':
-                    # GPS enabled/disabled
-                    try:
-                        val = bool(int(value))
-                        self.set_parameter('gps_enabled', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid GPS enabled value: {value}')
-                        return False
+                # Removed: GPS enable/disable command (not supported)
                         
-                elif channel == '30' and command == '00':
-                    # Battery threshold
-                    try:
-                        val = int(value)
-                        self.set_parameter('battery_threshold', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid battery threshold value: {value}')
-                        return False
+                # Removed: battery threshold command (not supported)
                         
                 elif channel == '31' and command == '00':
                     # Compression level
@@ -533,13 +575,9 @@ class LoRaRuntimeManager:
         
         print("\nSystem Control:")
         print(f"  Emergency Mode: {params['emergency_mode']}")
-        print(f"  Transmission Enabled: {params['transmission_enabled']}")
         print(f"  Debug Mode: {params['debug_mode']}")
-        print(f"  GPS Enabled: {params['gps_enabled']}")
         
         print("\nPerformance:")
-        print(f"  Battery Threshold: {params['battery_threshold']}%")
-        print(f"  Compression Level: {params['compression_level']}")
         print(f"  Max Retransmissions: {params['max_retransmissions']}")
         
         print(f"\nLoRa Status: {status['lora_status']}")
@@ -600,12 +638,6 @@ def integrate_with_ticktalk():
         else:
             print("✅ Emergency mode deactivated - Returning to normal operation")
     
-    def on_transmission_enabled_changed(value, old_value):
-        if value:
-            print("📡 Transmissions enabled")
-        else:
-            print("📡 Transmissions disabled - Data will be queued but not sent")
-    
     def on_debug_mode_changed(value, old_value):
         if value:
             print("🐛 Debug mode enabled - Verbose logging active")
@@ -620,7 +652,6 @@ def integrate_with_ticktalk():
     
     # Register the callbacks
     manager.register_update_callback('emergency_mode', on_emergency_mode_changed)
-    manager.register_update_callback('transmission_enabled', on_transmission_enabled_changed)
     manager.register_update_callback('debug_mode', on_debug_mode_changed)
     manager.register_update_callback('photo_interval', on_photo_interval_changed)
     manager.register_update_callback('monitoring_frequency', on_monitoring_frequency_changed)

@@ -208,15 +208,9 @@ def get_lora_status() -> Dict[str, Any]:
         # Try to get runtime parameters
         from lora_runtime_integration import get_parameter
         emergency_mode = get_parameter('emergency_mode', False)
-        transmission_enabled = get_parameter('transmission_enabled', True)
-        
-        # In emergency mode, transmission should ALWAYS be enabled
-        if emergency_mode:
-            transmission_enabled = True
         
         runtime_params = {
             'emergency_mode': emergency_mode,
-            'transmission_enabled': transmission_enabled,
             'debug_mode': get_parameter('debug_mode', False),
             'monitoring_frequency': get_parameter('monitoring_frequency', 60),
             'area_threshold': get_parameter('area_threshold', 10)
@@ -404,7 +398,6 @@ def format_debug_status_for_lora(debug_status: Dict[str, Any]) -> str:
             'disk_p': round(debug_status['disk_info'].get('percent_used', 0), 1),  # Disk percent, 1 decimal
             'load': round(debug_status['system_load']['1min'], 2),  # Load average, 2 decimals
             'em': debug_status['lora_status']['runtime_parameters'].get('emergency_mode', False),  # Emergency mode
-            'tx': debug_status['lora_status']['runtime_parameters'].get('transmission_enabled', True),  # Transmission enabled
             'lora': debug_status['lora_status']['lora_handler_available'],  # LoRa available
             'wp': debug_status['wittypi_status']['available']  # WittyPi available
         }

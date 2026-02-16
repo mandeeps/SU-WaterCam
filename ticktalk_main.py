@@ -15,6 +15,9 @@ from tools.lora_runtime_integration import (
 # Import LoRa handler
 from tools.lora_handler_concurrent import get_lora_handler
 
+# Import helper functions
+from tools.wittypi_control import get_wittypi_status
+
 @SQify
 def wittypi_emergency_control(emergency_mode):
     """
@@ -188,6 +191,8 @@ def update_sensor_tracker(tracker, sensor_data, transmission_result):
         
     except Exception as e:
         print(f"⚠️ Failed to update sensor tracker: {e}")
+    
+    return tracker
 
 @SQify
 def lora_token_with_tracker(bitmap, sensor_tracker):
@@ -205,17 +210,14 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     from ticktalkpython import NetworkInterfaceLoRa
     from tools.bno055_imu import get_orientation
     from tools.aht20_temperature import get_aht20
-    from tools.get_gps import get_lat_lon_alt
+    from tools.get_gps import get_location_with_retry
     from tools.lora_runtime_integration import get_parameter
+    # Helper functions are now imported at module level
 
     from pympler import asizeof
     from sys import getsizeof
 
-    # Check if transmissions are enabled via runtime parameters
-    transmission_enabled = get_parameter('transmission_enabled', True)
-    if not transmission_enabled:
-        print("📡 Transmissions disabled - skipping LoRa transmission")
-        return bitmap
+    # LoRa transmission is always enabled
 
     root_clock = TTClock.root()
     # Create a time-tagged token using that interval and the derived clock
@@ -232,18 +234,17 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         print(f"⚠️ Failed to get sensor data: {e}")
         data = {}
     
-    # Check if GPS is enabled via runtime parameters
-    gps_enabled = get_parameter('gps_enabled', True)
-    if gps_enabled:
-        try:
-            gps = get_lat_lon_alt()
-            if gps:
-                data.update(gps)
-        except Exception as e:
-            print(f"⚠️ Failed to get GPS data: {e}")
+    # Always attempt to collect GPS data
+    try:
+        gps, packet = get_location_with_retry()
+        if gps:
+            data.update(gps)
+    except Exception as e:
+        print(f"⚠️ Failed to get GPS data: {e}")
     
     # Get WittyPi voltage measurements for battery status
     try:
+        from tools.wittypi_control import get_wittypi_status
         wittypi_data = get_wittypi_status()
         if wittypi_data.get('status') == 'wittypi_data_retrieved':
             data.update({
@@ -275,6 +276,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     sensors_to_transmit = {}
     if sensor_tracker:
         try:
+            # Call check_sensor_changes directly since it's in the same module
             sensors_to_transmit = check_sensor_changes(sensor_tracker, data)
             print(f"📊 Sensor change check: {len(sensors_to_transmit)} sensors qualify for transmission")
         except Exception as e:
@@ -297,7 +299,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
             if sensor_tracker and sensors_to_transmit:
                 filtered_data = {k: v for k, v in data.items() if k in sensors_to_transmit}
                 transmission_result['transmitted_sensors'] = list(sensors_to_transmit.keys())
-                transmission_result['change_percent'] = {k: v['change_percent'] for k, v in sensors_to_transmit.items()}
+                transmission_result['change_percent'] = {k: v.get('change_percent', 0) for k, v in sensors_to_transmit.items()}
                 print(f"📡 Transmitting {len(filtered_data)} sensors with significant changes")
             else:
                 filtered_data = data
@@ -383,7 +385,29 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     # Update sensor tracker with transmission results
     if sensor_tracker:
         try:
-            update_sensor_tracker(sensor_tracker, data, transmission_result)
+            # Call the function directly to avoid scope issues
+            if not sensor_tracker:
+                return bitmap
+            
+            current_time = 'now'  # In real implementation, use datetime.now()
+            
+            # Update transmission history
+            sensor_tracker['last_transmission'] = current_time
+            
+            # Record which sensors were transmitted
+            if transmission_result and 'transmitted_sensors' in transmission_result:
+                for sensor_name in transmission_result['transmitted_sensors']:
+                    if sensor_name not in sensor_tracker['transmission_history']:
+                        sensor_tracker['transmission_history'][sensor_name] = []
+                    
+                    sensor_tracker['transmission_history'][sensor_name].append({
+                        'timestamp': current_time,
+                        'value': data.get(sensor_name, 'unknown'),
+                        'change_percent': transmission_result.get('change_percent', {}).get(sensor_name, 0)
+                    })
+            
+            print(f"✅ Sensor tracker updated with transmission results")
+            
         except Exception as e:
             print(f"⚠️ Failed to update sensor tracker: {e}")
     
@@ -412,36 +436,7 @@ def create_workflow_data(monitoring_params, dirname, photo, lepton_file, coreg_s
         print(f"⚠️ Failed to create workflow data: {e}")
         return {'error': str(e)}
 
-@SQify
-def get_wittypi_status():
-    """
-    Get current WittyPi status including temperature, battery voltage, and internal voltage
-    """
-    try:
-        from tools.wittypi_control import get_data
-        
-        temperature, battery_voltage, internal_voltage = get_data()
-        
-        return {
-            'status': 'wittypi_data_retrieved',
-            'temperature': temperature,
-            'battery_voltage': battery_voltage,
-            'internal_voltage': internal_voltage,
-            'timestamp': 'now'
-        }
-        
-    except ImportError as e:
-        return {
-            'status': 'wittypi_unavailable',
-            'error': f'Import error: {str(e)}',
-            'message': 'WittyPi control functions not available'
-        }
-    except Exception as e:
-        return {
-            'status': 'wittypi_error',
-            'error': str(e),
-            'message': 'Failed to get WittyPi status'
-        }
+# get_wittypi_status moved to tools/wittypi_control.py
 
 @SQify
 def get_wittypi_schedule_config():
@@ -562,9 +557,8 @@ def validate_configuration(trigger):
         'stage_threshold': (50, 'default stage height threshold'),
         'monitoring_frequency': (60, 'default monitoring interval'),
         'emergency_frequency': (5, 'default emergency monitoring interval'),
-        'transmission_enabled': (True, 'default transmission state'),
-        'gps_enabled': (True, 'default GPS state'),
-        'compression_level': (8, 'default compression level'),
+        # transmission_enabled and gps_enabled removed (always-on policy)
+        
         'shutdown_iteration_limit': (3, 'default shutdown limit'),
         'auto_shutdown_enabled': (True, 'default auto-shutdown state')
     }
@@ -656,21 +650,24 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
 def call_shutdown(state):
     import sys
     from subprocess import call
-    from tools.lora_runtime_integration import get_parameter
+    from tools.lora_runtime_integration import get_parameter, set_parameter
 
-    global sq_state
-    if 'sq_state' not in globals():
-        sq_state = {'count': 0}
-    sq_state['count'] = sq_state.get('count', 0) + 1
-    
-    print(f"\n Iteration: {sq_state['count']} \n")
+    # Get current iteration count from runtime parameters
+    try:
+        current_count = get_parameter('iteration_count', 0)
+        new_count = current_count + 1
+        set_parameter('iteration_count', new_count)
+        print(f"\n Iteration: {new_count} \n")
+    except Exception as e:
+        print(f"⚠️ Failed to update iteration count: {e}")
+        new_count = 1
     
     # Check if emergency mode is active - if so, ignore shutdown limit
     try:
         emergency_mode = get_parameter('emergency_mode', False)
         if emergency_mode:
             print(f"🚨 EMERGENCY MODE ACTIVE - Ignoring shutdown limit, continuing data collection")
-            return {'status': 'emergency_mode_active', 'shutdown_bypassed': True}
+            return "emergency_mode_active"
     except Exception as e:
         print(f"⚠️ Failed to check emergency mode: {e}")
     
@@ -679,14 +676,21 @@ def call_shutdown(state):
         shutdown_limit = get_parameter('shutdown_iteration_limit', 3)
         auto_shutdown_enabled = get_parameter('auto_shutdown_enabled', True)
         
-        if auto_shutdown_enabled and sq_state['count'] >= shutdown_limit:
-            print(f"\n shutdown after {sq_state['count']} iterations (limit: {shutdown_limit}) \n")
+        print(f"🔍 Shutdown check: count={new_count}, limit={shutdown_limit}, enabled={auto_shutdown_enabled}")
+        
+        if auto_shutdown_enabled and new_count >= shutdown_limit:
+            print(f"\n🚨 SHUTDOWN TRIGGERED: {new_count} iterations >= {shutdown_limit} limit\n")
             # using an /etc/doas.conf configured for user pi
             #call("doas /usr/sbin/shutdown", shell=True) # shutdown Pi
-            sys.exit("shutdown") # exit program
+            print("🔄 Executing sys.exit('shutdown')...")
+            sys.exit("shutdown")
+        else:
+            print(f"✅ Continuing: count={new_count} < limit={shutdown_limit} or shutdown disabled")
     except Exception as e:
         print(f"⚠️ Failed to check shutdown parameters: {e}")
         # Continue without shutdown
+    
+    return "continue"
 
 @SQify
 def flir_planb(dummy):
@@ -704,8 +708,7 @@ def compress_bitmap(segmented_file):
     print(f"Compressing {segmented_file} for transmission")
     
     # Use runtime parameter for compression level
-    compression_level = get_parameter('compression_level', 8)
-    print(f"Using compression level: {compression_level}")
+    
     
     try:
         bitmap_dict = compress_image(segmented_file)
@@ -729,17 +732,13 @@ def lora_token(bitmap):
     from ticktalkpython import NetworkInterfaceLoRa
     from tools.bno055_imu import get_orientation
     from tools.aht20_temperature import get_aht20
-    from tools.get_gps import get_lat_lon_alt
+    from tools.get_gps import get_location_with_retry
     from tools.lora_runtime_integration import get_parameter
 
     from pympler import asizeof
     from sys import getsizeof
 
-    # Check if transmissions are enabled via runtime parameters
-    transmission_enabled = get_parameter('transmission_enabled', True)
-    if not transmission_enabled:
-        print("📡 Transmissions disabled - skipping LoRa transmission")
-        return bitmap
+    # LoRa transmission is always enabled
 
     root_clock = TTClock.root()
     # Create a time-tagged token using that interval and the derived clock
@@ -756,18 +755,19 @@ def lora_token(bitmap):
         print(f"⚠️ Failed to get sensor data: {e}")
         data = {}
     
-    # Check if GPS is enabled via runtime parameters
-    gps_enabled = get_parameter('gps_enabled', True)
-    if gps_enabled:
-        try:
-            gps = get_lat_lon_alt()
-            if gps:
-                data.update(gps)
-        except Exception as e:
-            print(f"⚠️ Failed to get GPS data: {e}")
+    # Always attempt to collect GPS data
+    try:
+        gps, packet = get_location_with_retry()
+        if gps:
+            data.update(gps)
+            print(f"🔍 GPS data: {gps}")
+            print(f"🔍 GPS packet: {packet}")
+    except Exception as e:
+        print(f"⚠️ Failed to get GPS data: {e}")
     
     # Get WittyPi voltage measurements for battery status
     try:
+        from tools.wittypi_control import get_wittypi_status
         wittypi_data = get_wittypi_status()
         if wittypi_data.get('status') == 'wittypi_data_retrieved':
             data.update({
@@ -934,7 +934,6 @@ def lora_listener():
         area_threshold = get_parameter('area_threshold', 10)
         monitoring_freq = get_parameter('monitoring_frequency', 60)
         emergency_mode = get_parameter('emergency_mode', False)
-        transmission_enabled = get_parameter('transmission_enabled', True)
         debug_mode = get_parameter('debug_mode', False)
     except Exception as e:
         print(f"⚠️ Failed to get LoRa parameters: {e}")
@@ -942,7 +941,6 @@ def lora_listener():
         area_threshold = 10
         monitoring_freq = 60
         emergency_mode = False
-        transmission_enabled = True
         debug_mode = False
     
     # Process any queued transmissions
@@ -953,14 +951,14 @@ def lora_listener():
     if debug_mode:
         print(f"📡 LoRa Status ({datetime.now().strftime('%H:%M:%S')}): "
               f"Area={area_threshold}%, Freq={monitoring_freq}min, "
-              f"Emergency={emergency_mode}, Transmit={transmission_enabled}")
+              f"Emergency={emergency_mode}, Transmit=True")
     
     # Return current status for TickTalk integration
     return {
         'area_threshold': area_threshold,
         'monitoring_frequency': monitoring_freq,
         'emergency_mode': emergency_mode,
-        'transmission_enabled': transmission_enabled,
+        'transmission_enabled': True,
         'debug_mode': debug_mode,
         'timestamp': datetime.now().isoformat()
     }
@@ -1017,14 +1015,12 @@ def emergency_workflow(trigger, monitoring_params, dirname, photo, lepton_file, 
         emergency_mode = get_parameter('emergency_mode', False)
         area_threshold = get_parameter('area_threshold', 10)
         monitoring_freq = get_parameter('monitoring_frequency', 60)
-        transmission_enabled = get_parameter('transmission_enabled', True)
         
         # Force emergency mode parameters during emergency
         if emergency_mode:
             # Set faster monitoring frequency for emergency
             set_parameter('monitoring_frequency', 5)  # 5 minutes instead of 60
             set_parameter('emergency_frequency', 1)   # 1 minute for critical monitoring
-            set_parameter('transmission_enabled', True)  # Always enable transmission
             print("🚨 Emergency parameters set: Fast monitoring (5min), continuous transmission")
         
         # Return comprehensive status with emergency indicators
@@ -1035,7 +1031,6 @@ def emergency_workflow(trigger, monitoring_params, dirname, photo, lepton_file, 
             'area_threshold': area_threshold,
             'monitoring_frequency': get_parameter('monitoring_frequency', 5),  # Use updated value
             'emergency_frequency': get_parameter('emergency_frequency', 1),   # Use updated value
-            'transmission_enabled': True,  # Always true in emergency
             'bitmap_compressed': True,
             'lora_transmitted': True,
             'photos_captured': True,
@@ -1070,7 +1065,6 @@ def normal_workflow(trigger, workflow_data):
         emergency_mode = get_parameter('emergency_mode', False)
         area_threshold = get_parameter('area_threshold', 10)
         monitoring_freq = get_parameter('monitoring_frequency', 60)
-        transmission_enabled = get_parameter('transmission_enabled', True)
         
         # Return comprehensive status
         return {
@@ -1079,7 +1073,6 @@ def normal_workflow(trigger, workflow_data):
             'emergency_mode': emergency_mode,
             'area_threshold': area_threshold,
             'monitoring_frequency': monitoring_freq,
-            'transmission_enabled': transmission_enabled,
             'bitmap_compressed': True,
             'lora_transmitted': True,
             'photos_captured': True,
@@ -1107,26 +1100,24 @@ def emergency_status_monitor(trigger):
         emergency_mode = get_parameter('emergency_mode', False)
         monitoring_freq = get_parameter('monitoring_frequency', 60)
         emergency_freq = get_parameter('emergency_frequency', 5)
-        transmission_enabled = get_parameter('transmission_enabled', True)
         
         if emergency_mode:
             print(f"🚨 EMERGENCY STATUS ({datetime.now().strftime('%H:%M:%S')}):")
             print(f"   - Emergency Mode: ACTIVE")
             print(f"   - Monitoring Frequency: {monitoring_freq} minutes")
             print(f"   - Emergency Frequency: {emergency_freq} minutes")
-            print(f"   - Transmission: {'ENABLED' if transmission_enabled else 'DISABLED'}")
+            print(f"   - Transmission: ENABLED")
             print(f"   - Shutdown: BYPASSED (continuing operation)")
         else:
             print(f"✅ Normal Operation ({datetime.now().strftime('%H:%M:%S')}):")
             print(f"   - Emergency Mode: INACTIVE")
             print(f"   - Monitoring Frequency: {monitoring_freq} minutes")
-            print(f"   - Transmission: {'ENABLED' if transmission_enabled else 'DISABLED'}")
+            print(f"   - Transmission: ENABLED")
         
         return {
             'emergency_mode': emergency_mode,
             'monitoring_frequency': monitoring_freq,
             'emergency_frequency': emergency_freq,
-            'transmission_enabled': transmission_enabled,
             'timestamp': datetime.now().isoformat(),
             'status': 'emergency_active' if emergency_mode else 'normal_operation'
         }
@@ -1159,10 +1150,8 @@ def lora_parameter_monitor(trigger):
             'stage_threshold': get_parameter('stage_threshold', 50),
             'monitoring_frequency': get_parameter('monitoring_frequency', 60),
             'emergency_frequency': get_parameter('emergency_frequency', 5),
-            'transmission_enabled': get_parameter('transmission_enabled', True),
             'debug_mode': get_parameter('debug_mode', False),
-            'gps_enabled': get_parameter('gps_enabled', True),
-            'compression_level': get_parameter('compression_level', 8),
+            
             'photo_interval': get_parameter('photo_interval', 30),
             'timestamp': datetime.now().isoformat()
         }
@@ -1175,10 +1164,8 @@ def lora_parameter_monitor(trigger):
             'stage_threshold': 50,
             'monitoring_frequency': 60,
             'emergency_frequency': 5,
-            'transmission_enabled': True,
             'debug_mode': False,
-            'gps_enabled': True,
-            'compression_level': 8,
+            
             'photo_interval': 30,
             'timestamp': datetime.now().isoformat()
         }
@@ -1196,7 +1183,7 @@ def lora_parameter_monitor(trigger):
         print(f"📡 LoRa Parameter Monitor ({datetime.now().strftime('%H:%M:%S')}): "
               f"Emergency={current_params['emergency_mode']}, "
               f"Area={current_params['area_threshold']}%, "
-              f"Transmit={current_params['transmission_enabled']}")
+              f"Transmit=True")
     
     return current_params
 
@@ -1247,8 +1234,7 @@ def lora_configuration_manager(trigger, current_config):
         changes.append('emergency_mode_activated')
     
     # Monitor for transmission enable/disable
-    if not current_config.get('transmission_enabled', True):
-        changes.append('transmissions_disabled')
+    # transmission_enabled removed (always-on policy)
     
     # Monitor for debug mode
     if current_config.get('debug_mode', False):
@@ -1303,18 +1289,6 @@ def get_emergency_mode_status(trigger):
         'status': 'emergency_active' if emergency_mode else 'normal_operation'
     }
 
-@SQify
-def set_emergency_transmission_enabled(trigger, enabled=True):
-    """
-    Set transmission enabled during emergency - wrapper for set_parameter that can be called from GRAPH functions
-    """
-    from tools.lora_runtime_integration import set_parameter
-    set_parameter('transmission_enabled', enabled)
-    return {
-        'status': 'transmission_updated',
-        'transmission_enabled': enabled,
-        'timestamp': 'now'
-    }
 
 @SQify
 def check_lora_availability(trigger):
@@ -1350,17 +1324,13 @@ def handle_emergency_mode_logic(trigger, emergency_status, shutdown_result):
     lora_available = True
     
     if emergency_mode and shutdown_bypassed:
-        # Force transmission to be enabled during emergency
+        # Emergency mode activated - LoRa transmission is always enabled
         try:
-            from tools.lora_runtime_integration import set_parameter
-            set_parameter('transmission_enabled', True)
-            
             # Simple logging without external function dependency
             print(f"🚨 EMERGENCY MODE LOG: emergency_mode={emergency_mode}, shutdown_bypassed={shutdown_bypassed}")
             
             return {
                 'emergency_mode': True,
-                'transmission_enabled': True,
                 'shutdown_bypassed': True,
                 'action_taken': 'emergency_mode_activated',
                 'lora_available': True
@@ -1371,7 +1341,6 @@ def handle_emergency_mode_logic(trigger, emergency_status, shutdown_result):
             
             return {
                 'emergency_mode': True,
-                'transmission_enabled': False,
                 'shutdown_bypassed': True,
                 'action_taken': 'emergency_mode_activated_no_lora',
                 'lora_available': False,
@@ -1381,7 +1350,6 @@ def handle_emergency_mode_logic(trigger, emergency_status, shutdown_result):
         print(f"ℹ️ EMERGENCY MODE LOG: emergency_mode={emergency_mode}, shutdown_bypassed={shutdown_bypassed}")
         return {
             'emergency_mode': emergency_mode,
-            'transmission_enabled': False,
             'shutdown_bypassed': shutdown_bypassed,
             'action_taken': 'no_action_needed',
             'lora_available': lora_available
@@ -1544,7 +1512,17 @@ def ttmain(trigger):
         # Take photos and capture lepton data at GRAPH level
         from tt_take_photos import flir, take_two_photos
         photo = take_two_photos(trigger, dirname)
+        deadline_time = READ_TTCLOCK(token, TTClock=root_clock) + 5_000_000
+        
         lepton_file = flir(dirname)
+        lepton = TTFinishByOtherwise(lepton_file, TTTimeDeadline=deadline_time, TTPlanB=TTSingleRunTimeout(flir_planb(token), TTTimeout=3_000_000), TTWillContinue=False) 
+        
+        #lepton_file = TTFinishByOtherwise(
+        #    flir(dirname, TTClock=root_clock, TTPeriod=60_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000),
+        #    TTTimeDeadline=deadline_time,
+        #    TTPlanB=TTSingleRunTimeout(flir_planb(token), TTTimeout=10_000_000),
+        #    TTWillContinue=True
+        #)
         
         # Coregistration and segmentation at GRAPH level
         coreg_state = coregistration(dirname, lepton_file, photo)
@@ -1575,10 +1553,9 @@ def ttmain(trigger):
         # Get sensor tracking statistics for monitoring
         log_result = log_sensor_tracking_stats(sensor_tracker)
         
-        # Get WittyPi status for monitoring
-        wittypi_status = get_wittypi_status()
-        
         # Ensure constant LoRa monitoring for incoming messages
         lora_status = lora_listener(TTPersistent=True)
         
         return result
+
+# Test function removed - not needed for main application

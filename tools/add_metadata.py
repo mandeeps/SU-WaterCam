@@ -9,17 +9,17 @@ import piexif.helper
 from libxmp import XMPFiles, consts
 
 try:
-    import bno055_imu
+    from tools import bno055_imu
 except ImportError:
     print("BNO055 import issue")
-except:
+except Exception:
     print("BNO055 hardware issue")
 
 try:
-    from get_gps import get_loc
+    from tools.get_gps import get_location_with_retry, get_loc
 except ImportError:
     print("GPS import issue")
-except:
+except Exception:
     print("GPS issue")
 
 # two helper functions from https://gist.github.com/c060604/8a51f8999be12fc2be498e9ca56adc72
@@ -55,12 +55,18 @@ def add_metadata(image):
     # add metadata to an image
     DATA = "/home/pi/SU-WaterCam/data/metadata_log.txt"
 
+    # Initialize IMU variables
+    roll = None
+    pitch = None
+    yaw = None
+
     # get IMU data
     try:
         imu_values = bno055_imu.get_values()
     except Exception as error:
         print("IMU Error")
-    else: # log IMU data to text file
+    else:
+        # log IMU data to text file
         imu = [f"\nFile: {image}\n",
             f"Time: {time.asctime(time.localtime(time.time()))}\n",
             f"Accelerometer: {imu_values['Accelerometer']}\n",
@@ -77,7 +83,7 @@ def add_metadata(image):
     # load original exif data
     exif_data = piexif.load(image)
     # Add roll/pitch/yaw to UserComment tag if they exist
-    if roll:
+    if roll is not None:
         user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
         exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
         
@@ -91,19 +97,31 @@ def add_metadata(image):
         xmpfile.close_file()
 
     # GPS: get current info from gpsd
+    formatted_gps_data = []
+    packet = None
+    
     try:
-        # we want the entire packet returned from gpsd
-        gps_data, packet = get_loc(exif=True) 
+        # Get GPS packet for EXIF data (we discard the location dict as we use get_loc() for logging)
+        _, packet = get_location_with_retry()
     except Exception as error:
-        print("No GPS data returned")
+        print(f"No GPS data returned from get_location_with_retry: {error}")
         with open(DATA, 'a', encoding="utf8") as data:
             data.write("\nGPS Error \n")
-    else:
-        # save to text file
+    
+    try:
+        # Get formatted GPS data for logging
+        formatted_gps_data = get_loc()
+    except Exception as error:
+        print(f"No GPS data returned from get_loc: {error}")
+    
+    # save formatted GPS data to text file
+    if formatted_gps_data:
         with open(DATA, 'a', encoding="utf8") as data:
-            for line in gps_data:
+            for line in formatted_gps_data:
                 data.writelines(line)
 
+    # Only add EXIF GPS data if we have a valid packet
+    if packet:
         # Conversion for exif use
         lat_deg = to_deg(packet.lat,['S','N'])
         lng_deg = to_deg(packet.lon,['W','E'])

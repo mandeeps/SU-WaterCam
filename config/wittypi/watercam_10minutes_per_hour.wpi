@@ -1,0 +1,6 @@
+# Turn on Raspberry Pi for 5 minutes, in every 20 minutes
+
+BEGIN	2025-07-24 15:00:00
+END	2035-07-24 23:59:59
+ON	M10	# keep ON state for 10 minutes
+OFF	M50	# keep OFF state for 50 minutes
