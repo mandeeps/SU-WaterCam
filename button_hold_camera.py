@@ -26,7 +26,8 @@ PARALLEL_FLIR_WITH_PICAM = False
 # after boot still fail in the field.
 STARTUP_DELAY_SEC = 0.0
 
-# Retries for a full NIR pair if Picamera2 fails mid-capture (common right after boot).
+# Retry attempts around NIR capture startup/capture failures (common right after boot).
+# Note: partial OFF-only captures are retained and reported distinctly from full-pair success.
 NIR_PAIR_MAX_ATTEMPTS = 3
 NIR_PAIR_RETRY_DELAY_SEC = 0.75
 
@@ -104,7 +105,7 @@ try:
 except Exception as exc:
     print(f"Camera loading error: {exc}")
 
-def take_nir_pair(directory: str, pin) -> Optional[str]:
+def take_nir_pair(directory: str, pin) -> Tuple[Optional[str], bool]:
     """Two full-resolution stills via ``start_and_capture_file`` (not a long-lived ``start()`` session).
 
     Project history: keeping Picamera2 running with bare ``start()`` can interfere with Flir Lepton SPI.
@@ -112,15 +113,17 @@ def take_nir_pair(directory: str, pin) -> Optional[str]:
     between frames and again before ``flir()`` runs (sequential mode). Slightly more overhead than one
     start + two ``capture_file`` calls.
 
-    Returns the path to the NIR-OFF JPEG only if that file was saved successfully; otherwise None
-    (including when the second shot fails after the first — NIR-OFF still exists in that case).
+    Returns (nir_off_path, full_pair_saved).
+    - nir_off_path is set when the NIR-OFF frame is saved, even if NIR-ON later fails.
+    - full_pair_saved is True only when both NIR-OFF and NIR-ON were saved.
     """
     if picam2 is None:
         print("Picamera2 not initialized; skipping NIR pair")
-        return None
+        return None, False
 
     for attempt in range(1, NIR_PAIR_MAX_ATTEMPTS + 1):
         nir_off_saved: Optional[str] = None
+        pair_saved = False
         try:
             pin.off()
             print(f"Pin state is: {pin.value}")
@@ -137,6 +140,7 @@ def take_nir_pair(directory: str, pin) -> Optional[str]:
             path_on = path.join(directory, f'{time_on}-NIR-ON.jpg')
             print(f"taking photo: {path_on}")
             picam2.start_and_capture_file(path_on, show_preview=False)
+            pair_saved = True
         except Exception as exc:
             print(f"Camera failed to capture (attempt {attempt}/{NIR_PAIR_MAX_ATTEMPTS}): {exc}")
         finally:
@@ -147,8 +151,10 @@ def take_nir_pair(directory: str, pin) -> Optional[str]:
                     # stop() must not prevent returning a path after a successful capture_file
                     print(f"Picamera2 stop failed (attempt {attempt}/{NIR_PAIR_MAX_ATTEMPTS}): {exc}")
 
+        if pair_saved:
+            return nir_off_saved, True
         if nir_off_saved is not None:
-            return nir_off_saved
+            return nir_off_saved, False
         if attempt < NIR_PAIR_MAX_ATTEMPTS:
             time.sleep(NIR_PAIR_RETRY_DELAY_SEC)
 
@@ -156,7 +162,7 @@ def take_nir_pair(directory: str, pin) -> Optional[str]:
     #add_metadata.add_metadata(image)
     # no IMU or GPS on the Pi Zero units currently
 
-    return None
+    return None, False
 
 def flir(directory: str) -> None:
     """Flir Lepton 3.5: run capture then lepton sequentially in ``directory`` (no global chdir — safe for threads)."""
@@ -203,7 +209,7 @@ def _join_flir_thread(flir_thread: threading.Thread) -> None:
         )
 
 
-def photos(filepath: str) -> Tuple[Optional[str], str]:
+def photos(filepath: str) -> Tuple[Optional[str], bool, str]:
     date = datetime.now().strftime('%Y%m%d-%H%M%S')
     directory = path.join(filepath, date)
     if not path.exists(directory):
@@ -223,30 +229,32 @@ def photos(filepath: str) -> Tuple[Optional[str], str]:
                     _join_flir_thread(flir_thread)
         else:
             _run_flir_safe(directory)
-        return basename, directory
+        return basename, False, directory
 
     basename: Optional[str] = None
+    pair_saved = False
     if PARALLEL_FLIR_WITH_PICAM:
         flir_thread = threading.Thread(target=_run_flir_safe, args=(directory,), name="flir")
         flir_started = False
         try:
             flir_thread.start()
             flir_started = True
-            basename = take_nir_pair(directory, nir_control_led)
+            basename, pair_saved = take_nir_pair(directory, nir_control_led)
         finally:
             if flir_started:
                 _join_flir_thread(flir_thread)
     else:
-        basename = take_nir_pair(directory, nir_control_led)
+        basename, pair_saved = take_nir_pair(directory, nir_control_led)
         _run_flir_safe(directory)
 
-    return basename, directory
+    return basename, pair_saved, directory
 
 def single_press(button):
     print(f"Button DOWN on pin {button.pin}")
 
     blocked_by_stuck_flir = False
     nir_off_name: Optional[str] = None
+    nir_pair_saved = False
     directory = ""
     try:
         with _capture_lock:
@@ -256,17 +264,17 @@ def single_press(button):
                 if status_led is not None:
                     status_led.on()
                 try:
-                    nir_off_name, directory = photos(filepath)
+                    nir_off_name, nir_pair_saved, directory = photos(filepath)
                 finally:
                     if status_led is not None:
                         status_led.off()
 
-        if blocked_by_stuck_flir:
-            print("Capture disabled because prior FLIR thread appears stuck; restart the button service")
-            _signal_capture_outcome(False)
-            return
+            if blocked_by_stuck_flir:
+                print("Capture disabled because prior FLIR thread appears stuck; restart the button service")
+                _signal_capture_outcome(False)
+                return
 
-        _signal_capture_outcome(nir_off_name is not None)
+            _signal_capture_outcome(nir_pair_saved)
     except Exception as exc:
         print(f"Capture aborted: {exc}")
         _signal_capture_outcome(False)
