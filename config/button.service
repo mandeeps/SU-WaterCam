@@ -1,12 +1,13 @@
 [Unit]
 Description=Python script to perform an action on button press - like taking photos
+After=multi-user.target
 
 [Service]
 User=pi
 Group=pi
 Type=idle
 WorkingDirectory=/home/pi/SU-WaterCam
-ExecStart=/home/pi/SU-WaterCam/venv/bin/python3 /home/pi/SU-WaterCam/button-service-gpiozero.py
+ExecStart=/home/pi/SU-WaterCam/venv/bin/python3 /home/pi/SU-WaterCam/button_hold_camera.py
 
 [Install]
 WantedBy=multi-user.target
