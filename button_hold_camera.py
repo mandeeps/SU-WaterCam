@@ -145,17 +145,30 @@ except Exception as exc:
 
 _metadata_writer: Optional[Callable[[str], None]] = None
 _metadata_writer_initialized = False
+_metadata_writer_last_attempt_ts: float = 0.0
+_metadata_writer_retry_backoff_sec: float = 30.0
 
 
 def _get_metadata_writer() -> Optional[Callable[[str], None]]:
     """Lazily load metadata helper so systems without GPS/IMU deps still run."""
-    global _metadata_writer, _metadata_writer_initialized
-    if _metadata_writer_initialized:
+    global _metadata_writer, _metadata_writer_initialized, _metadata_writer_last_attempt_ts
+    if _metadata_writer is not None:
+        _metadata_writer_initialized = True
         return _metadata_writer
-    _metadata_writer_initialized = True
+
+    now = time.monotonic()
+    if _metadata_writer_initialized and (now - _metadata_writer_last_attempt_ts) < _metadata_writer_retry_backoff_sec:
+        return None
+    _metadata_writer_last_attempt_ts = now
+
+    repo_root = REPO_ROOT
     tools_dir = path.join(REPO_ROOT, "tools")
+    # Make both `tools.*` and plain modules inside `tools/` importable.
+    # - `import tools.add_metadata` requires the repo root on sys.path.
+    # - `import add_metadata` (tools/add_metadata.py) requires tools_dir on sys.path.
+    if path.isdir(repo_root) and repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
     if path.isdir(tools_dir) and tools_dir not in sys.path:
-        # Support deployed variants where add_metadata imports sibling modules as plain names.
         sys.path.insert(0, tools_dir)
     try:
         last_error: Optional[Exception] = None
@@ -176,6 +189,10 @@ def _get_metadata_writer() -> Optional[Callable[[str], None]]:
                 print("Metadata helper found but add_metadata() is missing; continuing without metadata")
     except Exception as exc:
         print(f"Metadata helper unavailable; continuing without metadata: {exc}")
+    finally:
+        # Mark initialized only after at least one real attempt. If it failed, we still allow
+        # occasional retries (backoff) in case the environment becomes ready later.
+        _metadata_writer_initialized = True
     return _metadata_writer
 
 
@@ -208,6 +225,7 @@ def take_nir_pair(directory: str, pin) -> Tuple[Optional[str], bool]:
 
     for attempt in range(1, NIR_PAIR_MAX_ATTEMPTS + 1):
         nir_off_saved: Optional[str] = None
+        nir_on_saved: Optional[str] = None
         pair_saved = False
         try:
             time_off = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -223,14 +241,13 @@ def take_nir_pair(directory: str, pin) -> Tuple[Optional[str], bool]:
             if (not path.exists(path_off)) or path.getsize(path_off) == 0:
                 raise RuntimeError(f"NIR-OFF file not written: {path_off}")
             nir_off_saved = path_off
-            _maybe_add_sensor_metadata(path_off)
             pin.on()
             print(f"Pin state is: {pin.value}")
             print(f"taking photo: {path_on}")
             picam2.capture_file(path_on)
             if (not path.exists(path_on)) or path.getsize(path_on) == 0:
                 raise RuntimeError(f"NIR-ON file not written: {path_on}")
-            _maybe_add_sensor_metadata(path_on)
+            nir_on_saved = path_on
             pair_saved = True
         except Exception as exc:
             print(f"Camera failed to capture (attempt {attempt}/{NIR_PAIR_MAX_ATTEMPTS}): {exc}")
@@ -239,6 +256,13 @@ def take_nir_pair(directory: str, pin) -> Tuple[Optional[str], bool]:
                 picam2.stop()
             except Exception as exc:
                 print(f"Picamera2 stop failed (attempt {attempt}/{NIR_PAIR_MAX_ATTEMPTS}): {exc}")
+            # Embed metadata after captures to keep OFF/ON timing tight.
+            try:
+                _maybe_add_sensor_metadata(nir_off_saved)
+                _maybe_add_sensor_metadata(nir_on_saved)
+            except Exception:
+                # _maybe_add_sensor_metadata() is already best-effort; avoid perturbing capture retries.
+                pass
 
         if pair_saved:
             return nir_off_saved, True
