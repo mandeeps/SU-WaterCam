@@ -8,10 +8,12 @@
 
 from os import path, makedirs, listdir, rename, environ
 from datetime import datetime
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 import subprocess
 import threading
 import time
+import importlib
+import sys
 from glob import glob
 from signal import pause
 from picamera2 import Picamera2
@@ -141,6 +143,55 @@ try:
 except Exception as exc:
     print(f"Camera loading error: {exc}")
 
+_metadata_writer: Optional[Callable[[str], None]] = None
+_metadata_writer_initialized = False
+
+
+def _get_metadata_writer() -> Optional[Callable[[str], None]]:
+    """Lazily load metadata helper so systems without GPS/IMU deps still run."""
+    global _metadata_writer, _metadata_writer_initialized
+    if _metadata_writer_initialized:
+        return _metadata_writer
+    _metadata_writer_initialized = True
+    tools_dir = path.join(REPO_ROOT, "tools")
+    if path.isdir(tools_dir) and tools_dir not in sys.path:
+        # Support deployed variants where add_metadata imports sibling modules as plain names.
+        sys.path.insert(0, tools_dir)
+    try:
+        last_error: Optional[Exception] = None
+        for module_name in ("tools.add_metadata", "add_metadata"):
+            try:
+                metadata_module = importlib.import_module(module_name)
+                writer = getattr(metadata_module, "add_metadata", None)
+                if callable(writer):
+                    _metadata_writer = writer
+                    break
+            except Exception as exc:
+                last_error = exc
+        if _metadata_writer is None:
+            if last_error is not None:
+                # Expected on units without metadata dependencies or sensors.
+                print(f"Metadata helper unavailable; continuing without metadata: {last_error}")
+            else:
+                print("Metadata helper found but add_metadata() is missing; continuing without metadata")
+    except Exception as exc:
+        print(f"Metadata helper unavailable; continuing without metadata: {exc}")
+    return _metadata_writer
+
+
+def _maybe_add_sensor_metadata(image_path: Optional[str]) -> None:
+    """Add EXIF/XMP sensor metadata only when metadata stack is available."""
+    if not image_path or not path.isfile(image_path):
+        return
+    writer = _get_metadata_writer()
+    if writer is None:
+        return
+    try:
+        writer(image_path)
+        print(f"Sensor metadata written: {image_path}")
+    except Exception as exc:
+        print(f"Metadata write failed for {image_path}: {exc}")
+
 def take_nir_pair(directory: str, pin) -> Tuple[Optional[str], bool]:
     """Two full-resolution stills in one Picamera2 session: ``start()`` → OFF → ON → ``stop()``.
 
@@ -172,12 +223,14 @@ def take_nir_pair(directory: str, pin) -> Tuple[Optional[str], bool]:
             if (not path.exists(path_off)) or path.getsize(path_off) == 0:
                 raise RuntimeError(f"NIR-OFF file not written: {path_off}")
             nir_off_saved = path_off
+            _maybe_add_sensor_metadata(path_off)
             pin.on()
             print(f"Pin state is: {pin.value}")
             print(f"taking photo: {path_on}")
             picam2.capture_file(path_on)
             if (not path.exists(path_on)) or path.getsize(path_on) == 0:
                 raise RuntimeError(f"NIR-ON file not written: {path_on}")
+            _maybe_add_sensor_metadata(path_on)
             pair_saved = True
         except Exception as exc:
             print(f"Camera failed to capture (attempt {attempt}/{NIR_PAIR_MAX_ATTEMPTS}): {exc}")
@@ -193,10 +246,6 @@ def take_nir_pair(directory: str, pin) -> Tuple[Optional[str], bool]:
             return nir_off_saved, False
         if attempt < NIR_PAIR_MAX_ATTEMPTS:
             time.sleep(NIR_PAIR_RETRY_DELAY_SEC)
-
-    # get IMU and GPS data and save into image EXIF and XMP
-    #add_metadata.add_metadata(image)
-    # no IMU or GPS on the Pi Zero units currently
 
     return None, False
 
