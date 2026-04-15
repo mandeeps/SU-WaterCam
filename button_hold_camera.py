@@ -144,43 +144,36 @@ except Exception as exc:
     print(f"Camera loading error: {exc}")
 
 _metadata_writer: Optional[Callable[[str], None]] = None
-_metadata_writer_initialized = False
+_metadata_writer_attempted = False
 _metadata_writer_last_attempt_ts: float = 0.0
 _metadata_writer_retry_backoff_sec: float = 30.0
 
 
 def _get_metadata_writer() -> Optional[Callable[[str], None]]:
     """Lazily load metadata helper so systems without GPS/IMU deps still run."""
-    global _metadata_writer, _metadata_writer_initialized, _metadata_writer_last_attempt_ts
+    global _metadata_writer, _metadata_writer_attempted, _metadata_writer_last_attempt_ts
     if _metadata_writer is not None:
-        _metadata_writer_initialized = True
         return _metadata_writer
 
     now = time.monotonic()
-    if _metadata_writer_initialized and (now - _metadata_writer_last_attempt_ts) < _metadata_writer_retry_backoff_sec:
+    if _metadata_writer_attempted and (now - _metadata_writer_last_attempt_ts) < _metadata_writer_retry_backoff_sec:
         return None
     _metadata_writer_last_attempt_ts = now
 
     repo_root = REPO_ROOT
-    tools_dir = path.join(REPO_ROOT, "tools")
-    # Make both `tools.*` and plain modules inside `tools/` importable.
-    # - `import tools.add_metadata` requires the repo root on sys.path.
-    # - `import add_metadata` (tools/add_metadata.py) requires tools_dir on sys.path.
+    # `import tools.add_metadata` requires the repo root on sys.path.
+    # Append rather than insert(0) to avoid shadowing stdlib modules.
     if path.isdir(repo_root) and repo_root not in sys.path:
-        sys.path.insert(0, repo_root)
-    if path.isdir(tools_dir) and tools_dir not in sys.path:
-        sys.path.insert(0, tools_dir)
+        sys.path.append(repo_root)
     try:
         last_error: Optional[Exception] = None
-        for module_name in ("tools.add_metadata", "add_metadata"):
-            try:
-                metadata_module = importlib.import_module(module_name)
-                writer = getattr(metadata_module, "add_metadata", None)
-                if callable(writer):
-                    _metadata_writer = writer
-                    break
-            except Exception as exc:
-                last_error = exc
+        try:
+            metadata_module = importlib.import_module("tools.add_metadata")
+            writer = getattr(metadata_module, "add_metadata", None)
+            if callable(writer):
+                _metadata_writer = writer
+        except Exception as exc:
+            last_error = exc
         if _metadata_writer is None:
             if last_error is not None:
                 # Expected on units without metadata dependencies or sensors.
@@ -190,9 +183,9 @@ def _get_metadata_writer() -> Optional[Callable[[str], None]]:
     except Exception as exc:
         print(f"Metadata helper unavailable; continuing without metadata: {exc}")
     finally:
-        # Mark initialized only after at least one real attempt. If it failed, we still allow
+        # Mark attempted only after at least one real attempt. If it failed, we still allow
         # occasional retries (backoff) in case the environment becomes ready later.
-        _metadata_writer_initialized = True
+        _metadata_writer_attempted = True
     return _metadata_writer
 
 
@@ -209,19 +202,22 @@ def _maybe_add_sensor_metadata(image_path: Optional[str]) -> None:
     except Exception as exc:
         print(f"Metadata write failed for {image_path}: {exc}")
 
-def take_nir_pair(directory: str, pin) -> Tuple[Optional[str], bool]:
+def take_nir_pair(directory: str, pin) -> Tuple[Optional[str], Optional[str], bool]:
     """Two full-resolution stills in one Picamera2 session: ``start()`` → OFF → ON → ``stop()``.
 
     Faster than two ``start_and_capture_file`` calls (benchmark C/D NIR path). Pipeline is idle after
     ``stop()`` before ``flir()`` unless ``PARALLEL_FLIR_WITH_PICAM`` overlaps Flir in another thread.
 
-    Returns (nir_off_path, full_pair_saved).
+    Returns (nir_off_path, nir_on_path, full_pair_saved).
     - nir_off_path is set when the NIR-OFF frame is saved, even if NIR-ON later fails.
+    - nir_on_path is set only when the NIR-ON frame is saved.
     - full_pair_saved is True only when both NIR-OFF and NIR-ON were saved.
+    Metadata writes are intentionally omitted here; callers should apply them after
+    releasing any capture lock so that GPS retries do not block subsequent presses.
     """
     if picam2 is None:
         print("Picamera2 not initialized; skipping NIR pair")
-        return None, False
+        return None, None, False
 
     for attempt in range(1, NIR_PAIR_MAX_ATTEMPTS + 1):
         nir_off_saved: Optional[str] = None
@@ -256,22 +252,15 @@ def take_nir_pair(directory: str, pin) -> Tuple[Optional[str], bool]:
                 picam2.stop()
             except Exception as exc:
                 print(f"Picamera2 stop failed (attempt {attempt}/{NIR_PAIR_MAX_ATTEMPTS}): {exc}")
-            # Embed metadata after captures to keep OFF/ON timing tight.
-            try:
-                _maybe_add_sensor_metadata(nir_off_saved)
-                _maybe_add_sensor_metadata(nir_on_saved)
-            except Exception:
-                # _maybe_add_sensor_metadata() is already best-effort; avoid perturbing capture retries.
-                pass
 
         if pair_saved:
-            return nir_off_saved, True
+            return nir_off_saved, nir_on_saved, True
         if nir_off_saved is not None:
-            return nir_off_saved, False
+            return nir_off_saved, None, False
         if attempt < NIR_PAIR_MAX_ATTEMPTS:
             time.sleep(NIR_PAIR_RETRY_DELAY_SEC)
 
-    return None, False
+    return None, None, False
 
 def flir(session_dir: str) -> None:
     """Flir Lepton 3.5: run capture then lepton sequentially in ``session_dir`` (same folder as NIR stills).
@@ -386,7 +375,7 @@ def _join_flir_thread(flir_thread: threading.Thread) -> None:
         )
 
 
-def photos(images_root: str) -> Tuple[Optional[str], bool, str]:
+def photos(images_root: str) -> Tuple[Optional[str], Optional[str], bool, str]:
     """Create one session folder per press; NIR JPEGs and FLIR PGM/CSV all use that same path."""
     date = datetime.now().strftime('%Y%m%d-%H%M%S')
     session_dir = path.join(images_root, date)
@@ -395,7 +384,6 @@ def photos(images_root: str) -> Tuple[Optional[str], bool, str]:
 
     if nir_control_led is None:
         print("NIR control LED not initialized; skipping NIR pair, running FLIR only")
-        basename: Optional[str] = None
         if PARALLEL_FLIR_WITH_PICAM:
             flir_thread = threading.Thread(target=_run_flir_safe, args=(session_dir,), name="flir")
             flir_started = False
@@ -407,9 +395,10 @@ def photos(images_root: str) -> Tuple[Optional[str], bool, str]:
                     _join_flir_thread(flir_thread)
         else:
             _run_flir_safe(session_dir)
-        return basename, False, session_dir
+        return None, None, False, session_dir
 
-    basename: Optional[str] = None
+    nir_off: Optional[str] = None
+    nir_on: Optional[str] = None
     pair_saved = False
     if PARALLEL_FLIR_WITH_PICAM:
         flir_thread = threading.Thread(target=_run_flir_safe, args=(session_dir,), name="flir")
@@ -417,21 +406,22 @@ def photos(images_root: str) -> Tuple[Optional[str], bool, str]:
         try:
             flir_thread.start()
             flir_started = True
-            basename, pair_saved = take_nir_pair(session_dir, nir_control_led)
+            nir_off, nir_on, pair_saved = take_nir_pair(session_dir, nir_control_led)
         finally:
             if flir_started:
                 _join_flir_thread(flir_thread)
     else:
-        basename, pair_saved = take_nir_pair(session_dir, nir_control_led)
+        nir_off, nir_on, pair_saved = take_nir_pair(session_dir, nir_control_led)
         _run_flir_safe(session_dir)
 
-    return basename, pair_saved, session_dir
+    return nir_off, nir_on, pair_saved, session_dir
 
 def single_press(button):
     print(f"Button DOWN on pin {button.pin}")
 
     blocked_by_stuck_flir = False
     nir_off_name: Optional[str] = None
+    nir_on_name: Optional[str] = None
     nir_pair_saved = False
     directory = ""
     try:
@@ -442,10 +432,15 @@ def single_press(button):
                 try:
                     if status_led is not None:
                         status_led.on()
-                    nir_off_name, nir_pair_saved, directory = photos(IMAGES_ROOT)
+                    nir_off_name, nir_on_name, nir_pair_saved, directory = photos(IMAGES_ROOT)
                 finally:
                     if status_led is not None:
                         status_led.off()
+
+        # Metadata writes (GPS lookup ~3 s) happen after releasing the lock so a subsequent
+        # button press is not blocked while sensor data is being fetched.
+        _maybe_add_sensor_metadata(nir_off_name)
+        _maybe_add_sensor_metadata(nir_on_name)
 
         # Feedback can take ~2s (blocking blink/beep); run only after releasing the lock so the next
         # press is not delayed — the lock serializes capture hardware, not UI.
