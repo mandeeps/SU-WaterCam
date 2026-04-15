@@ -1,0 +1,376 @@
+"""IP uplink/downlink transport for SU-WaterCam.
+
+Sends sensor channel data to the WaterCam FastAPI server over HTTP (WiFi or
+cellular) and polls for queued downlink commands.  Designed to run outside of
+TickTalkPython so the logic can be tested standalone before integration.
+
+Usage (module)
+--------------
+    from tools.transmit_ip import IPTransmitter
+    tx = IPTransmitter()                  # reads runtime_config.json
+    result = tx.send_uplink(channels)     # list of {"code": "...", "payload_hex": "..."}
+    cmd    = tx.poll_downlink()           # returns command dict or None
+
+Usage (CLI smoke-test)
+----------------------
+    python tools/transmit_ip.py
+
+Configuration
+-------------
+All settings live in runtime_config.json under the "ip_upload" key.  See the
+project docs/IP_TRANSMISSION.md for a full field reference.
+
+Channel format
+--------------
+Each element of `channels` must match the ChannelItem schema the server expects:
+    {"code": "02 01", "payload_hex": "00000064"}
+
+Codes used by this device (from API CHANNEL_REGISTRY):
+    "00 01"  device_ts        (8 bytes, UNIX seconds as u64 big-endian)
+    "02 01"  battery_pct      (4 bytes, uint32)
+    "03 01"  imu_block        (12 bytes)
+    "04 01"  gps_block        (8 bytes: lat int32 /1e6, lon int32 /1e6)
+    "05 01"  temperature_c    (2 bytes, int16 /100.0)
+    "06 01"  humidity_pct     (1 byte, uint8)
+    "07 17"  camera_flood_detect  (4 bytes, bool as uint32)
+    "07 27"  camera_new_local_max (4 bytes, bool as uint32)
+    "08 18"  camera_flood_bitmap  (variable length, raw bitmap bytes as hex string)
+    "09 19"  sr_area_threshold_pct        (4 bytes)
+    "09 29"  sr_stage_threshold_pct       (4 bytes)
+    "09 39"  sr_monitoring_frequency      (4 bytes)
+    "09 49"  sr_emergency_frequency       (4 bytes)
+    "09 59"  sr_neighborhood_emerg_freq   (4 bytes)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import time
+from typing import Any, Dict, List, Optional
+
+import requests
+
+logger = logging.getLogger(__name__)
+
+# Default config path — relative to the project root (one level above tools/).
+_DEFAULT_CONFIG_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "runtime_config.json"
+)
+
+
+def _load_ip_config(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
+    """Load and return the ip_upload section from runtime_config.json."""
+    with open(config_path) as f:
+        cfg = json.load(f)
+    return cfg.get("ip_upload", {})
+
+
+class IPTransmitter:
+    """Handles uplink posting and downlink polling over HTTP.
+
+    Parameters
+    ----------
+    config_path:
+        Path to runtime_config.json.  Defaults to the project-root copy.
+    override_url:
+        If provided, overrides the server_url from config (useful in tests).
+    override_device_id:
+        If provided, overrides the device_id from config.
+    """
+
+    def __init__(
+        self,
+        config_path: str = _DEFAULT_CONFIG_PATH,
+        override_url: Optional[str] = None,
+        override_device_id: Optional[str] = None,
+    ) -> None:
+        cfg = _load_ip_config(config_path)
+
+        self.enabled: bool = cfg.get("enabled", False)
+        self.server_url: str = (override_url or cfg.get("server_url", "http://localhost:8000")).rstrip("/")
+        self.api_key: str = cfg.get("api_key", "")
+        self.device_id: str = override_device_id or cfg.get("device_id", "watercam-001")
+        self.timeout_s: int = int(cfg.get("timeout_s", 15))
+        self.retry_attempts: int = int(cfg.get("retry_attempts", 3))
+        self.retry_backoff_s: float = float(cfg.get("retry_backoff_s", 2))
+        self.fallback_to_lora: bool = cfg.get("fallback_to_lora", True)
+        self.downlink_poll_interval_s: int = int(cfg.get("downlink_poll_interval_s", 60))
+
+        self._session = requests.Session()
+        if self.api_key:
+            self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
+        self._session.headers.update({"Content-Type": "application/json"})
+
+    # ------------------------------------------------------------------ #
+    # Public API                                                           #
+    # ------------------------------------------------------------------ #
+
+    def send_uplink(
+        self,
+        channels: List[Dict[str, str]],
+        device_ts: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """POST sensor channel data to /ip/uplink.
+
+        Parameters
+        ----------
+        channels:
+            List of channel dicts, each with "code" and "payload_hex".
+            Example:
+                [
+                    {"code": "02 01", "payload_hex": "00000064"},
+                    {"code": "05 01", "payload_hex": "0B80"},
+                ]
+        device_ts:
+            Optional UNIX epoch (seconds) timestamp from the device clock.
+            When provided, the server uses it as the measurement timestamp
+            instead of the server arrival time.
+
+        Returns
+        -------
+        dict with keys:
+            "success"    : bool
+            "status_code": int or None
+            "response"   : decoded JSON body or None
+            "error"      : error message string or None
+            "attempts"   : number of attempts made
+        """
+        if not channels:
+            return _err_result("send_uplink called with empty channels list")
+
+        payload: Dict[str, Any] = {
+            "device_id": self.device_id,
+            "channels": channels,
+        }
+        if device_ts is not None:
+            payload["device_ts"] = device_ts
+
+        url = f"{self.server_url}/ip/uplink"
+        return self._post_with_retry(url, payload)
+
+    def poll_downlink(self) -> Dict[str, Any]:
+        """GET /ip/downlink/{device_id} to retrieve the oldest pending command.
+
+        The server atomically marks the command as delivered on retrieval, so
+        calling this multiple times without handling the first response will
+        consume queued commands.
+
+        Returns
+        -------
+        dict with keys:
+            "success"    : bool
+            "command"    : dict or None  (None means no pending command)
+            "status_code": int or None
+            "error"      : error message string or None
+        """
+        url = f"{self.server_url}/ip/downlink/{self.device_id}"
+
+        try:
+            resp = self._session.get(url, timeout=self.timeout_s)
+        except requests.exceptions.ConnectionError as exc:
+            return {"success": False, "command": None, "status_code": None,
+                    "error": f"Connection error: {exc}"}
+        except requests.exceptions.Timeout:
+            return {"success": False, "command": None, "status_code": None,
+                    "error": f"Request timed out after {self.timeout_s}s"}
+        except requests.exceptions.RequestException as exc:
+            return {"success": False, "command": None, "status_code": None,
+                    "error": str(exc)}
+
+        if resp.status_code != 200:
+            return {
+                "success": False,
+                "command": None,
+                "status_code": resp.status_code,
+                "error": f"HTTP {resp.status_code}: {resp.text[:200]}",
+            }
+
+        try:
+            body = resp.json()
+        except ValueError:
+            return {"success": False, "command": None,
+                    "status_code": resp.status_code,
+                    "error": "Non-JSON response from server"}
+
+        return {
+            "success": True,
+            "command": body.get("command"),   # dict or None
+            "status_code": resp.status_code,
+            "error": None,
+        }
+
+    def is_reachable(self) -> bool:
+        """Quick check — returns True if the server /health endpoint responds."""
+        try:
+            resp = self._session.get(
+                f"{self.server_url}/health", timeout=self.timeout_s
+            )
+            return resp.status_code == 200
+        except requests.exceptions.RequestException:
+            return False
+
+    # ------------------------------------------------------------------ #
+    # Internal helpers                                                     #
+    # ------------------------------------------------------------------ #
+
+    def _post_with_retry(
+        self, url: str, payload: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """POST payload to url with exponential-ish backoff retry."""
+        last_error: str = "unknown error"
+        last_status: Optional[int] = None
+
+        for attempt in range(1, self.retry_attempts + 1):
+            try:
+                resp = self._session.post(
+                    url, json=payload, timeout=self.timeout_s
+                )
+                last_status = resp.status_code
+
+                if resp.status_code in (200, 201):
+                    try:
+                        body = resp.json()
+                    except ValueError:
+                        body = {"raw": resp.text}
+                    logger.info(
+                        "IP uplink OK (attempt %d/%d): %s",
+                        attempt, self.retry_attempts, resp.status_code,
+                    )
+                    return {
+                        "success": True,
+                        "status_code": resp.status_code,
+                        "response": body,
+                        "error": None,
+                        "attempts": attempt,
+                    }
+
+                # Server-side error — don't retry 4xx (client mistake)
+                if 400 <= resp.status_code < 500:
+                    logger.error(
+                        "IP uplink rejected by server (HTTP %d): %s",
+                        resp.status_code, resp.text[:300],
+                    )
+                    return _err_result(
+                        f"HTTP {resp.status_code}: {resp.text[:200]}",
+                        status_code=resp.status_code,
+                        attempts=attempt,
+                    )
+
+                # 5xx — retry
+                last_error = f"HTTP {resp.status_code}: {resp.text[:200]}"
+                logger.warning(
+                    "IP uplink attempt %d/%d failed with %d, retrying...",
+                    attempt, self.retry_attempts, resp.status_code,
+                )
+
+            except requests.exceptions.ConnectionError as exc:
+                last_error = f"Connection error: {exc}"
+                logger.warning(
+                    "IP uplink attempt %d/%d connection error: %s",
+                    attempt, self.retry_attempts, exc,
+                )
+            except requests.exceptions.Timeout:
+                last_error = f"Timeout after {self.timeout_s}s"
+                logger.warning(
+                    "IP uplink attempt %d/%d timed out", attempt, self.retry_attempts
+                )
+            except requests.exceptions.RequestException as exc:
+                last_error = str(exc)
+                logger.warning(
+                    "IP uplink attempt %d/%d request error: %s",
+                    attempt, self.retry_attempts, exc,
+                )
+
+            if attempt < self.retry_attempts:
+                sleep_s = self.retry_backoff_s * attempt
+                logger.debug("Waiting %.1fs before retry %d", sleep_s, attempt + 1)
+                time.sleep(sleep_s)
+
+        logger.error(
+            "IP uplink failed after %d attempts. Last error: %s",
+            self.retry_attempts, last_error,
+        )
+        return _err_result(
+            last_error,
+            status_code=last_status,
+            attempts=self.retry_attempts,
+        )
+
+
+# ------------------------------------------------------------------ #
+# Module-level convenience functions                                   #
+# ------------------------------------------------------------------ #
+
+def send_uplink(
+    channels: List[Dict[str, str]],
+    device_ts: Optional[int] = None,
+    config_path: str = _DEFAULT_CONFIG_PATH,
+) -> Dict[str, Any]:
+    """Module-level wrapper: create a transmitter and send one uplink."""
+    tx = IPTransmitter(config_path=config_path)
+    return tx.send_uplink(channels, device_ts=device_ts)
+
+
+def poll_downlink(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
+    """Module-level wrapper: create a transmitter and poll for one downlink."""
+    tx = IPTransmitter(config_path=config_path)
+    return tx.poll_downlink()
+
+
+# ------------------------------------------------------------------ #
+# Internal util                                                        #
+# ------------------------------------------------------------------ #
+
+def _err_result(
+    message: str,
+    status_code: Optional[int] = None,
+    attempts: int = 0,
+) -> Dict[str, Any]:
+    return {
+        "success": False,
+        "status_code": status_code,
+        "response": None,
+        "error": message,
+        "attempts": attempts,
+    }
+
+
+# ------------------------------------------------------------------ #
+# CLI smoke-test                                                       #
+# ------------------------------------------------------------------ #
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+    import struct
+
+    tx = IPTransmitter()
+    print(f"Server : {tx.server_url}")
+    print(f"Device : {tx.device_id}")
+    print(f"Enabled: {tx.enabled}")
+    print()
+
+    # Encode a minimal uplink: battery 75%, temperature 22.50 °C
+    battery_hex = struct.pack(">I", 75).hex()            # "0000004B"
+    temp_raw = int(22.50 * 100)                          # 2250 → 0x08CA
+    temp_hex = struct.pack(">h", temp_raw).hex()         # signed int16
+    ts_now = int(time.time())
+    ts_hex = struct.pack(">Q", ts_now).hex()             # 8-byte big-endian u64
+
+    channels = [
+        {"code": "00 01", "payload_hex": ts_hex},
+        {"code": "02 01", "payload_hex": battery_hex},
+        {"code": "05 01", "payload_hex": temp_hex},
+    ]
+
+    print("--- Uplink test ---")
+    print(f"Channels: {json.dumps(channels, indent=2)}")
+    result = tx.send_uplink(channels, device_ts=ts_now)
+    print(f"Result  : {json.dumps(result, indent=2)}")
+
+    print()
+    print("--- Downlink poll ---")
+    dl = tx.poll_downlink()
+    print(f"Result  : {json.dumps(dl, indent=2)}")

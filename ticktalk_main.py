@@ -272,9 +272,12 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30)
     })
 
-    # Check sensor changes using tracker if available
+    # Check sensor changes using tracker if available (unless always_transmit_sensors is set)
+    always_transmit_sensors = get_parameter('always_transmit_sensors', False)
+    if always_transmit_sensors:
+        print(f"📡 always_transmit_sensors=True: bypassing sensor change check")
     sensors_to_transmit = {}
-    if sensor_tracker:
+    if sensor_tracker and not always_transmit_sensors:
         try:
             # Call check_sensor_changes directly since it's in the same module
             sensors_to_transmit = check_sensor_changes(sensor_tracker, data)
@@ -290,10 +293,10 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         print(f"⚠️ Failed to get LoRa handler: {e}")
         return bitmap
 
-    # Transmit sensor data only if changes detected or no tracker available
+    # Transmit sensor data if: no tracker, always_transmit_sensors, or changes detected
     transmission_result = {'transmitted_sensors': [], 'change_percent': {}}
     
-    if not sensor_tracker or sensors_to_transmit:
+    if always_transmit_sensors or not sensor_tracker or sensors_to_transmit:
         try:
             # Filter data to only include sensors that changed significantly
             if sensor_tracker and sensors_to_transmit:
@@ -304,7 +307,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
             else:
                 filtered_data = data
                 transmission_result['transmitted_sensors'] = list(data.keys())
-                print(f"📡 Transmitting all sensor data (no tracker or all sensors qualify)")
+                print(f"📡 Transmitting all sensor data (no tracker, always_transmit_sensors, or all sensors qualify)")
             
             handler.queue_transmit(filtered_data)
             handler.process_transmit_queue()
@@ -1490,6 +1493,269 @@ def log_sensor_tracking_stats(sensor_tracker):
         print(f"⚠️ Failed to log sensor tracking stats: {e}")
         return {'status': 'error', 'error': str(e)}
 
+@SQify
+def ip_uplink_transmit(bitmap, sensor_tracker):
+    """Send sensor readings and flood bitmap to the FastAPI server over IP (WiFi/cellular).
+
+    Collects the same sensor data as lora_token_with_tracker, encodes it as
+    channel-coded hex blocks (same format the API already understands for LoRa
+    uplinks), and POSTs to /ip/uplink.
+
+    Disabled by default — set ip_upload.enabled=true in runtime_config.json to
+    activate.  When fallback_to_lora=true and IP fails, the data has already been
+    sent via LoRa so nothing is lost.
+
+    Returns a status dict (never raises) so a failure here never stops the main
+    workflow.
+    """
+    import struct
+    import time as _time
+    from tools.transmit_ip import IPTransmitter
+    from tools.lora_runtime_integration import get_parameter
+
+    tx = IPTransmitter()
+
+    if not tx.enabled:
+        print("📡 IP uplink disabled (ip_upload.enabled=false) — skipping")
+        return {"status": "disabled", "success": False}
+
+    if not tx.is_reachable():
+        print(f"⚠️ IP uplink: server unreachable at {tx.server_url}")
+        return {"status": "unreachable", "success": False}
+
+    # ── Collect sensor data ────────────────────────────────────────────────────
+    data = {}
+
+    try:
+        from tools.bno055_imu import get_orientation
+        data.update(get_orientation())
+    except Exception as e:
+        print(f"⚠️ IP uplink: IMU unavailable: {e}")
+
+    try:
+        from tools.aht20_temperature import get_aht20
+        data.update(get_aht20())
+    except Exception as e:
+        print(f"⚠️ IP uplink: AHT20 unavailable: {e}")
+
+    try:
+        from tools.get_gps import get_location_with_retry
+        gps, _ = get_location_with_retry()
+        if gps:
+            data.update(gps)
+    except Exception as e:
+        print(f"⚠️ IP uplink: GPS unavailable: {e}")
+
+    try:
+        from tools.wittypi_control import get_wittypi_status
+        wittypi_data = get_wittypi_status()
+        if wittypi_data.get('status') == 'wittypi_data_retrieved':
+            data['wittypi_battery_voltage'] = wittypi_data.get('battery_voltage', 0.0)
+    except Exception as e:
+        print(f"⚠️ IP uplink: WittyPi unavailable: {e}")
+
+    data['area_threshold']                    = get_parameter('area_threshold', 10)
+    data['stage_threshold']                   = get_parameter('stage_threshold', 50)
+    data['monitoring_frequency']              = get_parameter('monitoring_frequency', 60)
+    data['emergency_frequency']               = get_parameter('emergency_frequency', 5)
+    data['neighborhood_emergency_frequency']  = get_parameter('neighborhood_emergency_frequency', 30)
+
+    # ── Build channel list ─────────────────────────────────────────────────────
+    channels = []
+    ts_now = int(_time.time())
+
+    # 00 01 — device timestamp (8-byte uint64)
+    channels.append({"code": "00 01", "payload_hex": struct.pack(">Q", ts_now).hex()})
+
+    # 02 01 — battery percent derived from WittyPi voltage (LiPo: 3.0V=0%, 4.2V=100%)
+    batt_v = data.get('wittypi_battery_voltage', 0.0)
+    if batt_v and batt_v > 0:
+        batt_pct = max(0, min(100, int((batt_v - 3.0) / 1.2 * 100)))
+        channels.append({"code": "02 01", "payload_hex": struct.pack(">I", batt_pct).hex()})
+
+    # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
+    lat = data.get('gps_lat')
+    lon = data.get('gps_lon')
+    if lat is not None and lon is not None:
+        try:
+            channels.append({
+                "code": "04 01",
+                "payload_hex": struct.pack(">ii",
+                    int(round(lat * 1_000_000)),
+                    int(round(lon * 1_000_000)),
+                ).hex(),
+            })
+        except struct.error as e:
+            print(f"⚠️ IP uplink: GPS encoding error (lat={lat}, lon={lon}): {e}")
+
+    # 05 01 — temperature (int16, value × 100)
+    temp = data.get('temperature_celsius')
+    if temp is not None:
+        try:
+            channels.append({"code": "05 01",
+                              "payload_hex": struct.pack(">h", int(round(temp * 100))).hex()})
+        except struct.error as e:
+            print(f"⚠️ IP uplink: temperature encoding error (temp={temp}): {e}")
+
+    # 06 01 — humidity (uint8)
+    hum = data.get('relative_humidity')
+    if hum is not None:
+        channels.append({"code": "06 01",
+                         "payload_hex": struct.pack(">B", max(0, min(255, int(hum)))).hex()})
+
+    # 07 17 — flood detect (inferred from bitmap content)
+    flood_detected = bool(bitmap and any(b != 0 for b in bitmap))
+    channels.append({"code": "07 17",
+                     "payload_hex": struct.pack(">I", int(flood_detected)).hex()})
+
+    # 08 18 — flood bitmap (variable length, only if non-empty)
+    if bitmap:
+        channels.append({"code": "08 18", "payload_hex": bytes(bitmap).hex()})
+
+    # 09 xx — status reports
+    channels.append({"code": "09 19",
+                     "payload_hex": struct.pack(">I", int(data['area_threshold'])).hex()})
+    channels.append({"code": "09 29",
+                     "payload_hex": struct.pack(">I", int(data['stage_threshold'])).hex()})
+    channels.append({"code": "09 39",
+                     "payload_hex": struct.pack(">I", int(data['monitoring_frequency'])).hex()})
+    channels.append({"code": "09 49",
+                     "payload_hex": struct.pack(">I", int(data['emergency_frequency'])).hex()})
+    channels.append({"code": "09 59",
+                     "payload_hex": struct.pack(">I",
+                         int(data['neighborhood_emergency_frequency'])).hex()})
+
+    # ── Transmit ───────────────────────────────────────────────────────────────
+    result = tx.send_uplink(channels, device_ts=ts_now)
+
+    if result["success"]:
+        print(f"✅ IP uplink OK: {len(channels)} channels sent "
+              f"(attempt {result.get('attempts', '?')})")
+    else:
+        print(f"⚠️ IP uplink failed after {result.get('attempts', '?')} attempt(s): "
+              f"{result.get('error', 'unknown error')}")
+        if tx.fallback_to_lora:
+            print("📡 LoRa fallback is enabled — data already sent via LoRa path")
+
+    return {
+        "status": "ok" if result["success"] else "failed",
+        "channels_sent": len(channels),
+        "result": result,
+    }
+
+
+@SQify
+def ip_downlink_poll_and_apply(lora_init):
+    """Poll /ip/downlink/{device_id} for queued server commands and apply them.
+
+    The server queues parameter-update commands when a human operator (or weather
+    automation) sends a downlink via the dashboard.  This function retrieves the
+    oldest pending command, decodes the parts list, and applies each recognised
+    parameter change to the runtime config via set_parameter().
+
+    Runs once at the start of each wake cycle (after LoRa init) so the device
+    picks up any commands that arrived while it was sleeping.
+
+    Disabled by default — requires ip_upload.enabled=true in runtime_config.json.
+    """
+    from tools.transmit_ip import IPTransmitter
+    from tools.lora_runtime_integration import set_parameter
+
+    tx = IPTransmitter()
+
+    if not tx.enabled:
+        return {"status": "disabled"}
+
+    poll_result = tx.poll_downlink()
+
+    if not poll_result["success"]:
+        print(f"⚠️ IP downlink poll failed: {poll_result.get('error')}")
+        return {"status": "poll_failed", "error": poll_result.get("error")}
+
+    cmd = poll_result.get("command")
+    if not cmd:
+        print("📬 IP downlink: no pending commands")
+        return {"status": "no_command"}
+
+    print(f"📬 IP downlink: received command (queue_id={cmd.get('queue_id')})")
+
+    parts = cmd.get("parts") or []
+    applied = []
+
+    # Index-based lookup tables — must match server app/encoders.py constants
+    _MF_HOURS = [1, 3, 6, 24, 72]    # monitoring_freq_h allowed values
+    _EF_MIN   = [2, 5, 10]           # emergency_freq_min allowed values
+    _FF_MIN   = [10, 20, 30, 40, 50, 60]  # flood_code_freq_min allowed values
+
+    for part in parts:
+        code        = part.get("code", "").strip()
+        payload_hex = part.get("payload_hex", "")
+
+        try:
+            payload_bytes = bytes.fromhex(payload_hex)
+        except ValueError:
+            print(f"⚠️ IP downlink: bad payload_hex in part {part} — skipping")
+            continue
+
+        if code == "10 90":  # area_threshold_pct — direct u8 value
+            val = int.from_bytes(payload_bytes, 'big')
+            set_parameter('area_threshold', val)
+            print(f"⬇️ Applied: area_threshold = {val}%")
+            applied.append(f"area_threshold={val}%")
+
+        elif code == "11 91":  # stage_threshold_cm — u16, stored as cm
+            val_cm = int.from_bytes(payload_bytes, 'big')
+            set_parameter('stage_threshold', val_cm)
+            print(f"⬇️ Applied: stage_threshold = {val_cm}cm")
+            applied.append(f"stage_threshold={val_cm}cm")
+
+        elif code == "12 92":  # monitoring_freq_h — u8 index into _MF_HOURS
+            idx = int.from_bytes(payload_bytes, 'big')
+            if 0 <= idx < len(_MF_HOURS):
+                hours = _MF_HOURS[idx]
+                set_parameter('monitoring_frequency', hours * 60)  # stored in minutes
+                print(f"⬇️ Applied: monitoring_frequency = {hours}h ({hours * 60}min)")
+                applied.append(f"monitoring_frequency={hours}h")
+            else:
+                print(f"⚠️ IP downlink: monitoring_freq index {idx} out of range")
+
+        elif code == "13 93":  # emergency_freq_min — u8 index into _EF_MIN
+            idx = int.from_bytes(payload_bytes, 'big')
+            if 0 <= idx < len(_EF_MIN):
+                mins = _EF_MIN[idx]
+                set_parameter('emergency_frequency', mins)
+                print(f"⬇️ Applied: emergency_frequency = {mins}min")
+                applied.append(f"emergency_frequency={mins}min")
+            else:
+                print(f"⚠️ IP downlink: emergency_freq index {idx} out of range")
+
+        elif code == "14 94":  # flood_code_freq_min — u8 index into _FF_MIN
+            idx = int.from_bytes(payload_bytes, 'big')
+            if 0 <= idx < len(_FF_MIN):
+                mins = _FF_MIN[idx]
+                set_parameter('neighborhood_emergency_frequency', mins)
+                print(f"⬇️ Applied: neighborhood_emergency_frequency = {mins}min")
+                applied.append(f"neighborhood_emergency_frequency={mins}min")
+            else:
+                print(f"⚠️ IP downlink: flood_code_freq index {idx} out of range")
+
+        else:
+            print(f"⚠️ IP downlink: unrecognised command code '{code}' — ignoring")
+
+    if applied:
+        print(f"✅ IP downlink: applied {len(applied)} parameter(s): {', '.join(applied)}")
+    else:
+        print(f"⚠️ IP downlink: no recognised parameters in command "
+              f"(hex={cmd.get('hex_payload', '')})")
+
+    return {
+        "status": "applied",
+        "queue_id": cmd.get("queue_id"),
+        "applied_params": applied,
+        "hex_payload": cmd.get("hex_payload"),
+    }
+
+
 @GRAPHify
 def ttmain(trigger):
     # Import TTClock for the main workflow
@@ -1499,7 +1765,12 @@ def ttmain(trigger):
         
         # Initialize LoRa integration first
         lora_init = initialize_lora_integration(trigger)
-        
+
+        # Poll for queued server commands over IP and apply them before the
+        # capture cycle begins, so any threshold/frequency changes take effect
+        # this iteration.  No-ops silently when ip_upload.enabled=false.
+        ip_downlink = ip_downlink_poll_and_apply(lora_init)
+
         # Validate configuration
         config_validation = validate_configuration(trigger)
         
@@ -1536,7 +1807,13 @@ def ttmain(trigger):
         
         # Use sensor tracker for intelligent LoRa transmission
         lora_return = lora_token_with_tracker(bitmap, sensor_tracker)
-        
+
+        # Parallel IP uplink — sends the same sensor data + bitmap to the
+        # FastAPI server over WiFi/cellular.  No-ops silently when disabled.
+        # Runs concurrently with the LoRa path; LoRa failure does not affect
+        # IP and vice versa.
+        ip_return = ip_uplink_transmit(bitmap, sensor_tracker)
+
         # Shutdown check at GRAPH level
         shutdown_result = call_shutdown(lora_return)
         
