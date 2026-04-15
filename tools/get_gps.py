@@ -60,9 +60,17 @@ def _get_lat_lon_alt_with_packet() -> Tuple[dict, Optional[Any]]:
         return ({}, None)
 
 def get_lat_lon_alt() -> dict:
-    """Get GPS latitude, longitude, and altitude as a dictionary."""
+    """Get GPS latitude, longitude, and altitude as a dictionary.
+    Returns only the dict for backward compatibility; use get_location_with_retry() for (dict, packet).
+    """
     gps_data, _ = _get_lat_lon_alt_with_packet()
     return gps_data
+
+
+def get_loc() -> List[str]:
+    """Alias for get_location() for backward compatibility (e.g. add_metadata logging)."""
+    return get_location()
+
 
 def get_location_with_retry(max_retries: int = 3, delay: float = 1.0) -> Tuple[dict, Optional[Any]]:
     """Get location with retry logic for better reliability.
