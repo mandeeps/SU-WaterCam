@@ -1529,122 +1529,128 @@ def ip_uplink_transmit(bitmap, sensor_tracker):
         tx.close()
         return {"status": "unreachable", "success": False}
 
-    # ── Collect sensor data ────────────────────────────────────────────────────
-    # IMU orientation is not transmitted (no 03 01 channel encoded below);
-    # do not read it here to avoid unnecessary hardware I/O and failure points.
-    data = {}
-
     try:
-        from tools.aht20_temperature import get_aht20
-        data.update(get_aht20())
-    except Exception as e:
-        print(f"⚠️ IP uplink: AHT20 unavailable: {e}")
+        # ── Collect sensor data ────────────────────────────────────────────────
+        # IMU orientation is not transmitted (no 03 01 channel encoded below);
+        # do not read it here to avoid unnecessary hardware I/O and failure points.
+        data = {}
 
-    try:
-        from tools.get_gps import get_location_with_retry
-        gps, _ = get_location_with_retry()
-        if gps:
-            data.update(gps)
-    except Exception as e:
-        print(f"⚠️ IP uplink: GPS unavailable: {e}")
-
-    try:
-        from tools.wittypi_control import get_wittypi_status
-        wittypi_data = get_wittypi_status()
-        if wittypi_data.get('status') == 'wittypi_data_retrieved':
-            data['wittypi_battery_voltage'] = wittypi_data.get('battery_voltage', 0.0)
-    except Exception as e:
-        print(f"⚠️ IP uplink: WittyPi unavailable: {e}")
-
-    data['area_threshold']                    = get_parameter('area_threshold', 10)
-    data['stage_threshold']                   = get_parameter('stage_threshold', 50)
-    data['monitoring_frequency']              = get_parameter('monitoring_frequency', 60)
-    data['emergency_frequency']               = get_parameter('emergency_frequency', 5)
-    data['neighborhood_emergency_frequency']  = get_parameter('neighborhood_emergency_frequency', 30)
-
-    # ── Build channel list ─────────────────────────────────────────────────────
-    channels = []
-    ts_now = int(_time.time())
-
-    # 00 01 — device timestamp (8-byte uint64)
-    channels.append({"code": "00 01", "payload_hex": struct.pack(">Q", ts_now).hex()})
-
-    # 02 01 — battery percent derived from WittyPi voltage (LiPo: 3.0V=0%, 4.2V=100%)
-    batt_v = data.get('wittypi_battery_voltage', 0.0)
-    if batt_v and batt_v > 0:
-        batt_pct = max(0, min(100, int((batt_v - 3.0) / 1.2 * 100)))
-        channels.append({"code": "02 01", "payload_hex": struct.pack(">I", batt_pct).hex()})
-
-    # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
-    lat = data.get('gps_lat')
-    lon = data.get('gps_lon')
-    if lat is not None and lon is not None:
         try:
-            channels.append({
-                "code": "04 01",
-                "payload_hex": struct.pack(">ii",
-                    int(round(lat * 1_000_000)),
-                    int(round(lon * 1_000_000)),
-                ).hex(),
-            })
-        except struct.error as e:
-            print(f"⚠️ IP uplink: GPS encoding error (lat={lat}, lon={lon}): {e}")
+            from tools.aht20_temperature import get_aht20
+            data.update(get_aht20())
+        except Exception as e:
+            print(f"⚠️ IP uplink: AHT20 unavailable: {e}")
 
-    # 05 01 — temperature (int16, value × 100)
-    temp = data.get('temperature_celsius')
-    if temp is not None:
         try:
-            channels.append({"code": "05 01",
-                              "payload_hex": struct.pack(">h", int(round(temp * 100))).hex()})
-        except struct.error as e:
-            print(f"⚠️ IP uplink: temperature encoding error (temp={temp}): {e}")
+            from tools.get_gps import get_location_with_retry
+            gps, _ = get_location_with_retry()
+            if gps:
+                data.update(gps)
+        except Exception as e:
+            print(f"⚠️ IP uplink: GPS unavailable: {e}")
 
-    # 06 01 — humidity (uint8)
-    hum = data.get('relative_humidity')
-    if hum is not None:
-        channels.append({"code": "06 01",
-                         "payload_hex": struct.pack(">B", max(0, min(255, int(hum)))).hex()})
+        try:
+            from tools.wittypi_control import get_wittypi_status
+            wittypi_data = get_wittypi_status()
+            if wittypi_data.get('status') == 'wittypi_data_retrieved':
+                data['wittypi_battery_voltage'] = wittypi_data.get('battery_voltage', 0.0)
+        except Exception as e:
+            print(f"⚠️ IP uplink: WittyPi unavailable: {e}")
 
-    # 07 17 — flood detect (inferred from bitmap content)
-    flood_detected = bool(bitmap and any(b != 0 for b in bitmap))
-    channels.append({"code": "07 17",
-                     "payload_hex": struct.pack(">I", int(flood_detected)).hex()})
+        data['area_threshold']                    = get_parameter('area_threshold', 10)
+        data['stage_threshold']                   = get_parameter('stage_threshold', 50)
+        data['monitoring_frequency']              = get_parameter('monitoring_frequency', 60)
+        data['emergency_frequency']               = get_parameter('emergency_frequency', 5)
+        data['neighborhood_emergency_frequency']  = get_parameter('neighborhood_emergency_frequency', 30)
 
-    # 08 18 — flood bitmap (variable length, only if non-empty)
-    if bitmap:
-        channels.append({"code": "08 18", "payload_hex": bytes(bitmap).hex()})
+        # ── Build channel list ─────────────────────────────────────────────────
+        channels = []
+        ts_now = int(_time.time())
 
-    # 09 xx — status reports
-    channels.append({"code": "09 19",
-                     "payload_hex": struct.pack(">I", int(data['area_threshold'])).hex()})
-    channels.append({"code": "09 29",
-                     "payload_hex": struct.pack(">I", int(data['stage_threshold'])).hex()})
-    channels.append({"code": "09 39",
-                     "payload_hex": struct.pack(">I", int(data['monitoring_frequency'])).hex()})
-    channels.append({"code": "09 49",
-                     "payload_hex": struct.pack(">I", int(data['emergency_frequency'])).hex()})
-    channels.append({"code": "09 59",
-                     "payload_hex": struct.pack(">I",
-                         int(data['neighborhood_emergency_frequency'])).hex()})
+        # 00 01 — device timestamp (8-byte uint64)
+        channels.append({"code": "00 01", "payload_hex": struct.pack(">Q", ts_now).hex()})
 
-    # ── Transmit ───────────────────────────────────────────────────────────────
-    result = tx.send_uplink(channels, device_ts=ts_now)
-    tx.close()
+        # 02 01 — battery percent derived from WittyPi voltage (LiPo: 3.0V=0%, 4.2V=100%)
+        batt_v = data.get('wittypi_battery_voltage', 0.0)
+        if batt_v and batt_v > 0:
+            batt_pct = max(0, min(100, int((batt_v - 3.0) / 1.2 * 100)))
+            channels.append({"code": "02 01", "payload_hex": struct.pack(">I", batt_pct).hex()})
 
-    if result["success"]:
-        print(f"✅ IP uplink OK: {len(channels)} channels sent "
-              f"(attempt {result.get('attempts', '?')})")
-    else:
-        print(f"⚠️ IP uplink failed after {result.get('attempts', '?')} attempt(s): "
-              f"{result.get('error', 'unknown error')}")
-        if tx.fallback_to_lora:
-            print("📡 LoRa fallback is enabled — data may also be sent via the LoRa path")
+        # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
+        lat = data.get('gps_lat')
+        lon = data.get('gps_lon')
+        if lat is not None and lon is not None:
+            try:
+                channels.append({
+                    "code": "04 01",
+                    "payload_hex": struct.pack(">ii",
+                        int(round(lat * 1_000_000)),
+                        int(round(lon * 1_000_000)),
+                    ).hex(),
+                })
+            except struct.error as e:
+                print(f"⚠️ IP uplink: GPS encoding error (lat={lat}, lon={lon}): {e}")
 
-    return {
-        "status": "ok" if result["success"] else "failed",
-        "channels_sent": len(channels),
-        "result": result,
-    }
+        # 05 01 — temperature (int16, value × 100)
+        temp = data.get('temperature_celsius')
+        if temp is not None:
+            try:
+                channels.append({"code": "05 01",
+                                  "payload_hex": struct.pack(">h", int(round(temp * 100))).hex()})
+            except struct.error as e:
+                print(f"⚠️ IP uplink: temperature encoding error (temp={temp}): {e}")
+
+        # 06 01 — humidity (uint8)
+        hum = data.get('relative_humidity')
+        if hum is not None:
+            channels.append({"code": "06 01",
+                             "payload_hex": struct.pack(">B", max(0, min(255, int(hum)))).hex()})
+
+        # 07 17 — flood detect (inferred from bitmap content)
+        flood_detected = bool(bitmap and any(b != 0 for b in bitmap))
+        channels.append({"code": "07 17",
+                         "payload_hex": struct.pack(">I", int(flood_detected)).hex()})
+
+        # 08 18 — flood bitmap (variable length, only if non-empty)
+        if bitmap:
+            channels.append({"code": "08 18", "payload_hex": bytes(bitmap).hex()})
+
+        # 09 xx — status reports; clamped to uint32 range so struct.pack never raises
+        _u32 = lambda v: max(0, min(0xFFFFFFFF, int(v)))
+        channels.append({"code": "09 19",
+                         "payload_hex": struct.pack(">I", _u32(data['area_threshold'])).hex()})
+        channels.append({"code": "09 29",
+                         "payload_hex": struct.pack(">I", _u32(data['stage_threshold'])).hex()})
+        channels.append({"code": "09 39",
+                         "payload_hex": struct.pack(">I", _u32(data['monitoring_frequency'])).hex()})
+        channels.append({"code": "09 49",
+                         "payload_hex": struct.pack(">I", _u32(data['emergency_frequency'])).hex()})
+        channels.append({"code": "09 59",
+                         "payload_hex": struct.pack(">I",
+                             _u32(data['neighborhood_emergency_frequency'])).hex()})
+
+        # ── Transmit ──────────────────────────────────────────────────────────
+        result = tx.send_uplink(channels, device_ts=ts_now)
+
+        if result["success"]:
+            print(f"✅ IP uplink OK: {len(channels)} channels sent "
+                  f"(attempt {result.get('attempts', '?')})")
+        else:
+            print(f"⚠️ IP uplink failed after {result.get('attempts', '?')} attempt(s): "
+                  f"{result.get('error', 'unknown error')}")
+            if tx.fallback_to_lora:
+                print("📡 LoRa fallback is enabled — data may also be sent via the LoRa path")
+
+        return {
+            "status": "ok" if result["success"] else "failed",
+            "channels_sent": len(channels),
+            "result": result,
+        }
+    except Exception as exc:
+        print(f"⚠️ IP uplink: unexpected error: {exc}")
+        return {"status": "error", "success": False, "error": str(exc)}
+    finally:
+        tx.close()
 
 
 @SQify

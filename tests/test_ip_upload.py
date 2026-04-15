@@ -245,7 +245,8 @@ class TestIPDownlink(unittest.TestCase):
         result = self.tx.poll_downlink()
 
         self.assertTrue(result["success"], f"Poll failed: {result.get('error')}")
-        self.assertEqual(result["status_code"], 200)
+        # poll_downlink treats 404 (device not yet registered) as success + no command
+        self.assertIn(result["status_code"], (200, 404))
         # command is either None (no pending) or a dict
         self.assertIn("command", result)
         cmd = result["command"]
