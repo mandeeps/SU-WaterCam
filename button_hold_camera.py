@@ -150,6 +150,10 @@ _metadata_writer_retry_backoff_sec: float = 30.0
 # Serializes _get_metadata_writer() so concurrent single_press() calls cannot
 # race on the attempted flag, backoff timestamp, or exec_module.
 _metadata_writer_lock = threading.Lock()
+# Serializes add_metadata() calls. gpiozero runs button handlers in worker
+# threads, so back-to-back presses can reach _maybe_add_sensor_metadata()
+# concurrently. add_metadata() accesses GPS/IMU hardware and is not thread-safe.
+_metadata_write_lock = threading.Lock()
 
 
 def _get_metadata_writer() -> Optional[Callable[[str], None]]:
@@ -218,11 +222,12 @@ def _maybe_add_sensor_metadata(image_path: Optional[str]) -> None:
     writer = _get_metadata_writer()
     if writer is None:
         return
-    try:
-        writer(image_path)
-        print(f"Sensor metadata written: {image_path}")
-    except Exception as exc:
-        print(f"Metadata write failed for {image_path}: {exc}")
+    with _metadata_write_lock:
+        try:
+            writer(image_path)
+            print(f"Sensor metadata written: {image_path}")
+        except Exception as exc:
+            print(f"Metadata write failed for {image_path}: {exc}")
 
 def take_nir_pair(directory: str, pin: LED) -> Tuple[Optional[str], Optional[str], bool]:
     """Two full-resolution stills in one Picamera2 session: ``start()`` → OFF → ON → ``stop()``.
@@ -437,7 +442,7 @@ def photos(images_root: str) -> Tuple[Optional[str], Optional[str], bool, str]:
 
     return nir_off, nir_on, pair_saved, session_dir
 
-def single_press(button):
+def single_press(button: Button) -> None:
     print(f"Button DOWN on pin {button.pin}")
 
     blocked_by_stuck_flir = False
