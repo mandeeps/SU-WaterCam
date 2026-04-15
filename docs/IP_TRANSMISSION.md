@@ -390,7 +390,8 @@ calls — zero overhead for LoRa-only deployments.
    on the server side to receive full-resolution JPG/PGM/CSV files.
 2. **Auth** — if the server gains API key auth, populate `api_key` in config and
    update the server to check `Authorization: Bearer <key>` headers.
-3. **GPS decoder bug (server-side)** — the `04 01` GPS channel decodes
-   `gps_lat_raw` / `gps_lon_raw` instead of float lat/lon.  The server
-   `decode_gps_8b` function in `app/decoders.py` needs investigation — it appears
-   to be reading 3 bytes per coordinate instead of 4.
+3. **GPS decoder bug — fixed (API commit 0a63091)** — `decode_gps_8b` in
+   `API/app/decoders.py` had three bugs: 3-byte slices instead of 4-byte,
+   `signed=False` which corrupted W-hemisphere longitudes, and raw integer
+   field names instead of float degrees.  Fixed and covered by `TestGPSDecoder`
+   in `API/tests/test_ip_transport.py`.
