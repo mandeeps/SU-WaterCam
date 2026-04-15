@@ -137,8 +137,8 @@ class IPTransmitter:
         self.server_url: str = (override_url or cfg.get("server_url", "http://localhost:8000")).rstrip("/")
         self.api_key: str = cfg.get("api_key", "")
         self.device_id: str = override_device_id or cfg.get("device_id", "watercam-001")
-        self.timeout_s: int = _coerce_int(cfg.get("timeout_s"), 15)
-        self.retry_attempts: int = _coerce_int(cfg.get("retry_attempts"), 3)
+        self.timeout_s: int = max(1, _coerce_int(cfg.get("timeout_s"), 15))
+        self.retry_attempts: int = max(1, _coerce_int(cfg.get("retry_attempts"), 3))
         self.retry_backoff_s: float = _coerce_float(cfg.get("retry_backoff_s"), 2.0)
         self.fallback_to_lora: bool = cfg.get("fallback_to_lora", True)
 
@@ -222,6 +222,16 @@ class IPTransmitter:
         except requests.exceptions.RequestException as exc:
             return {"success": False, "command": None, "status_code": None,
                     "error": str(exc)}
+
+        if resp.status_code == 404:
+            # Device not yet registered on the server — treat as "no pending commands"
+            # rather than a transport error, so callers handle it uniformly.
+            return {
+                "success": True,
+                "command": None,
+                "status_code": resp.status_code,
+                "error": None,
+            }
 
         if resp.status_code != 200:
             return {

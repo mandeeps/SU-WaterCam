@@ -1670,6 +1670,11 @@ def ip_downlink_poll_and_apply(lora_init):
         tx.close()
         return {"status": "disabled"}
 
+    if not tx.is_reachable(timeout_s=2):
+        tx.close()
+        print("⚠️ IP downlink poll skipped: server unreachable")
+        return {"status": "unreachable"}
+
     poll_result = tx.poll_downlink()
     tx.close()
 
