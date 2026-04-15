@@ -12,7 +12,6 @@ from typing import Callable, Optional, Tuple
 import subprocess
 import threading
 import time
-import importlib
 import importlib.util
 import sys
 from glob import glob
@@ -148,58 +147,89 @@ _metadata_writer: Optional[Callable[[str], None]] = None
 _metadata_writer_attempted = False
 _metadata_writer_last_attempt_ts: float = 0.0
 _metadata_writer_retry_backoff_sec: float = 30.0
+# Serializes _get_metadata_writer() so concurrent single_press() calls cannot
+# race on the attempted flag, backoff timestamp, or exec_module.
+_metadata_writer_lock = threading.Lock()
 
 
 def _get_metadata_writer() -> Optional[Callable[[str], None]]:
     """Lazily load metadata helper so systems without GPS/IMU deps still run."""
     global _metadata_writer, _metadata_writer_attempted, _metadata_writer_last_attempt_ts
+    # Fast path: writer already loaded — check without acquiring the lock.
     if _metadata_writer is not None:
         return _metadata_writer
 
-    now = time.monotonic()
-    if _metadata_writer_attempted and (now - _metadata_writer_last_attempt_ts) < _metadata_writer_retry_backoff_sec:
-        return None
-    _metadata_writer_last_attempt_ts = now
+    with _metadata_writer_lock:
+        # Re-check under the lock; another thread may have loaded it while we waited.
+        if _metadata_writer is not None:
+            return _metadata_writer
 
-    repo_root = REPO_ROOT
-    metadata_path = path.join(repo_root, "tools", "add_metadata.py")
-    # add_metadata.py itself uses `from tools import bno055_imu` and
-    # `from tools.get_gps import ...`, so repo_root must be on sys.path for
-    # those transitive imports to resolve.  We append (not insert) to avoid
-    # accidentally shadowing stdlib modules.
-    if path.isdir(repo_root) and repo_root not in sys.path:
-        sys.path.append(repo_root)
-    try:
-        last_error: Optional[Exception] = None
+        now = time.monotonic()
+        if _metadata_writer_attempted and (now - _metadata_writer_last_attempt_ts) < _metadata_writer_retry_backoff_sec:
+            return None
+        _metadata_writer_last_attempt_ts = now
+
+        repo_root = REPO_ROOT
+        metadata_path = path.join(repo_root, "tools", "add_metadata.py")
         try:
-            # Use spec_from_file_location so we always load THIS repo's
-            # add_metadata.py by explicit path, regardless of what other
-            # packages named `tools` may exist earlier on sys.path.
-            if not path.isfile(metadata_path):
-                raise FileNotFoundError(f"add_metadata.py not found at {metadata_path}")
-            spec = importlib.util.spec_from_file_location("watercam_add_metadata", metadata_path)
-            if spec is None or spec.loader is None:
-                raise ImportError(f"Could not create module spec for {metadata_path}")
-            metadata_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(metadata_module)  # type: ignore[union-attr]
-            writer = getattr(metadata_module, "add_metadata", None)
-            if callable(writer):
-                _metadata_writer = writer
+            last_error: Optional[Exception] = None
+            try:
+                # Load add_metadata.py by explicit file path so we always get
+                # THIS repo's copy, regardless of what other packages named
+                # `tools` may exist on sys.path.
+                if not path.isfile(metadata_path):
+                    raise FileNotFoundError(f"add_metadata.py not found at {metadata_path}")
+                spec = importlib.util.spec_from_file_location("watercam_add_metadata", metadata_path)
+                if spec is None or spec.loader is None:
+                    raise ImportError(f"Could not create module spec for {metadata_path}")
+                metadata_module = importlib.util.module_from_spec(spec)
+                # add_metadata.py uses `from tools import bno055_imu` and
+                # `from tools.get_gps import ...`.  Temporarily insert repo_root
+                # at the front of sys.path so those transitive imports resolve to
+                # THIS repo's tools/ package, then restore sys.path immediately.
+                _inserted = False
+                if repo_root not in sys.path:
+                    sys.path.insert(0, repo_root)
+                    _inserted = True
+                else:
+                    # Move repo_root to the front so it wins over any earlier
+                    # `tools` package that may have been on the path already.
+                    _orig_idx = sys.path.index(repo_root)
+                    sys.path.insert(0, sys.path.pop(_orig_idx))
+                    _inserted = False  # we'll restore by moving it back
+                try:
+                    spec.loader.exec_module(metadata_module)  # type: ignore[union-attr]
+                finally:
+                    if _inserted:
+                        try:
+                            sys.path.remove(repo_root)
+                        except ValueError:
+                            pass
+                    else:
+                        # Restore repo_root to its original position.
+                        try:
+                            sys.path.remove(repo_root)
+                            sys.path.insert(_orig_idx, repo_root)  # type: ignore[possibly-undefined]
+                        except ValueError:
+                            pass
+                writer = getattr(metadata_module, "add_metadata", None)
+                if callable(writer):
+                    _metadata_writer = writer
+            except Exception as exc:
+                last_error = exc
+            if _metadata_writer is None:
+                if last_error is not None:
+                    # Expected on units without metadata dependencies or sensors.
+                    print(f"Metadata helper unavailable; continuing without metadata: {last_error}")
+                else:
+                    print("Metadata helper found but add_metadata() is missing; continuing without metadata")
         except Exception as exc:
-            last_error = exc
-        if _metadata_writer is None:
-            if last_error is not None:
-                # Expected on units without metadata dependencies or sensors.
-                print(f"Metadata helper unavailable; continuing without metadata: {last_error}")
-            else:
-                print("Metadata helper found but add_metadata() is missing; continuing without metadata")
-    except Exception as exc:
-        print(f"Metadata helper unavailable; continuing without metadata: {exc}")
-    finally:
-        # Mark attempted only after at least one real attempt. If it failed, we still allow
-        # occasional retries (backoff) in case the environment becomes ready later.
-        _metadata_writer_attempted = True
-    return _metadata_writer
+            print(f"Metadata helper unavailable; continuing without metadata: {exc}")
+        finally:
+            # Mark attempted only after at least one real attempt. If it failed, we still allow
+            # occasional retries (backoff) in case the environment becomes ready later.
+            _metadata_writer_attempted = True
+        return _metadata_writer
 
 
 def _maybe_add_sensor_metadata(image_path: Optional[str]) -> None:
