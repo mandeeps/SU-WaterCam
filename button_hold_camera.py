@@ -171,64 +171,43 @@ def _get_metadata_writer() -> Optional[Callable[[str], None]]:
 
         repo_root = REPO_ROOT
         metadata_path = path.join(repo_root, "tools", "add_metadata.py")
+        last_error: Optional[Exception] = None
         try:
-            last_error: Optional[Exception] = None
+            # Load add_metadata.py by explicit file path so we always get
+            # THIS repo's copy, regardless of what other packages named
+            # `tools` may exist on sys.path.
+            if not path.isfile(metadata_path):
+                raise FileNotFoundError(f"add_metadata.py not found at {metadata_path}")
+            spec = importlib.util.spec_from_file_location("watercam_add_metadata", metadata_path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Could not create module spec for {metadata_path}")
+            metadata_module = importlib.util.module_from_spec(spec)
+            # add_metadata.py uses `from tools import bno055_imu` and
+            # `from tools.get_gps import ...`.  Temporarily front repo_root on
+            # sys.path so those transitive imports resolve to THIS repo's tools/
+            # package, then restore sys.path to its exact prior state.
+            _saved_path = list(sys.path)
+            if repo_root not in sys.path or sys.path[0] != repo_root:
+                sys.path.insert(0, repo_root)
             try:
-                # Load add_metadata.py by explicit file path so we always get
-                # THIS repo's copy, regardless of what other packages named
-                # `tools` may exist on sys.path.
-                if not path.isfile(metadata_path):
-                    raise FileNotFoundError(f"add_metadata.py not found at {metadata_path}")
-                spec = importlib.util.spec_from_file_location("watercam_add_metadata", metadata_path)
-                if spec is None or spec.loader is None:
-                    raise ImportError(f"Could not create module spec for {metadata_path}")
-                metadata_module = importlib.util.module_from_spec(spec)
-                # add_metadata.py uses `from tools import bno055_imu` and
-                # `from tools.get_gps import ...`.  Temporarily insert repo_root
-                # at the front of sys.path so those transitive imports resolve to
-                # THIS repo's tools/ package, then restore sys.path immediately.
-                _inserted = False
-                if repo_root not in sys.path:
-                    sys.path.insert(0, repo_root)
-                    _inserted = True
-                else:
-                    # Move repo_root to the front so it wins over any earlier
-                    # `tools` package that may have been on the path already.
-                    _orig_idx = sys.path.index(repo_root)
-                    sys.path.insert(0, sys.path.pop(_orig_idx))
-                    _inserted = False  # we'll restore by moving it back
-                try:
-                    spec.loader.exec_module(metadata_module)  # type: ignore[union-attr]
-                finally:
-                    if _inserted:
-                        try:
-                            sys.path.remove(repo_root)
-                        except ValueError:
-                            pass
-                    else:
-                        # Restore repo_root to its original position.
-                        try:
-                            sys.path.remove(repo_root)
-                            sys.path.insert(_orig_idx, repo_root)  # type: ignore[possibly-undefined]
-                        except ValueError:
-                            pass
-                writer = getattr(metadata_module, "add_metadata", None)
-                if callable(writer):
-                    _metadata_writer = writer
-            except Exception as exc:
-                last_error = exc
-            if _metadata_writer is None:
-                if last_error is not None:
-                    # Expected on units without metadata dependencies or sensors.
-                    print(f"Metadata helper unavailable; continuing without metadata: {last_error}")
-                else:
-                    print("Metadata helper found but add_metadata() is missing; continuing without metadata")
+                spec.loader.exec_module(metadata_module)  # type: ignore[union-attr]
+            finally:
+                sys.path[:] = _saved_path
+            writer = getattr(metadata_module, "add_metadata", None)
+            if callable(writer):
+                _metadata_writer = writer
         except Exception as exc:
-            print(f"Metadata helper unavailable; continuing without metadata: {exc}")
+            last_error = exc
         finally:
             # Mark attempted only after at least one real attempt. If it failed, we still allow
             # occasional retries (backoff) in case the environment becomes ready later.
             _metadata_writer_attempted = True
+        if _metadata_writer is None:
+            if last_error is not None:
+                # Expected on units without metadata dependencies or sensors.
+                print(f"Metadata helper unavailable; continuing without metadata: {last_error}")
+            else:
+                print("Metadata helper found but add_metadata() is missing; continuing without metadata")
         return _metadata_writer
 
 
@@ -245,7 +224,7 @@ def _maybe_add_sensor_metadata(image_path: Optional[str]) -> None:
     except Exception as exc:
         print(f"Metadata write failed for {image_path}: {exc}")
 
-def take_nir_pair(directory: str, pin) -> Tuple[Optional[str], Optional[str], bool]:
+def take_nir_pair(directory: str, pin: LED) -> Tuple[Optional[str], Optional[str], bool]:
     """Two full-resolution stills in one Picamera2 session: ``start()`` → OFF → ON → ``stop()``.
 
     Faster than two ``start_and_capture_file`` calls (benchmark C/D NIR path). Pipeline is idle after
@@ -422,8 +401,7 @@ def photos(images_root: str) -> Tuple[Optional[str], Optional[str], bool, str]:
     """Create one session folder per press; NIR JPEGs and FLIR PGM/CSV all use that same path."""
     date = datetime.now().strftime('%Y%m%d-%H%M%S')
     session_dir = path.join(images_root, date)
-    if not path.exists(session_dir):
-        makedirs(session_dir)
+    makedirs(session_dir, exist_ok=True)
 
     if nir_control_led is None:
         print("NIR control LED not initialized; skipping NIR pair, running FLIR only")
