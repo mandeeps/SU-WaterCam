@@ -1520,7 +1520,10 @@ def ip_uplink_transmit(bitmap, sensor_tracker):
         print("📡 IP uplink disabled (ip_upload.enabled=false) — skipping")
         return {"status": "disabled", "success": False}
 
-    if not tx.is_reachable():
+    # Use a short timeout for the reachability probe — this runs on every wake
+    # cycle and a full timeout_s (default 15 s) would add significant dead time
+    # when the server is down.
+    if not tx.is_reachable(timeout_s=5):
         print(f"⚠️ IP uplink: server unreachable at {tx.server_url}")
         return {"status": "unreachable", "success": False}
 

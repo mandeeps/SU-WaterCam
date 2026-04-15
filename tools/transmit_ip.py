@@ -61,6 +61,22 @@ _DEFAULT_CONFIG_PATH = os.path.join(
 )
 
 
+def _coerce_int(value: Any, default: int) -> int:
+    """Return ``int(value)`` or ``default`` if value is missing/invalid."""
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    """Return ``float(value)`` or ``default`` if value is missing/invalid."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def _load_ip_config(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
     """Load and return the ip_upload section from runtime_config.json.
 
@@ -71,8 +87,9 @@ def _load_ip_config(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
     try:
         with open(config_path) as f:
             cfg = json.load(f)
-    except FileNotFoundError:
-        logger.debug("runtime_config.json not found at %s; using defaults", config_path)
+    except OSError as exc:
+        # Covers FileNotFoundError, PermissionError, and other I/O failures.
+        logger.debug("Cannot read config at %s (%s); using defaults", config_path, exc)
         return {}
     except json.JSONDecodeError as exc:
         logger.warning("Invalid JSON in %s: %s; using defaults", config_path, exc)
@@ -116,9 +133,9 @@ class IPTransmitter:
         self.server_url: str = (override_url or cfg.get("server_url", "http://localhost:8000")).rstrip("/")
         self.api_key: str = cfg.get("api_key", "")
         self.device_id: str = override_device_id or cfg.get("device_id", "watercam-001")
-        self.timeout_s: int = int(cfg.get("timeout_s", 15))
-        self.retry_attempts: int = int(cfg.get("retry_attempts", 3))
-        self.retry_backoff_s: float = float(cfg.get("retry_backoff_s", 2))
+        self.timeout_s: int = _coerce_int(cfg.get("timeout_s"), 15)
+        self.retry_attempts: int = _coerce_int(cfg.get("retry_attempts"), 3)
+        self.retry_backoff_s: float = _coerce_float(cfg.get("retry_backoff_s"), 2.0)
         self.fallback_to_lora: bool = cfg.get("fallback_to_lora", True)
 
         self._session = requests.Session()
@@ -241,6 +258,10 @@ class IPTransmitter:
         except requests.exceptions.RequestException:
             return False
 
+    def close(self) -> None:
+        """Close the underlying requests.Session and release pooled connections."""
+        self._session.close()
+
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #
     # ------------------------------------------------------------------ #
@@ -343,15 +364,21 @@ def send_uplink(
     device_ts: Optional[int] = None,
     config_path: str = _DEFAULT_CONFIG_PATH,
 ) -> Dict[str, Any]:
-    """Module-level wrapper: create a transmitter and send one uplink."""
+    """Module-level wrapper: create a transmitter, send one uplink, then close."""
     tx = IPTransmitter(config_path=config_path)
-    return tx.send_uplink(channels, device_ts=device_ts)
+    try:
+        return tx.send_uplink(channels, device_ts=device_ts)
+    finally:
+        tx.close()
 
 
 def poll_downlink(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
-    """Module-level wrapper: create a transmitter and poll for one downlink."""
+    """Module-level wrapper: create a transmitter, poll for one downlink, then close."""
     tx = IPTransmitter(config_path=config_path)
-    return tx.poll_downlink()
+    try:
+        return tx.poll_downlink()
+    finally:
+        tx.close()
 
 
 # ------------------------------------------------------------------ #
