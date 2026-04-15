@@ -2,11 +2,25 @@
 # embed GPS/IMU data into image EXIF
 # Takes image path as parameter
 
+import json
+import os
 import time
 from fractions import Fraction
 import piexif
 import piexif.helper
 from libxmp import XMPFiles, consts
+
+_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "runtime_config.json")
+
+
+def _read_device_id(config_path: str = _CONFIG_PATH) -> str:
+    """Return the device_id from runtime_config.json, or '' if unavailable."""
+    try:
+        with open(config_path) as f:
+            cfg = json.load(f)
+        return cfg.get("ip_upload", {}).get("device_id", "")
+    except Exception:
+        return ""
 
 try:
     from tools import bno055_imu
@@ -76,23 +90,37 @@ def add_metadata(image):
         with open(DATA, 'a', encoding="utf8") as data:
             for line in imu:
                 data.writelines(line)
-        
+
         yaw, roll, pitch = imu_values['Euler']
 
     # Start exif handling
     # load original exif data
     exif_data = piexif.load(image)
+
+    # Embed unit ID in EXIF BodySerialNumber (tag 0xA431)
+    device_id = _read_device_id()
+    if device_id:
+        exif_data["Exif"][piexif.ExifIFD.BodySerialNumber] = device_id.encode()
+
     # Add roll/pitch/yaw to UserComment tag if they exist
     if roll is not None:
         user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
         exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
-        
-        # Write roll/pitch/yaw to XMP tags for Pix4D
+
+    # Write XMP tags for Pix4D: unit ID always, orientation when available
+    xmp_props: dict = {}
+    if device_id:
+        xmp_props["DeviceID"] = device_id
+    if roll is not None:
+        xmp_props["Roll"] = str(roll)
+        xmp_props["Pitch"] = str(pitch)
+        xmp_props["Yaw"] = str(yaw)
+
+    if xmp_props:
         xmpfile = XMPFiles(file_path=image, open_forupdate=True)
         xmp = xmpfile.get_xmp()
-        xmp.set_property(consts.XMP_NS_DC, 'Roll', str(roll))
-        xmp.set_property(consts.XMP_NS_DC, 'Pitch', str(pitch))
-        xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
+        for prop, val in xmp_props.items():
+            xmp.set_property(consts.XMP_NS_DC, prop, val)
         xmpfile.put_xmp(xmp)
         xmpfile.close_file()
 
