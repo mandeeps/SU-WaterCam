@@ -1518,6 +1518,7 @@ def ip_uplink_transmit(bitmap, sensor_tracker):
 
     if not tx.enabled:
         print("📡 IP uplink disabled (ip_upload.enabled=false) — skipping")
+        tx.close()
         return {"status": "disabled", "success": False}
 
     # Use a short timeout for the reachability probe — this runs on every wake
@@ -1525,16 +1526,13 @@ def ip_uplink_transmit(bitmap, sensor_tracker):
     # when the server is down.
     if not tx.is_reachable(timeout_s=5):
         print(f"⚠️ IP uplink: server unreachable at {tx.server_url}")
+        tx.close()
         return {"status": "unreachable", "success": False}
 
     # ── Collect sensor data ────────────────────────────────────────────────────
+    # IMU orientation is not transmitted (no 03 01 channel encoded below);
+    # do not read it here to avoid unnecessary hardware I/O and failure points.
     data = {}
-
-    try:
-        from tools.bno055_imu import get_orientation
-        data.update(get_orientation())
-    except Exception as e:
-        print(f"⚠️ IP uplink: IMU unavailable: {e}")
 
     try:
         from tools.aht20_temperature import get_aht20
@@ -1631,6 +1629,7 @@ def ip_uplink_transmit(bitmap, sensor_tracker):
 
     # ── Transmit ───────────────────────────────────────────────────────────────
     result = tx.send_uplink(channels, device_ts=ts_now)
+    tx.close()
 
     if result["success"]:
         print(f"✅ IP uplink OK: {len(channels)} channels sent "
@@ -1668,9 +1667,11 @@ def ip_downlink_poll_and_apply(lora_init):
     tx = IPTransmitter()
 
     if not tx.enabled:
+        tx.close()
         return {"status": "disabled"}
 
     poll_result = tx.poll_downlink()
+    tx.close()
 
     if not poll_result["success"]:
         print(f"⚠️ IP downlink poll failed: {poll_result.get('error')}")

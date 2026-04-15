@@ -97,7 +97,11 @@ def _load_ip_config(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
     if not isinstance(cfg, dict):
         logger.warning("Unexpected config format in %s; using defaults", config_path)
         return {}
-    return cfg.get("ip_upload", {})
+    ip_cfg = cfg.get("ip_upload", {})
+    if not isinstance(ip_cfg, dict):
+        logger.warning("ip_upload in %s is not an object; using defaults", config_path)
+        return {}
+    return ip_cfg
 
 
 class IPTransmitter:

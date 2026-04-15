@@ -112,6 +112,12 @@ class TestIPUplink(unittest.TestCase):
             )
         print(f"\nServer: {cls.tx.server_url}  Device: {cls.tx.device_id}")
 
+    @classmethod
+    def tearDownClass(cls):
+        if getattr(cls, "tx", None) is not None:
+            cls.tx.close()
+            cls.tx = None
+
     def test_01_minimal_uplink_battery_and_temperature(self):
         """Simplest valid uplink: battery + temperature."""
         ts = int(time.time())
@@ -228,6 +234,12 @@ class TestIPDownlink(unittest.TestCase):
                 f"Server not reachable at {cls.tx.server_url} — start the API first."
             )
 
+    @classmethod
+    def tearDownClass(cls):
+        if getattr(cls, "tx", None) is not None:
+            cls.tx.close()
+            cls.tx = None
+
     def test_01_poll_returns_valid_structure(self):
         """Polling with no pending command returns a well-formed response."""
         result = self.tx.poll_downlink()
@@ -251,7 +263,10 @@ class TestIPDownlink(unittest.TestCase):
             override_url=self.tx.server_url,
             override_device_id="__nonexistent_test_device__",
         )
-        result = tx2.poll_downlink()
+        try:
+            result = tx2.poll_downlink()
+        finally:
+            tx2.close()
         # May return 200 {"command": null} or 404 depending on API version
         self.assertIn(result["status_code"], (200, 404))
         self.assertIsNone(result.get("command"))
@@ -263,7 +278,10 @@ class TestIPReachability(unittest.TestCase):
     def test_is_reachable_live_server(self):
         """is_reachable() should return True when server is up."""
         tx = _make_transmitter()
-        reachable = tx.is_reachable()
+        try:
+            reachable = tx.is_reachable()
+        finally:
+            tx.close()
         if not reachable:
             self.skipTest(f"Server not reachable at {tx.server_url}")
         self.assertTrue(reachable)
@@ -271,7 +289,11 @@ class TestIPReachability(unittest.TestCase):
     def test_is_reachable_bad_url(self):
         """is_reachable() should return False for a definitely-wrong URL."""
         tx = IPTransmitter(override_url="http://127.0.0.1:19999")
-        self.assertFalse(tx.is_reachable())
+        try:
+            result = tx.is_reachable()
+        finally:
+            tx.close()
+        self.assertFalse(result)
 
 
 # ---------------------------------------------------------------------------

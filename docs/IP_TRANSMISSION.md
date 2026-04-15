@@ -326,8 +326,10 @@ Two `@SQify` functions have been added to `ticktalk_main.py`:
 
 ### `ip_uplink_transmit(bitmap, sensor_tracker)` (line ~1496)
 
-Collects the same sensor data as `lora_token_with_tracker`, encodes it as
-channel-coded hex, and POSTs to `/ip/uplink`.  Called from `ttmain` immediately
+Collects a subset of sensor data (AHT20 temperature/humidity, GPS, WittyPi
+battery, flood bitmap, flood detect flag, and runtime threshold parameters),
+encodes it as channel-coded hex, and POSTs to `/ip/uplink`.  IMU orientation
+is intentionally omitted (no `03 01` channel).  Called from `ttmain` immediately
 after `lora_return`:
 
 ```python
