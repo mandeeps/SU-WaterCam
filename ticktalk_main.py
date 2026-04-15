@@ -1494,7 +1494,7 @@ def log_sensor_tracking_stats(sensor_tracker):
         return {'status': 'error', 'error': str(e)}
 
 @SQify
-def ip_uplink_transmit(bitmap, sensor_tracker):
+def ip_uplink_transmit(bitmap, _sensor_tracker):
     """Send a subset of sensor readings and the flood bitmap to the FastAPI server over IP.
 
     Encodes the following channels as channel-coded hex blocks and POSTs to
@@ -1600,11 +1600,11 @@ def ip_uplink_transmit(bitmap, sensor_tracker):
             except struct.error as e:
                 print(f"⚠️ IP uplink: temperature encoding error (temp={temp}): {e}")
 
-        # 06 01 — humidity (uint8)
+        # 06 01 — humidity (uint8, 0–100 %)
         hum = data.get('relative_humidity')
         if hum is not None:
             channels.append({"code": "06 01",
-                             "payload_hex": struct.pack(">B", max(0, min(255, int(hum)))).hex()})
+                             "payload_hex": struct.pack(">B", max(0, min(100, int(round(hum))))).hex()})
 
         # 07 17 — flood detect (inferred from bitmap content)
         flood_detected = bool(bitmap and any(b != 0 for b in bitmap))
@@ -1654,7 +1654,7 @@ def ip_uplink_transmit(bitmap, sensor_tracker):
 
 
 @SQify
-def ip_downlink_poll_and_apply(lora_init):
+def ip_downlink_poll_and_apply(_lora_init):
     """Poll /ip/downlink/{device_id} for queued server commands and apply them.
 
     The server queues parameter-update commands when a human operator (or weather
@@ -1695,7 +1695,15 @@ def ip_downlink_poll_and_apply(lora_init):
 
     print(f"📬 IP downlink: received command (queue_id={cmd.get('queue_id')})")
 
-    parts = cmd.get("parts") or []
+    parts_raw = cmd.get("parts")
+    if parts_raw is None:
+        parts = []
+    elif isinstance(parts_raw, list):
+        parts = parts_raw
+    else:
+        print(f"⚠️ IP downlink: malformed parts field "
+              f"(expected list, got {type(parts_raw).__name__}) — treating as empty")
+        parts = []
     applied = []
 
     # Index-based lookup tables — must match server app/encoders.py constants
@@ -1719,6 +1727,13 @@ def ip_downlink_poll_and_apply(lora_init):
             payload_bytes = bytes.fromhex(payload_hex)
         except (TypeError, ValueError):
             print(f"⚠️ IP downlink: bad payload_hex in part {part} — skipping")
+            continue
+
+        # Validate payload width before decoding to avoid silent misinterpretation
+        _expected_len = {"10 90": 1, "11 91": 2, "12 92": 1, "13 93": 1, "14 94": 1}
+        if code in _expected_len and len(payload_bytes) != _expected_len[code]:
+            print(f"⚠️ IP downlink: wrong payload length for {code} "
+                  f"(expected {_expected_len[code]}, got {len(payload_bytes)}) — skipping")
             continue
 
         if code == "10 90":  # area_threshold_pct — direct u8 value
