@@ -13,6 +13,7 @@ import subprocess
 import threading
 import time
 import importlib
+import importlib.util
 import sys
 from glob import glob
 from signal import pause
@@ -161,14 +162,26 @@ def _get_metadata_writer() -> Optional[Callable[[str], None]]:
     _metadata_writer_last_attempt_ts = now
 
     repo_root = REPO_ROOT
-    # `import tools.add_metadata` requires the repo root on sys.path.
-    # Append rather than insert(0) to avoid shadowing stdlib modules.
+    metadata_path = path.join(repo_root, "tools", "add_metadata.py")
+    # add_metadata.py itself uses `from tools import bno055_imu` and
+    # `from tools.get_gps import ...`, so repo_root must be on sys.path for
+    # those transitive imports to resolve.  We append (not insert) to avoid
+    # accidentally shadowing stdlib modules.
     if path.isdir(repo_root) and repo_root not in sys.path:
         sys.path.append(repo_root)
     try:
         last_error: Optional[Exception] = None
         try:
-            metadata_module = importlib.import_module("tools.add_metadata")
+            # Use spec_from_file_location so we always load THIS repo's
+            # add_metadata.py by explicit path, regardless of what other
+            # packages named `tools` may exist earlier on sys.path.
+            if not path.isfile(metadata_path):
+                raise FileNotFoundError(f"add_metadata.py not found at {metadata_path}")
+            spec = importlib.util.spec_from_file_location("watercam_add_metadata", metadata_path)
+            if spec is None or spec.loader is None:
+                raise ImportError(f"Could not create module spec for {metadata_path}")
+            metadata_module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(metadata_module)  # type: ignore[union-attr]
             writer = getattr(metadata_module, "add_metadata", None)
             if callable(writer):
                 _metadata_writer = writer
