@@ -395,6 +395,162 @@ def poll_downlink(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
         tx.close()
 
 
+def apply_downlink_command(
+    cmd: Dict[str, Any],
+    set_param_fn=None,
+) -> Dict[str, Any]:
+    """Decode a downlink command dict and apply each recognised parameter change.
+
+    This is the standalone-tools counterpart to the TickTalkPython
+    ``ip_downlink_poll_and_apply`` action in ``ticktalk_main.py``.  It contains
+    no TickTalkPython dependencies and can be called from tests, CLI scripts, or
+    any future integration layer.
+
+    Parameters
+    ----------
+    cmd:
+        The dict at ``poll_downlink()["command"]``.  Must have a ``"parts"``
+        field — a list of ``{"code": str, "payload_hex": str}`` dicts.
+    set_param_fn:
+        ``Callable[[str, Any], None]`` used to persist each change.  Defaults
+        to ``tools.lora_runtime_integration.set_parameter``.  Pass a custom
+        function in tests to avoid touching the real runtime config.
+
+    Returns
+    -------
+    dict with keys:
+        "applied" : list[str] — "param=value" strings for each change applied
+        "skipped" : list[str] — codes that were unrecognised or had bad payloads
+        "queue_id": the queue_id from cmd, or None
+    """
+    if set_param_fn is None:
+        from tools.lora_runtime_integration import set_parameter as set_param_fn  # type: ignore[assignment]
+
+    # Index-based lookup tables — must match server app/encoders.py constants.
+    _MF_HOURS = [1, 3, 6, 24, 72]       # monitoring_freq_h allowed values
+    _EF_MIN   = [2, 5, 10]              # emergency_freq_min allowed values
+    _FF_MIN   = [10, 20, 30, 40, 50, 60]  # flood_code_freq_min allowed values
+
+    # Expected payload byte-lengths for fixed-width codes (variable-width codes
+    # are absent from this dict and accepted at any non-zero length).
+    _expected_len: Dict[str, int] = {
+        "10 90": 1,
+        "11 91": 2,
+        "12 92": 1,
+        "13 93": 1,
+        "14 94": 1,
+    }
+
+    parts_raw = cmd.get("parts")
+    if parts_raw is None:
+        parts: list = []
+    elif isinstance(parts_raw, list):
+        parts = parts_raw
+    else:
+        logger.warning(
+            "apply_downlink_command: malformed parts field "
+            "(expected list, got %s) — treating as empty",
+            type(parts_raw).__name__,
+        )
+        parts = []
+
+    applied: List[str] = []
+    skipped: List[str] = []
+
+    for part in parts:
+        if not isinstance(part, dict):
+            logger.warning(
+                "apply_downlink_command: malformed part (expected dict, got %s) — skipping",
+                type(part).__name__,
+            )
+            skipped.append(repr(part))
+            continue
+
+        code_raw = part.get("code", "")
+        payload_hex = part.get("payload_hex", "")
+        if not isinstance(code_raw, str) or not isinstance(payload_hex, str):
+            logger.warning(
+                "apply_downlink_command: non-string code or payload_hex in part %s — skipping",
+                part,
+            )
+            skipped.append(str(code_raw))
+            continue
+        code = code_raw.strip()
+
+        try:
+            payload_bytes = bytes.fromhex(payload_hex)
+        except (TypeError, ValueError):
+            logger.warning(
+                "apply_downlink_command: bad payload_hex in part %s — skipping", part
+            )
+            skipped.append(code)
+            continue
+
+        if code in _expected_len and len(payload_bytes) != _expected_len[code]:
+            logger.warning(
+                "apply_downlink_command: wrong payload length for %s "
+                "(expected %d, got %d) — skipping",
+                code, _expected_len[code], len(payload_bytes),
+            )
+            skipped.append(code)
+            continue
+
+        if code == "10 90":  # area_threshold_pct — direct u8 value
+            val = int.from_bytes(payload_bytes, "big")
+            set_param_fn("area_threshold", val)
+            logger.info("Applied: area_threshold = %d%%", val)
+            applied.append(f"area_threshold={val}%")
+
+        elif code == "11 91":  # stage_threshold_cm — u16 big-endian
+            val_cm = int.from_bytes(payload_bytes, "big")
+            set_param_fn("stage_threshold", val_cm)
+            logger.info("Applied: stage_threshold = %dcm", val_cm)
+            applied.append(f"stage_threshold={val_cm}cm")
+
+        elif code == "12 92":  # monitoring_freq_h — u8 index into _MF_HOURS
+            idx = int.from_bytes(payload_bytes, "big")
+            if 0 <= idx < len(_MF_HOURS):
+                hours = _MF_HOURS[idx]
+                set_param_fn("monitoring_frequency", hours * 60)  # stored in minutes
+                logger.info("Applied: monitoring_frequency = %dh (%dmin)", hours, hours * 60)
+                applied.append(f"monitoring_frequency={hours}h")
+            else:
+                logger.warning("apply_downlink_command: monitoring_freq index %d out of range", idx)
+                skipped.append(code)
+
+        elif code == "13 93":  # emergency_freq_min — u8 index into _EF_MIN
+            idx = int.from_bytes(payload_bytes, "big")
+            if 0 <= idx < len(_EF_MIN):
+                mins = _EF_MIN[idx]
+                set_param_fn("emergency_frequency", mins)
+                logger.info("Applied: emergency_frequency = %dmin", mins)
+                applied.append(f"emergency_frequency={mins}min")
+            else:
+                logger.warning("apply_downlink_command: emergency_freq index %d out of range", idx)
+                skipped.append(code)
+
+        elif code == "14 94":  # flood_code_freq_min — u8 index into _FF_MIN
+            idx = int.from_bytes(payload_bytes, "big")
+            if 0 <= idx < len(_FF_MIN):
+                mins = _FF_MIN[idx]
+                set_param_fn("neighborhood_emergency_frequency", mins)
+                logger.info("Applied: neighborhood_emergency_frequency = %dmin", mins)
+                applied.append(f"neighborhood_emergency_frequency={mins}min")
+            else:
+                logger.warning("apply_downlink_command: flood_code_freq index %d out of range", idx)
+                skipped.append(code)
+
+        else:
+            logger.warning("apply_downlink_command: unrecognised code '%s' — ignoring", code)
+            skipped.append(code)
+
+    return {
+        "applied": applied,
+        "skipped": skipped,
+        "queue_id": cmd.get("queue_id"),
+    }
+
+
 # ------------------------------------------------------------------ #
 # Internal util                                                        #
 # ------------------------------------------------------------------ #
