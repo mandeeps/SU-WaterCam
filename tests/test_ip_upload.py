@@ -106,8 +106,11 @@ class TestIPUplink(unittest.TestCase):
         # server is not running — the full timeout_s (default 15 s) would add
         # significant delay per test class before the skip is issued.
         if not cls.tx.is_reachable(timeout_s=3):
+            server_url = cls.tx.server_url
+            cls.tx.close()
+            cls.tx = None
             raise unittest.SkipTest(
-                f"Server not reachable at {cls.tx.server_url} — start the API first "
+                f"Server not reachable at {server_url} — start the API first "
                 "or set WATERCAM_SERVER_URL to point at a running instance."
             )
         print(f"\nServer: {cls.tx.server_url}  Device: {cls.tx.device_id}")
@@ -230,8 +233,11 @@ class TestIPDownlink(unittest.TestCase):
     def setUpClass(cls):
         cls.tx = _make_transmitter()
         if not cls.tx.is_reachable(timeout_s=3):
+            server_url = cls.tx.server_url
+            cls.tx.close()
+            cls.tx = None
             raise unittest.SkipTest(
-                f"Server not reachable at {cls.tx.server_url} — start the API first."
+                f"Server not reachable at {server_url} — start the API first."
             )
 
     @classmethod

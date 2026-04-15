@@ -1503,8 +1503,8 @@ def ip_uplink_transmit(bitmap, sensor_tracker):
     status-report parameters.  IMU data is not included.
 
     Disabled by default — set ip_upload.enabled=true in runtime_config.json to
-    activate.  Runs in parallel with the LoRa path; neither path depends on the
-    other completing first.
+    activate.  Runs after the LoRa path in the wake cycle; both paths share the
+    same sensor snapshot but neither affects the other's outcome.
 
     Returns a status dict (never raises) so a failure here never stops the main
     workflow.
@@ -1704,12 +1704,20 @@ def ip_downlink_poll_and_apply(lora_init):
     _FF_MIN   = [10, 20, 30, 40, 50, 60]  # flood_code_freq_min allowed values
 
     for part in parts:
-        code        = part.get("code", "").strip()
+        if not isinstance(part, dict):
+            print(f"⚠️ IP downlink: malformed part (expected dict, got {type(part).__name__}) — skipping")
+            continue
+
+        code_raw = part.get("code", "")
         payload_hex = part.get("payload_hex", "")
+        if not isinstance(code_raw, str) or not isinstance(payload_hex, str):
+            print(f"⚠️ IP downlink: non-string code or payload_hex in part {part} — skipping")
+            continue
+        code = code_raw.strip()
 
         try:
             payload_bytes = bytes.fromhex(payload_hex)
-        except ValueError:
+        except (TypeError, ValueError):
             print(f"⚠️ IP downlink: bad payload_hex in part {part} — skipping")
             continue
 
@@ -1824,10 +1832,9 @@ def ttmain(trigger):
         # Use sensor tracker for intelligent LoRa transmission
         lora_return = lora_token_with_tracker(bitmap, sensor_tracker)
 
-        # Parallel IP uplink — sends the same sensor data + bitmap to the
-        # FastAPI server over WiFi/cellular.  No-ops silently when disabled.
-        # Runs concurrently with the LoRa path; LoRa failure does not affect
-        # IP and vice versa.
+        # IP uplink — sends the same sensor snapshot + bitmap to the FastAPI
+        # server over WiFi/cellular.  Runs sequentially after lora_return.
+        # No-ops silently when disabled; a failure here does not affect LoRa.
         ip_return = ip_uplink_transmit(bitmap, sensor_tracker)
 
         # Shutdown check at GRAPH level

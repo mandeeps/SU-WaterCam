@@ -37,7 +37,7 @@ Codes used by this device (from API CHANNEL_REGISTRY):
     "07 27"  camera_new_local_max (4 bytes, bool as uint32)
     "08 18"  camera_flood_bitmap  (variable length, raw bitmap bytes as hex string)
     "09 19"  sr_area_threshold_pct        (4 bytes)
-    "09 29"  sr_stage_threshold_pct       (4 bytes)
+    "09 29"  sr_stage_threshold_cm        (4 bytes)
     "09 39"  sr_monitoring_frequency      (4 bytes)
     "09 49"  sr_emergency_frequency       (4 bytes)
     "09 59"  sr_neighborhood_emerg_freq   (4 bytes)

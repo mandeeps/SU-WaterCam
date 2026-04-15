@@ -175,7 +175,7 @@ The server's `CHANNEL_REGISTRY` maps 2-byte codes to sensor fields.  The
 | `07 27` | `camera_new_local_max` | 4 | uint32 bool |
 | `08 18` | `camera_flood_bitmap` | variable | raw bitmap bytes |
 | `09 19` | `sr_area_threshold_pct` | 4 | uint32 |
-| `09 29` | `sr_stage_threshold_pct` | 4 | uint32 |
+| `09 29` | `sr_stage_threshold_cm` | 4 | uint32 (cm) |
 | `09 39` | `sr_monitoring_frequency` | 4 | uint32 |
 | `09 49` | `sr_emergency_frequency` | 4 | uint32 |
 | `09 59` | `sr_neighborhood_emerg_freq` | 4 | uint32 |
