@@ -1,6 +1,6 @@
 # IP Transmission — WaterCam over WiFi/Cellular
 
-**Status:** Client-side implementation complete (standalone). TickTalkPython integration pending.  
+**Status:** Complete — standalone client and TickTalkPython integration both implemented.  
 **Branch:** `CellTransmit`  
 **Last updated:** 2026-04-14
 
@@ -49,8 +49,7 @@ Add or edit the `ip_upload` block:
   "timeout_s": 15,
   "retry_attempts": 3,
   "retry_backoff_s": 2,
-  "fallback_to_lora": true,
-  "downlink_poll_interval_s": 60
+  "fallback_to_lora": true
 }
 ```
 
@@ -62,9 +61,8 @@ Add or edit the `ip_upload` block:
 | `device_id` | str | Logical device identifier used for all uplinks and downlink polling. Must be unique per deployment. |
 | `timeout_s` | int | Per-request timeout in seconds. |
 | `retry_attempts` | int | Max POST attempts before giving up (backoff between attempts). |
-| `retry_backoff_s` | float | Base sleep between retries. Attempt N waits `N * retry_backoff_s` seconds. |
+| `retry_backoff_s` | float | Base sleep between retries. Before attempt N, waits `retry_backoff_s * 2^(N-1)` seconds (exponential backoff). |
 | `fallback_to_lora` | bool | Intent flag for the TickTalkPython integration layer: if IP fails, fall back to LoRa. Not enforced by `transmit_ip.py` itself. |
-| `downlink_poll_interval_s` | int | How often the device should poll for queued commands. |
 
 ---
 

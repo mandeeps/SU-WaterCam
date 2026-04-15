@@ -102,7 +102,10 @@ class TestIPUplink(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tx = _make_transmitter()
-        if not cls.tx.is_reachable():
+        # Use a short timeout for the health check so CI skips quickly when the
+        # server is not running — the full timeout_s (default 15 s) would add
+        # significant delay per test class before the skip is issued.
+        if not cls.tx.is_reachable(timeout_s=3):
             raise unittest.SkipTest(
                 f"Server not reachable at {cls.tx.server_url} — start the API first "
                 "or set WATERCAM_SERVER_URL to point at a running instance."
@@ -220,7 +223,7 @@ class TestIPDownlink(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.tx = _make_transmitter()
-        if not cls.tx.is_reachable():
+        if not cls.tx.is_reachable(timeout_s=3):
             raise unittest.SkipTest(
                 f"Server not reachable at {cls.tx.server_url} — start the API first."
             )

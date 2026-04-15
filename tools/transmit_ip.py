@@ -8,8 +8,9 @@ Usage (module)
 --------------
     from tools.transmit_ip import IPTransmitter
     tx = IPTransmitter()                  # reads runtime_config.json
-    result = tx.send_uplink(channels)     # list of {"code": "...", "payload_hex": "..."}
-    cmd    = tx.poll_downlink()           # returns command dict or None
+    result = tx.send_uplink(channels)     # {"success": bool, "status_code": int|None, ...}
+    reply  = tx.poll_downlink()           # {"success": bool, "status_code": int|None, "command": dict|None, ...}
+    cmd    = reply["command"]             # dict or None
 
 Usage (CLI smoke-test)
 ----------------------
@@ -61,9 +62,24 @@ _DEFAULT_CONFIG_PATH = os.path.join(
 
 
 def _load_ip_config(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
-    """Load and return the ip_upload section from runtime_config.json."""
-    with open(config_path) as f:
-        cfg = json.load(f)
+    """Load and return the ip_upload section from runtime_config.json.
+
+    Returns an empty dict (all defaults) if the file is missing or contains
+    invalid JSON — runtime_config.json is gitignored and may not exist in fresh
+    dev or CI environments.
+    """
+    try:
+        with open(config_path) as f:
+            cfg = json.load(f)
+    except FileNotFoundError:
+        logger.debug("runtime_config.json not found at %s; using defaults", config_path)
+        return {}
+    except json.JSONDecodeError as exc:
+        logger.warning("Invalid JSON in %s: %s; using defaults", config_path, exc)
+        return {}
+    if not isinstance(cfg, dict):
+        logger.warning("Unexpected config format in %s; using defaults", config_path)
+        return {}
     return cfg.get("ip_upload", {})
 
 
@@ -78,6 +94,14 @@ class IPTransmitter:
         If provided, overrides the server_url from config (useful in tests).
     override_device_id:
         If provided, overrides the device_id from config.
+
+    Notes
+    -----
+    ``self.enabled`` reflects the ``ip_upload.enabled`` config flag, but
+    ``send_uplink()`` and ``poll_downlink()`` do **not** check it internally —
+    the flag is an integration-layer concern enforced by ``ticktalk_main.py``.
+    Direct callers (tests, CLI smoke-test) are responsible for checking
+    ``tx.enabled`` themselves if they want to respect the flag.
     """
 
     def __init__(
@@ -96,7 +120,6 @@ class IPTransmitter:
         self.retry_attempts: int = int(cfg.get("retry_attempts", 3))
         self.retry_backoff_s: float = float(cfg.get("retry_backoff_s", 2))
         self.fallback_to_lora: bool = cfg.get("fallback_to_lora", True)
-        self.downlink_poll_interval_s: int = int(cfg.get("downlink_poll_interval_s", 60))
 
         self._session = requests.Session()
         if self.api_key:
@@ -201,12 +224,19 @@ class IPTransmitter:
             "error": None,
         }
 
-    def is_reachable(self) -> bool:
-        """Quick check — returns True if the server /health endpoint responds."""
+    def is_reachable(self, timeout_s: Optional[float] = None) -> bool:
+        """Quick check — returns True if the server /health endpoint responds.
+
+        Parameters
+        ----------
+        timeout_s:
+            Override the instance timeout for this call only.  Pass a small
+            value (e.g. 3) in CI/test contexts to fail fast when the server
+            is not running.
+        """
+        t = timeout_s if timeout_s is not None else self.timeout_s
         try:
-            resp = self._session.get(
-                f"{self.server_url}/health", timeout=self.timeout_s
-            )
+            resp = self._session.get(f"{self.server_url}/health", timeout=t)
             return resp.status_code == 200
         except requests.exceptions.RequestException:
             return False
@@ -218,7 +248,12 @@ class IPTransmitter:
     def _post_with_retry(
         self, url: str, payload: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """POST payload to url with exponential-ish backoff retry."""
+        """POST payload to url with exponential backoff retry.
+
+        Sleep before retry N is ``retry_backoff_s * 2^(N-1)`` seconds, so for
+        the default ``retry_backoff_s=2`` and ``retry_attempts=3``:
+        attempt 1 → immediate, attempt 2 → 2 s, attempt 3 → 4 s.
+        """
         last_error: str = "unknown error"
         last_status: Optional[int] = None
 
@@ -284,7 +319,7 @@ class IPTransmitter:
                 )
 
             if attempt < self.retry_attempts:
-                sleep_s = self.retry_backoff_s * attempt
+                sleep_s = self.retry_backoff_s * (2 ** (attempt - 1))
                 logger.debug("Waiting %.1fs before retry %d", sleep_s, attempt + 1)
                 time.sleep(sleep_s)
 

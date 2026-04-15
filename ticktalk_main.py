@@ -1495,15 +1495,16 @@ def log_sensor_tracking_stats(sensor_tracker):
 
 @SQify
 def ip_uplink_transmit(bitmap, sensor_tracker):
-    """Send sensor readings and flood bitmap to the FastAPI server over IP (WiFi/cellular).
+    """Send a subset of sensor readings and the flood bitmap to the FastAPI server over IP.
 
-    Collects the same sensor data as lora_token_with_tracker, encodes it as
-    channel-coded hex blocks (same format the API already understands for LoRa
-    uplinks), and POSTs to /ip/uplink.
+    Encodes the following channels as channel-coded hex blocks and POSTs to
+    /ip/uplink: device_ts, battery_pct (from WittyPi), GPS lat/lon, temperature,
+    humidity, flood_detect (inferred from bitmap), flood_bitmap, and the five
+    status-report parameters.  IMU data is not included.
 
     Disabled by default — set ip_upload.enabled=true in runtime_config.json to
-    activate.  When fallback_to_lora=true and IP fails, the data has already been
-    sent via LoRa so nothing is lost.
+    activate.  Runs in parallel with the LoRa path; neither path depends on the
+    other completing first.
 
     Returns a status dict (never raises) so a failure here never stops the main
     workflow.
@@ -1635,7 +1636,7 @@ def ip_uplink_transmit(bitmap, sensor_tracker):
         print(f"⚠️ IP uplink failed after {result.get('attempts', '?')} attempt(s): "
               f"{result.get('error', 'unknown error')}")
         if tx.fallback_to_lora:
-            print("📡 LoRa fallback is enabled — data already sent via LoRa path")
+            print("📡 LoRa fallback is enabled — data may also be sent via the LoRa path")
 
     return {
         "status": "ok" if result["success"] else "failed",

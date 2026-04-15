@@ -7,6 +7,7 @@
   "neighborhood_emergency_frequency": 30,
   "emergency_mode": false,
   "debug_mode": false,
+  "always_transmit_sensors": false,
 
   "max_retransmissions": 3,
   "auto_shutdown_enabled": true,
@@ -22,7 +23,6 @@
     "timeout_s": 15,
     "retry_attempts": 3,
     "retry_backoff_s": 2,
-    "fallback_to_lora": true,
-    "downlink_poll_interval_s": 60
+    "fallback_to_lora": true
   }
 }
