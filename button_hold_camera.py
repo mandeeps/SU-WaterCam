@@ -73,9 +73,13 @@ FLIR_THREAD_TIMEOUT_SEC = 90
 
 # Seconds to wait after changing the NIR filter GPIO state before capturing.
 # The IR-CUT filter motor needs ~300 ms to physically complete its movement.
-# 0.5 s provides margin and also gives the camera AEC time to begin adapting
-# to the new filter state before the capture frame is requested.
 NIR_FILTER_SETTLE_S = 0.5
+
+# Seconds for AWB/AEC to stabilize on the scene before locking controls.
+# Both NIR-OFF and NIR-ON captures use the same locked exposure and white balance
+# so the spectral difference between the pair reflects the filter, not camera adaptation.
+# AWB typically converges within 1-2 s; 2.0 s provides comfortable margin.
+NIR_AWB_WARMUP_S = 2.0
 
 # Serialize captures: a second button event while NIR/FLIR runs would overlap Picamera2 and Lepton I/O.
 _capture_lock = threading.Lock()
@@ -263,14 +267,39 @@ def take_nir_pair(directory: str, pin: LED) -> Tuple[Optional[str], Optional[str
             path_on = path.join(directory, f'{time_on}-NIR-ON.jpg')
 
             picam2.start()
+
+            # Drive pin LOW (IR filter IN) and let AWB/AEC stabilize on the
+            # scene before locking. Both captures use identical settings so the
+            # difference between NIR-OFF and NIR-ON reflects the filter only,
+            # not camera adaptation between the two frames.
             pin.off()
-            time.sleep(NIR_FILTER_SETTLE_S)   # wait for filter to move before OFF capture
+            time.sleep(NIR_FILTER_SETTLE_S + NIR_AWB_WARMUP_S)
+
+            # Lock AWB and AEC at current settled values.
+            try:
+                meta = picam2.capture_metadata()
+                gains = meta.get("ColourGains", (1.0, 1.0))
+                exp   = meta.get("ExposureTime", 10_000)
+                gain  = meta.get("AnalogueGain", 1.0)
+                picam2.set_controls({
+                    "AwbEnable": False,
+                    "ColourGains": gains,
+                    "AeEnable": False,
+                    "ExposureTime": exp,
+                    "AnalogueGain": gain,
+                })
+                # One short settle so the pipeline flushes locked values before capture.
+                time.sleep(0.1)
+            except Exception as exc:
+                print(f"Camera control lock failed (attempt {attempt}): {exc}; continuing with auto")
+
             print(f"Pin state is: {pin.value}")
             print(f"taking photo: {path_off}")
             picam2.capture_file(path_off)
             if (not path.exists(path_off)) or path.getsize(path_off) == 0:
                 raise RuntimeError(f"NIR-OFF file not written: {path_off}")
             nir_off_saved = path_off
+
             pin.on()
             time.sleep(NIR_FILTER_SETTLE_S)   # wait for filter to move before ON capture
             print(f"Pin state is: {pin.value}")
@@ -283,6 +312,11 @@ def take_nir_pair(directory: str, pin: LED) -> Tuple[Optional[str], Optional[str
         except Exception as exc:
             print(f"Camera failed to capture (attempt {attempt}/{NIR_PAIR_MAX_ATTEMPTS}): {exc}")
         finally:
+            # Re-enable auto controls so the next session starts in auto mode.
+            try:
+                picam2.set_controls({"AwbEnable": True, "AeEnable": True})
+            except Exception:
+                pass
             try:
                 picam2.stop()
             except Exception as exc:
