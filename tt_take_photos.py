@@ -129,14 +129,19 @@ def take_two_photos(trigger, directory):
     except Exception:
         print("Camera loading error")
     
+    import time
     # Adjust GPIO as appropriate. We are using GPIO 21, pin 40
+    # 0.5 s settle after each pin change: the IR-CUT filter motor needs
+    # ~300 ms to physically complete its movement before capturing.
     pin = LED(21)
     pin.off()
+    time.sleep(0.5)
     print(f"Pin state is: {pin.value}")
 
     take_photo(directory, "OFF", picam2)
 
     pin.on()
+    time.sleep(0.5)
     take_photo(directory, "ON", picam2)
 
     pin.close()

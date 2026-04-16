@@ -71,6 +71,12 @@ NIR_PAIR_RETRY_DELAY_SEC = 0.75
 
 FLIR_THREAD_TIMEOUT_SEC = 90
 
+# Seconds to wait after changing the NIR filter GPIO state before capturing.
+# The IR-CUT filter motor needs ~300 ms to physically complete its movement.
+# 0.5 s provides margin and also gives the camera AEC time to begin adapting
+# to the new filter state before the capture frame is requested.
+NIR_FILTER_SETTLE_S = 0.5
+
 # Serialize captures: a second button event while NIR/FLIR runs would overlap Picamera2 and Lepton I/O.
 _capture_lock = threading.Lock()
 
@@ -258,6 +264,7 @@ def take_nir_pair(directory: str, pin: LED) -> Tuple[Optional[str], Optional[str
 
             picam2.start()
             pin.off()
+            time.sleep(NIR_FILTER_SETTLE_S)   # wait for filter to move before OFF capture
             print(f"Pin state is: {pin.value}")
             print(f"taking photo: {path_off}")
             picam2.capture_file(path_off)
@@ -265,6 +272,7 @@ def take_nir_pair(directory: str, pin: LED) -> Tuple[Optional[str], Optional[str
                 raise RuntimeError(f"NIR-OFF file not written: {path_off}")
             nir_off_saved = path_off
             pin.on()
+            time.sleep(NIR_FILTER_SETTLE_S)   # wait for filter to move before ON capture
             print(f"Pin state is: {pin.value}")
             print(f"taking photo: {path_on}")
             picam2.capture_file(path_on)

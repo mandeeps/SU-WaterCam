@@ -7,11 +7,16 @@
 # Run lepton and capture binaries to save data from Flir in same directory
 
 import subprocess
+import time
 from os import path, makedirs, chdir
 from datetime import datetime
 from picamera2 import Picamera2
 from gpiozero import LED
 import add_metadata
+
+# Seconds to wait after changing the NIR filter GPIO state before capturing.
+# The IR-CUT filter motor needs ~300 ms to physically complete its movement.
+NIR_FILTER_SETTLE_S = 0.5
 
 try:
     picam2 = Picamera2()
@@ -58,11 +63,13 @@ def main(filepath: str) -> str:
     # Adjust GPIO as appropriate. We are using GPIO 21, pin 40
     pin = LED(21)
     pin.off()
+    time.sleep(NIR_FILTER_SETTLE_S)   # wait for filter to move before OFF capture
     print(f"Pin state is: {pin.value}")
 
     basename = take_photo(directory, "OFF")
 
     pin.on()
+    time.sleep(NIR_FILTER_SETTLE_S)   # wait for filter to move before ON capture
     print(f"Pin state is: {pin.value}")
     take_photo(directory, "ON")
 
