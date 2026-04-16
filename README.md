@@ -372,6 +372,19 @@ Remove and purge udhcpcd and openresolv: `sudo apt purge udhcpcd openresolv`
 Reconfigure current network devices with network manager to retain local networking during setup - `sudo nmtui` is easiest way
 Make sure /etc/network/interfaces has no references to devices you want NM to manage
 
+Override automatic device renaming: Create /etc/systemd/network/10-wwan.link with the contents 
+
+[Match]
+Driver=qmi_wwan
+Path=platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.4
+
+[Link]
+Name=wwan0
+
+Then run 'sudo udevadm control --reload' 
+
+'sudo udevadm trigger --action=add /sys/class/net/wwp1s0u1u3i4' or whatever the device name is
+
 Then configure the cellular modem and verify everything works as expected after restarts
 `sudo mmcli -m 0 --simple-connect='apn=iot.1nce.net'` Replace apn as appropriate
 
@@ -381,18 +394,7 @@ On Bookworm: needs to be done on every modem
 `sudo mmcli -m 0 –-location-enable-gps-unmanaged` -- to tell ModemManager to start the GPS on the Quectel EC25 but not control it, so gpsd can manage it instead
 Enable gps.service in the git config directory so this will be done automatically on boot.
 
-Bullseye: ModemManager on Bullseye doesn't support --location-enable-gps-unmanaged for the Quectel EC25 apparently, and since RaspberryPi OS has not officially released a Bookworm-based version yet, we are using Bullseye and working around this by creating a custom Udev rule to tell ModemManager to ignore the GPS:
-
-create file /etc/udev/rules.d/77-mm-quectel-ignore-gps.rules
-with contents: ATTRS{idVendor}=="2c7c", ATTRS{idProduct}=="0125", SUBSYSTEM=="tty", ENV{ID_MM_PORT_IGNORE}="1"
-
-Save this and run sudo udevadm control --reload
-
-sudo udevadm trigger
-
-If using a different cellular modem change the ids to the appropriate ones, use lsusb to lookup the ids.
-
-Reduce the priority of the cellular modem so Ethernet is preferred while you are building the unit and still installing updates: https://superuser.com/a/1603124
+Reduce the priority of the cellular modem so Ethernet or WiFi is preferred while you are still installing updates: https://superuser.com/a/1603124
 
 `sudo nmcli con mod Quectel ipv4.route-metric 100` and do the same for ipv6
 
@@ -403,7 +405,7 @@ Activate the GPS and enable autostart for future use - needs to be done on every
 Turn off ModemManager for the time being, with `sudo systemctl stop ModemManager`
 
 install minicom or tio if not already available and run it:
-minicom -b 9600 -D /dev/ttyUSB2
+tio /dev/ttyUSB2 or minicom -b 9600 -D /dev/ttyUSB2
 
 (ttyUSB2 is the AT port for the Quectel. ttyUSB1 is the GPS output port)
 
