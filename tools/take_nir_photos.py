@@ -60,20 +60,68 @@ def main(filepath: str) -> str:
     if not path.exists(directory):
         makedirs(directory)
 
-    # Adjust GPIO as appropriate. We are using GPIO 21, pin 40
+    # AWB/AEC warmup: let the camera stabilize on the scene before locking so
+    # both captures use identical settings and the difference reflects the filter.
+    NIR_AWB_WARMUP_S = 2.0
+
     pin = LED(21)
-    pin.off()
-    time.sleep(NIR_FILTER_SETTLE_S)   # wait for filter to move before OFF capture
-    print(f"Pin state is: {pin.value}")
+    image_off = None
+    image_on = None
+    try:
+        picam2.start()
 
-    basename = take_photo(directory, "OFF")
+        # Drive pin LOW (IR filter IN) and wait for both filter movement and
+        # AWB/AEC convergence before locking controls.
+        pin.off()
+        time.sleep(NIR_FILTER_SETTLE_S + NIR_AWB_WARMUP_S)
 
-    pin.on()
-    time.sleep(NIR_FILTER_SETTLE_S)   # wait for filter to move before ON capture
-    print(f"Pin state is: {pin.value}")
-    take_photo(directory, "ON")
+        # Lock AWB and AEC at current settled values.
+        try:
+            meta = picam2.capture_metadata()
+            gains = meta.get("ColourGains", (1.0, 1.0))
+            exp   = meta.get("ExposureTime", 10_000)
+            gain  = meta.get("AnalogueGain", 1.0)
+            picam2.set_controls({
+                "AwbEnable": False, "ColourGains": gains,
+                "AeEnable": False, "ExposureTime": exp, "AnalogueGain": gain,
+            })
+            time.sleep(0.1)
+        except Exception as exc:
+            print(f"Camera control lock failed: {exc}; continuing with auto")
 
-    return basename, directory
+        print(f"Pin state is: {pin.value}")
+        ts_off = datetime.now().strftime('%Y%m%d-%H%M%S')
+        image_off = path.join(directory, f'{ts_off}-NIR-OFF.jpg')
+        print(f'taking photo: {image_off}')
+        picam2.capture_file(image_off)
+
+        pin.on()
+        time.sleep(NIR_FILTER_SETTLE_S)
+        print(f"Pin state is: {pin.value}")
+        ts_on = datetime.now().strftime('%Y%m%d-%H%M%S')
+        image_on = path.join(directory, f'{ts_on}-NIR-ON.jpg')
+        print(f'taking photo: {image_on}')
+        picam2.capture_file(image_on)
+
+    except Exception as exc:
+        print(f"Camera capture failed: {exc}")
+    finally:
+        try:
+            picam2.set_controls({"AwbEnable": True, "AeEnable": True})
+        except Exception:
+            pass
+        try:
+            picam2.stop()
+        except Exception:
+            pass
+        pin.close()
+
+    # Add metadata after camera is stopped (GPS/IMU reads can be slow).
+    for img in (image_off, image_on):
+        if img and path.exists(img):
+            add_metadata.add_metadata(img)
+
+    return image_off, directory
 
 
 if __name__ == '__main__':

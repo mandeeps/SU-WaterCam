@@ -115,7 +115,9 @@ def take_two_photos(trigger, directory):
         print("Camera module (picamera2) unavailable - skipping photo capture")
         return True
     from gpiozero import LED
-    from tt_take_photos import take_photo
+    from os import path
+    from datetime import datetime
+    from tools.add_metadata import add_metadata
 
     global sq_state
     try:
@@ -128,22 +130,73 @@ def take_two_photos(trigger, directory):
         picam2 = sq_state['picam']
     except Exception:
         print("Camera loading error")
-    
+        return True
+
     import time
-    # Adjust GPIO as appropriate. We are using GPIO 21, pin 40
-    # 0.5 s settle after each pin change: the IR-CUT filter motor needs
-    # ~300 ms to physically complete its movement before capturing.
+    # IR-CUT filter motor needs ~300 ms to move; 0.5 s provides margin.
+    NIR_FILTER_SETTLE_S = 0.5
+    # AWB/AEC warmup: let the camera stabilize on the scene before locking so
+    # both captures use identical settings and the difference reflects the filter.
+    NIR_AWB_WARMUP_S = 2.0
+
     pin = LED(21)
-    pin.off()
-    time.sleep(0.5)
-    print(f"Pin state is: {pin.value}")
+    image_off = None
+    image_on = None
+    try:
+        picam2.start()
 
-    take_photo(directory, "OFF", picam2)
+        # Drive pin LOW (IR filter IN) and wait for both filter movement and
+        # AWB/AEC convergence before locking controls.
+        pin.off()
+        time.sleep(NIR_FILTER_SETTLE_S + NIR_AWB_WARMUP_S)
 
-    pin.on()
-    time.sleep(0.5)
-    take_photo(directory, "ON", picam2)
+        # Lock AWB and AEC at current settled values.
+        try:
+            meta = picam2.capture_metadata()
+            gains = meta.get("ColourGains", (1.0, 1.0))
+            exp   = meta.get("ExposureTime", 10_000)
+            gain  = meta.get("AnalogueGain", 1.0)
+            picam2.set_controls({
+                "AwbEnable": False, "ColourGains": gains,
+                "AeEnable": False, "ExposureTime": exp, "AnalogueGain": gain,
+            })
+            time.sleep(0.1)
+        except Exception as exc:
+            print(f"Camera control lock failed: {exc}; continuing with auto")
 
-    pin.close()
+        print(f"Pin state is: {pin.value}")
+        ts_off = datetime.now().strftime('%Y%m%d-%H%M%S')
+        image_off = path.join(directory, f'{ts_off}-NIR-OFF.jpg')
+        print(f'taking photo: {image_off}')
+        picam2.capture_file(image_off)
+
+        pin.on()
+        time.sleep(NIR_FILTER_SETTLE_S)
+        print(f"Pin state is: {pin.value}")
+        ts_on = datetime.now().strftime('%Y%m%d-%H%M%S')
+        image_on = path.join(directory, f'{ts_on}-NIR-ON.jpg')
+        print(f'taking photo: {image_on}')
+        picam2.capture_file(image_on)
+
+    except Exception as exc:
+        print(f"Camera capture failed: {exc}")
+    finally:
+        try:
+            picam2.set_controls({"AwbEnable": True, "AeEnable": True})
+        except Exception:
+            pass
+        try:
+            picam2.stop()
+        except Exception:
+            pass
+        pin.close()
+
+    # Add metadata after camera is stopped (GPS/IMU reads can be slow).
+    for img in (image_off, image_on):
+        if img and path.isfile(img):
+            try:
+                add_metadata(img)
+            except Exception as exc:
+                print(f"Metadata write failed for {img}: {exc}")
 
     return True
