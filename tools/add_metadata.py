@@ -3,12 +3,15 @@
 # Takes image path as parameter
 
 import json
+import logging
 import os
 import time
 from fractions import Fraction
 import piexif
 import piexif.helper
-from libxmp import XMPFiles, consts
+from libxmp import XMPFiles, XMPMeta, consts
+
+logger = logging.getLogger(__name__)
 
 _CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "runtime_config.json")
 
@@ -18,9 +21,20 @@ def _read_device_id(config_path: str = _CONFIG_PATH) -> str:
     try:
         with open(config_path) as f:
             cfg = json.load(f)
-        return cfg.get("ip_upload", {}).get("device_id", "")
-    except Exception:
+    except OSError as exc:
+        logger.debug("Cannot read config at %s (%s); device_id unavailable", config_path, exc)
         return ""
+    except json.JSONDecodeError as exc:
+        logger.warning("Invalid JSON in %s: %s; device_id unavailable", config_path, exc)
+        return ""
+    if not isinstance(cfg, dict):
+        logger.warning("Unexpected config format in %s; device_id unavailable", config_path)
+        return ""
+    ip_upload = cfg.get("ip_upload", {})
+    if not isinstance(ip_upload, dict):
+        logger.warning("ip_upload in %s is not an object; device_id unavailable", config_path)
+        return ""
+    return ip_upload.get("device_id", "")
 
 try:
     from tools import bno055_imu
@@ -118,11 +132,15 @@ def add_metadata(image):
 
     if xmp_props:
         xmpfile = XMPFiles(file_path=image, open_forupdate=True)
-        xmp = xmpfile.get_xmp()
-        for prop, val in xmp_props.items():
-            xmp.set_property(consts.XMP_NS_DC, prop, val)
-        xmpfile.put_xmp(xmp)
-        xmpfile.close_file()
+        try:
+            xmp = xmpfile.get_xmp()
+            if xmp is None:
+                xmp = XMPMeta()
+            for prop, val in xmp_props.items():
+                xmp.set_property(consts.XMP_NS_DC, prop, val)
+            xmpfile.put_xmp(xmp)
+        finally:
+            xmpfile.close_file()
 
     # GPS: get current info from gpsd
     formatted_gps_data = []
