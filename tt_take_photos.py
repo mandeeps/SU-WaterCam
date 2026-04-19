@@ -77,7 +77,7 @@ def flir(directory):
 
         if not path.isfile(command[0]):
             print(f"Check Lepton state - {label} binary not found: {command[0]}")
-            return False
+            return []
 
         if label == "capture":
             out_glob = path.join(directory, "IMG_*.pgm")
@@ -99,16 +99,16 @@ def flir(directory):
         except subprocess.TimeoutExpired:
             print(f"Check Lepton state - {label} timed out")
             _reset_lepton()
-            return False
+            return []
         except Exception as exc:
             print(f"Check Lepton state - {label} failed: {exc}")
             _reset_lepton()
-            return False
+            return []
 
         if proc.returncode != 0:
             print(f"Check Lepton state - {label} failed (rc={proc.returncode})")
             _reset_lepton()
-            return False
+            return []
 
         MTIME_SLOP_SEC = 1
         # Verify output was written during this run. Allow a small mtime slop
