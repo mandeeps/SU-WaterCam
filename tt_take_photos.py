@@ -26,15 +26,13 @@ def take_photo(directory: str, nir: str, picam2) -> str:
 
 @SQify
 def flir(directory):
-    from os import chdir, rename, makedirs, path
+    from os import makedirs, path, listdir, rename
+    from glob import glob
     import subprocess
     from datetime import datetime
+
     date = datetime.now().strftime('%Y%m%d-%H%M%S')
 
-    # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
-    # Derive project root from directory (always <root>/images/<date>), then
-    # scan upward for the capture binary as a cross-check.  Must be computed
-    # before any chdir so we are not misled by a changed working directory.
     def _find_project_root(start):
         candidate = path.abspath(start)
         for _ in range(6):
@@ -44,56 +42,85 @@ def flir(directory):
         return None
 
     project_root = _find_project_root(directory) or path.dirname(path.dirname(path.abspath(directory)))
-    capture_bin = path.join(project_root, "capture") if path.exists(path.join(project_root, "capture")) else None
-    lepton_bin = path.join(project_root, "lepton") if path.exists(path.join(project_root, "lepton")) else None
+    capture_bin = path.join(project_root, "capture")
+    lepton_bin  = path.join(project_root, "lepton")
+    lepton_reset = path.join(project_root, "tools", "lepton_reset.py")
 
-    # Ensure target directory exists (create fallback if needed)
-    need_fallback = False
-    try:
-        if not path.isdir(directory):
-            if directory.startswith('/home/pi/') or directory == '/home/pi':
-                need_fallback = True
-            else:
-                makedirs(directory, exist_ok=True)
-    except PermissionError:
-        need_fallback = True
-    except Exception:
-        need_fallback = True
+    makedirs(directory, exist_ok=True)
 
-    if need_fallback:
-        directory = path.join(project_root, 'images', 'fallback')
+    def _reset_lepton():
         try:
-            makedirs(directory, exist_ok=True)
-        except Exception:
-            directory = path.join(project_root, 'images')
-            makedirs(directory, exist_ok=True)
+            subprocess.run(
+                [lepton_reset], check=True, timeout=10,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            print(f"Lepton reset failed: {exc}")
 
-    try:
-        chdir(directory)
-    except Exception:
-        directory = path.join(project_root, 'images', 'fallback')
-        makedirs(directory, exist_ok=True)
-        chdir(directory)
+    def _run_flir_cmd(label, command):
+        if not path.isfile(command[0]):
+            print(f"Check Lepton state - {label} binary not found: {command[0]}")
+            return False
+        try:
+            proc = subprocess.run(
+                command,
+                timeout=20,
+                cwd=directory,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"Check Lepton state - {label} timed out")
+            _reset_lepton()
+            return False
+        except Exception as exc:
+            print(f"Check Lepton state - {label} failed: {exc}")
+            _reset_lepton()
+            return False
 
-    try:
-        if not capture_bin:
-            raise FileNotFoundError("capture binary not found")
-        subprocess.run([capture_bin], check=True, timeout=5)
-    except:
-        print("Check Lepton state - capture failed")
-    else:
-        print(f"change name to include {date}")
-        rename("IMG_0000.pgm", f"lepton_{date}.pgm")
+        if proc.returncode != 0:
+            print(f"Check Lepton state - {label} failed (rc={proc.returncode})")
+            _reset_lepton()
+            return False
 
-    try:
-        if not lepton_bin:
-            raise FileNotFoundError("lepton binary not found")
-        subprocess.run([lepton_bin], check=True, timeout=5)
-    except:
-        print("Check Lepton state - radiometery failed")
-    else:
-        print(f"change name to include {date}")
-        rename("lepton_temp_0000.csv", f"temperatures_{date}.csv")
+        # Verify expected output file appeared in the session directory.
+        try:
+            files = listdir(directory)
+        except Exception as exc:
+            print(f"Check Lepton state - {label} could not inspect output dir: {exc}")
+            _reset_lepton()
+            return False
+
+        if label == "capture":
+            if not any(f.lower().endswith(".pgm") for f in files):
+                print("Check Lepton state - capture completed but no .pgm output found")
+                _reset_lepton()
+                return False
+        elif label == "lepton":
+            if not any(f.startswith("lepton_temp_") and f.lower().endswith(".csv") for f in files):
+                print("Check Lepton state - radiometery completed but no lepton_temp_*.csv found")
+                _reset_lepton()
+                return False
+
+        return True
+
+    if not _run_flir_cmd("capture", [capture_bin]):
+        return True
+    if not _run_flir_cmd("lepton", [lepton_bin]):
+        return True
+
+    # Rename outputs to timestamped names matching the coregistration pipeline's expectations.
+    for src_glob, dst_name in [
+        (path.join(directory, "IMG_*.pgm"),          f"lepton_{date}.pgm"),
+        (path.join(directory, "lepton_temp_*.csv"),  f"temperatures_{date}.csv"),
+    ]:
+        matches = sorted(glob(src_glob))
+        if matches:
+            try:
+                rename(matches[0], path.join(directory, dst_name))
+            except Exception as exc:
+                print(f"Could not rename {matches[0]}: {exc}")
 
     return True
 
