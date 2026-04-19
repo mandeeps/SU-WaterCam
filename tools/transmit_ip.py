@@ -433,8 +433,8 @@ def apply_downlink_command(
     _EF_MIN   = [2, 5, 10]              # emergency_freq_min allowed values
     _FF_MIN   = [10, 20, 30, 40, 50, 60]  # flood_code_freq_min allowed values
 
-    # Expected payload byte-lengths for fixed-width codes (variable-width codes
-    # are absent from this dict and accepted at any non-zero length).
+    # Expected payload byte-lengths for fixed-width codes. Codes absent from
+    # this dict are not length-checked here and are handled by later decoding.
     _expected_len: Dict[str, int] = {
         "10 90": 1,
         "11 91": 2,
@@ -478,6 +478,12 @@ def apply_downlink_command(
             skipped.append(str(code_raw))
             continue
         code = code_raw.strip()
+        if not code:
+            logger.warning(
+                "apply_downlink_command: missing or empty code in part %s — skipping", part
+            )
+            skipped.append("<missing_code>")
+            continue
 
         try:
             payload_bytes = bytes.fromhex(payload_hex)
