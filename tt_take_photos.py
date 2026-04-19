@@ -26,7 +26,7 @@ def take_photo(directory: str, nir: str, picam2) -> str:
 
 @SQify
 def flir(directory):
-    from os import makedirs, path, listdir, rename
+    from os import makedirs, path, rename
     from glob import glob
     import subprocess
     from datetime import datetime
@@ -49,9 +49,13 @@ def flir(directory):
     makedirs(directory, exist_ok=True)
 
     def _reset_lepton():
+        import sys
+        if not path.isfile(lepton_reset):
+            print(f"Lepton reset script not found: {lepton_reset}")
+            return
         try:
             subprocess.run(
-                [lepton_reset], check=True, timeout=10,
+                [sys.executable, lepton_reset], check=True, timeout=10,
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
         except Exception as exc:
@@ -61,6 +65,14 @@ def flir(directory):
         if not path.isfile(command[0]):
             print(f"Check Lepton state - {label} binary not found: {command[0]}")
             return False
+
+        if label == "capture":
+            before = set(glob(path.join(directory, "IMG_*.pgm")))
+        elif label == "lepton":
+            before = set(glob(path.join(directory, "lepton_temp_*.csv")))
+        else:
+            before = set()
+
         try:
             proc = subprocess.run(
                 command,
@@ -84,22 +96,17 @@ def flir(directory):
             _reset_lepton()
             return False
 
-        # Verify expected output file appeared in the session directory.
-        try:
-            files = listdir(directory)
-        except Exception as exc:
-            print(f"Check Lepton state - {label} could not inspect output dir: {exc}")
-            _reset_lepton()
-            return False
-
+        # Verify a new output file appeared (not satisfied by pre-existing files).
         if label == "capture":
-            if not any(f.lower().endswith(".pgm") for f in files):
-                print("Check Lepton state - capture completed but no .pgm output found")
+            after = set(glob(path.join(directory, "IMG_*.pgm")))
+            if not (after - before):
+                print("Check Lepton state - capture completed but no new IMG_*.pgm found")
                 _reset_lepton()
                 return False
         elif label == "lepton":
-            if not any(f.startswith("lepton_temp_") and f.lower().endswith(".csv") for f in files):
-                print("Check Lepton state - radiometery completed but no lepton_temp_*.csv found")
+            after = set(glob(path.join(directory, "lepton_temp_*.csv")))
+            if not (after - before):
+                print("Check Lepton state - radiometry completed but no lepton_temp_*.csv found")
                 _reset_lepton()
                 return False
 
