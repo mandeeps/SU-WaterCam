@@ -46,7 +46,18 @@ def flir(directory):
     lepton_bin  = path.join(project_root, "lepton")
     lepton_reset = path.join(project_root, "tools", "lepton_reset.py")
 
-    makedirs(directory, exist_ok=True)
+    try:
+        makedirs(directory, exist_ok=True)
+    except Exception as exc:
+        fallback_directory = path.join(project_root, "images", "fallback")
+        print(f"Unable to create FLIR output directory '{directory}': {exc}")
+        try:
+            makedirs(fallback_directory, exist_ok=True)
+            print(f"Falling back to FLIR output directory '{fallback_directory}'")
+            directory = fallback_directory
+        except Exception as fallback_exc:
+            print(f"Unable to create fallback FLIR output directory '{fallback_directory}': {fallback_exc}")
+            return False
 
     def _reset_lepton():
         import sys
@@ -118,16 +129,18 @@ def flir(directory):
         return True
 
     # Rename outputs to timestamped names matching the coregistration pipeline's expectations.
+    # Select by mtime so we rename the file just produced, not a stale older match.
     for src_glob, dst_name in [
         (path.join(directory, "IMG_*.pgm"),          f"lepton_{date}.pgm"),
         (path.join(directory, "lepton_temp_*.csv"),  f"temperatures_{date}.csv"),
     ]:
-        matches = sorted(glob(src_glob))
+        matches = glob(src_glob)
         if matches:
+            src_path = max(matches, key=path.getmtime)
             try:
-                rename(matches[0], path.join(directory, dst_name))
+                rename(src_path, path.join(directory, dst_name))
             except Exception as exc:
-                print(f"Could not rename {matches[0]}: {exc}")
+                print(f"Could not rename {src_path}: {exc}")
 
     return True
 
