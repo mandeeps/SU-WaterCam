@@ -36,7 +36,7 @@ def flir(directory):
     date = datetime.now().strftime('%Y%m%d-%H%M%S')
 
     # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
-    # Ensure target directory exists (create fallback if needed)
+    # Resolve project root NOW (before any chdir) so Path.cwd() is still valid.
     def _safe_project_root():
         try:
             fpath = inspect.getfile(flir)
@@ -50,6 +50,12 @@ def flir(directory):
                 pass
             return str(Path.cwd())
 
+    # Resolve project root and binary paths before any chdir.
+    project_root = _safe_project_root()
+    capture_bin = path.join(project_root, "capture") if path.exists(path.join(project_root, "capture")) else None
+    lepton_bin = path.join(project_root, "lepton") if path.exists(path.join(project_root, "lepton")) else None
+
+    # Ensure target directory exists (create fallback if needed)
     need_fallback = False
     try:
         if not path.isdir(directory):
@@ -63,26 +69,19 @@ def flir(directory):
         need_fallback = True
 
     if need_fallback:
-        project_root = _safe_project_root()
         directory = path.join(project_root, 'images', 'fallback')
         try:
             makedirs(directory, exist_ok=True)
         except Exception:
-            directory = path.join(_safe_project_root(), 'images')
+            directory = path.join(project_root, 'images')
             makedirs(directory, exist_ok=True)
 
     try:
         chdir(directory)
     except Exception:
-        project_root = _safe_project_root()
         directory = path.join(project_root, 'images', 'fallback')
         makedirs(directory, exist_ok=True)
         chdir(directory)
-
-    # Resolve binary paths using project root
-    project_root = _safe_project_root()
-    capture_bin = next((p for p in [path.join(project_root, "capture")] if path.exists(p)), None)
-    lepton_bin = next((p for p in [path.join(project_root, "lepton")] if path.exists(p)), None)
 
     try:
         if not capture_bin:

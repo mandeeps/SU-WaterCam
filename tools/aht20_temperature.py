@@ -1,38 +1,62 @@
 #!/usr/bin/env python3
 # get temp & humidity reading from Adafruit AHT20
-import board
+try:
+    import board
+except Exception:
+    board = None
 
 try:
     import adafruit_ahtx0
 except ImportError:
-    print("Error: AHT20 import")
-except:
-    print("Error: AHT20 hardware")
+    adafruit_ahtx0 = None
 
-SENSOR = adafruit_ahtx0.AHTx0(board.I2C())
+_sensor = None
+
+
+def _get_sensor():
+    global _sensor
+    if _sensor is not None:
+        return _sensor
+    if board is None or adafruit_ahtx0 is None:
+        return None
+    try:
+        _sensor = adafruit_ahtx0.AHTx0(board.I2C())
+        return _sensor
+    except Exception:
+        return None
+
 
 def record_csv():
     from time import sleep
     from datetime import datetime
     from csv import DictWriter
     FILE = '/home/pi/SU-WaterCam/data/temp_humidity.csv'
-    
+
     while True:
+        sensor = _get_sensor()
+        if sensor is None:
+            print("AHT20 unavailable")
+            sleep(60)
+            continue
         row = {'Time':datetime.now().strftime('%Y%m%d-%H%M%S'),
-               'Temp': '%0.1f C' % SENSOR.temperature, 'Humidity': '%0.1f %%' %
-               SENSOR.relative_humidity}
+               'Temp': '%0.1f C' % sensor.temperature, 'Humidity': '%0.1f %%' %
+               sensor.relative_humidity}
         print(row)
 
         with open(FILE, 'a+', newline='') as out:
-            #DictWriter(out, row.keys()).writeheader()
             DictWriter(out, row.keys()).writerow(row)
 
         sleep(60)
 
 def get_aht20():
-    data = {"temperature_celsius": float("%0.1f" % SENSOR.temperature),
-            "relative_humidity": int(float("%0.1f" % SENSOR.relative_humidity))}
-    return data
+    sensor = _get_sensor()
+    if sensor is None:
+        return {}
+    try:
+        return {"temperature_celsius": float("%0.1f" % sensor.temperature),
+                "relative_humidity": int(float("%0.1f" % sensor.relative_humidity))}
+    except Exception:
+        return {}
 
 if __name__ == '__main__':
     import sys

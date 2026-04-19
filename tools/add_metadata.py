@@ -82,19 +82,23 @@ def add_metadata(image):
         imu_values = bno055_imu.get_values()
     except Exception as error:
         print("IMU Error")
-    else:
+        imu_values = {}
+
+    if imu_values:
         # log IMU data to text file
         imu = [f"\nFile: {image}\n",
             f"Time: {time.asctime(time.localtime(time.time()))}\n",
-            f"Accelerometer: {imu_values['Accelerometer']}\n",
-            f"Gyro: {imu_values['Gyro']}\n",
-            f"Temperature: {imu_values['Temperature']}\n"]
+            f"Accelerometer: {imu_values.get('Accelerometer')}\n",
+            f"Gyro: {imu_values.get('Gyro')}\n",
+            f"Temperature: {imu_values.get('Temperature')}\n"]
 
         with open(DATA, 'a', encoding="utf8") as data:
             for line in imu:
                 data.writelines(line)
 
-        yaw, roll, pitch = imu_values['Euler']
+        euler = imu_values.get('Euler')
+        if isinstance(euler, tuple) and len(euler) == 3:
+            yaw, roll, pitch = euler
 
     # Start exif handling
     # load original exif data
