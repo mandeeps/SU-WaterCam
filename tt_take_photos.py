@@ -121,28 +121,31 @@ def flir(directory):
             if not fresh:
                 print(f"Check Lepton state - {label} completed but no fresh output found")
                 _reset_lepton()
-                return False
+                return []
+            return fresh
 
-        return True
+        return []
 
-    if not _run_flir_cmd("capture", [capture_bin]):
+    # Return fresh paths from each command so the rename step uses exactly
+    # the files produced by this run — no re-glob that could match a file
+    # from a concurrent run sharing the same (fallback) directory.
+    capture_fresh = _run_flir_cmd("capture", [capture_bin])
+    if not capture_fresh:
         return True
-    if not _run_flir_cmd("lepton", [lepton_bin]):
+    lepton_fresh = _run_flir_cmd("lepton", [lepton_bin])
+    if not lepton_fresh:
         return True
 
     # Rename outputs to timestamped names matching the coregistration pipeline's expectations.
-    # Select by mtime so we rename the file just produced, not a stale older match.
-    for src_glob, dst_name in [
-        (path.join(directory, "IMG_*.pgm"),          f"lepton_{date}.pgm"),
-        (path.join(directory, "lepton_temp_*.csv"),  f"temperatures_{date}.csv"),
+    for fresh_files, dst_name in [
+        (capture_fresh, f"lepton_{date}.pgm"),
+        (lepton_fresh,  f"temperatures_{date}.csv"),
     ]:
-        matches = glob(src_glob)
-        if matches:
-            src_path = max(matches, key=path.getmtime)
-            try:
-                rename(src_path, path.join(directory, dst_name))
-            except Exception as exc:
-                print(f"Could not rename {src_path}: {exc}")
+        src_path = max(fresh_files, key=path.getmtime)
+        try:
+            rename(src_path, path.join(directory, dst_name))
+        except Exception as exc:
+            print(f"Could not rename {src_path}: {exc}")
 
     return True
 
