@@ -27,31 +27,23 @@ def take_photo(directory: str, nir: str, picam2) -> str:
 @SQify
 def flir(directory):
     from os import chdir, rename, makedirs, path
-    from time import sleep
     import subprocess
     from datetime import datetime
-    import inspect
-    import sys
-    from pathlib import Path
     date = datetime.now().strftime('%Y%m%d-%H%M%S')
 
     # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
-    # Resolve project root NOW (before any chdir) so Path.cwd() is still valid.
-    def _safe_project_root():
-        try:
-            fpath = inspect.getfile(flir)
-            return path.dirname(path.abspath(fpath))
-        except Exception:
-            try:
-                mod_file = sys.modules.get(__name__).__dict__.get('__file__')
-                if mod_file:
-                    return path.dirname(path.abspath(mod_file))
-            except Exception:
-                pass
-            return str(Path.cwd())
+    # Derive project root from directory (always <root>/images/<date>), then
+    # scan upward for the capture binary as a cross-check.  Must be computed
+    # before any chdir so we are not misled by a changed working directory.
+    def _find_project_root(start):
+        candidate = path.abspath(start)
+        for _ in range(6):
+            candidate = path.dirname(candidate)
+            if path.exists(path.join(candidate, "capture")):
+                return candidate
+        return None
 
-    # Resolve project root and binary paths before any chdir.
-    project_root = _safe_project_root()
+    project_root = _find_project_root(directory) or path.dirname(path.dirname(path.abspath(directory)))
     capture_bin = path.join(project_root, "capture") if path.exists(path.join(project_root, "capture")) else None
     lepton_bin = path.join(project_root, "lepton") if path.exists(path.join(project_root, "lepton")) else None
 
