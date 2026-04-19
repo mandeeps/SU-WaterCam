@@ -2,11 +2,28 @@
 # embed GPS/IMU data into image EXIF
 # Takes image path as parameter
 
+import logging
 import time
 from fractions import Fraction
 import piexif
 import piexif.helper
-from libxmp import XMPFiles, consts
+from libxmp import XMPFiles, XMPMeta, consts
+
+logger = logging.getLogger(__name__)
+
+
+def _read_device_id() -> str:
+    """Return the device_id from runtime_config.json as a str, or '' if unavailable."""
+    from tools.transmit_ip import _load_ip_config
+    ip_cfg = _load_ip_config()
+    raw = ip_cfg.get("device_id", "")
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, (int, float, bool)):
+        return str(raw)
+    if raw is not None:
+        logger.warning("device_id in config has unexpected type %s; ignoring", type(raw).__name__)
+    return ""
 
 try:
     from tools import bno055_imu
@@ -76,25 +93,43 @@ def add_metadata(image):
         with open(DATA, 'a', encoding="utf8") as data:
             for line in imu:
                 data.writelines(line)
-        
+
         yaw, roll, pitch = imu_values['Euler']
 
     # Start exif handling
     # load original exif data
     exif_data = piexif.load(image)
+
+    # Embed unit ID in EXIF BodySerialNumber (tag 0xA431)
+    device_id = _read_device_id()
+    if device_id:
+        exif_data["Exif"][piexif.ExifIFD.BodySerialNumber] = device_id.encode("ascii", errors="replace")
+
     # Add roll/pitch/yaw to UserComment tag if they exist
     if roll is not None:
         user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
         exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
-        
-        # Write roll/pitch/yaw to XMP tags for Pix4D
+
+    # Write XMP tags for Pix4D: unit ID always, orientation when available
+    xmp_props: dict = {}
+    if device_id:
+        xmp_props["DeviceID"] = device_id
+    if roll is not None:
+        xmp_props["Roll"] = str(roll)
+        xmp_props["Pitch"] = str(pitch)
+        xmp_props["Yaw"] = str(yaw)
+
+    if xmp_props:
         xmpfile = XMPFiles(file_path=image, open_forupdate=True)
-        xmp = xmpfile.get_xmp()
-        xmp.set_property(consts.XMP_NS_DC, 'Roll', str(roll))
-        xmp.set_property(consts.XMP_NS_DC, 'Pitch', str(pitch))
-        xmp.set_property(consts.XMP_NS_DC, 'Yaw', str(yaw))
-        xmpfile.put_xmp(xmp)
-        xmpfile.close_file()
+        try:
+            xmp = xmpfile.get_xmp()
+            if xmp is None:
+                xmp = XMPMeta()
+            for prop, val in xmp_props.items():
+                xmp.set_property(consts.XMP_NS_DC, prop, val)
+            xmpfile.put_xmp(xmp)
+        finally:
+            xmpfile.close_file()
 
     # GPS: get current info from gpsd
     formatted_gps_data = []
