@@ -1667,7 +1667,7 @@ def ip_downlink_poll_and_apply(_lora_init):
 
     Disabled by default — requires ip_upload.enabled=true in runtime_config.json.
     """
-    from tools.transmit_ip import IPTransmitter
+    from tools.transmit_ip import IPTransmitter, apply_downlink_command
     from tools.lora_runtime_integration import set_parameter
 
     tx = IPTransmitter()
@@ -1695,7 +1695,6 @@ def ip_downlink_poll_and_apply(_lora_init):
 
     print(f"📬 IP downlink: received command (queue_id={cmd.get('queue_id')})")
 
-    from tools.transmit_ip import apply_downlink_command
     dispatch = apply_downlink_command(cmd, set_param_fn=set_parameter)
 
     applied = dispatch["applied"]

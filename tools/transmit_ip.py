@@ -49,7 +49,7 @@ import json
 import logging
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
@@ -397,7 +397,7 @@ def poll_downlink(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
 
 def apply_downlink_command(
     cmd: Dict[str, Any],
-    set_param_fn=None,
+    set_param_fn: Callable[[str, Any], None] | None = None,
 ) -> Dict[str, Any]:
     """Decode a downlink command dict and apply each recognised parameter change.
 
@@ -420,11 +420,13 @@ def apply_downlink_command(
     -------
     dict with keys:
         "applied" : list[str] — "param=value" strings for each change applied
-        "skipped" : list[str] — codes that were unrecognised or had bad payloads
+        "skipped" : list[str] — string identifiers for skipped parts: the
+            command code when available, otherwise a stringified malformed part
+            or invalid code value
         "queue_id": the queue_id from cmd, or None
     """
     if set_param_fn is None:
-        from tools.lora_runtime_integration import set_parameter as set_param_fn  # type: ignore[assignment]
+        from tools.lora_runtime_integration import set_parameter as set_param_fn
 
     # Index-based lookup tables — must match server app/encoders.py constants.
     _MF_HOURS = [1, 3, 6, 24, 72]       # monitoring_freq_h allowed values
@@ -463,7 +465,7 @@ def apply_downlink_command(
                 "apply_downlink_command: malformed part (expected dict, got %s) — skipping",
                 type(part).__name__,
             )
-            skipped.append(repr(part))
+            skipped.append("<malformed_part>")
             continue
 
         code_raw = part.get("code", "")
