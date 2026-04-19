@@ -2,7 +2,6 @@
 # embed GPS/IMU data into image EXIF
 # Takes image path as parameter
 
-import json
 import logging
 import os
 import time
@@ -13,28 +12,19 @@ from libxmp import XMPFiles, XMPMeta, consts
 
 logger = logging.getLogger(__name__)
 
-_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "..", "runtime_config.json")
 
-
-def _read_device_id(config_path: str = _CONFIG_PATH) -> str:
-    """Return the device_id from runtime_config.json, or '' if unavailable."""
-    try:
-        with open(config_path) as f:
-            cfg = json.load(f)
-    except OSError as exc:
-        logger.debug("Cannot read config at %s (%s); device_id unavailable", config_path, exc)
-        return ""
-    except json.JSONDecodeError as exc:
-        logger.warning("Invalid JSON in %s: %s; device_id unavailable", config_path, exc)
-        return ""
-    if not isinstance(cfg, dict):
-        logger.warning("Unexpected config format in %s; device_id unavailable", config_path)
-        return ""
-    ip_upload = cfg.get("ip_upload", {})
-    if not isinstance(ip_upload, dict):
-        logger.warning("ip_upload in %s is not an object; device_id unavailable", config_path)
-        return ""
-    return ip_upload.get("device_id", "")
+def _read_device_id() -> str:
+    """Return the device_id from runtime_config.json as an ASCII string, or '' if unavailable."""
+    from tools.transmit_ip import _load_ip_config
+    ip_cfg = _load_ip_config()
+    raw = ip_cfg.get("device_id", "")
+    if isinstance(raw, str):
+        return raw
+    if isinstance(raw, (int, float, bool)):
+        return str(raw)
+    if raw is not None:
+        logger.warning("device_id in config has unexpected type %s; ignoring", type(raw).__name__)
+    return ""
 
 try:
     from tools import bno055_imu
@@ -114,7 +104,7 @@ def add_metadata(image):
     # Embed unit ID in EXIF BodySerialNumber (tag 0xA431)
     device_id = _read_device_id()
     if device_id:
-        exif_data["Exif"][piexif.ExifIFD.BodySerialNumber] = device_id.encode()
+        exif_data["Exif"][piexif.ExifIFD.BodySerialNumber] = device_id.encode("ascii", errors="replace")
 
     # Add roll/pitch/yaw to UserComment tag if they exist
     if roll is not None:
