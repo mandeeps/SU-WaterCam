@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def _read_device_id() -> str:
-    """Return the device_id from runtime_config.json as an ASCII string, or '' if unavailable."""
+    """Return the device_id from runtime_config.json as a str, or '' if unavailable."""
     from tools.transmit_ip import _load_ip_config
     ip_cfg = _load_ip_config()
     raw = ip_cfg.get("device_id", "")
