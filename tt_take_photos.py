@@ -110,11 +110,14 @@ def flir(directory):
             _reset_lepton()
             return False
 
-        # Verify output was written during this run (mtime >= start_time).
+        MTIME_SLOP_SEC = 1
+        # Verify output was written during this run. Allow a small mtime slop
+        # for filesystems with coarse timestamp granularity and minor clock /
+        # timestamp-recording skew, while still requiring output to be fresh.
         # Using mtime handles both new files and overwrites of existing files,
         # so validation stays correct when the fallback directory is reused.
         if out_glob is not None:
-            fresh = [f for f in glob(out_glob) if path.getmtime(f) >= start_time - 1]
+            fresh = [f for f in glob(out_glob) if path.getmtime(f) >= start_time - MTIME_SLOP_SEC]
             if not fresh:
                 print(f"Check Lepton state - {label} completed but no fresh output found")
                 _reset_lepton()
