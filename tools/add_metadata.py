@@ -3,7 +3,6 @@
 # Takes image path as parameter
 
 import logging
-import os
 import time
 from fractions import Fraction
 import piexif
