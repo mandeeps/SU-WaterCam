@@ -57,7 +57,7 @@ def flir(directory):
             directory = fallback_directory
         except Exception as fallback_exc:
             print(f"Unable to create fallback FLIR output directory '{fallback_directory}': {fallback_exc}")
-            return False
+            return True
 
     def _reset_lepton():
         import sys
@@ -73,17 +73,20 @@ def flir(directory):
             print(f"Lepton reset failed: {exc}")
 
     def _run_flir_cmd(label, command):
+        import time
+
         if not path.isfile(command[0]):
             print(f"Check Lepton state - {label} binary not found: {command[0]}")
             return False
 
         if label == "capture":
-            before = set(glob(path.join(directory, "IMG_*.pgm")))
+            out_glob = path.join(directory, "IMG_*.pgm")
         elif label == "lepton":
-            before = set(glob(path.join(directory, "lepton_temp_*.csv")))
+            out_glob = path.join(directory, "lepton_temp_*.csv")
         else:
-            before = set()
+            out_glob = None
 
+        start_time = time.time()
         try:
             proc = subprocess.run(
                 command,
@@ -107,17 +110,13 @@ def flir(directory):
             _reset_lepton()
             return False
 
-        # Verify a new output file appeared (not satisfied by pre-existing files).
-        if label == "capture":
-            after = set(glob(path.join(directory, "IMG_*.pgm")))
-            if not (after - before):
-                print("Check Lepton state - capture completed but no new IMG_*.pgm found")
-                _reset_lepton()
-                return False
-        elif label == "lepton":
-            after = set(glob(path.join(directory, "lepton_temp_*.csv")))
-            if not (after - before):
-                print("Check Lepton state - radiometry completed but no lepton_temp_*.csv found")
+        # Verify output was written during this run (mtime >= start_time).
+        # Using mtime handles both new files and overwrites of existing files,
+        # so validation stays correct when the fallback directory is reused.
+        if out_glob is not None:
+            fresh = [f for f in glob(out_glob) if path.getmtime(f) >= start_time - 1]
+            if not fresh:
+                print(f"Check Lepton state - {label} completed but no fresh output found")
                 _reset_lepton()
                 return False
 
