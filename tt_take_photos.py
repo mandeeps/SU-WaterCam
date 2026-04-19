@@ -26,15 +26,13 @@ def take_photo(directory: str, nir: str, picam2) -> str:
 
 @SQify
 def flir(directory):
-    from os import chdir, rename, makedirs, path
+    from os import makedirs, path, rename
+    from glob import glob
     import subprocess
     from datetime import datetime
+
     date = datetime.now().strftime('%Y%m%d-%H%M%S')
 
-    # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
-    # Derive project root from directory (always <root>/images/<date>), then
-    # scan upward for the capture binary as a cross-check.  Must be computed
-    # before any chdir so we are not misled by a changed working directory.
     def _find_project_root(start):
         candidate = path.abspath(start)
         for _ in range(6):
@@ -44,56 +42,110 @@ def flir(directory):
         return None
 
     project_root = _find_project_root(directory) or path.dirname(path.dirname(path.abspath(directory)))
-    capture_bin = path.join(project_root, "capture") if path.exists(path.join(project_root, "capture")) else None
-    lepton_bin = path.join(project_root, "lepton") if path.exists(path.join(project_root, "lepton")) else None
-
-    # Ensure target directory exists (create fallback if needed)
-    need_fallback = False
-    try:
-        if not path.isdir(directory):
-            if directory.startswith('/home/pi/') or directory == '/home/pi':
-                need_fallback = True
-            else:
-                makedirs(directory, exist_ok=True)
-    except PermissionError:
-        need_fallback = True
-    except Exception:
-        need_fallback = True
-
-    if need_fallback:
-        directory = path.join(project_root, 'images', 'fallback')
-        try:
-            makedirs(directory, exist_ok=True)
-        except Exception:
-            directory = path.join(project_root, 'images')
-            makedirs(directory, exist_ok=True)
+    capture_bin = path.join(project_root, "capture")
+    lepton_bin  = path.join(project_root, "lepton")
+    lepton_reset = path.join(project_root, "tools", "lepton_reset.py")
 
     try:
-        chdir(directory)
-    except Exception:
-        directory = path.join(project_root, 'images', 'fallback')
         makedirs(directory, exist_ok=True)
-        chdir(directory)
+    except Exception as exc:
+        fallback_directory = path.join(project_root, "images", "fallback")
+        print(f"Unable to create FLIR output directory '{directory}': {exc}")
+        try:
+            makedirs(fallback_directory, exist_ok=True)
+            print(f"Falling back to FLIR output directory '{fallback_directory}'")
+            directory = fallback_directory
+        except Exception as fallback_exc:
+            print(f"Unable to create fallback FLIR output directory '{fallback_directory}': {fallback_exc}")
+            return True
 
-    try:
-        if not capture_bin:
-            raise FileNotFoundError("capture binary not found")
-        subprocess.run([capture_bin], check=True, timeout=5)
-    except:
-        print("Check Lepton state - capture failed")
-    else:
-        print(f"change name to include {date}")
-        rename("IMG_0000.pgm", f"lepton_{date}.pgm")
+    def _reset_lepton():
+        import sys
+        if not path.isfile(lepton_reset):
+            print(f"Lepton reset script not found: {lepton_reset}")
+            return
+        try:
+            subprocess.run(
+                [sys.executable, lepton_reset], check=True, timeout=10,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            )
+        except Exception as exc:
+            print(f"Lepton reset failed: {exc}")
 
-    try:
-        if not lepton_bin:
-            raise FileNotFoundError("lepton binary not found")
-        subprocess.run([lepton_bin], check=True, timeout=5)
-    except:
-        print("Check Lepton state - radiometery failed")
-    else:
-        print(f"change name to include {date}")
-        rename("lepton_temp_0000.csv", f"temperatures_{date}.csv")
+    def _run_flir_cmd(label, command):
+        import time
+
+        if not path.isfile(command[0]):
+            print(f"Check Lepton state - {label} binary not found: {command[0]}")
+            return []
+
+        if label == "capture":
+            out_glob = path.join(directory, "IMG_*.pgm")
+        elif label == "lepton":
+            out_glob = path.join(directory, "lepton_temp_*.csv")
+        else:
+            out_glob = None
+
+        start_time = time.time()
+        try:
+            proc = subprocess.run(
+                command,
+                timeout=20,
+                cwd=directory,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            print(f"Check Lepton state - {label} timed out")
+            _reset_lepton()
+            return []
+        except Exception as exc:
+            print(f"Check Lepton state - {label} failed: {exc}")
+            _reset_lepton()
+            return []
+
+        if proc.returncode != 0:
+            print(f"Check Lepton state - {label} failed (rc={proc.returncode})")
+            _reset_lepton()
+            return []
+
+        MTIME_SLOP_SEC = 1
+        # Verify output was written during this run. Allow a small mtime slop
+        # for filesystems with coarse timestamp granularity and minor clock /
+        # timestamp-recording skew, while still requiring output to be fresh.
+        # Using mtime handles both new files and overwrites of existing files,
+        # so validation stays correct when the fallback directory is reused.
+        if out_glob is not None:
+            fresh = [f for f in glob(out_glob) if path.getmtime(f) >= start_time - MTIME_SLOP_SEC]
+            if not fresh:
+                print(f"Check Lepton state - {label} completed but no fresh output found")
+                _reset_lepton()
+                return []
+            return fresh
+
+        return []
+
+    # Return fresh paths from each command so the rename step uses exactly
+    # the files produced by this run — no re-glob that could match a file
+    # from a concurrent run sharing the same (fallback) directory.
+    capture_fresh = _run_flir_cmd("capture", [capture_bin])
+    if not capture_fresh:
+        return True
+    lepton_fresh = _run_flir_cmd("lepton", [lepton_bin])
+    if not lepton_fresh:
+        return True
+
+    # Rename outputs to timestamped names matching the coregistration pipeline's expectations.
+    for fresh_files, dst_name in [
+        (capture_fresh, f"lepton_{date}.pgm"),
+        (lepton_fresh,  f"temperatures_{date}.csv"),
+    ]:
+        src_path = max(fresh_files, key=path.getmtime)
+        try:
+            rename(src_path, path.join(directory, dst_name))
+        except Exception as exc:
+            print(f"Could not rename {src_path}: {exc}")
 
     return True
 
