@@ -1698,16 +1698,20 @@ def ip_downlink_poll_and_apply(_lora_init):
     dispatch = apply_downlink_command(cmd, set_param_fn=set_parameter)
 
     applied = dispatch["applied"]
+    skipped = dispatch["skipped"]
     if applied:
         print(f"✅ IP downlink: applied {len(applied)} parameter(s): {', '.join(applied)}")
     else:
         print(f"⚠️ IP downlink: no recognised parameters in command "
               f"(hex={cmd.get('hex_payload', '')})")
+    if skipped:
+        print(f"⚠️ IP downlink: skipped {len(skipped)} part(s): {', '.join(skipped)}")
 
     return {
-        "status": "applied",
+        "status": "applied" if applied else "no_match",
         "queue_id": dispatch["queue_id"],
         "applied_params": applied,
+        "skipped_parts": skipped,
         "hex_payload": cmd.get("hex_payload"),
     }
 

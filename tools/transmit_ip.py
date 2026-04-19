@@ -426,7 +426,14 @@ def apply_downlink_command(
         "queue_id": the queue_id from cmd, or None
     """
     if set_param_fn is None:
-        from tools.lora_runtime_integration import set_parameter as set_param_fn
+        try:
+            from tools.lora_runtime_integration import set_parameter as set_param_fn
+        except ImportError as exc:
+            raise RuntimeError(
+                "apply_downlink_command: set_param_fn not provided and "
+                "tools.lora_runtime_integration is unavailable. "
+                "Pass set_param_fn explicitly when calling outside TickTalkPython."
+            ) from exc
 
     # Index-based lookup tables — must match server app/encoders.py constants.
     _MF_HOURS = [1, 3, 6, 24, 72]       # monitoring_freq_h allowed values
