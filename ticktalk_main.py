@@ -1667,7 +1667,7 @@ def ip_downlink_poll_and_apply(_lora_init):
 
     Disabled by default — requires ip_upload.enabled=true in runtime_config.json.
     """
-    from tools.transmit_ip import IPTransmitter
+    from tools.transmit_ip import IPTransmitter, apply_downlink_command
     from tools.lora_runtime_integration import set_parameter
 
     tx = IPTransmitter()
@@ -1695,102 +1695,23 @@ def ip_downlink_poll_and_apply(_lora_init):
 
     print(f"📬 IP downlink: received command (queue_id={cmd.get('queue_id')})")
 
-    parts_raw = cmd.get("parts")
-    if parts_raw is None:
-        parts = []
-    elif isinstance(parts_raw, list):
-        parts = parts_raw
-    else:
-        print(f"⚠️ IP downlink: malformed parts field "
-              f"(expected list, got {type(parts_raw).__name__}) — treating as empty")
-        parts = []
-    applied = []
+    dispatch = apply_downlink_command(cmd, set_param_fn=set_parameter)
 
-    # Index-based lookup tables — must match server app/encoders.py constants
-    _MF_HOURS = [1, 3, 6, 24, 72]    # monitoring_freq_h allowed values
-    _EF_MIN   = [2, 5, 10]           # emergency_freq_min allowed values
-    _FF_MIN   = [10, 20, 30, 40, 50, 60]  # flood_code_freq_min allowed values
-
-    for part in parts:
-        if not isinstance(part, dict):
-            print(f"⚠️ IP downlink: malformed part (expected dict, got {type(part).__name__}) — skipping")
-            continue
-
-        code_raw = part.get("code", "")
-        payload_hex = part.get("payload_hex", "")
-        if not isinstance(code_raw, str) or not isinstance(payload_hex, str):
-            print(f"⚠️ IP downlink: non-string code or payload_hex in part {part} — skipping")
-            continue
-        code = code_raw.strip()
-
-        try:
-            payload_bytes = bytes.fromhex(payload_hex)
-        except (TypeError, ValueError):
-            print(f"⚠️ IP downlink: bad payload_hex in part {part} — skipping")
-            continue
-
-        # Validate payload width before decoding to avoid silent misinterpretation
-        _expected_len = {"10 90": 1, "11 91": 2, "12 92": 1, "13 93": 1, "14 94": 1}
-        if code in _expected_len and len(payload_bytes) != _expected_len[code]:
-            print(f"⚠️ IP downlink: wrong payload length for {code} "
-                  f"(expected {_expected_len[code]}, got {len(payload_bytes)}) — skipping")
-            continue
-
-        if code == "10 90":  # area_threshold_pct — direct u8 value
-            val = int.from_bytes(payload_bytes, 'big')
-            set_parameter('area_threshold', val)
-            print(f"⬇️ Applied: area_threshold = {val}%")
-            applied.append(f"area_threshold={val}%")
-
-        elif code == "11 91":  # stage_threshold_cm — u16, stored as cm
-            val_cm = int.from_bytes(payload_bytes, 'big')
-            set_parameter('stage_threshold', val_cm)
-            print(f"⬇️ Applied: stage_threshold = {val_cm}cm")
-            applied.append(f"stage_threshold={val_cm}cm")
-
-        elif code == "12 92":  # monitoring_freq_h — u8 index into _MF_HOURS
-            idx = int.from_bytes(payload_bytes, 'big')
-            if 0 <= idx < len(_MF_HOURS):
-                hours = _MF_HOURS[idx]
-                set_parameter('monitoring_frequency', hours * 60)  # stored in minutes
-                print(f"⬇️ Applied: monitoring_frequency = {hours}h ({hours * 60}min)")
-                applied.append(f"monitoring_frequency={hours}h")
-            else:
-                print(f"⚠️ IP downlink: monitoring_freq index {idx} out of range")
-
-        elif code == "13 93":  # emergency_freq_min — u8 index into _EF_MIN
-            idx = int.from_bytes(payload_bytes, 'big')
-            if 0 <= idx < len(_EF_MIN):
-                mins = _EF_MIN[idx]
-                set_parameter('emergency_frequency', mins)
-                print(f"⬇️ Applied: emergency_frequency = {mins}min")
-                applied.append(f"emergency_frequency={mins}min")
-            else:
-                print(f"⚠️ IP downlink: emergency_freq index {idx} out of range")
-
-        elif code == "14 94":  # flood_code_freq_min — u8 index into _FF_MIN
-            idx = int.from_bytes(payload_bytes, 'big')
-            if 0 <= idx < len(_FF_MIN):
-                mins = _FF_MIN[idx]
-                set_parameter('neighborhood_emergency_frequency', mins)
-                print(f"⬇️ Applied: neighborhood_emergency_frequency = {mins}min")
-                applied.append(f"neighborhood_emergency_frequency={mins}min")
-            else:
-                print(f"⚠️ IP downlink: flood_code_freq index {idx} out of range")
-
-        else:
-            print(f"⚠️ IP downlink: unrecognised command code '{code}' — ignoring")
-
+    applied = dispatch["applied"]
+    skipped = dispatch["skipped"]
     if applied:
         print(f"✅ IP downlink: applied {len(applied)} parameter(s): {', '.join(applied)}")
     else:
         print(f"⚠️ IP downlink: no recognised parameters in command "
               f"(hex={cmd.get('hex_payload', '')})")
+    if skipped:
+        print(f"⚠️ IP downlink: skipped {len(skipped)} part(s): {', '.join(skipped)}")
 
     return {
-        "status": "applied",
-        "queue_id": cmd.get("queue_id"),
+        "status": "applied" if applied else "no_match",
+        "queue_id": dispatch["queue_id"],
         "applied_params": applied,
+        "skipped_parts": skipped,
         "hex_payload": cmd.get("hex_payload"),
     }
 
