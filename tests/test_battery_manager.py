@@ -1,13 +1,20 @@
-"""Tests for tools/battery_manager.py (ADS1115 + D+ pin SOC estimation)."""
+"""Tests for tools/battery_manager.py (ADS1115 D+ and INA260 coulomb paths)."""
 
+import json
 import os
 import sys
+import tempfile
 import unittest
+from datetime import datetime, timezone, timedelta
 from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 import tools.battery_manager as bm
 
+
+# ---------------------------------------------------------------------------
+# ADS1115 / D+ path
+# ---------------------------------------------------------------------------
 
 class TestCellVoltageToPct(unittest.TestCase):
 
@@ -28,115 +35,212 @@ class TestCellVoltageToPct(unittest.TestCase):
         self.assertEqual(bm._cell_voltage_to_pct(1.0), 0)
 
     def test_empirical_observed_full(self):
-        # Voltaic blog reports ~1.85V D+ at observed full → cell ~3.7V → ~58%
-        d_plus = 1.85
-        cell_v = d_plus * 2.0
-        pct = bm._cell_voltage_to_pct(cell_v)
+        # Voltaic blog: ~1.85V D+ at observed full → cell ~3.7V → ~58%
+        pct = bm._cell_voltage_to_pct(1.85 * 2.0)
         self.assertGreater(pct, 50)
         self.assertLess(pct, 75)
 
     def test_empirical_observed_empty(self):
-        # Voltaic blog reports ~1.54V D+ at observed empty → cell ~3.08V → ~7%
-        d_plus = 1.54
-        cell_v = d_plus * 2.0
-        pct = bm._cell_voltage_to_pct(cell_v)
+        # Voltaic blog: ~1.54V D+ at observed empty → cell ~3.08V → ~7%
+        pct = bm._cell_voltage_to_pct(1.54 * 2.0)
         self.assertGreaterEqual(pct, 0)
         self.assertLess(pct, 15)
 
     def test_returns_int(self):
-        result = bm._cell_voltage_to_pct(3.6)
-        self.assertIsInstance(result, int)
+        self.assertIsInstance(bm._cell_voltage_to_pct(3.6), int)
 
 
-class TestGetBatteryStatusFallback(unittest.TestCase):
-    """When ADS1115 is absent, get_battery_status() returns unavailable."""
+class TestADS1115Path(unittest.TestCase):
 
-    def test_no_hardware_returns_none_pct(self):
-        with patch.object(bm, "_read_ads1115_dplus", return_value=None):
-            with patch.object(bm, "_log_wittypi_vin_diagnostic"):
-                result = bm.get_battery_status()
-        self.assertIsNone(result["battery_pct"])
-        self.assertEqual(result["battery_source"], "unavailable")
-        self.assertIsNone(result["cell_voltage_v"])
-        self.assertIsNone(result["d_plus_v"])
-
-    def test_no_hardware_does_not_raise(self):
-        with patch.object(bm, "_read_ads1115_dplus", return_value=None):
-            with patch.object(bm, "_log_wittypi_vin_diagnostic"):
-                try:
-                    bm.get_battery_status()
-                except Exception as e:
-                    self.fail(f"get_battery_status raised unexpectedly: {e}")
-
-
-class TestGetBatteryStatusWithHardware(unittest.TestCase):
-    """When ADS1115 reads a valid D+ voltage, SOC is computed correctly."""
-
-    def _run_with_dplus(self, d_plus_v):
+    def _status(self, d_plus_v):
         with patch.object(bm, "_read_ads1115_dplus", return_value=d_plus_v):
             return bm.get_battery_status()
 
     def test_source_tag(self):
-        result = self._run_with_dplus(1.85)
-        self.assertEqual(result["battery_source"], "ads1115_dplus")
+        self.assertEqual(self._status(1.85)["battery_source"], "ads1115_dplus")
 
-    def test_d_plus_v_returned(self):
-        result = self._run_with_dplus(1.75)
-        self.assertAlmostEqual(result["d_plus_v"], 1.75, places=3)
+    def test_d_plus_returned(self):
+        self.assertAlmostEqual(self._status(1.75)["d_plus_v"], 1.75, places=3)
 
     def test_cell_voltage_is_double_dplus(self):
-        result = self._run_with_dplus(1.85)
-        self.assertAlmostEqual(result["cell_voltage_v"], 3.70, places=2)
+        self.assertAlmostEqual(self._status(1.85)["cell_voltage_v"], 3.70, places=2)
 
     def test_full_charge(self):
-        # D+ = 2.1V → cell = 4.2V → 100%
-        result = self._run_with_dplus(2.1)
-        self.assertEqual(result["battery_pct"], 100)
+        self.assertEqual(self._status(2.1)["battery_pct"], 100)
 
     def test_empty(self):
-        # D+ = 1.5V → cell = 3.0V → 0%
-        result = self._run_with_dplus(1.5)
-        self.assertEqual(result["battery_pct"], 0)
+        self.assertEqual(self._status(1.5)["battery_pct"], 0)
 
     def test_pct_in_range(self):
-        result = self._run_with_dplus(1.75)
-        self.assertGreaterEqual(result["battery_pct"], 0)
-        self.assertLessEqual(result["battery_pct"], 100)
+        pct = self._status(1.75)["battery_pct"]
+        self.assertGreaterEqual(pct, 0)
+        self.assertLessEqual(pct, 100)
 
-    def test_pct_is_int(self):
-        result = self._run_with_dplus(1.80)
-        self.assertIsInstance(result["battery_pct"], int)
+    def test_ina260_fields_are_none(self):
+        result = self._status(1.80)
+        self.assertIsNone(result["current_ma"])
+        self.assertIsNone(result["mah_remaining"])
 
+
+# ---------------------------------------------------------------------------
+# INA260 coulomb-counting path
+# ---------------------------------------------------------------------------
+
+class TestCoulombCounting(unittest.TestCase):
+
+    def test_discharge_reduces_remaining(self):
+        state = {"mah_remaining": 13500.0, "last_updated_utc": None}
+        remaining = bm._update_coulomb_state(state, current_ma=1000.0, elapsed_s=3600.0)
+        self.assertAlmostEqual(remaining, 12500.0, places=1)
+
+    def test_discharge_clamps_to_zero(self):
+        state = {"mah_remaining": 10.0, "last_updated_utc": None}
+        remaining = bm._update_coulomb_state(state, current_ma=5000.0, elapsed_s=3600.0)
+        self.assertEqual(remaining, 0.0)
+
+    def test_zero_elapsed_no_change(self):
+        state = {"mah_remaining": 8000.0, "last_updated_utc": None}
+        remaining = bm._update_coulomb_state(state, current_ma=1000.0, elapsed_s=0.0)
+        self.assertAlmostEqual(remaining, 8000.0)
+
+    def test_elapsed_seconds_valid_timestamp(self):
+        past = (datetime.now(timezone.utc) - timedelta(hours=1)).isoformat()
+        elapsed = bm._elapsed_seconds_since(past)
+        self.assertGreater(elapsed, 3500)
+        self.assertLess(elapsed, 3700)
+
+    def test_elapsed_seconds_none_returns_zero(self):
+        self.assertEqual(bm._elapsed_seconds_since(None), 0.0)
+
+    def test_elapsed_seconds_bad_string_returns_zero(self):
+        self.assertEqual(bm._elapsed_seconds_since("not-a-date"), 0.0)
+
+
+class TestStateFile(unittest.TestCase):
+
+    def test_save_and_load_roundtrip(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = os.path.join(tmpdir, "battery_state.json")
+            with patch.object(bm, "STATE_FILE", state_file):
+                state_in = {"mah_remaining": 9876.5, "calibrated": True,
+                            "last_updated_utc": "2026-01-01T00:00:00+00:00"}
+                bm._save_state(state_in)
+                state_out = bm._load_state()
+            self.assertAlmostEqual(state_out["mah_remaining"], 9876.5)
+
+    def test_missing_file_returns_full_capacity(self):
+        with patch.object(bm, "STATE_FILE", "/nonexistent/path/battery_state.json"):
+            state = bm._load_state()
+        self.assertAlmostEqual(state["mah_remaining"], bm.VOLTAIC_V50_MAH)
+
+    def test_missing_mah_key_defaults_to_full(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = os.path.join(tmpdir, "battery_state.json")
+            with open(state_file, "w") as f:
+                json.dump({"calibrated": False}, f)
+            with patch.object(bm, "STATE_FILE", state_file):
+                state = bm._load_state()
+            self.assertAlmostEqual(state["mah_remaining"], bm.VOLTAIC_V50_MAH)
+
+
+class TestINA260Path(unittest.TestCase):
+
+    def _status_with_ina(self, mah_remaining=6750.0, current_ma=500.0):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = os.path.join(tmpdir, "battery_state.json")
+            seed = {"mah_remaining": mah_remaining, "calibrated": True,
+                    "last_updated_utc": None}
+            with open(state_file, "w") as f:
+                json.dump(seed, f)
+            with patch.object(bm, "_read_ads1115_dplus", return_value=None):
+                with patch.object(bm, "_read_ina260", return_value=(5.1, current_ma, 2550.0)):
+                    with patch.object(bm, "STATE_FILE", state_file):
+                        return bm.get_battery_status()
+
+    def test_source_tag(self):
+        self.assertEqual(self._status_with_ina()["battery_source"], "ina260")
+
+    def test_pct_at_half_capacity(self):
+        result = self._status_with_ina(mah_remaining=bm.VOLTAIC_V50_MAH / 2)
+        self.assertEqual(result["battery_pct"], 50)
+
+    def test_ads1115_fields_are_none(self):
+        result = self._status_with_ina()
+        self.assertIsNone(result["d_plus_v"])
+        self.assertIsNone(result["cell_voltage_v"])
+
+    def test_current_ma_returned(self):
+        result = self._status_with_ina(current_ma=750.0)
+        self.assertAlmostEqual(result["current_ma"], 750.0, places=1)
+
+
+# ---------------------------------------------------------------------------
+# Fallback chain
+# ---------------------------------------------------------------------------
+
+class TestFallbackChain(unittest.TestCase):
+
+    def test_ads1115_takes_priority_over_ina260(self):
+        with patch.object(bm, "_read_ads1115_dplus", return_value=1.80):
+            with patch.object(bm, "_read_ina260", return_value=(5.1, 500.0, 2550.0)):
+                result = bm.get_battery_status()
+        self.assertEqual(result["battery_source"], "ads1115_dplus")
+
+    def test_ina260_used_when_ads1115_absent(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = os.path.join(tmpdir, "s.json")
+            with patch.object(bm, "_read_ads1115_dplus", return_value=None):
+                with patch.object(bm, "_read_ina260", return_value=(5.1, 500.0, 2550.0)):
+                    with patch.object(bm, "STATE_FILE", state_file):
+                        result = bm.get_battery_status()
+        self.assertEqual(result["battery_source"], "ina260")
+
+    def test_unavailable_when_both_absent(self):
+        with patch.object(bm, "_read_ads1115_dplus", return_value=None):
+            with patch.object(bm, "_read_ina260", return_value=None):
+                with patch.object(bm, "_log_wittypi_vin_diagnostic"):
+                    result = bm.get_battery_status()
+        self.assertIsNone(result["battery_pct"])
+        self.assertEqual(result["battery_source"], "unavailable")
+
+    def test_unavailable_does_not_raise(self):
+        with patch.object(bm, "_read_ads1115_dplus", return_value=None):
+            with patch.object(bm, "_read_ina260", return_value=None):
+                with patch.object(bm, "_log_wittypi_vin_diagnostic"):
+                    try:
+                        bm.get_battery_status()
+                    except Exception as e:
+                        self.fail(f"get_battery_status raised unexpectedly: {e}")
+
+
+# ---------------------------------------------------------------------------
+# LoRa packet encoding
+# ---------------------------------------------------------------------------
 
 class TestLoRaPacketEncoding(unittest.TestCase):
-    """battery_percent=None must be skipped in compressed_encoding."""
 
     def setUp(self):
-        serial_mock = MagicMock()
-        sys.modules.setdefault("serial", serial_mock)
+        sys.modules.setdefault("serial", MagicMock())
 
-    def test_none_battery_excluded_from_packet(self):
+    def test_none_battery_excluded(self):
         import importlib
         import tools.lora_transmit as lt
         importlib.reload(lt)
-        data = {"timestamp": 1000000, "temperature_celsius": 20.0, "battery_percent": None}
-        packet = lt.compressed_encoding(data)
+        packet = lt.compressed_encoding({"timestamp": 1000000, "battery_percent": None})
         self.assertNotIn("0201", packet.hex())
 
-    def test_valid_battery_included_in_packet(self):
+    def test_valid_battery_included(self):
         import importlib
         import tools.lora_transmit as lt
         importlib.reload(lt)
-        data = {"timestamp": 1000000, "battery_percent": 75}
-        packet = lt.compressed_encoding(data)
+        packet = lt.compressed_encoding({"timestamp": 1000000, "battery_percent": 75})
         self.assertIn("0201", packet.hex())
 
-    def test_zero_battery_included_in_packet(self):
+    def test_zero_battery_included(self):
         import importlib
         import tools.lora_transmit as lt
         importlib.reload(lt)
-        data = {"timestamp": 1000000, "battery_percent": 0}
-        packet = lt.compressed_encoding(data)
+        packet = lt.compressed_encoding({"timestamp": 1000000, "battery_percent": 0})
         self.assertIn("0201", packet.hex())
 
 
