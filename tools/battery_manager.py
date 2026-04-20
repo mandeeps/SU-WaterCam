@@ -3,24 +3,33 @@ Battery state-of-charge estimation for the UFONet HazMapper WaterCam unit.
 
 Hardware: Voltaic V50 battery pack (50 Wh, ~13 500 mAh at 3.7 V nominal).
 
-Two measurement paths are supported, tried in priority order:
+Three measurement paths are supported, tried in priority order:
 
-  1. ADS1115 + D+ pin (preferred)
+  1. ADS1115 + D+ pin (preferred — most accurate)
      The Voltaic V50 outputs ~½ cell voltage on its USB-C D+ pin (1.5–2.1 V).
      An Adafruit ADS1115 ADC (Product #1085) reads this directly.
      No drift, no state file, fresh reading every boot.
      Ref: https://blog.voltaicsystems.com/reading-charge-level-of-voltaic-usb-battery-packs/
      BOM: ADS1115 #1085 + USB-C breakout #4090 + STEMMA QT cable.
 
-  2. INA260 coulomb counting (fallback)
+  2. INA260 coulomb counting (fallback — accurate, drifts over time)
      An Adafruit INA260 power monitor (Product #4226) placed in-line on the
      power feed measures current draw. Accumulated mAh is persisted to a state
      file so the counter survives WittyPi-scheduled reboots.
      Requires initial calibration after a known full charge.
      BOM: INA260 #4226 + STEMMA QT cable.
 
-  3. Unavailable
-     Neither sensor detected. Returns battery_pct=None; callers omit the
+  3. WittyPi output voltage (rough estimate — no extra hardware required)
+     The WittyPi 4 reports the voltage it delivers to the Raspberry Pi via
+     its 5V GPIO rail. This voltage droops slowly as the Voltaic V50 depletes
+     and rises when solar charging restores the pack. The relationship is
+     non-linear and load-dependent, so the estimate is coarse but useful for
+     detecting critically low charge without additional hardware.
+     Calibrate WITTYPI_OUTPUT_V_FULL / WITTYPI_OUTPUT_V_EMPTY against
+     observed readings at known charge levels.
+
+  4. Unavailable
+     No usable reading available. Returns battery_pct=None; callers omit the
      battery channel from transmissions rather than sending a wrong value.
 
 Wiring — ADS1115 path:
@@ -50,6 +59,13 @@ CELL_V_MAX = 4.2   # cell voltage at 100% SOC
 # ── INA260 constants ───────────────────────────────────────────────────────
 INA260_I2C_ADDRESS = 0x40
 VOLTAIC_V50_MAH = 13500.0
+
+# ── WittyPi output-voltage constants ──────────────────────────────────────
+# The WittyPi 5V output rail droops as the Voltaic V50 depletes. These
+# bounds must be calibrated against observed readings at known charge levels.
+# The defaults below are conservative starting points; refine after deployment.
+WITTYPI_OUTPUT_V_FULL = 5.10   # output voltage (V) when battery is fully charged
+WITTYPI_OUTPUT_V_EMPTY = 4.75  # output voltage (V) when battery is nearly depleted
 # Stored in the project root so it stays within the home directory on all deployments.
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_FILE = os.path.join(_PROJECT_ROOT, "battery_state.json")
@@ -60,15 +76,21 @@ STATE_FILE = os.path.join(_PROJECT_ROOT, "battery_state.json")
 # ---------------------------------------------------------------------------
 
 def get_battery_status() -> dict:
-    """Return current battery SOC, trying ADS1115 then INA260 then unavailable.
+    """Return current battery SOC, trying each path in priority order.
+
+    Priority: ADS1115 D+ pin → INA260 coulomb counting →
+              WittyPi output voltage (rough) → unavailable.
 
     Return dict keys:
-        battery_pct     int | None   — 0–100, or None when unavailable
-        battery_source  str          — "ads1115_dplus" | "ina260" | "unavailable"
-        cell_voltage_v  float | None — reconstructed cell voltage (V); ADS1115 path only
-        d_plus_v        float | None — raw D+ reading (V); ADS1115 path only
-        current_ma      float | None — instantaneous draw (mA); INA260 path only
-        mah_remaining   float | None — coulomb-counted charge (mAh); INA260 path only
+        battery_pct      int | None   — 0–100, or None when unavailable
+        battery_source   str          — "ads1115_dplus" | "ina260" |
+                                        "wittypi_output" | "unavailable"
+        cell_voltage_v   float | None — reconstructed cell voltage (V); ADS1115 only
+        d_plus_v         float | None — raw D+ reading (V); ADS1115 only
+        current_ma       float | None — instantaneous draw (mA); INA260 only
+        mah_remaining    float | None — coulomb-counted charge (mAh); INA260 only
+        output_voltage_v float | None — WittyPi 5V rail reading (V); WittyPi path only
+        output_current_a float | None — WittyPi output current (A); WittyPi path only
     """
     # ── Path 1: ADS1115 + D+ ──────────────────────────────────────────────
     d_plus_v = _read_ads1115_dplus()
@@ -86,6 +108,8 @@ def get_battery_status() -> dict:
             "d_plus_v": round(d_plus_v, 4),
             "current_ma": None,
             "mah_remaining": None,
+            "output_voltage_v": None,
+            "output_current_a": None,
         }
 
     # ── Path 2: INA260 coulomb counting ───────────────────────────────────
@@ -108,10 +132,31 @@ def get_battery_status() -> dict:
             "d_plus_v": None,
             "current_ma": round(current_ma, 2),
             "mah_remaining": round(mah_remaining, 1),
+            "output_voltage_v": None,
+            "output_current_a": None,
         }
 
-    # ── Path 3: unavailable ───────────────────────────────────────────────
-    _log_wittypi_vin_diagnostic()
+    # ── Path 3: WittyPi output voltage (rough estimate) ───────────────────
+    wittypi_reading = _read_wittypi_output()
+    if wittypi_reading is not None:
+        output_v, output_a = wittypi_reading
+        battery_pct = _wittypi_output_to_pct(output_v)
+        logging.info(
+            "Battery (WittyPi output, rough): %d%% — %.3fV, %.3fA",
+            battery_pct, output_v, output_a,
+        )
+        return {
+            "battery_pct": battery_pct,
+            "battery_source": "wittypi_output",
+            "cell_voltage_v": None,
+            "d_plus_v": None,
+            "current_ma": None,
+            "mah_remaining": None,
+            "output_voltage_v": round(output_v, 3),
+            "output_current_a": round(output_a, 3),
+        }
+
+    # ── Path 4: unavailable ───────────────────────────────────────────────
     return {
         "battery_pct": None,
         "battery_source": "unavailable",
@@ -119,6 +164,8 @@ def get_battery_status() -> dict:
         "d_plus_v": None,
         "current_ma": None,
         "mah_remaining": None,
+        "output_voltage_v": None,
+        "output_current_a": None,
     }
 
 
@@ -230,20 +277,38 @@ def _save_state(state: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Diagnostic
+# WittyPi output-voltage interface
 # ---------------------------------------------------------------------------
 
-def _log_wittypi_vin_diagnostic() -> None:
-    """Log WittyPi VIN for cable-fault detection only — NOT an SOC signal.
+def _read_wittypi_output() -> Optional[tuple[float, float]]:
+    """Read output voltage (V) and current (A) from the WittyPi 4.
 
-    The Voltaic V50 outputs regulated 5V; VIN does not vary with charge level.
-    Values below ~4.5V may indicate a power cable fault.
+    Returns (output_voltage_v, output_current_a), or None if unavailable.
+    The output voltage is the 5V rail delivered to the Raspberry Pi and droops
+    gradually as the Voltaic V50 depletes, providing a rough SOC signal.
     """
     try:
         from tools.wittypi_control import get_wittypi_status
         data = get_wittypi_status()
-        vin = data.get("battery_voltage")
-        if vin is not None:
-            logging.debug("WittyPi VIN (cable diagnostic only): %.3fV", vin)
-    except Exception:
-        pass
+        if data.get("status") != "wittypi_data_retrieved":
+            return None
+        output_v = data.get("internal_voltage")
+        output_a = data.get("internal_current", 0.0)
+        if output_v is None or output_v <= 0:
+            return None
+        return float(output_v), float(output_a)
+    except Exception as e:
+        logging.debug("WittyPi output read failed: %s", e)
+        return None
+
+
+def _wittypi_output_to_pct(output_v: float) -> int:
+    """Estimate SOC from WittyPi output voltage, clamped [0, 100].
+
+    The mapping is linear between WITTYPI_OUTPUT_V_EMPTY and
+    WITTYPI_OUTPUT_V_FULL. Accuracy is limited because the output voltage
+    also varies with load current. Treat results as a rough indicator only.
+    Calibrate the constants against observed voltages at known charge levels.
+    """
+    pct = (output_v - WITTYPI_OUTPUT_V_EMPTY) / (WITTYPI_OUTPUT_V_FULL - WITTYPI_OUTPUT_V_EMPTY) * 100
+    return max(0, min(100, int(pct)))

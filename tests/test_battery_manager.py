@@ -175,6 +175,58 @@ class TestINA260Path(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# WittyPi output-voltage path
+# ---------------------------------------------------------------------------
+
+class TestWittyPiOutputPath(unittest.TestCase):
+
+    def _status(self, output_v, output_a=0.5):
+        with patch.object(bm, "_read_ads1115_dplus", return_value=None):
+            with patch.object(bm, "_read_ina260", return_value=None):
+                with patch.object(bm, "_read_wittypi_output", return_value=(output_v, output_a)):
+                    return bm.get_battery_status()
+
+    def test_source_tag(self):
+        self.assertEqual(self._status(5.05)["battery_source"], "wittypi_output")
+
+    def test_full_voltage_returns_100(self):
+        self.assertEqual(self._status(bm.WITTYPI_OUTPUT_V_FULL)["battery_pct"], 100)
+
+    def test_empty_voltage_returns_0(self):
+        self.assertEqual(self._status(bm.WITTYPI_OUTPUT_V_EMPTY)["battery_pct"], 0)
+
+    def test_midpoint(self):
+        mid_v = (bm.WITTYPI_OUTPUT_V_FULL + bm.WITTYPI_OUTPUT_V_EMPTY) / 2
+        pct = self._status(mid_v)["battery_pct"]
+        self.assertEqual(pct, 50)
+
+    def test_above_full_clamps_to_100(self):
+        self.assertEqual(self._status(6.0)["battery_pct"], 100)
+
+    def test_below_empty_clamps_to_0(self):
+        self.assertEqual(self._status(3.0)["battery_pct"], 0)
+
+    def test_output_voltage_returned(self):
+        result = self._status(5.02)
+        self.assertAlmostEqual(result["output_voltage_v"], 5.02, places=2)
+
+    def test_output_current_returned(self):
+        result = self._status(5.02, output_a=0.75)
+        self.assertAlmostEqual(result["output_current_a"], 0.75, places=2)
+
+    def test_ads1115_fields_none(self):
+        result = self._status(5.02)
+        self.assertIsNone(result["d_plus_v"])
+        self.assertIsNone(result["cell_voltage_v"])
+
+    def test_ina260_fields_none(self):
+        result = self._status(5.02)
+        self.assertIsNone(result["current_ma"])
+        self.assertIsNone(result["mah_remaining"])
+
+
+
+# ---------------------------------------------------------------------------
 # Fallback chain
 # ---------------------------------------------------------------------------
 
@@ -183,6 +235,12 @@ class TestFallbackChain(unittest.TestCase):
     def test_ads1115_takes_priority_over_ina260(self):
         with patch.object(bm, "_read_ads1115_dplus", return_value=1.80):
             with patch.object(bm, "_read_ina260", return_value=(5.1, 500.0, 2550.0)):
+                result = bm.get_battery_status()
+        self.assertEqual(result["battery_source"], "ads1115_dplus")
+
+    def test_ads1115_takes_priority_over_wittypi(self):
+        with patch.object(bm, "_read_ads1115_dplus", return_value=1.80):
+            with patch.object(bm, "_read_wittypi_output", return_value=(5.05, 0.5)):
                 result = bm.get_battery_status()
         self.assertEqual(result["battery_source"], "ads1115_dplus")
 
@@ -195,10 +253,27 @@ class TestFallbackChain(unittest.TestCase):
                         result = bm.get_battery_status()
         self.assertEqual(result["battery_source"], "ina260")
 
-    def test_unavailable_when_both_absent(self):
+    def test_ina260_takes_priority_over_wittypi(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            state_file = os.path.join(tmpdir, "s.json")
+            with patch.object(bm, "_read_ads1115_dplus", return_value=None):
+                with patch.object(bm, "_read_ina260", return_value=(5.1, 500.0, 2550.0)):
+                    with patch.object(bm, "_read_wittypi_output", return_value=(5.05, 0.5)):
+                        with patch.object(bm, "STATE_FILE", state_file):
+                            result = bm.get_battery_status()
+        self.assertEqual(result["battery_source"], "ina260")
+
+    def test_wittypi_used_when_ads1115_and_ina260_absent(self):
         with patch.object(bm, "_read_ads1115_dplus", return_value=None):
             with patch.object(bm, "_read_ina260", return_value=None):
-                with patch.object(bm, "_log_wittypi_vin_diagnostic"):
+                with patch.object(bm, "_read_wittypi_output", return_value=(5.05, 0.5)):
+                    result = bm.get_battery_status()
+        self.assertEqual(result["battery_source"], "wittypi_output")
+
+    def test_unavailable_when_all_absent(self):
+        with patch.object(bm, "_read_ads1115_dplus", return_value=None):
+            with patch.object(bm, "_read_ina260", return_value=None):
+                with patch.object(bm, "_read_wittypi_output", return_value=None):
                     result = bm.get_battery_status()
         self.assertIsNone(result["battery_pct"])
         self.assertEqual(result["battery_source"], "unavailable")
@@ -206,7 +281,7 @@ class TestFallbackChain(unittest.TestCase):
     def test_unavailable_does_not_raise(self):
         with patch.object(bm, "_read_ads1115_dplus", return_value=None):
             with patch.object(bm, "_read_ina260", return_value=None):
-                with patch.object(bm, "_log_wittypi_vin_diagnostic"):
+                with patch.object(bm, "_read_wittypi_output", return_value=None):
                     try:
                         bm.get_battery_status()
                     except Exception as e:
