@@ -86,12 +86,16 @@ batt_pct = max(0, min(100, int((cell_v - CELL_V_MIN) / (CELL_V_MAX - CELL_V_MIN)
 
 Where `CELL_V_MIN = 3.0 V`, `CELL_V_MAX = 4.2 V`. These constants are tunable once empirical D+ readings are collected from the deployed unit.
 
-### Fallback: no hardware
+### Fallback chain when ADS1115 is absent
 
-When ADS1115 is absent (or D+ wire not connected):
-- Return `battery_pct = None`, `battery_source = "unavailable"`
-- Omit channel `02 01` from packets — receiver treats as unknown
-- Log WittyPi VIN for cable-fault diagnostics only (do not compute SOC from it)
+The shipped `battery_manager` does not immediately declare unavailable when ADS1115/D+ is absent. It tries each path in order:
+
+1. **ADS1115 D+** (preferred) — direct voltage reading, no drift, no state file
+2. **INA260 coulomb counting** — accurate fallback; accumulated mAh persisted to `battery_state.json`
+3. **WittyPi output voltage** — coarse estimate from the 5V rail sag; no extra hardware required
+4. **Unavailable** — `battery_pct = None`, `battery_source = "unavailable"`; channel `02 01` omitted from packets so the receiver treats battery state as unknown
+
+WittyPi VIN (`get_input_voltage`) is **not** used for SOC — it reads a regulated 5V rail and is logged only as a cable-fault diagnostic.
 
 ---
 

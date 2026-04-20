@@ -75,11 +75,17 @@ STATE_FILE = os.path.join(_PROJECT_ROOT, "battery_state.json")
 # Public API
 # ---------------------------------------------------------------------------
 
-def get_battery_status() -> dict:
+def get_battery_status(wittypi_data: Optional[dict] = None) -> dict:
     """Return current battery SOC, trying each path in priority order.
 
     Priority: ADS1115 D+ pin → INA260 coulomb counting →
               WittyPi output voltage (rough) → unavailable.
+
+    Args:
+        wittypi_data: Optional pre-fetched result from get_wittypi_status().
+                      When supplied, Path 3 reuses it instead of making a
+                      second I2C call (avoids bus contention when the caller
+                      already holds fresh WittyPi readings).
 
     Return dict keys:
         battery_pct      int | None   — 0–100, or None when unavailable
@@ -137,7 +143,7 @@ def get_battery_status() -> dict:
         }
 
     # ── Path 3: WittyPi output voltage (rough estimate) ───────────────────
-    wittypi_reading = _read_wittypi_output()
+    wittypi_reading = _read_wittypi_output(wittypi_data)
     if wittypi_reading is not None:
         output_v, output_a = wittypi_reading
         battery_pct = _wittypi_output_to_pct(output_v)
@@ -282,16 +288,23 @@ def _save_state(state: dict) -> None:
 # WittyPi output-voltage interface
 # ---------------------------------------------------------------------------
 
-def _read_wittypi_output() -> Optional[tuple[float, float]]:
+def _read_wittypi_output(prefetched: Optional[dict] = None) -> Optional[tuple[float, float]]:
     """Read output voltage (V) and current (A) from the WittyPi 4.
 
     Returns (output_voltage_v, output_current_a), or None if unavailable.
     The output voltage is the 5V rail delivered to the Raspberry Pi and droops
     gradually as the Voltaic V50 depletes, providing a rough SOC signal.
+
+    Args:
+        prefetched: Optional result already returned by get_wittypi_status().
+                    Skips the I2C call when supplied.
     """
     try:
-        from tools.wittypi_control import get_wittypi_status
-        data = get_wittypi_status()
+        if prefetched is not None:
+            data = prefetched
+        else:
+            from tools.wittypi_control import get_wittypi_status
+            data = get_wittypi_status()
         if data.get("status") != "wittypi_data_retrieved":
             return None
         output_v = data.get("internal_voltage")

@@ -243,6 +243,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         print(f"⚠️ Failed to get GPS data: {e}")
     
     # Get WittyPi temperature and voltage diagnostics
+    wittypi_data = None
     try:
         from tools.wittypi_control import get_wittypi_status
         wittypi_data = get_wittypi_status()
@@ -260,7 +261,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     # Get battery state-of-charge from battery_manager (path varies by hardware)
     try:
         from tools.battery_manager import get_battery_status
-        batt_status = get_battery_status()
+        batt_status = get_battery_status(wittypi_data=wittypi_data)
         data['battery_percent'] = batt_status['battery_pct']
         data['battery_source'] = batt_status['battery_source']  # device-side diagnostic; not transmitted
         pct = batt_status['battery_pct']
@@ -783,6 +784,7 @@ def lora_token(bitmap):
         print(f"⚠️ Failed to get GPS data: {e}")
     
     # Get WittyPi temperature and voltage diagnostics
+    wittypi_data = None
     try:
         from tools.wittypi_control import get_wittypi_status
         wittypi_data = get_wittypi_status()
@@ -800,7 +802,7 @@ def lora_token(bitmap):
     # Get battery state-of-charge from battery_manager (path varies by hardware)
     try:
         from tools.battery_manager import get_battery_status
-        batt_status = get_battery_status()
+        batt_status = get_battery_status(wittypi_data=wittypi_data)
         data['battery_percent'] = batt_status['battery_pct']
         data['battery_source'] = batt_status['battery_source']  # device-side diagnostic; not transmitted
         pct = batt_status['battery_pct']
