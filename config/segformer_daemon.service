@@ -1,0 +1,22 @@
+[Unit]
+Description=SegFormer 5-band ONNX inference daemon
+# Start after the filesystem and network are ready, but before ticktalk.
+After=multi-user.target
+Before=ticktalk.service
+
+[Service]
+User=pi
+Group=pi
+Type=simple
+WorkingDirectory=/home/pi/segformer_5band
+ExecStart=/home/pi/miniforge3/envs/5band/bin/python \
+    /home/pi/SU-WaterCam/tools/segformer_daemon.py \
+    --model /home/pi/segformer_5band/segformer_5band_int8.onnx \
+    --socket /tmp/segformer.sock
+Restart=on-failure
+RestartSec=5
+# Give the model time to load before ticktalk starts sending requests.
+ExecStartPost=/bin/bash -c 'until [ -S /tmp/segformer.sock ]; do sleep 0.5; done'
+
+[Install]
+WantedBy=multi-user.target
