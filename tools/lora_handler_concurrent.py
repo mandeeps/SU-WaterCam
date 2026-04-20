@@ -588,7 +588,7 @@ class LoRaHandler:
             if 'movement_threshold' in data: 
                 print(f"DEBUG: Processing movement_threshold: {data['movement_threshold']}")
                 add_u8(0x01, 0x06, data['movement_threshold'])
-            if 'battery_percent' in data: 
+            if data.get('battery_percent') is not None:
                 print(f"DEBUG: Processing battery_percent: {data['battery_percent']}")
                 add_u8(0x02, 0x01, data['battery_percent'])
             if 'tilt_roll_yaw' in data: 

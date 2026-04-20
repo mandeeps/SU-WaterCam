@@ -11,7 +11,8 @@ def get_data():
     temperature = witty_pi_4.get_temperature()
     battery_voltage = witty_pi_4.get_battery_voltage()
     internal_voltage = witty_pi_4.get_internal_voltage()
-    return temperature, battery_voltage, internal_voltage
+    internal_current = witty_pi_4.get_internal_current()
+    return temperature, battery_voltage, internal_voltage, internal_current
 
 def set_schedule(start_hour, start_minute, interval_length_minutes, num_repetitions_per_day):
     witty_pi_4.generate_schedule(start_hour, start_minute, interval_length_minutes, num_repetitions_per_day)
@@ -27,16 +28,18 @@ from datetime import datetime, timezone
 @SQify
 def get_wittypi_status():
     """
-    Get current WittyPi status including temperature, battery voltage, and internal voltage
+    Get current WittyPi status including temperature, battery voltage,
+    internal voltage, and internal current.
     """
     try:
-        temperature, battery_voltage, internal_voltage = get_data()
-        
+        temperature, battery_voltage, internal_voltage, internal_current = get_data()
+
         return {
             'status': 'wittypi_data_retrieved',
             'temperature': temperature,
             'battery_voltage': battery_voltage,
             'internal_voltage': internal_voltage,
+            'internal_current': internal_current,
             'timestamp': datetime.now(timezone.utc).isoformat()
         }
         
