@@ -50,7 +50,9 @@ CELL_V_MAX = 4.2   # cell voltage at 100% SOC
 # ── INA260 constants ───────────────────────────────────────────────────────
 INA260_I2C_ADDRESS = 0x40
 VOLTAIC_V50_MAH = 13500.0
-STATE_FILE = "/var/lib/watercam/battery_state.json"
+# Stored in the project root so it stays within the home directory on all deployments.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+STATE_FILE = os.path.join(_PROJECT_ROOT, "battery_state.json")
 
 
 # ---------------------------------------------------------------------------
@@ -221,7 +223,6 @@ def _load_state() -> dict:
 
 def _save_state(state: dict) -> None:
     try:
-        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
         with open(STATE_FILE, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
     except Exception as e:
