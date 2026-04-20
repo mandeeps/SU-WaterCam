@@ -43,6 +43,8 @@ build/
 # Runtime config files
 lora_config.json
 runtime_config.json
+battery_state.json
+battery_state.json.tmp
 
 # IDE
 .vscode/

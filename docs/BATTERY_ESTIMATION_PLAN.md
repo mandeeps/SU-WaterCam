@@ -132,19 +132,41 @@ The USB-C breakout sits in-line on the USB-C cable from the Voltaic V50 to the W
 ```
 get_battery_status() → dict
     battery_pct:      int | None      (0–100, or None if unavailable)
-    battery_source:   str             ("ads1115_dplus" | "unavailable")
-    cell_voltage_v:   float | None    (reconstructed cell voltage, V)
-    d_plus_v:         float | None    (raw D+ reading, V)
+    battery_source:   str             ("ads1115_dplus" | "ina260" |
+                                       "wittypi_output" | "unavailable")
+    cell_voltage_v:   float | None    (reconstructed cell voltage, V; ADS1115 only)
+    d_plus_v:         float | None    (raw D+ reading, V; ADS1115 only)
+    current_ma:       float | None    (instantaneous draw, mA; INA260 only)
+    mah_remaining:    float | None    (coulomb-counted charge, mAh; INA260 only)
+    output_voltage_v: float | None    (WittyPi 5V rail reading, V; WittyPi path only)
+    output_current_a: float | None    (WittyPi output current, A; WittyPi path only)
+
+Priority fallback chain:
+  1. ADS1115 D+ (preferred — no drift, no state file)
+  2. INA260 coulomb counting (fallback — accurate, drifts; state in battery_state.json)
+  3. WittyPi output voltage (rough estimate — no extra hardware)
+  4. Unavailable — battery_pct=None, battery channel omitted from packets
 
 _read_ads1115_dplus() → float | None
-    Read AIN0 from ADS1115 at ±2.048V gain.
+    Read AIN0 from ADS1115 at ±2.048V gain via board.I2C() cached singleton.
     Returns voltage in V, or None if hardware absent.
+
+_read_ina260() → tuple[float, float, float] | None
+    Read voltage, current, power from INA260 via board.I2C() cached singleton.
+    Returns None if hardware absent.
+
+_read_wittypi_output() → tuple[float, float] | None
+    Read internal_voltage and internal_current from WittyPi 4.
+    Returns None if unavailable.
 
 _cell_voltage_to_pct(cell_v: float) → int
     Apply LiPo formula clamped [0, 100].
 
-_log_wittypi_vin_diagnostic() → None
-    Log WittyPi get_input_voltage for cable-fault detection only.
+_wittypi_output_to_pct(output_v: float) → int
+    Linear mapping between WITTYPI_OUTPUT_V_EMPTY and WITTYPI_OUTPUT_V_FULL.
+
+_save_state(state) → None
+    Atomic write (temp file + os.replace) to prevent JSON corruption on power loss.
 ```
 
 ### Changes to existing files
@@ -165,8 +187,13 @@ _log_wittypi_vin_diagnostic() → None
 - [x] Write `tools/battery_manager.py` (initial INA260 version)
 - [x] Fix IP uplink and LoRa paths in `ticktalk_main.py`
 - [x] Fix `lora_transmit.py` and `lora_handler_concurrent.py` None guard
-- [x] Write `tests/test_battery_manager.py` (14 tests passing)
-- [x] Revise `battery_manager.py` to use ADS1115 + D+ (replaces INA260/coulomb counting)
+- [x] Write `tests/test_battery_manager.py` (49 tests passing)
+- [x] Add WittyPi output-voltage fallback path (Path 3)
+- [x] Add INA260 coulomb-counting fallback path (Path 2)
+- [x] Use `board.I2C()` cached singleton to avoid I2C bus contention
+- [x] Atomic state-file write (`os.replace`) to prevent JSON corruption on power loss
+- [x] Add `battery_state.json` to `.gitignore`
+- [x] Fix GPS key lookup in `initial_health_check.py` (`gps_lat`/`gps_lon`)
 - [ ] Deploy hardware and collect empirical D+ readings to tune `CELL_V_MIN`/`CELL_V_MAX`
 - [ ] Update `docs/KNOWN_ISSUES.md`
 
@@ -183,8 +210,11 @@ _log_wittypi_vin_diagnostic() → None
 ## 8. Acceptance Criteria
 
 1. `battery_pct` in packets reflects D+ derived cell SOC when ADS1115 is present
-2. When ADS1115 absent, battery channel omitted from packet (not silently wrong)
-3. `battery_source` field always present in status dict
-4. No LiPo formula applied to regulated WittyPi VIN voltage anywhere in codebase
-5. LoRa and IP paths both use `battery_manager.get_battery_status()`
-6. All tests pass; ADS1115 absence does not crash the system
+2. Falls back to INA260 coulomb counting when ADS1115 absent
+3. Falls back to WittyPi output voltage when both ADS1115 and INA260 absent
+4. When all paths unavailable, battery channel omitted from packet (not silently wrong)
+5. `battery_source` field always present in status dict
+6. No LiPo formula applied to regulated WittyPi VIN voltage anywhere in codebase
+7. LoRa and IP paths both use `battery_manager.get_battery_status()`
+8. All tests pass; absence of any hardware does not crash the system
+9. State file writes are atomic; JSON is never left corrupt after power loss

@@ -112,8 +112,8 @@ def evaluate_health(
     if not gps:
         failures.append('gps_unavailable')
     else:
-        lat = gps.get('lat') or gps.get('latitude')
-        lon = gps.get('lon') or gps.get('longitude')
+        lat = gps.get('gps_lat') or gps.get('lat') or gps.get('latitude')
+        lon = gps.get('gps_lon') or gps.get('lon') or gps.get('longitude')
         if lat is None or lon is None:
             failures.append('gps_invalid')
 
@@ -135,11 +135,12 @@ def evaluate_health(
 
 
 def send_lora_alert(payload: Dict[str, Any]) -> bool:
-    """Encode health-check result as standard LoRa fields and transmit.
+    """Transmit a minimal LoRa alert signalling health-check failure.
 
-    Uses emergency_status=1 and health_status=0 to signal failure.
-    The LoRa encoder ignores unknown top-level keys, so the full payload
-    dict is not transmitted; only the fields the encoder knows are included.
+    Sends timestamp, emergency_status=1, and health_status=0.
+    The full payload dict (failures list, readings) is NOT transmitted —
+    the LoRa encoder only encodes known channel fields, and failure details
+    would exceed the LoRa payload size limit.
     """
     try:
         import time

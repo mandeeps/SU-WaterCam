@@ -190,11 +190,10 @@ def _read_ads1115_dplus() -> Optional[float]:
     """
     try:
         import board  # type: ignore
-        import busio  # type: ignore
         import adafruit_ads1x15.ads1115 as ADS  # type: ignore
         from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore
 
-        i2c = busio.I2C(board.SCL, board.SDA)
+        i2c = board.I2C()
         ads = ADS.ADS1115(i2c, address=ADS1115_I2C_ADDRESS)
         ads.gain = 2  # ±2.048V — best resolution for 1.5–2.1V D+ signal
         chan = AnalogIn(ads, ADS.P0)
@@ -221,10 +220,9 @@ def _read_ina260() -> Optional[tuple[float, float, float]]:
     """
     try:
         import board  # type: ignore
-        import busio  # type: ignore
         import adafruit_ina260  # type: ignore
 
-        i2c = busio.I2C(board.SCL, board.SDA)
+        i2c = board.I2C()
         ina = adafruit_ina260.INA260(i2c, address=INA260_I2C_ADDRESS)
         return float(ina.voltage), float(ina.current), float(ina.power)
     except Exception as e:
@@ -272,8 +270,10 @@ def _load_state() -> dict:
 
 def _save_state(state: dict) -> None:
     try:
-        with open(STATE_FILE, "w", encoding="utf-8") as f:
+        tmp = STATE_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
+        os.replace(tmp, STATE_FILE)
     except Exception as e:
         logging.warning("Could not save battery state: %s", e)
 
