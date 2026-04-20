@@ -79,7 +79,7 @@ def compressed_encoding(data):
     if 'emergency_status' in data: add_u8(0x01, 0x04, data['emergency_status'])
     if 'health_status' in data: add_u8(0x01, 0x05, data['health_status'])
     if 'movement_threshold' in data: add_u8(0x01, 0x06, data['movement_threshold'])
-    if 'battery_percent' in data: add_u8(0x02, 0x01, data['battery_percent'])
+    if data.get('battery_percent') is not None: add_u8(0x02, 0x01, data['battery_percent'])
     if 'tilt_roll_yaw' in data: add_f32_3(0x03, 0x01, data['tilt_roll_yaw'])
     if 'lat_lon_z' in data: add_f32_3(0x04, 0x01, data['lat_lon_z'])
     if 'temperature_celsius' in data: add_f32(0x05, 0x01, data['temperature_celsius'])

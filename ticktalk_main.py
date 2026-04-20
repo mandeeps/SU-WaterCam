@@ -242,22 +242,33 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     except Exception as e:
         print(f"⚠️ Failed to get GPS data: {e}")
     
-    # Get WittyPi voltage measurements for battery status
+    # Get WittyPi temperature and voltage diagnostics
     try:
         from tools.wittypi_control import get_wittypi_status
         wittypi_data = get_wittypi_status()
         if wittypi_data.get('status') == 'wittypi_data_retrieved':
             data.update({
                 'wittypi_temperature': wittypi_data.get('temperature', 0.0),
-                'wittypi_battery_voltage': wittypi_data.get('battery_voltage', 0.0),
                 'wittypi_internal_voltage': wittypi_data.get('internal_voltage', 0.0)
             })
-            print(f"🔋 WittyPi data added: temp={wittypi_data.get('temperature', 0.0)}°C, battery={wittypi_data.get('battery_voltage', 0.0)}V, internal={wittypi_data.get('internal_voltage', 0.0)}V")
+            print(f"WittyPi data: temp={wittypi_data.get('temperature', 0.0)}°C, internal={wittypi_data.get('internal_voltage', 0.0)}V")
         else:
             print(f"⚠️ WittyPi data unavailable: {wittypi_data.get('status', 'unknown')}")
     except Exception as e:
         print(f"⚠️ Failed to get WittyPi data: {e}")
-    
+
+    # Get battery state-of-charge from INA260 coulomb counter
+    try:
+        from tools.battery_manager import get_battery_status
+        batt_status = get_battery_status()
+        data['battery_percent'] = batt_status['battery_pct']
+        data['battery_source'] = batt_status['battery_source']
+        print(f"Battery: {batt_status['battery_pct']}% ({batt_status['battery_source']})")
+    except Exception as e:
+        print(f"⚠️ Failed to get battery status: {e}")
+        data['battery_pct'] = None
+        data['battery_source'] = 'unavailable'
+
     # Add runtime parameters to sensor data
     emergency_mode = get_parameter('emergency_mode', False)
     area_threshold = get_parameter('area_threshold', 10)
@@ -768,22 +779,33 @@ def lora_token(bitmap):
     except Exception as e:
         print(f"⚠️ Failed to get GPS data: {e}")
     
-    # Get WittyPi voltage measurements for battery status
+    # Get WittyPi temperature and voltage diagnostics
     try:
         from tools.wittypi_control import get_wittypi_status
         wittypi_data = get_wittypi_status()
         if wittypi_data.get('status') == 'wittypi_data_retrieved':
             data.update({
                 'wittypi_temperature': wittypi_data.get('temperature', 0.0),
-                'wittypi_battery_voltage': wittypi_data.get('battery_voltage', 0.0),
                 'wittypi_internal_voltage': wittypi_data.get('internal_voltage', 0.0)
             })
-            print(f"🔋 WittyPi data added: temp={wittypi_data.get('temperature', 0.0)}°C, battery={wittypi_data.get('battery_voltage', 0.0)}V, internal={wittypi_data.get('internal_voltage', 0.0)}V")
+            print(f"WittyPi data: temp={wittypi_data.get('temperature', 0.0)}°C, internal={wittypi_data.get('internal_voltage', 0.0)}V")
         else:
             print(f"⚠️ WittyPi data unavailable: {wittypi_data.get('status', 'unknown')}")
     except Exception as e:
         print(f"⚠️ Failed to get WittyPi data: {e}")
-    
+
+    # Get battery state-of-charge from INA260 coulomb counter
+    try:
+        from tools.battery_manager import get_battery_status
+        batt_status = get_battery_status()
+        data['battery_percent'] = batt_status['battery_pct']
+        data['battery_source'] = batt_status['battery_source']
+        print(f"Battery: {batt_status['battery_pct']}% ({batt_status['battery_source']})")
+    except Exception as e:
+        print(f"⚠️ Failed to get battery status: {e}")
+        data['battery_pct'] = None
+        data['battery_source'] = 'unavailable'
+
     # Add runtime parameters to sensor data
     emergency_mode = get_parameter('emergency_mode', False)
     area_threshold = get_parameter('area_threshold', 10)
@@ -1550,12 +1572,15 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
             print(f"⚠️ IP uplink: GPS unavailable: {e}")
 
         try:
-            from tools.wittypi_control import get_wittypi_status
-            wittypi_data = get_wittypi_status()
-            if wittypi_data.get('status') == 'wittypi_data_retrieved':
-                data['wittypi_battery_voltage'] = wittypi_data.get('battery_voltage', 0.0)
+            from tools.battery_manager import get_battery_status
+            batt_status = get_battery_status()
+            data['battery_percent'] = batt_status['battery_pct']
+            data['battery_source'] = batt_status['battery_source']
+            data['battery_input_voltage_v'] = batt_status['input_voltage_v']
         except Exception as e:
-            print(f"⚠️ IP uplink: WittyPi unavailable: {e}")
+            print(f"⚠️ IP uplink: battery manager unavailable: {e}")
+            data['battery_percent'] = None
+            data['battery_source'] = 'unavailable'
 
         data['area_threshold']                    = get_parameter('area_threshold', 10)
         data['stage_threshold']                   = get_parameter('stage_threshold', 50)
@@ -1570,10 +1595,9 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
         # 00 01 — device timestamp (8-byte uint64)
         channels.append({"code": "00 01", "payload_hex": struct.pack(">Q", ts_now).hex()})
 
-        # 02 01 — battery percent derived from WittyPi voltage (LiPo: 3.0V=0%, 4.2V=100%)
-        batt_v = data.get('wittypi_battery_voltage', 0.0)
-        if batt_v and batt_v > 0:
-            batt_pct = max(0, min(100, int((batt_v - 3.0) / 1.2 * 100)))
+        # 02 01 — battery percent from INA260 coulomb counter; omitted when unavailable
+        batt_pct = data.get('battery_percent')
+        if batt_pct is not None:
             channels.append({"code": "02 01", "payload_hex": struct.pack(">I", batt_pct).hex()})
 
         # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
