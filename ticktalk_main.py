@@ -1527,7 +1527,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
     """Send a subset of sensor readings and the flood bitmap to the FastAPI server over IP.
 
     Encodes the following channels as channel-coded hex blocks and POSTs to
-    /ip/uplink: device_ts, battery_pct (from WittyPi), GPS lat/lon, temperature,
+    /ip/uplink: device_ts, battery_pct (from battery_manager; source varies by
+    available hardware — ADS1115 D+, INA260, or WittyPi output), GPS lat/lon, temperature,
     humidity, flood_detect (inferred from bitmap), flood_bitmap, and the five
     status-report parameters.  IMU data is not included.
 
