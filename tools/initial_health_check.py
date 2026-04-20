@@ -134,11 +134,11 @@ def evaluate_health(
     }
 
 
-def send_lora_alert(payload: Dict[str, Any]) -> bool:
+def send_lora_alert() -> bool:
     """Transmit a minimal LoRa alert signalling health-check failure.
 
     Sends timestamp, emergency_status=1, and health_status=0.
-    The full payload dict (failures list, readings) is NOT transmitted —
+    Failure details (failures list, readings) are NOT transmitted —
     the LoRa encoder only encodes known channel fields, and failure details
     would exceed the LoRa payload size limit.
     """
@@ -166,9 +166,8 @@ def main() -> int:
     result = evaluate_health(cpu_temp_c, wittypi, gps, imu)
 
     if result['status'] == 'fail':
-        sent = send_lora_alert(result)
-        # Best-effort; still return failure exit code
-        return 1 if not sent else 1
+        send_lora_alert()
+        return 1
     return 0
 
 

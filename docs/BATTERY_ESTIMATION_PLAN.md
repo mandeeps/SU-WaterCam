@@ -152,11 +152,13 @@ Priority fallback chain:
   4. Unavailable — battery_pct=None, battery channel omitted from packets
 
 _read_ads1115_dplus() → float | None
-    Read AIN0 from ADS1115 at ±2.048V gain via board.I2C() cached singleton.
+    Read AIN0 from ADS1115 at ±2.048V gain.
+    Caches the AnalogIn instance at module scope; resets on hardware error.
     Returns voltage in V, or None if hardware absent.
 
 _read_ina260() → tuple[float, float, float] | None
-    Read voltage, current, power from INA260 via board.I2C() cached singleton.
+    Read voltage, current, power from INA260.
+    Caches the INA260 instance at module scope; resets on hardware error.
     Returns None if hardware absent.
 
 _read_wittypi_output() → tuple[float, float] | None
@@ -194,7 +196,7 @@ _save_state(state) → None
 - [x] Write `tests/test_battery_manager.py` (49 tests passing)
 - [x] Add WittyPi output-voltage fallback path (Path 3)
 - [x] Add INA260 coulomb-counting fallback path (Path 2)
-- [x] Use `board.I2C()` cached singleton to avoid I2C bus contention
+- [x] Cache ADS1115/INA260 sensor instances at module scope to avoid repeated I2C init
 - [x] Atomic state-file write (`os.replace`) to prevent JSON corruption on power loss
 - [x] Add `battery_state.json` to `.gitignore`
 - [x] Fix GPS key lookup in `initial_health_check.py` (`gps_lat`/`gps_lon`)

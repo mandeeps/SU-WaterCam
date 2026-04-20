@@ -70,6 +70,10 @@ WITTYPI_OUTPUT_V_EMPTY = 4.75  # output voltage (V) when battery is nearly deple
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_FILE = os.path.join(_PROJECT_ROOT, "battery_state.json")
 
+# Module-level sensor cache — initialized on first successful read, reset on failure.
+_ads1115_chan = None   # adafruit_ads1x15.analog_in.AnalogIn
+_ina260 = None        # adafruit_ina260.INA260
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -192,19 +196,23 @@ def calibrate_full_charge() -> None:
 def _read_ads1115_dplus() -> Optional[float]:
     """Read D+ voltage (V) from ADS1115 AIN0 at ±2.048V gain.
 
-    Returns None if the ADS1115 is not detected.
+    Caches the AnalogIn instance at module scope after the first successful
+    initialisation. Resets the cache on any hardware error so the next call
+    retries. Returns None if the ADS1115 is not detected.
     """
+    global _ads1115_chan
     try:
-        import board  # type: ignore
-        import adafruit_ads1x15.ads1115 as ADS  # type: ignore
-        from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore
-
-        i2c = board.I2C()
-        ads = ADS.ADS1115(i2c, address=ADS1115_I2C_ADDRESS)
-        ads.gain = 2  # ±2.048V — best resolution for 1.5–2.1V D+ signal
-        chan = AnalogIn(ads, ADS.P0)
-        return float(chan.voltage)
+        if _ads1115_chan is None:
+            import board  # type: ignore
+            import adafruit_ads1x15.ads1115 as ADS  # type: ignore
+            from adafruit_ads1x15.analog_in import AnalogIn  # type: ignore
+            i2c = board.I2C()
+            ads = ADS.ADS1115(i2c, address=ADS1115_I2C_ADDRESS)
+            ads.gain = 2  # ±2.048V — best resolution for 1.5–2.1V D+ signal
+            _ads1115_chan = AnalogIn(ads, ADS.P0)
+        return float(_ads1115_chan.voltage)
     except Exception as e:
+        _ads1115_chan = None  # reset so next call retries
         logging.debug("ADS1115 not available: %s", e)
         return None
 
@@ -222,16 +230,20 @@ def _cell_voltage_to_pct(cell_v: float) -> int:
 def _read_ina260() -> Optional[tuple[float, float, float]]:
     """Read voltage (V), current (mA), power (mW) from INA260 over I2C.
 
-    Returns None if the INA260 is not detected.
+    Caches the INA260 instance at module scope after the first successful
+    initialisation. Resets the cache on any hardware error so the next call
+    retries. Returns None if the INA260 is not detected.
     """
+    global _ina260
     try:
-        import board  # type: ignore
-        import adafruit_ina260  # type: ignore
-
-        i2c = board.I2C()
-        ina = adafruit_ina260.INA260(i2c, address=INA260_I2C_ADDRESS)
-        return float(ina.voltage), float(ina.current), float(ina.power)
+        if _ina260 is None:
+            import board  # type: ignore
+            import adafruit_ina260  # type: ignore
+            i2c = board.I2C()
+            _ina260 = adafruit_ina260.INA260(i2c, address=INA260_I2C_ADDRESS)
+        return float(_ina260.voltage), float(_ina260.current), float(_ina260.power)
     except Exception as e:
+        _ina260 = None  # reset so next call retries
         logging.debug("INA260 not available: %s", e)
         return None
 
