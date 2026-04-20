@@ -266,7 +266,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         print(f"Battery: {batt_status['battery_pct']}% ({batt_status['battery_source']})")
     except Exception as e:
         print(f"⚠️ Failed to get battery status: {e}")
-        data['battery_pct'] = None
+        data['battery_percent'] = None
         data['battery_source'] = 'unavailable'
 
     # Add runtime parameters to sensor data
@@ -522,13 +522,14 @@ def manual_wittypi_control(action, **kwargs):
             }
             
         elif action == 'get_status':
-            temperature, battery_voltage, internal_voltage = get_data()
+            temperature, battery_voltage, internal_voltage, internal_current = get_data()
             return {
                 'status': 'data_retrieved',
                 'action': 'get_status',
                 'temperature': temperature,
                 'battery_voltage': battery_voltage,
-                'internal_voltage': internal_voltage
+                'internal_voltage': internal_voltage,
+                'internal_current': internal_current
             }
             
         elif action == 'sync_time':
@@ -803,7 +804,7 @@ def lora_token(bitmap):
         print(f"Battery: {batt_status['battery_pct']}% ({batt_status['battery_source']})")
     except Exception as e:
         print(f"⚠️ Failed to get battery status: {e}")
-        data['battery_pct'] = None
+        data['battery_percent'] = None
         data['battery_source'] = 'unavailable'
 
     # Add runtime parameters to sensor data
@@ -1576,7 +1577,6 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
             batt_status = get_battery_status()
             data['battery_percent'] = batt_status['battery_pct']
             data['battery_source'] = batt_status['battery_source']
-            data['battery_input_voltage_v'] = batt_status['input_voltage_v']
         except Exception as e:
             print(f"⚠️ IP uplink: battery manager unavailable: {e}")
             data['battery_percent'] = None

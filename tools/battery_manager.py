@@ -250,6 +250,8 @@ def _elapsed_seconds_since(iso_timestamp: Optional[str]) -> float:
         return 0.0
     try:
         last = datetime.fromisoformat(iso_timestamp)
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
         return max(0.0, (datetime.now(timezone.utc) - last).total_seconds())
     except Exception:
         return 0.0

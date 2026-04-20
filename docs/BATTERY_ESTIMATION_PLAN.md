@@ -30,7 +30,7 @@ Raspberry Pi
 | Command | What it reads | Useful for SOC? |
 |---|---|---|
 | `get_input_voltage` | VIN pin (XH2.54) | **No** — reads regulated 5V, constant regardless of charge |
-| `get_output_voltage` | 5V rail to RPi | **No** — regulated by WittyPi DC/DC |
+| `get_output_voltage` | 5V rail to RPi | **Limited / fallback only** — regulated by WittyPi DC/DC, but rail sag under load is a coarse indicator when no better signal exists (Path 3) |
 | `get_output_current` | Current to RPi | No — load current, not battery level |
 
 ### Voltaic V50 D+ signal (key finding)
@@ -50,7 +50,7 @@ D+ voltage ≈ cell_voltage / 2
 
 The theoretical range is 1.5–2.1 V. Empirical user measurements show 1.54–1.85 V, suggesting the pack's protection circuit cuts off before full cell voltage is reached. The LiPo formula applied to the reconstructed cell voltage is valid for this signal.
 
-**This eliminates the need for coulomb counting.** SOC is read directly on every boot — no accumulated drift, no state file, no power-path interruption.
+The ADS1115 D+ path is the **primary** SOC source: no accumulated drift, no state file, no power-path interruption. The shipped `battery_manager` retains two fallback paths — INA260 coulomb counting (which does use a persisted state file) and WittyPi output voltage — so the system degrades gracefully when the preferred hardware is absent.
 
 ---
 

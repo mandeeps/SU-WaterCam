@@ -115,6 +115,15 @@ class TestCoulombCounting(unittest.TestCase):
     def test_elapsed_seconds_bad_string_returns_zero(self):
         self.assertEqual(bm._elapsed_seconds_since("not-a-date"), 0.0)
 
+    def test_elapsed_seconds_naive_datetime_does_not_raise(self):
+        # Naive ISO timestamp (no timezone) must not raise TypeError
+        naive_ts = "2026-01-01T00:00:00"
+        try:
+            elapsed = bm._elapsed_seconds_since(naive_ts)
+            self.assertGreater(elapsed, 0)
+        except TypeError:
+            self.fail("_elapsed_seconds_since raised TypeError on naive timestamp")
+
 
 class TestStateFile(unittest.TestCase):
 
