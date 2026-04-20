@@ -28,7 +28,8 @@ from datetime import datetime, timezone
 @SQify
 def get_wittypi_status():
     """
-    Get current WittyPi status including temperature, battery voltage, and internal voltage
+    Get current WittyPi status including temperature, battery voltage,
+    internal voltage, and internal current.
     """
     try:
         temperature, battery_voltage, internal_voltage, internal_current = get_data()

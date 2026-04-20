@@ -81,7 +81,10 @@ def evaluate_health(
 
     # Thresholds (conservative defaults)
     max_cpu_temp_c = 80.0
-    min_battery_voltage_v = 3.6
+    # wittypi_battery_voltage_v is the WittyPi VIN (regulated 5V USB from Voltaic V50).
+    # It stays near 5V until the pack dies, so the useful fault threshold is a cable/
+    # connection check (~4.5V) rather than a cell-voltage threshold.
+    min_input_voltage_v = 4.5
     min_internal_voltage_v = 4.7
 
     # CPU temp
@@ -97,9 +100,9 @@ def evaluate_health(
         bv = wittypi.get('wittypi_battery_voltage_v', math.nan)
         iv = wittypi.get('wittypi_internal_voltage_v', math.nan)
         if math.isnan(bv):
-            failures.append('battery_voltage_unavailable')
-        elif bv < min_battery_voltage_v:
-            failures.append(f'battery_voltage_low_{bv:.2f}V')
+            failures.append('wittypi_input_voltage_unavailable')
+        elif bv < min_input_voltage_v:
+            failures.append(f'wittypi_input_voltage_low_{bv:.2f}V')
         if math.isnan(iv):
             failures.append('internal_voltage_unavailable')
         elif iv < min_internal_voltage_v:
@@ -132,11 +135,21 @@ def evaluate_health(
 
 
 def send_lora_alert(payload: Dict[str, Any]) -> bool:
-    """Send payload over LoRa, returning True on success."""
+    """Encode health-check result as standard LoRa fields and transmit.
+
+    Uses emergency_status=1 and health_status=0 to signal failure.
+    The LoRa encoder ignores unknown top-level keys, so the full payload
+    dict is not transmitted; only the fields the encoder knows are included.
+    """
     try:
+        import time
         from tools.lora_handler_concurrent import get_lora_handler
         handler = get_lora_handler()
-        handler.queue_transmit({'health_check': payload})
+        handler.queue_transmit({
+            'timestamp': int(time.time()),
+            'emergency_status': 1,
+            'health_status': 0,
+        })
         handler.process_transmit_queue()
         return True
     except Exception:

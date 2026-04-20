@@ -257,13 +257,15 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     except Exception as e:
         print(f"⚠️ Failed to get WittyPi data: {e}")
 
-    # Get battery state-of-charge from INA260 coulomb counter
+    # Get battery state-of-charge from battery_manager (path varies by hardware)
     try:
         from tools.battery_manager import get_battery_status
         batt_status = get_battery_status()
         data['battery_percent'] = batt_status['battery_pct']
-        data['battery_source'] = batt_status['battery_source']
-        print(f"Battery: {batt_status['battery_pct']}% ({batt_status['battery_source']})")
+        data['battery_source'] = batt_status['battery_source']  # device-side diagnostic; not transmitted
+        pct = batt_status['battery_pct']
+        src = batt_status['battery_source']
+        print(f"Battery: {pct}% ({src})" if pct is not None else f"Battery: unavailable ({src})")
     except Exception as e:
         print(f"⚠️ Failed to get battery status: {e}")
         data['battery_percent'] = None
@@ -795,13 +797,15 @@ def lora_token(bitmap):
     except Exception as e:
         print(f"⚠️ Failed to get WittyPi data: {e}")
 
-    # Get battery state-of-charge from INA260 coulomb counter
+    # Get battery state-of-charge from battery_manager (path varies by hardware)
     try:
         from tools.battery_manager import get_battery_status
         batt_status = get_battery_status()
         data['battery_percent'] = batt_status['battery_pct']
-        data['battery_source'] = batt_status['battery_source']
-        print(f"Battery: {batt_status['battery_pct']}% ({batt_status['battery_source']})")
+        data['battery_source'] = batt_status['battery_source']  # device-side diagnostic; not transmitted
+        pct = batt_status['battery_pct']
+        src = batt_status['battery_source']
+        print(f"Battery: {pct}% ({src})" if pct is not None else f"Battery: unavailable ({src})")
     except Exception as e:
         print(f"⚠️ Failed to get battery status: {e}")
         data['battery_percent'] = None
@@ -1595,7 +1599,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
         # 00 01 — device timestamp (8-byte uint64)
         channels.append({"code": "00 01", "payload_hex": struct.pack(">Q", ts_now).hex()})
 
-        # 02 01 — battery percent from INA260 coulomb counter; omitted when unavailable
+        # 02 01 — battery percent from battery_manager (source varies by hardware); omitted when unavailable
         batt_pct = data.get('battery_percent')
         if batt_pct is not None:
             channels.append({"code": "02 01", "payload_hex": struct.pack(">I", batt_pct).hex()})
