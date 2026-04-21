@@ -34,6 +34,7 @@ class CoregistrationConfig:
     INVERT_THERMAL = False
     SAVE_TRANSFORM_PARAMETERS = True
     TRANSFORM_CACHE_FILENAME = "registration_transform.json"
+    CALIBRATION_FILE = "camera_calibration.json"
     FORCE_RECALCULATE_TRANSFORM = False
     ENABLE_MULTIPLE_STRATEGIES = False
     FAST_MODE = False
@@ -42,6 +43,24 @@ class CoregistrationConfig:
     CHUNK_SIZE = 512
 
 config = CoregistrationConfig()
+
+
+def _undistort_if_calibrated(image: np.ndarray, calib_path: str) -> np.ndarray:
+    """Apply lens undistortion using camera_calibration.json if it exists; otherwise return image unchanged."""
+    if not calib_path or not os.path.exists(calib_path):
+        return image
+    try:
+        with open(calib_path) as f:
+            cal = json.load(f)
+        mtx = np.array(cal["camera_matrix"], dtype=np.float64)
+        dist = np.array(cal["dist_coeffs"], dtype=np.float64).reshape(-1, 1)
+        h, w = image.shape[:2]
+        new_mtx, _ = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
+        return cv2.undistort(image, mtx, dist, None, new_mtx)
+    except Exception as e:
+        print(f"Warning: calibration load failed ({e}), skipping undistort")
+        return image
+
 
 def normalize_image(image: np.ndarray, min_val: float = 0.0, max_val: float = 255.0) -> np.ndarray:
     if image.size == 0:
@@ -212,14 +231,17 @@ def validate_transform_compatibility(transform: sitk.Transform, fixed_image_path
         return False
 
 
-def apply_cached_transform(fixed_image_path: str, moving_image_path: str, cached_transform: sitk.Transform, temperature_data: Optional[np.ndarray] = None) -> Tuple[sitk.Transform, np.ndarray, np.ndarray]:
+def apply_cached_transform(fixed_image_path: str, moving_image_path: str, cached_transform: sitk.Transform, temperature_data: Optional[np.ndarray] = None, calibration_file: str = "") -> Tuple[sitk.Transform, np.ndarray, np.ndarray]:
     print("Applying cached transform to images...")
+    calib_path = calibration_file or os.path.join(os.path.dirname(fixed_image_path), config.CALIBRATION_FILE)
     fixed_image_cv = cv2.imread(fixed_image_path, cv2.IMREAD_UNCHANGED)
     moving_image_cv = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
     if fixed_image_cv is None:
         raise ValueError(f"Could not load fixed image: {fixed_image_path}")
     if moving_image_cv is None:
         raise ValueError(f"Could not load moving image: {moving_image_path}")
+    fixed_image_cv = _undistort_if_calibrated(fixed_image_cv, calib_path)
+    moving_image_cv = _undistort_if_calibrated(moving_image_cv, calib_path)
     if (fixed_image_cv.shape[0] > config.MAX_IMAGE_SIZE or fixed_image_cv.shape[1] > config.MAX_IMAGE_SIZE):
         print(f"Resizing large images by {config.SCALE_PERCENT}%")
         width = int(fixed_image_cv.shape[1] * config.SCALE_PERCENT / 100)
@@ -298,7 +320,7 @@ def estimate_initial_transform(fixed_image: sitk.Image, moving_image: sitk.Image
     return transform
 
 
-def try_multiple_registration_strategies(fixed_image_path: str, moving_image_path: str, directory: str = "", position_changed: bool = False, moving_image_data: Optional[np.ndarray] = None) -> Tuple[sitk.Transform, np.ndarray, np.ndarray]:
+def try_multiple_registration_strategies(fixed_image_path: str, moving_image_path: str, directory: str = "", position_changed: bool = False, moving_image_data: Optional[np.ndarray] = None, calibration_file: str = "") -> Tuple[sitk.Transform, np.ndarray, np.ndarray]:
     if not config.ENABLE_MULTIPLE_STRATEGIES:
         # Using single best strategy
         try:
@@ -306,7 +328,7 @@ def try_multiple_registration_strategies(fixed_image_path: str, moving_image_pat
             original_metric = config.REGISTRATION_METRIC
             config.TRANSFORM_TYPE = "affine"
             config.REGISTRATION_METRIC = "mutual_information"
-            transform, output, four_band = mutual_information_registration(fixed_image_path, moving_image_path, directory, position_changed, moving_image_data)
+            transform, output, four_band = mutual_information_registration(fixed_image_path, moving_image_path, directory, position_changed, moving_image_data, calibration_file)
             config.TRANSFORM_TYPE = original_transform
             config.REGISTRATION_METRIC = original_metric
             return transform, output, four_band
@@ -327,7 +349,7 @@ def try_multiple_registration_strategies(fixed_image_path: str, moving_image_pat
             original_metric = config.REGISTRATION_METRIC
             config.TRANSFORM_TYPE = strategy["transform"]
             config.REGISTRATION_METRIC = strategy["metric"]
-            transform, output, four_band = mutual_information_registration(fixed_image_path, moving_image_path, directory, position_changed, moving_image_data)
+            transform, output, four_band = mutual_information_registration(fixed_image_path, moving_image_path, directory, position_changed, moving_image_data, calibration_file)
             config.TRANSFORM_TYPE = original_transform
             config.REGISTRATION_METRIC = original_metric
             metric_value = 0
@@ -348,7 +370,7 @@ def try_multiple_registration_strategies(fixed_image_path: str, moving_image_pat
     return best_result
 
 
-def mutual_information_registration(fixed_image_path: str, moving_image_path: str, directory: str = "", position_changed: bool = False, moving_image_data: Optional[np.ndarray] = None) -> Tuple[sitk.Transform, np.ndarray, np.ndarray]:
+def mutual_information_registration(fixed_image_path: str, moving_image_path: str, directory: str = "", position_changed: bool = False, moving_image_data: Optional[np.ndarray] = None, calibration_file: str = "") -> Tuple[sitk.Transform, np.ndarray, np.ndarray]:
     if directory and not position_changed:
         cached = load_transform_parameters(directory)
         if cached is not None:
@@ -366,12 +388,15 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
                 print(f"Cached transform from {loaded_path} is not compatible with current config. Will generate a new transform.")
     elif position_changed:
         print("Position changed flag is True - forcing new registration")
+    calib_path = calibration_file or os.path.join(os.path.dirname(fixed_image_path), config.CALIBRATION_FILE)
     fixed_image_cv = cv2.imread(fixed_image_path, cv2.IMREAD_UNCHANGED)
     moving_image_cv = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
     if fixed_image_cv is None:
         raise ValueError(f"Could not load fixed image: {fixed_image_path}")
     if moving_image_cv is None:
         raise ValueError(f"Could not load moving image: {moving_image_path}")
+    fixed_image_cv = _undistort_if_calibrated(fixed_image_cv, calib_path)
+    moving_image_cv = _undistort_if_calibrated(moving_image_cv, calib_path)
     original_fixed_size = fixed_image_cv.shape[:2]
     if (fixed_image_cv.shape[0] > config.MAX_IMAGE_SIZE or fixed_image_cv.shape[1] > config.MAX_IMAGE_SIZE):
         print(f"Resizing large images by {config.SCALE_PERCENT}%")
@@ -486,7 +511,7 @@ def save_metadata_summary(directory: str, output_paths: dict, image_info: dict) 
     print(f"Saved metadata summary: {metadata_file}")
 
 
-def coreg(directory: str, position_changed: bool = False) -> str:
+def coreg(directory: str, position_changed: bool = False, calibration_file: str = "") -> str:
     try:
         nir_off_path, nir_on_path, lwir_path = validate_input_files(directory)
         # Loading LWIR image
@@ -500,7 +525,7 @@ def coreg(directory: str, position_changed: bool = False) -> str:
             # Performing image registration
             print(get_thermal_colormap_info())
             try:
-                transform, output, four_band = try_multiple_registration_strategies(nir_off_path, lwir_path, directory, position_changed, lwir_normalized)
+                transform, output, four_band = try_multiple_registration_strategies(nir_off_path, lwir_path, directory, position_changed, lwir_normalized, calibration_file)
                 cv2.imwrite(output_paths["registered"], output)
                 # Registered output saved
             except Exception as e:
@@ -556,9 +581,11 @@ def main():
     parser.add_argument("--fast", action="store_true", help="Enable fast mode with reduced iterations and preprocessing")
     parser.add_argument("--single-strategy", action="store_true", help="Use only the best registration strategy (faster)")
     parser.add_argument("--multiple-strategies", action="store_true", help="Try multiple registration strategies (slower but potentially better)")
+    parser.add_argument("--calibration-file", default="", help="Path to camera_calibration.json (default: look in image directory)")
     args = parser.parse_args()
     directory = args.directory
     position_changed = args.position_changed
+    calibration_file = args.calibration_file
     if args.fast:
         config.FAST_MODE = True
         print("Fast mode enabled")
@@ -572,7 +599,7 @@ def main():
     if position_changed:
         print("Position changed flag is set - will force new registration")
     try:
-        coreg(directory, position_changed)
+        coreg(directory, position_changed, calibration_file)
         print("Coregistration completed successfully!")
     except Exception as e:
         print(f"Error: {e}")
