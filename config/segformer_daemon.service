@@ -10,15 +10,19 @@ User=pi
 Group=pi
 Type=simple
 WorkingDirectory=/home/pi/segformer_5band
+# RuntimeDirectory creates /run/segformer/ owned by User=pi at 0o700,
+# placing the socket outside world-writable /tmp.
+RuntimeDirectory=segformer
+RuntimeDirectoryMode=0750
 ExecStart=/home/pi/miniforge3/envs/5band/bin/python \
     /home/pi/SU-WaterCam/tools/segformer_daemon.py \
     --model /home/pi/segformer_5band/segformer_5band_int8.onnx \
-    --socket /tmp/segformer.sock
+    --socket /run/segformer/segformer.sock
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=60
 # Wait up to 30 s (60 × 0.5 s) for the socket to appear; fail cleanly if it doesn't.
-ExecStartPost=/bin/bash -c 'retries=0; until [ -S /tmp/segformer.sock ]; do sleep 0.5; retries=$((retries+1)); [ $retries -ge 60 ] && exit 1; done'
+ExecStartPost=/bin/bash -c 'retries=0; until [ -S /run/segformer/segformer.sock ]; do sleep 0.5; retries=$((retries+1)); [ $retries -ge 60 ] && exit 1; done'
 
 [Install]
 WantedBy=multi-user.target

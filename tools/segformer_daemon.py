@@ -24,7 +24,8 @@ Run directly for testing:
 
 Or via systemd (see config/segformer_daemon.service).
 
-The socket path is /tmp/segformer.sock by default. ticktalk_main.py's
+The socket path is /run/segformer/segformer.sock by default (systemd
+RuntimeDirectory=segformer creates and owns this directory). ticktalk_main.py's
 segformer() function connects to this socket if it exists, and falls back to
 the legacy subprocess call otherwise.
 """
@@ -41,7 +42,7 @@ import time
 
 import numpy as np
 
-SOCKET_PATH = "/tmp/segformer.sock"
+SOCKET_PATH = "/run/segformer/segformer.sock"
 LOG_FORMAT = "%(asctime)s [segformer_daemon] %(levelname)s: %(message)s"
 MAX_REQUEST_BYTES = 8192
 
@@ -184,13 +185,15 @@ def handle_connection(conn: socket.socket, session) -> None:
 
 def serve(session, socket_path: str) -> None:
     if os.path.exists(socket_path):
-        if not stat.S_ISSOCK(os.stat(socket_path).st_mode):
+        # lstat avoids following a symlink planted in /tmp by another user.
+        if not stat.S_ISSOCK(os.lstat(socket_path).st_mode):
             log.error("Path %s exists but is not a socket — refusing to unlink", socket_path)
             sys.exit(1)
         os.unlink(socket_path)
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    old_umask = os.umask(0o007)  # 0o666 & ~0o007 = 0o660 at creation, no race
+    # Unix sockets use 0o777 as base mode; umask 0o117 → 0o777 & ~0o117 = 0o660.
+    old_umask = os.umask(0o117)
     try:
         server.bind(socket_path)
     finally:

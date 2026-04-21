@@ -652,7 +652,7 @@ def coregistration(dirname, lepton_state, photo_state):
         return False
 
 def _segformer_via_daemon(tiff_path: str, output_path: str,
-                          socket_path: str = "/tmp/segformer.sock") -> bool:
+                          socket_path: str = "/run/segformer/segformer.sock") -> bool:
     """Send an inference request to the persistent SegFormer daemon.
 
     Returns True on success. The daemon keeps the ONNX model resident in
@@ -665,7 +665,7 @@ def _segformer_via_daemon(tiff_path: str, output_path: str,
 
     req = json.dumps({"tiff_path": tiff_path, "output_path": output_path}) + "\n"
     try:
-        if not _stat.S_ISSOCK(_os.stat(socket_path).st_mode):
+        if not _stat.S_ISSOCK(_os.lstat(socket_path).st_mode):
             print(f"⚠️ {socket_path} is not a Unix socket — skipping daemon")
             return False
         with _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM) as sock:
@@ -699,7 +699,7 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
 
     tiff_path = filepath + "/final_5_band.tiff"
     output_path = filepath + "/final_5_band_segmentation.png"
-    socket_path = "/tmp/segformer.sock"
+    socket_path = "/run/segformer/segformer.sock"
 
     try:
         # Prefer the persistent daemon — no cold-start, model stays loaded.

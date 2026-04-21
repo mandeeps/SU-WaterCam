@@ -15,10 +15,10 @@ The script produces:
     segformer_5band_int8.onnx   - INT8 statically-quantized model (deployment target)
 
 Prerequisites (already in the 5band conda env):
-    pip install onnx onnxruntime onnxruntime-extensions
+    pip install onnx onnxruntime torch transformers rasterio opencv-python-headless
 
-For INT8 quantization you also need:
-    pip install onnxruntime  # includes quantization tools
+For mmseg checkpoints (optional, alternative to HuggingFace):
+    pip install mmengine mmsegmentation
 """
 
 import argparse
