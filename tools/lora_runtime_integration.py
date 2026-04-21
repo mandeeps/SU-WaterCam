@@ -108,6 +108,7 @@ class LoRaRuntimeManager:
 
     # Parameters that must be stored as integers (not floats).
     _INT_PARAMS: frozenset = frozenset({
+        'area_threshold',
         'monitoring_frequency',
         'emergency_frequency',
         'photo_interval',
@@ -246,12 +247,15 @@ class LoRaRuntimeManager:
     def _coerce_param(self, key: str, value: Any) -> Any:
         """Coerce value to the correct stored type for key.
 
-        Safe to call only after _validate_param() has already accepted the value —
-        at that point booleans and fractional inputs have been rejected, so
-        int(float(value)) is exact.
+        Safe to call only after _validate_param() has already accepted the value.
+        Integer-only ranged params are stored as int; other ranged numeric params
+        are stored as float so the persisted config is type-consistent even when
+        callers supply string inputs such as "50" or "0.75".
         """
         if key in self._INT_PARAMS:
             return int(float(value))
+        if key in self._PARAM_RANGES:
+            return float(value)
         return value
 
     def set_parameter(self, key: str, value: Any) -> bool:
@@ -415,13 +419,15 @@ class LoRaRuntimeManager:
                 elif channel == '99' and command == '00':
                     self.set_parameter('emergency_mode', False)
                     return True
-                return True
+                else:
+                    print(f"Warning: unknown TLV channel/command {channel}/{command}, ignored")
+                    return False
 
             if _is_hex_string(payload):
                 tlv_cmds = _parse_tlv_commands(payload)
                 if tlv_cmds is not None and len(tlv_cmds) > 0:
-                    all_ok = all(_apply_command_tlv(ch, cmd, vbytes) for (ch, cmd, vbytes) in tlv_cmds)
-                    return all_ok
+                    results = [_apply_command_tlv(ch, cmd, vbytes) for (ch, cmd, vbytes) in tlv_cmds]
+                    return all(results)
 
             # Handle new format: [Channel][Command][Value] (single)
             if len(payload) >= 4:
