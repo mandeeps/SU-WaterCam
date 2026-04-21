@@ -19,6 +19,7 @@ Usage:
 """
 
 import json
+import math
 import os
 import time
 import threading
@@ -235,6 +236,10 @@ class LoRaRuntimeManager:
         except (TypeError, ValueError):
             print(f"Warning: non-numeric value {value!r} for parameter '{key}', rejected")
             return False
+        # Reject non-finite values (inf/nan pass float() but crash int() with OverflowError/ValueError)
+        if not math.isfinite(numeric):
+            print(f"Warning: non-finite value {value!r} for parameter '{key}', rejected")
+            return False
         # Reject fractional values for integer-only params (e.g. 1.9 must not silently become 1)
         if key in self._INT_PARAMS and numeric != int(numeric):
             print(f"Warning: fractional value {value} for integer parameter '{key}', rejected")
@@ -288,10 +293,6 @@ class LoRaRuntimeManager:
         if parameter not in self.update_callbacks:
             self.update_callbacks[parameter] = []
         self.update_callbacks[parameter].append(callback)
-    
-    def process_lora_payload(self, payload: str) -> bool:
-        """Process LoRa payload directly from the handler (alias for process_lora_command)"""
-        return self.process_lora_command(payload)
     
     def process_lora_command(self, command: str, value: Any) -> bool:
         """Process incoming LoRa command in old format (backward compatibility)"""
@@ -425,13 +426,22 @@ class LoRaRuntimeManager:
             if _is_hex_string(payload):
                 tlv_cmds = _parse_tlv_commands(payload)
                 if tlv_cmds is not None and len(tlv_cmds) > 0:
-                    results = [_apply_command_tlv(ch, cmd, vbytes) for (ch, cmd, vbytes) in tlv_cmds]
-                    # All-or-nothing: any rejected/unknown command returns False so the
-                    # sender knows the packet was not fully applied.
-                    if not all(results):
-                        failed = [f"{ch:02d}/{cmd:02d}" for (ch, cmd, _), ok in zip(tlv_cmds, results) if not ok]
-                        print(f"Warning: {len(failed)}/{len(results)} TLV commands not applied: {failed}")
-                    return all(results)
+                    results = []
+                    failed = []
+                    for ch, cmd, vbytes in tlv_cmds:
+                        ok = _apply_command_tlv(ch, cmd, vbytes)
+                        results.append(ok)
+                        if not ok:
+                            failed.append(f"{ch:02d}/{cmd:02d}")
+                    # Commands applied sequentially — partial apply is possible:
+                    # if a later command fails, earlier successful ones remain persisted.
+                    fully_applied = all(results)
+                    if not fully_applied:
+                        print(
+                            f"Warning: {len(failed)}/{len(results)} TLV commands not applied: {failed}. "
+                            "Earlier commands in the same payload may already have been applied."
+                        )
+                    return fully_applied
 
             # Handle new format: [Channel][Command][Value] (single)
             if len(payload) >= 4:

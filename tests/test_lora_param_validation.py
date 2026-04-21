@@ -125,6 +125,23 @@ class TestSetParameterRanges(unittest.TestCase):
     def test_stage_threshold_fractional_accepted(self):
         self.assertTrue(self.mgr.set_parameter('stage_threshold', 50.5))
 
+    # ---- inf/nan rejection (would crash int() without isfinite guard) ----------
+
+    def test_area_threshold_inf_rejected(self):
+        self.assertFalse(self.mgr.set_parameter('area_threshold', float('inf')))
+
+    def test_area_threshold_nan_rejected(self):
+        self.assertFalse(self.mgr.set_parameter('area_threshold', float('nan')))
+
+    def test_stage_threshold_inf_rejected(self):
+        self.assertFalse(self.mgr.set_parameter('stage_threshold', float('inf')))
+
+    def test_stage_threshold_nan_rejected(self):
+        self.assertFalse(self.mgr.set_parameter('stage_threshold', float('nan')))
+
+    def test_monitoring_frequency_inf_rejected(self):
+        self.assertFalse(self.mgr.set_parameter('monitoring_frequency', float('inf')))
+
     # ---- bool rejection -------------------------------------------------------
 
     def test_area_threshold_bool_true_rejected(self):
