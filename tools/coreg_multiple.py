@@ -494,9 +494,18 @@ def save_metadata_summary(directory: str, output_paths: dict, image_info: dict) 
         "inference_height": config.INFERENCE_HEIGHT,
         "inference_width": config.INFERENCE_WIDTH,
     }
+    file_info = {
+        "final_5_band.tiff": {
+            "resolution": f"{config.INFERENCE_WIDTH}×{config.INFERENCE_HEIGHT}",
+            "note": "resized for SegFormer inference",
+        },
+        "color_preserved_5_band.tiff": {
+            "resolution": "full co-registration resolution",
+            "note": "archival",
+        },
+    }
     band_descriptions = {
         "final_5_band.tiff": [
-            f"Resolution: {config.INFERENCE_HEIGHT}×{config.INFERENCE_WIDTH} (resized for SegFormer inference)",
             "Band 1: Blue Channel (Optical)",
             "Band 2: Green Channel (Optical)",
             "Band 3: Red Channel (Optical)",
@@ -504,7 +513,6 @@ def save_metadata_summary(directory: str, output_paths: dict, image_info: dict) 
             "Band 5: NIR Band (NIR-ON minus NIR-OFF)",
         ],
         "color_preserved_5_band.tiff": [
-            "Resolution: full co-registration resolution (archival)",
             "Band 1: Red Channel (Optical)",
             "Band 2: Green Channel (Optical)",
             "Band 3: Blue Channel (Optical)",
@@ -517,6 +525,7 @@ def save_metadata_summary(directory: str, output_paths: dict, image_info: dict) 
         "output_files": output_paths,
         "image_info": image_info,
         "processing_parameters": processing_parameters,
+        "file_info": file_info,
         "band_descriptions": band_descriptions,
     }
     with open(metadata_file, "w") as f:
