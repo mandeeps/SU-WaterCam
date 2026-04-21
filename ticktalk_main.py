@@ -669,8 +669,9 @@ def _segformer_via_daemon(tiff_path: str, output_path: str,
             print(f"⚠️ {socket_path} is not a Unix socket — skipping daemon")
             return False
         with _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM) as sock:
-            sock.settimeout(300)  # 5-minute hard timeout
+            sock.settimeout(10)   # connect: fail fast if daemon isn't ready
             sock.connect(socket_path)
+            sock.settimeout(120)  # read: generous budget for ONNX inference on Pi
             sock.sendall(req.encode())
             sock.shutdown(_socket.SHUT_WR)
 
