@@ -1,7 +1,8 @@
 [Unit]
 Description=SegFormer 5-band ONNX inference daemon
-# Start after the filesystem and network are ready, but before ticktalk.
-After=multi-user.target
+# Start after local filesystems are mounted so the model path is accessible,
+# but early enough to have the socket ready before ticktalk.service starts.
+After=local-fs.target
 Before=ticktalk.service
 
 [Service]

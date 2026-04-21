@@ -99,11 +99,14 @@ def load_and_preprocess(tiff_path: str, expected_h: int, expected_w: int) -> np.
             axis=0,
         )
 
-    # Per-band min-max normalisation to [0, 1]
+    # Per-band min-max normalisation to [0, 1]; constant bands are zeroed out.
     for i in range(img.shape[0]):
         lo, hi = float(img[i].min()), float(img[i].max())
         if hi > lo:
             img[i] = (img[i] - lo) / (hi - lo)
+        else:
+            img[i] = 0.0
+    img = np.clip(img, 0.0, 1.0)
 
     return img[np.newaxis].astype(np.float32)  # (1, bands, H, W)
 
@@ -143,6 +146,7 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
 
 def handle_connection(conn: socket.socket, session) -> None:
     try:
+        conn.settimeout(30)
         data = b""
         while True:
             chunk = conn.recv(4096)
@@ -186,8 +190,11 @@ def serve(session, socket_path: str) -> None:
         os.unlink(socket_path)
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    server.bind(socket_path)
-    os.chmod(socket_path, 0o660)
+    old_umask = os.umask(0o007)  # 0o666 & ~0o007 = 0o660 at creation, no race
+    try:
+        server.bind(socket_path)
+    finally:
+        os.umask(old_umask)
     server.listen(4)
     log.info("Listening on %s", socket_path)
 

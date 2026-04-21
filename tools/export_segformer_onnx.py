@@ -187,11 +187,14 @@ def collect_calibration_inputs(calibration_dir: str, n_images: int = 50,
                     axis=0,
                 )
 
-            # Per-band min-max normalisation to [0, 1]
+            # Per-band min-max normalisation to [0, 1]; constant bands are zeroed out.
             for i in range(img.shape[0]):
                 lo, hi = img[i].min(), img[i].max()
                 if hi > lo:
                     img[i] = (img[i] - lo) / (hi - lo)
+                else:
+                    img[i] = 0.0
+            img = np.clip(img, 0.0, 1.0)
 
             inputs.append(img[np.newaxis].astype(np.float32))  # (1, bands, H, W)
         except Exception as e:
@@ -241,6 +244,10 @@ def quantize_to_int8(fp32_onnx_path: str, int8_onnx_path: str,
 
     reader = _CalibrationReader(calibration_inputs, input_name)
 
+    # Softmax is not in onnxruntime's default quantizable op set, so it stays
+    # FP32 automatically. LayerNormalization ops are also left to the default
+    # policy; nodes_to_exclude expects exact ONNX node names (not op-type
+    # prefixes), so op-type-based exclusion is not used here.
     quantize_static(
         model_input=prep_path,
         model_output=int8_onnx_path,
@@ -249,9 +256,6 @@ def quantize_to_int8(fp32_onnx_path: str, int8_onnx_path: str,
         per_channel=True,
         activation_type=QuantType.QInt8,
         weight_type=QuantType.QInt8,
-        # Reduce inaccuracies in transformer attention layers by keeping
-        # softmax and layer-norm in FP32.
-        nodes_to_exclude=["/Softmax", "/LayerNorm"],
         optimize_model=True,
     )
     print(f"INT8 quantized model saved to {int8_onnx_path}")
