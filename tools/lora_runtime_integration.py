@@ -106,6 +106,17 @@ class LoRaRuntimeManager:
         'data_retention_days':              (1, 365),
     }
 
+    # Parameters that must be stored as integers (not floats).
+    _INT_PARAMS: frozenset = frozenset({
+        'monitoring_frequency',
+        'emergency_frequency',
+        'photo_interval',
+        'neighborhood_emergency_frequency',
+        'max_retransmissions',
+        'shutdown_iteration_limit',
+        'data_retention_days',
+    })
+
     def __init__(self, config_file='runtime_config.json'):
         self.config_file = config_file
         self.parameters = self.load_parameters()
@@ -224,19 +235,36 @@ class LoRaRuntimeManager:
             return False
         return True
 
+    def _coerce_param(self, key: str, value: Any) -> Any:
+        """Coerce value to the correct type for key (int for integer-only params)."""
+        if key in self._INT_PARAMS:
+            try:
+                return int(float(value))
+            except (TypeError, ValueError):
+                return value
+        return value
+
     def set_parameter(self, key: str, value: Any):
-        """Set a runtime parameter value and save to file"""
+        """Set a runtime parameter value and save to file.
+
+        Validates against _PARAM_RANGES and coerces integer-only params before
+        persisting, so all callers — including the LoRa runtime callback — are
+        protected regardless of how set_parameter() is reached.
+        """
+        if not self._validate_param(key, value):
+            return
+        coerced = self._coerce_param(key, value)
         old_value = self.parameters.get(key)
-        self.parameters[key] = value
+        self.parameters[key] = coerced
         self.save_parameters(self.parameters)
-        
-        print(f"Runtime parameter '{key}' updated: {old_value} → {value}")
-        
+
+        print(f"Runtime parameter '{key}' updated: {old_value} → {coerced}")
+
         # Call any registered update callbacks
         if key in self.update_callbacks:
             for callback in self.update_callbacks[key]:
                 try:
-                    callback(value, old_value)
+                    callback(coerced, old_value)
                 except Exception as e:
                     print(f"Error in parameter update callback for '{key}': {e}")
     
@@ -333,52 +361,59 @@ class LoRaRuntimeManager:
                     return 0
                 return int.from_bytes(b, byteorder='big', signed=False)
 
-            def _apply_command_tlv(ch: int, cmd: int, value_bytes: bytes):
+            def _apply_command_tlv(ch: int, cmd: int, value_bytes: bytes) -> bool:
                 channel = f"{ch:02d}"
                 command = f"{cmd:02d}"
                 val_int = _to_int_be(value_bytes)
 
-                def _set(param, value):
-                    if self._validate_param(param, value):
-                        self.set_parameter(param, value)
+                def _set(param, value) -> bool:
+                    if not self._validate_param(param, value):
+                        return False
+                    self.set_parameter(param, value)
+                    return True
 
                 if channel == '10' and command == '90':
-                    _set('area_threshold', val_int * 10)
+                    return _set('area_threshold', val_int * 10)
                 elif channel == '11' and command == '91':
-                    _set('stage_threshold', float(val_int))
+                    return _set('stage_threshold', float(val_int))
                 elif channel == '12' and command == '92':
-                    _set('monitoring_frequency', val_int)
+                    return _set('monitoring_frequency', val_int)
                 elif channel == '13' and command == '93':
-                    _set('emergency_frequency', val_int)
+                    return _set('emergency_frequency', val_int)
                 elif channel == '14' and command == '94':
-                    _set('photo_interval', val_int)
+                    return _set('photo_interval', val_int)
                 elif channel == '15' and command == '95':
-                    _set('neighborhood_emergency_frequency', val_int)
+                    return _set('neighborhood_emergency_frequency', val_int)
                 elif channel == '22' and command == '00':
                     self.set_parameter('debug_mode', bool(val_int))
+                    return True
                 elif channel == '31' and command == '00':
-                    pass
+                    return True
                 elif channel == '32' and command == '00':
-                    _set('max_retransmissions', val_int)
+                    return _set('max_retransmissions', val_int)
                 elif channel == '40' and command == '00':
                     self.set_parameter('auto_shutdown_enabled', bool(val_int))
+                    return True
                 elif channel == '41' and command == '00':
-                    _set('shutdown_iteration_limit', val_int)
+                    return _set('shutdown_iteration_limit', val_int)
                 elif channel == '42' and command == '00':
-                    _set('data_retention_days', val_int)
+                    return _set('data_retention_days', val_int)
                 elif channel == '43' and command == '00':
                     self.set_parameter('backup_enabled', bool(val_int))
+                    return True
                 elif channel == '21' and command == '00':
                     self.set_parameter('emergency_mode', True)
+                    return True
                 elif channel == '99' and command == '00':
                     self.set_parameter('emergency_mode', False)
+                    return True
+                return True
 
             if _is_hex_string(payload):
                 tlv_cmds = _parse_tlv_commands(payload)
                 if tlv_cmds is not None and len(tlv_cmds) > 0:
-                    for (ch, cmd, vbytes) in tlv_cmds:
-                        _apply_command_tlv(ch, cmd, vbytes)
-                    return True
+                    all_ok = all(_apply_command_tlv(ch, cmd, vbytes) for (ch, cmd, vbytes) in tlv_cmds)
+                    return all_ok
 
             # Handle new format: [Channel][Command][Value] (single)
             if len(payload) >= 4:
