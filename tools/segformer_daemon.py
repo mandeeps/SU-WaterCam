@@ -165,7 +165,7 @@ def handle_connection(conn: socket.socket, session) -> None:
         conn.sendall(resp.encode())
 
     except Exception as exc:
-        log.error("Inference failed: %s", exc)
+        log.exception("Inference failed: %s", exc)
         try:
             resp = json.dumps({"status": "error", "message": str(exc)}) + "\n"
             conn.sendall(resp.encode())

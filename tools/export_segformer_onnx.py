@@ -37,7 +37,6 @@ from segformer_preprocess import preprocess_bands
 def load_model_huggingface(checkpoint_dir: str):
     """Load via HuggingFace transformers (most common SegFormer training setup)."""
     from transformers import SegformerForSemanticSegmentation
-    import torch
     model = SegformerForSemanticSegmentation.from_pretrained(checkpoint_dir)
     model.eval()
     return model
