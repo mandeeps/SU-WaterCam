@@ -149,7 +149,8 @@ def save_transform_parameters(transform: sitk.Transform, directory: str, metadat
             "timestamp": pd.Timestamp.now().isoformat(),
             "metadata": metadata if metadata is not None else {},
         }
-        parent_directory = os.path.dirname(directory) or directory
+        normed = os.path.normpath(directory)
+        parent_directory = os.path.dirname(normed) or normed
         transform_path = os.path.join(parent_directory, config.TRANSFORM_CACHE_FILENAME)
         with open(transform_path, "w") as f:
             json.dump(transform_data, f, indent=2)
@@ -162,7 +163,8 @@ def save_transform_parameters(transform: sitk.Transform, directory: str, metadat
 def load_transform_parameters(directory: str) -> Optional[tuple[sitk.Transform, str]]:
     if config.FORCE_RECALCULATE_TRANSFORM:
         return None
-    parent_directory = os.path.dirname(directory) or directory
+    normed = os.path.normpath(directory)
+    parent_directory = os.path.dirname(normed) or normed
     transform_path = os.path.join(parent_directory, config.TRANSFORM_CACHE_FILENAME)
     if not os.path.exists(transform_path):
         transform_path = os.path.join(directory, config.TRANSFORM_CACHE_FILENAME)
