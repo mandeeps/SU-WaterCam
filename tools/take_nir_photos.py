@@ -6,13 +6,18 @@
 # Call add_metadata to get info from IMU and GPS
 # Run lepton and capture binaries to save data from Flir in same directory
 
+import os
 import subprocess
+import sys
 import time
 from os import path, makedirs, chdir
 from datetime import datetime
+from pathlib import Path
 from picamera2 import Picamera2
 from gpiozero import LED
 import add_metadata
+
+_REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent.parent)))
 
 # Seconds to wait after changing the NIR filter GPIO state before capturing.
 # The IR-CUT filter motor needs ~300 ms to physically complete its movement.
@@ -43,16 +48,19 @@ def take_photo(directory: str, nir: str) -> str:
 def flir(directory):
     # Flir Lepton 3.5 capture and lepton binaries for image and radiometery
     chdir(directory)
+    capture_bin = str(_REPO_ROOT / "capture")
+    lepton_bin = str(_REPO_ROOT / "lepton")
+    lepton_reset = str(_REPO_ROOT / "tools" / "lepton_reset.py")
     try:
-        subprocess.run(["/home/pi/SU-WaterCam/capture"], check=True, timeout=5)
+        subprocess.run([capture_bin], check=True, timeout=5)
     except subprocess.TimeoutExpired:
         print("Check Lepton state - capture failed")
-        subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
+        subprocess.run([sys.executable, lepton_reset], check=True)
     try:
-        subprocess.run(["/home/pi/SU-WaterCam/lepton"], check=True, timeout=5)
+        subprocess.run([lepton_bin], check=True, timeout=5)
     except subprocess.TimeoutExpired:
         print("Check Lepton state - radiometery failed")
-        subprocess.run(["/home/pi/SU-WaterCam/tools/lepton_reset.py"], check=True)
+        subprocess.run([sys.executable, lepton_reset], check=True)
 
 def main(filepath: str) -> str:
     date = datetime.now().strftime('%Y%m%d-%H%M%S')
@@ -129,7 +137,7 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         filepath = sys.argv[1]
     else:
-        filepath = "/home/pi/SU-WaterCam/images/"
+        filepath = str(_REPO_ROOT / "images" / "")
 
     # take photos: optical and NIR
     nir_off_name, directory = main(filepath)

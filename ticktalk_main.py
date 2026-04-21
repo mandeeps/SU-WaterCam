@@ -1,3 +1,8 @@
+import os
+from pathlib import Path
+
+_REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent)))
+
 from tt_take_photos import flir, take_two_photos
 
 # Import TickTalk decorators
@@ -630,14 +635,13 @@ def get_time(trigger):
     from os import path, makedirs
     try:
         date = datetime.now().strftime('%Y%m%d-%H%M%S')
-        directory = path.join("/home/pi/SU-WaterCam/images", date)
+        directory = str(_REPO_ROOT / "images" / date)
         if not path.exists(directory):
             makedirs(directory)
         return directory
     except Exception as e:
-        print(f"⚠️ Failed to create directory: {e}")
-        # Return a fallback directory
-        return "/home/pi/SU-WaterCam/images/fallback"
+        print(f"Failed to create directory: {e}")
+        return str(_REPO_ROOT / "images" / "fallback")
 
 @SQify
 def coregistration(dirname, lepton_state, photo_state):
@@ -655,10 +659,11 @@ def coregistration(dirname, lepton_state, photo_state):
 def segformer(filepath, coreg_state): # operate on coregistered image file
     import subprocess
     try:
-        segformer_python = "/home/pi/miniforge3/envs/5band/bin/python"
-        segformer_coreg = "/home/pi/segformer_5band/segment_tiff_5band.py"
+        segformer_location = os.environ.get("SEGFORMER_DIR", "/home/pi/git/segformer_5band")
+        segformer_python = os.environ.get("SEGFORMER_PYTHON", "/home/pi/miniforge3/envs/5band/bin/python")
+        segformer_coreg = os.path.join(segformer_location, "segment_tiff_5band.py")
         segmented_file = filepath + "/final_5_band.tiff"
-        subprocess.Popen([segformer_python, segformer_coreg, segmented_file], cwd="/home/pi/segformer_5band").wait()
+        subprocess.Popen([segformer_python, segformer_coreg, segmented_file], cwd=segformer_location).wait()
         return filepath + "/final_5_band_segmentation.png"
     except Exception as e:
         print(f"⚠️ Failed to run segmentation: {e}")

@@ -2,7 +2,11 @@
 # BNO055 IMU
 # Based on Adafruit example
 
+import os
 import time
+from pathlib import Path
+
+_REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent.parent)))
 
 try:
     import board
@@ -89,7 +93,7 @@ def get_orientation():
 def offset():
     offset_accel = []
     offset_gyro = []
-    OFFSET_PATH = "/home/pi/SU-WaterCam/data/imu_offsets.txt"
+    OFFSET_PATH = str(_REPO_ROOT / "data" / "imu_offsets.txt")
 
     try:
         with open(OFFSET_PATH) as file:

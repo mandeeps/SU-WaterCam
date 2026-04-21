@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # get temp & humidity reading from Adafruit AHT20
+import os
+from pathlib import Path
+
+_REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent.parent)))
+
 try:
     import board
 except Exception:
@@ -30,7 +35,7 @@ def record_csv():
     from time import sleep
     from datetime import datetime
     from csv import DictWriter
-    FILE = '/home/pi/SU-WaterCam/data/temp_humidity.csv'
+    FILE = str(_REPO_ROOT / "data" / "temp_humidity.csv")
 
     while True:
         sensor = _get_sensor()
