@@ -325,8 +325,7 @@ class LoRaRuntimeManager:
         
         if command in command_mapping:
             try:
-                command_mapping[command](value)
-                return True
+                return bool(command_mapping[command](value))
             except Exception as e:
                 print(f"Error processing LoRa command '{command}' with value '{value}': {e}")
                 return False
@@ -427,6 +426,11 @@ class LoRaRuntimeManager:
                 tlv_cmds = _parse_tlv_commands(payload)
                 if tlv_cmds is not None and len(tlv_cmds) > 0:
                     results = [_apply_command_tlv(ch, cmd, vbytes) for (ch, cmd, vbytes) in tlv_cmds]
+                    # All-or-nothing: any rejected/unknown command returns False so the
+                    # sender knows the packet was not fully applied.
+                    if not all(results):
+                        failed = [f"{ch:02d}/{cmd:02d}" for (ch, cmd, _), ok in zip(tlv_cmds, results) if not ok]
+                        print(f"Warning: {len(failed)}/{len(results)} TLV commands not applied: {failed}")
                     return all(results)
 
             # Handle new format: [Channel][Command][Value] (single)

@@ -36,21 +36,22 @@ with patch.dict('sys.modules', {
     from lora_runtime_integration import LoRaRuntimeManager
 
 
-def _make_manager() -> LoRaRuntimeManager:
-    """Return a manager backed by a temp config file (no LoRa hardware)."""
-    with tempfile.NamedTemporaryFile(suffix='.json', delete=False) as f:
-        tmp = f.name
-
-    with patch.object(LoRaRuntimeManager, '_init_lora_handler', lambda self: None):
-        mgr = LoRaRuntimeManager(config_file=tmp)
-    mgr.lora_handler = None
-    return mgr
-
-
 class TestSetParameterRanges(unittest.TestCase):
 
     def setUp(self):
-        self.mgr = _make_manager()
+        fd, self._tmp_path = tempfile.mkstemp(suffix='.json')
+        os.close(fd)
+        with open(self._tmp_path, 'w') as f:
+            json.dump({}, f)
+        with patch.object(LoRaRuntimeManager, '_init_lora_handler', lambda self: None):
+            self.mgr = LoRaRuntimeManager(config_file=self._tmp_path)
+        self.mgr.lora_handler = None
+
+    def tearDown(self):
+        try:
+            os.unlink(self._tmp_path)
+        except OSError:
+            pass
 
     # ---- min/max inclusive acceptance ----------------------------------------
 
