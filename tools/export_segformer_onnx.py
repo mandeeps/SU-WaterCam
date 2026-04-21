@@ -46,10 +46,20 @@ def load_model_huggingface(checkpoint_dir: str):
 def load_model_mmseg(checkpoint_dir: str):
     """Load via mmseg config+checkpoint (alternative training framework)."""
     from mmseg.apis import init_model
-    cfg_candidates = glob.glob(os.path.join(checkpoint_dir, "*.py"))
-    ckpt_candidates = glob.glob(os.path.join(checkpoint_dir, "*.pth"))
+    cfg_candidates = sorted(glob.glob(os.path.join(checkpoint_dir, "*.py")))
+    ckpt_candidates = sorted(glob.glob(os.path.join(checkpoint_dir, "*.pth")))
     if not cfg_candidates or not ckpt_candidates:
         raise FileNotFoundError("No .py config or .pth checkpoint found for mmseg loader")
+    if len(cfg_candidates) > 1:
+        raise RuntimeError(
+            f"Multiple .py configs found in {checkpoint_dir}: {cfg_candidates}. "
+            "Move all but the correct config out of the directory."
+        )
+    if len(ckpt_candidates) > 1:
+        raise RuntimeError(
+            f"Multiple .pth checkpoints found in {checkpoint_dir}: {ckpt_candidates}. "
+            "Move all but the correct checkpoint out of the directory."
+        )
     model = init_model(cfg_candidates[0], ckpt_candidates[0], device="cpu")
     model.eval()
     return model, "mmseg"

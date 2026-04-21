@@ -115,9 +115,11 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
     pred = np.argmax(logits[0], axis=0).astype(np.uint8)
 
     # Scale class indices to full 0–255 range so the PNG is human-readable.
+    # Float division ensures the highest index maps exactly to 255
+    # (integer division, e.g. 255//4=63, would cap at 252 for 5 classes).
     n_classes = logits.shape[1]
     if n_classes > 1:
-        pred_vis = (pred * (255 // (n_classes - 1))).astype(np.uint8)
+        pred_vis = np.round(pred.astype(np.float32) * (255.0 / (n_classes - 1))).astype(np.uint8)
     else:
         pred_vis = pred
 
