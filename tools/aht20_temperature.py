@@ -38,10 +38,11 @@ def record_csv():
             print("AHT20 unavailable")
             sleep(60)
             continue
-        row = {'Time':datetime.now().strftime('%Y%m%d-%H%M%S'),
-               'Temp': '%0.1f C' % sensor.temperature, 'Humidity': '%0.1f %%' %
-               sensor.relative_humidity}
-        print(row)
+        temp_c = round(float(sensor.temperature), 1)
+        hum_pct = round(float(sensor.relative_humidity), 1)
+        ts = datetime.now().strftime('%Y%m%d-%H%M%S')
+        print(f"Time: {ts}  Temp: {temp_c} C  Humidity: {hum_pct} %")
+        row = {'Time': ts, 'Temp': temp_c, 'Humidity': hum_pct}
 
         with open(FILE, 'a+', newline='') as out:
             DictWriter(out, row.keys()).writerow(row)
