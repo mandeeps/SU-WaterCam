@@ -534,7 +534,16 @@ def coreg(directory: str, position_changed: bool = False) -> str:
         lwir_normalized = normalize_image(lwir_image, 0, 255)
         output_filenames = {"registered": "registered.jpg", "nir_band": "NIR_band.png", "five_band": "final_5_band.tiff", "color_preserved": "color_preserved_5_band.tiff", "metadata": "coregistration_metadata.json"}
         output_paths = {name: os.path.join(directory, filename) for name, filename in output_filenames.items()}
-        if not all(os.path.exists(path) for path in [output_paths["five_band"], output_paths["color_preserved"], output_paths["nir_band"], output_paths["metadata"]]):
+        five_band_stale = False
+        if os.path.exists(output_paths["five_band"]):
+            try:
+                with rasterio.open(output_paths["five_band"]) as _src:
+                    if _src.height != config.INFERENCE_HEIGHT or _src.width != config.INFERENCE_WIDTH:
+                        print(f"Regenerating: final_5_band.tiff is {_src.width}×{_src.height}, expected {config.INFERENCE_WIDTH}×{config.INFERENCE_HEIGHT}")
+                        five_band_stale = True
+            except Exception:
+                five_band_stale = True
+        if five_band_stale or not all(os.path.exists(path) for path in [output_paths["five_band"], output_paths["color_preserved"], output_paths["nir_band"], output_paths["metadata"]]):
             # Performing image registration
             print(get_thermal_colormap_info())
             try:

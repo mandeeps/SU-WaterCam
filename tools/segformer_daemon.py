@@ -42,6 +42,8 @@ import time
 
 import numpy as np
 
+from segformer_preprocess import preprocess_bands
+
 SOCKET_PATH = "/run/segformer/segformer.sock"
 LOG_FORMAT = "%(asctime)s [segformer_daemon] %(levelname)s: %(message)s"
 MAX_REQUEST_BYTES = 8192
@@ -87,29 +89,11 @@ def load_session(model_path: str):
 
 def load_and_preprocess(tiff_path: str, expected_h: int, expected_w: int) -> np.ndarray:
     import rasterio
-    import cv2
 
     with rasterio.open(tiff_path) as src:
         img = src.read().astype(np.float32)  # (bands, H, W)
 
-    # Resize if the TIFF dimensions differ from the model's expected input.
-    if img.shape[1] != expected_h or img.shape[2] != expected_w:
-        img = np.stack(
-            [cv2.resize(img[i], (expected_w, expected_h), interpolation=cv2.INTER_AREA)
-             for i in range(img.shape[0])],
-            axis=0,
-        )
-
-    # Per-band min-max normalisation to [0, 1]; constant bands are zeroed out.
-    for i in range(img.shape[0]):
-        lo, hi = float(img[i].min()), float(img[i].max())
-        if hi > lo:
-            img[i] = (img[i] - lo) / (hi - lo)
-        else:
-            img[i] = 0.0
-    img = np.clip(img, 0.0, 1.0)
-
-    return img[np.newaxis].astype(np.float32)  # (1, bands, H, W)
+    return preprocess_bands(img, expected_h, expected_w)
 
 
 def run_inference(session, tiff_path: str, output_path: str) -> float:
@@ -163,6 +147,12 @@ def handle_connection(conn: socket.socket, session) -> None:
         tiff_path = req["tiff_path"]
         output_path = req["output_path"]
 
+        if not os.path.isabs(tiff_path) or not os.path.isabs(output_path):
+            raise ValueError("tiff_path and output_path must be absolute paths")
+        if not output_path.endswith(".png"):
+            raise ValueError(f"output_path must end in .png: {output_path}")
+        if not os.path.isdir(os.path.dirname(output_path)):
+            raise ValueError(f"output_path parent directory does not exist: {output_path}")
         if not os.path.exists(tiff_path):
             raise FileNotFoundError(f"TIFF not found: {tiff_path}")
 
@@ -193,11 +183,12 @@ def serve(session, socket_path: str) -> None:
 
     parent = os.path.dirname(socket_path)
     if parent:
-        os.makedirs(parent, exist_ok=True)
+        os.makedirs(parent, mode=0o750, exist_ok=True)
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    # Unix sockets use 0o777 as base mode; umask 0o117 → 0o777 & ~0o117 = 0o660.
-    old_umask = os.umask(0o117)
+    # Unix sockets use 0o777 as base mode; umask 0o177 → 0o777 & ~0o177 = 0o600
+    # (owner-only), since only the ticktalk process (same uid) should connect.
+    old_umask = os.umask(0o177)
     try:
         server.bind(socket_path)
     finally:

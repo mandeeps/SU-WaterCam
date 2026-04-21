@@ -27,6 +27,8 @@ import os
 
 import numpy as np
 
+from segformer_preprocess import preprocess_bands
+
 
 # ---------------------------------------------------------------------------
 # Model loading helpers
@@ -148,94 +150,59 @@ def verify_onnx(onnx_path: str, height: int = 512, width: int = 512, n_bands: in
 # INT8 static quantization
 # ---------------------------------------------------------------------------
 
-def collect_calibration_inputs(calibration_dir: str, n_images: int = 50,
-                                height: int = 512, width: int = 512,
-                                n_bands: int = 5) -> list[np.ndarray]:
-    """
-    Walk calibration_dir recursively for final_5_band.tiff files.
-    Falls back to random data if none are found (produces a lower-quality
-    calibration but still reduces model size and can improve speed).
-    """
-    import rasterio
-
-    tiff_paths = sorted(
+def collect_calibration_paths(calibration_dir: str, n_images: int = 50) -> list[str]:
+    """Walk calibration_dir for up to n_images final_5_band.tiff paths."""
+    return sorted(
         glob.glob(os.path.join(calibration_dir, "**", "final_5_band.tiff"), recursive=True)
     )[:n_images]
 
-    if not tiff_paths:
-        print(
-            f"WARNING: No final_5_band.tiff files found under {calibration_dir}. "
-            "Using random calibration data — quantization accuracy will be suboptimal. "
-            "Re-run with real captures for best results."
-        )
-        return [
-            np.random.rand(1, n_bands, height, width).astype(np.float32)
-            for _ in range(16)
-        ]
-
-    inputs = []
-    for path in tiff_paths:
-        try:
-            with rasterio.open(path) as src:
-                img = src.read().astype(np.float32)  # (bands, H, W)
-
-            if img.shape[1] != height or img.shape[2] != width:
-                import cv2
-                img = np.stack(
-                    [cv2.resize(img[i], (width, height), interpolation=cv2.INTER_AREA)
-                     for i in range(img.shape[0])],
-                    axis=0,
-                )
-
-            # Per-band min-max normalisation to [0, 1]; constant bands are zeroed out.
-            for i in range(img.shape[0]):
-                lo, hi = img[i].min(), img[i].max()
-                if hi > lo:
-                    img[i] = (img[i] - lo) / (hi - lo)
-                else:
-                    img[i] = 0.0
-            img = np.clip(img, 0.0, 1.0)
-
-            inputs.append(img[np.newaxis].astype(np.float32))  # (1, bands, H, W)
-        except Exception as e:
-            print(f"  Skipping {path}: {e}")
-
-    if not inputs:
-        print(
-            f"WARNING: All {len(tiff_paths)} candidate file(s) failed to load from "
-            f"{calibration_dir}. Falling back to random calibration data — quantization "
-            "accuracy will be suboptimal. Re-run with valid captures for best results."
-        )
-        return [
-            np.random.rand(1, n_bands, height, width).astype(np.float32)
-            for _ in range(16)
-        ]
-
-    print(f"Collected {len(inputs)} calibration images from {calibration_dir}")
-    return inputs
-
 
 class _CalibrationReader:
-    """onnxruntime CalibrationDataReader adapter."""
+    """Streams calibration images from disk one at a time to avoid OOM on the Pi.
 
-    def __init__(self, inputs: list[np.ndarray], input_name: str):
-        self._inputs = inputs
+    With the default 50 images at 5×512×512 float32, pre-loading everything
+    would consume ~500 MB; this reader holds at most one sample in memory.
+    Falls back to pre-generated random arrays when tiff_paths is empty.
+    """
+
+    def __init__(self, tiff_paths: list[str], input_name: str,
+                 height: int, width: int, n_bands: int,
+                 random_fallback: list[np.ndarray] | None = None):
+        self._paths = tiff_paths
+        self._fallback = random_fallback
         self._input_name = input_name
+        self._height = height
+        self._width = width
+        self._n_bands = n_bands
         self._idx = 0
 
     def get_next(self):
-        if self._idx >= len(self._inputs):
-            return None
-        item = {self._input_name: self._inputs[self._idx]}
-        self._idx += 1
-        return item
+        if self._fallback is not None:
+            if self._idx >= len(self._fallback):
+                return None
+            item = {self._input_name: self._fallback[self._idx]}
+            self._idx += 1
+            return item
+        while self._idx < len(self._paths):
+            path = self._paths[self._idx]
+            self._idx += 1
+            try:
+                import rasterio
+                with rasterio.open(path) as src:
+                    img = src.read().astype(np.float32)
+                return {self._input_name: preprocess_bands(img, self._height, self._width)}
+            except Exception as e:
+                print(f"  Skipping {path}: {e}")
+        return None
 
     def rewind(self):
         self._idx = 0
 
 
 def quantize_to_int8(fp32_onnx_path: str, int8_onnx_path: str,
-                     calibration_inputs: list[np.ndarray]) -> None:
+                     tiff_paths: list[str],
+                     height: int = 512, width: int = 512, n_bands: int = 5,
+                     random_fallback: list[np.ndarray] | None = None) -> None:
     import onnxruntime as ort
     from onnxruntime.quantization import (
         QuantFormat,
@@ -253,7 +220,8 @@ def quantize_to_int8(fp32_onnx_path: str, int8_onnx_path: str,
     sess = ort.InferenceSession(prep_path, providers=["CPUExecutionProvider"])
     input_name = sess.get_inputs()[0].name
 
-    reader = _CalibrationReader(calibration_inputs, input_name)
+    reader = _CalibrationReader(tiff_paths, input_name, height, width, n_bands,
+                                random_fallback)
 
     # Softmax is not in onnxruntime's default quantizable op set, so it stays
     # FP32 automatically. LayerNormalization ops are also left to the default
@@ -350,19 +318,27 @@ def main():
     verify_onnx(fp32_path, height=args.height, width=args.width, n_bands=args.bands)
 
     if not args.skip_quantization:
-        # 3. Collect calibration data
+        # 3. Collect calibration paths
         print("\n=== Collecting calibration data ===")
-        calib_inputs = collect_calibration_inputs(
-            args.calibration_dir,
-            n_images=args.calibration_images,
-            height=args.height,
-            width=args.width,
-            n_bands=args.bands,
-        )
+        calib_paths = collect_calibration_paths(args.calibration_dir, args.calibration_images)
+        if not calib_paths:
+            print(
+                f"WARNING: No final_5_band.tiff files found under {args.calibration_dir}. "
+                "Using random calibration data — quantization accuracy will be suboptimal."
+            )
+            random_fallback = [
+                np.random.rand(1, args.bands, args.height, args.width).astype(np.float32)
+                for _ in range(16)
+            ]
+        else:
+            print(f"Found {len(calib_paths)} calibration image(s) in {args.calibration_dir}")
+            random_fallback = None
 
         # 4. INT8 static quantization
         print("\n=== Quantizing to INT8 ===")
-        quantize_to_int8(fp32_path, int8_path, calib_inputs)
+        quantize_to_int8(fp32_path, int8_path, calib_paths,
+                         height=args.height, width=args.width, n_bands=args.bands,
+                         random_fallback=random_fallback)
         verify_onnx(int8_path, height=args.height, width=args.width, n_bands=args.bands)
 
     # 5. Optional benchmark
