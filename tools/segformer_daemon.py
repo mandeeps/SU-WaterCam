@@ -139,12 +139,12 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
 def handle_connection(conn: socket.socket, session) -> None:
     try:
         conn.settimeout(30)
-        data = b""
+        data = bytearray()
         while True:
             chunk = conn.recv(4096)
             if not chunk:
                 break
-            data += chunk
+            data.extend(chunk)
             if len(data) > MAX_REQUEST_BYTES:
                 raise ValueError(f"Request exceeded {MAX_REQUEST_BYTES} bytes")
             if b"\n" in data:

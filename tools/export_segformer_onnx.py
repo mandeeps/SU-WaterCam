@@ -160,10 +160,18 @@ def verify_onnx(onnx_path: str, height: int = 512, width: int = 512, n_bands: in
 # ---------------------------------------------------------------------------
 
 def collect_calibration_paths(calibration_dir: str, n_images: int = 50) -> list[str]:
-    """Walk calibration_dir for up to n_images final_5_band.tiff paths."""
-    return sorted(
-        glob.glob(os.path.join(calibration_dir, "**", "final_5_band.tiff"), recursive=True)
-    )[:n_images]
+    """Walk calibration_dir for up to n_images final_5_band.tiff paths.
+
+    Uses iglob to stop traversal early once n_images are collected, avoiding
+    a full directory walk and in-memory materialisation of all matches.
+    """
+    paths = []
+    pattern = os.path.join(calibration_dir, "**", "final_5_band.tiff")
+    for p in glob.iglob(pattern, recursive=True):
+        paths.append(p)
+        if len(paths) >= n_images:
+            break
+    return sorted(paths)
 
 
 class _CalibrationReader:
