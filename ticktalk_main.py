@@ -674,12 +674,12 @@ def _segformer_via_daemon(tiff_path: str, output_path: str,
             sock.sendall(req.encode())
             sock.shutdown(_socket.SHUT_WR)
 
-            data = b""
+            data = bytearray()
             while True:
                 chunk = sock.recv(4096)
                 if not chunk:
                     break
-                data += chunk
+                data.extend(chunk)
 
         resp = json.loads(data.strip())
         if resp.get("status") == "ok":

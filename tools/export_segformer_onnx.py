@@ -206,7 +206,7 @@ class _CalibrationReader:
             try:
                 import rasterio
                 with rasterio.open(path) as src:
-                    img = src.read().astype(np.float32)
+                    img = src.read()  # preprocess_bands handles float32 conversion
                 if img.shape[0] != self._n_bands:
                     print(f"  Skipping {path}: expected {self._n_bands} bands, got {img.shape[0]}")
                     continue

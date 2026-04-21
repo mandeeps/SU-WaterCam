@@ -96,7 +96,7 @@ def load_and_preprocess(tiff_path: str, expected_h: int, expected_w: int) -> np.
     import rasterio
 
     with rasterio.open(tiff_path) as src:
-        img = src.read().astype(np.float32)  # (bands, H, W)
+        img = src.read()  # (bands, H, W); preprocess_bands handles float32 conversion
 
     return preprocess_bands(img, expected_h, expected_w)
 
@@ -190,7 +190,16 @@ def serve(session, socket_path: str) -> None:
 
     parent = os.path.dirname(socket_path)
     if parent:
-        os.makedirs(parent, mode=0o750, exist_ok=True)
+        try:
+            os.makedirs(parent, mode=0o750, exist_ok=True)
+        except PermissionError:
+            log.error(
+                "Cannot create socket directory %s — likely running outside systemd "
+                "as a non-root user. Pass --socket /tmp/segformer_test.sock for "
+                "manual testing.",
+                parent,
+            )
+            sys.exit(1)
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     # Unix sockets use 0o777 as base mode; umask 0o177 → 0o777 & ~0o177 = 0o600
