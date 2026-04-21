@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import fcntl
 import time
 from sys import getsizeof
 import struct
@@ -115,7 +116,11 @@ class LoRaHandler:
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r') as f:
-                    return json.load(f)
+                    fcntl.flock(f, fcntl.LOCK_SH)
+                    try:
+                        return json.load(f)
+                    finally:
+                        fcntl.flock(f, fcntl.LOCK_UN)
             except Exception as e:
                 print(f"Error loading config: {e}, using defaults")
                 return default_config
@@ -128,7 +133,11 @@ class LoRaHandler:
         """Save configuration to file"""
         try:
             with open(self.config_file, 'w') as f:
-                json.dump(config, f, indent=2)
+                fcntl.flock(f, fcntl.LOCK_EX)
+                try:
+                    json.dump(config, f, indent=2)
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
         except Exception as e:
             print(f"Error saving config: {e}")
     
