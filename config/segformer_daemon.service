@@ -15,8 +15,9 @@ ExecStart=/home/pi/miniforge3/envs/5band/bin/python \
     --socket /tmp/segformer.sock
 Restart=on-failure
 RestartSec=5
-# Give the model time to load before ticktalk starts sending requests.
-ExecStartPost=/bin/bash -c 'until [ -S /tmp/segformer.sock ]; do sleep 0.5; done'
+TimeoutStartSec=60
+# Wait up to 30 s (60 × 0.5 s) for the socket to appear; fail cleanly if it doesn't.
+ExecStartPost=/bin/bash -c 'retries=0; until [ -S /tmp/segformer.sock ]; do sleep 0.5; retries=$((retries+1)); [ $retries -ge 60 ] && exit 1; done'
 
 [Install]
 WantedBy=multi-user.target

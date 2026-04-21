@@ -24,8 +24,6 @@ For INT8 quantization you also need:
 import argparse
 import glob
 import os
-import sys
-from pathlib import Path
 
 import numpy as np
 
@@ -45,7 +43,6 @@ def load_model_huggingface(checkpoint_dir: str):
 
 def load_model_mmseg(checkpoint_dir: str):
     """Load via mmseg config+checkpoint (alternative training framework)."""
-    from mmengine.config import Config
     from mmseg.apis import init_model
     cfg_candidates = glob.glob(os.path.join(checkpoint_dir, "*.py"))
     ckpt_candidates = glob.glob(os.path.join(checkpoint_dir, "*.pth"))

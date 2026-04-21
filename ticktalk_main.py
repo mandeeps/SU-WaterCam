@@ -659,10 +659,15 @@ def _segformer_via_daemon(tiff_path: str, output_path: str,
     memory, cutting the per-cycle cold-start cost of ~10–20 s.
     """
     import json
+    import os as _os
     import socket as _socket
+    import stat as _stat
 
     req = json.dumps({"tiff_path": tiff_path, "output_path": output_path}) + "\n"
     try:
+        if not _stat.S_ISSOCK(_os.stat(socket_path).st_mode):
+            print(f"⚠️ {socket_path} is not a Unix socket — skipping daemon")
+            return False
         with _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM) as sock:
             sock.settimeout(300)  # 5-minute hard timeout
             sock.connect(socket_path)

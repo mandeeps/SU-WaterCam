@@ -35,6 +35,7 @@ import logging
 import os
 import signal
 import socket
+import stat
 import sys
 import time
 
@@ -42,6 +43,7 @@ import numpy as np
 
 SOCKET_PATH = "/tmp/segformer.sock"
 LOG_FORMAT = "%(asctime)s [segformer_daemon] %(levelname)s: %(message)s"
+MAX_REQUEST_BYTES = 8192
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 log = logging.getLogger(__name__)
@@ -147,10 +149,12 @@ def handle_connection(conn: socket.socket, session) -> None:
             if not chunk:
                 break
             data += chunk
+            if len(data) > MAX_REQUEST_BYTES:
+                raise ValueError(f"Request exceeded {MAX_REQUEST_BYTES} bytes")
             if b"\n" in data:
                 break
 
-        req = json.loads(data.strip())
+        req = json.loads(data.split(b"\n", 1)[0].strip())
         tiff_path = req["tiff_path"]
         output_path = req["output_path"]
 
@@ -176,6 +180,9 @@ def handle_connection(conn: socket.socket, session) -> None:
 
 def serve(session, socket_path: str) -> None:
     if os.path.exists(socket_path):
+        if not stat.S_ISSOCK(os.stat(socket_path).st_mode):
+            log.error("Path %s exists but is not a socket — refusing to unlink", socket_path)
+            sys.exit(1)
         os.unlink(socket_path)
 
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

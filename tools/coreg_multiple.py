@@ -484,7 +484,41 @@ def save_color_preserved_tiff(rgb_data: np.ndarray, thermal_data: np.ndarray, ni
 
 def save_metadata_summary(directory: str, output_paths: dict, image_info: dict) -> None:
     metadata_file = os.path.join(directory, "coregistration_metadata.json")
-    metadata = {"timestamp": pd.Timestamp.now().isoformat(), "output_files": output_paths, "image_info": image_info, "processing_parameters": {"max_image_size": config.MAX_IMAGE_SIZE, "scale_percent": config.SCALE_PERCENT, "registration_metric": config.REGISTRATION_METRIC, "transform_type": config.TRANSFORM_TYPE, "thermal_colormap": str(config.THERMAL_COLORMAP), "invert_thermal": config.INVERT_THERMAL, "inference_height": config.INFERENCE_HEIGHT, "inference_width": config.INFERENCE_WIDTH}, "band_descriptions": {"final_5_band.tiff": [f"Resolution: {config.INFERENCE_HEIGHT}×{config.INFERENCE_WIDTH} (resized for SegFormer inference)", "Band 1: Blue Channel (Optical)", "Band 2: Green Channel (Optical)", "Band 3: Red Channel (Optical)", "Band 4: Thermal Data (Normalized 0-255)", "Band 5: NIR Band (NIR-ON minus NIR-OFF)"], "color_preserved_5_band.tiff": ["Resolution: full co-registration resolution (archival)", "Band 1: Red Channel (Optical)", "Band 2: Green Channel (Optical)", "Band 3: Blue Channel (Optical)", "Band 4: Thermal Data (Normalized 0-255)", "Band 5: NIR Band (NIR-ON minus NIR-OFF)"]}}
+    processing_parameters = {
+        "max_image_size": config.MAX_IMAGE_SIZE,
+        "scale_percent": config.SCALE_PERCENT,
+        "registration_metric": config.REGISTRATION_METRIC,
+        "transform_type": config.TRANSFORM_TYPE,
+        "thermal_colormap": str(config.THERMAL_COLORMAP),
+        "invert_thermal": config.INVERT_THERMAL,
+        "inference_height": config.INFERENCE_HEIGHT,
+        "inference_width": config.INFERENCE_WIDTH,
+    }
+    band_descriptions = {
+        "final_5_band.tiff": [
+            f"Resolution: {config.INFERENCE_HEIGHT}×{config.INFERENCE_WIDTH} (resized for SegFormer inference)",
+            "Band 1: Blue Channel (Optical)",
+            "Band 2: Green Channel (Optical)",
+            "Band 3: Red Channel (Optical)",
+            "Band 4: Thermal Data (Normalized 0-255)",
+            "Band 5: NIR Band (NIR-ON minus NIR-OFF)",
+        ],
+        "color_preserved_5_band.tiff": [
+            "Resolution: full co-registration resolution (archival)",
+            "Band 1: Red Channel (Optical)",
+            "Band 2: Green Channel (Optical)",
+            "Band 3: Blue Channel (Optical)",
+            "Band 4: Thermal Data (Normalized 0-255)",
+            "Band 5: NIR Band (NIR-ON minus NIR-OFF)",
+        ],
+    }
+    metadata = {
+        "timestamp": pd.Timestamp.now().isoformat(),
+        "output_files": output_paths,
+        "image_info": image_info,
+        "processing_parameters": processing_parameters,
+        "band_descriptions": band_descriptions,
+    }
     with open(metadata_file, "w") as f:
         json.dump(metadata, f, indent=2)
     print(f"Saved metadata summary: {metadata_file}")
