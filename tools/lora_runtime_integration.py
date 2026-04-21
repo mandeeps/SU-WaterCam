@@ -224,11 +224,19 @@ class LoRaRuntimeManager:
         bounds = self._PARAM_RANGES.get(key)
         if bounds is None:
             return True
+        # Reject booleans — bool subclasses int but is semantically wrong for numeric params
+        if isinstance(value, bool):
+            print(f"Warning: boolean value {value!r} for parameter '{key}', rejected")
+            return False
         lo, hi = bounds
         try:
             numeric = float(value)
         except (TypeError, ValueError):
             print(f"Warning: non-numeric value {value!r} for parameter '{key}', rejected")
+            return False
+        # Reject fractional values for integer-only params (e.g. 1.9 must not silently become 1)
+        if key in self._INT_PARAMS and numeric != int(numeric):
+            print(f"Warning: fractional value {value} for integer parameter '{key}', rejected")
             return False
         if not (lo <= numeric <= hi):
             print(f"Warning: value {value} for '{key}' is outside allowed range [{lo}, {hi}], rejected")
@@ -236,23 +244,26 @@ class LoRaRuntimeManager:
         return True
 
     def _coerce_param(self, key: str, value: Any) -> Any:
-        """Coerce value to the correct type for key (int for integer-only params)."""
+        """Coerce value to the correct stored type for key.
+
+        Safe to call only after _validate_param() has already accepted the value —
+        at that point booleans and fractional inputs have been rejected, so
+        int(float(value)) is exact.
+        """
         if key in self._INT_PARAMS:
-            try:
-                return int(float(value))
-            except (TypeError, ValueError):
-                return value
+            return int(float(value))
         return value
 
-    def set_parameter(self, key: str, value: Any):
+    def set_parameter(self, key: str, value: Any) -> bool:
         """Set a runtime parameter value and save to file.
 
         Validates against _PARAM_RANGES and coerces integer-only params before
-        persisting, so all callers — including the LoRa runtime callback — are
-        protected regardless of how set_parameter() is reached.
+        persisting. Returns True if the value was applied, False if rejected.
+        All callers — including the LoRa runtime callback — are protected
+        regardless of how set_parameter() is reached.
         """
         if not self._validate_param(key, value):
-            return
+            return False
         coerced = self._coerce_param(key, value)
         old_value = self.parameters.get(key)
         self.parameters[key] = coerced
@@ -260,13 +271,13 @@ class LoRaRuntimeManager:
 
         print(f"Runtime parameter '{key}' updated: {old_value} → {coerced}")
 
-        # Call any registered update callbacks
         if key in self.update_callbacks:
             for callback in self.update_callbacks[key]:
                 try:
                     callback(coerced, old_value)
                 except Exception as e:
                     print(f"Error in parameter update callback for '{key}': {e}")
+        return True
     
     def register_update_callback(self, parameter: str, callback: Callable):
         """Register a callback to be called when a parameter is updated"""
@@ -367,10 +378,7 @@ class LoRaRuntimeManager:
                 val_int = _to_int_be(value_bytes)
 
                 def _set(param, value) -> bool:
-                    if not self._validate_param(param, value):
-                        return False
-                    self.set_parameter(param, value)
-                    return True
+                    return self.set_parameter(param, value)
 
                 if channel == '10' and command == '90':
                     return _set('area_threshold', val_int * 10)
@@ -423,174 +431,45 @@ class LoRaRuntimeManager:
                 
                 print(f"DEBUG: Parsed - Channel: {channel}, Command: {command}, Value: {value}")
                 
-                # Process commands based on channel and command combination
-                if channel == '10' and command == '90':
-                    # Area threshold - value represents 10% increments
-                    try:
-                        val = int(value) * 10
-                        if not self._validate_param('area_threshold', val):
-                            return False
-                        self.set_parameter('area_threshold', val)
-                        return True
-                    except ValueError as e:
-                        print(f'Invalid area threshold value: {value}, error: {e}')
+                # Process commands based on channel and command combination.
+                # set_parameter() is the single validation + coercion point; dispatchers
+                # just parse the raw string into the right type and delegate.
+                try:
+                    if channel == '10' and command == '90':
+                        return self.set_parameter('area_threshold', int(value) * 10)
+                    elif channel == '11' and command == '91':
+                        return self.set_parameter('stage_threshold', float(value))
+                    elif channel == '12' and command == '92':
+                        return self.set_parameter('monitoring_frequency', int(value))
+                    elif channel == '13' and command == '93':
+                        return self.set_parameter('emergency_frequency', int(value))
+                    elif channel == '14' and command == '94':
+                        return self.set_parameter('photo_interval', int(value))
+                    elif channel == '15' and command == '95':
+                        return self.set_parameter('neighborhood_emergency_frequency', int(value))
+                    elif channel == '22' and command == '00':
+                        return self.set_parameter('debug_mode', bool(int(value)))
+                    elif channel == '31' and command == '00':
+                        return self.set_parameter('compression_level', max(1, min(10, int(value))))
+                    elif channel == '32' and command == '00':
+                        return self.set_parameter('max_retransmissions', int(value))
+                    elif channel == '40' and command == '00':
+                        return self.set_parameter('auto_shutdown_enabled', bool(int(value)))
+                    elif channel == '41' and command == '00':
+                        return self.set_parameter('shutdown_iteration_limit', int(value))
+                    elif channel == '42' and command == '00':
+                        return self.set_parameter('data_retention_days', int(value))
+                    elif channel == '43' and command == '00':
+                        return self.set_parameter('backup_enabled', bool(int(value)))
+                    elif channel == '21' and command == '00':
+                        return self.set_parameter('emergency_mode', True)
+                    elif channel == '99' and command == '00':
+                        return self.set_parameter('emergency_mode', False)
+                    else:
+                        print(f'Unknown channel/command combination: Channel {channel}, Command {command} with value: {value}')
                         return False
-
-                elif channel == '11' and command == '91':
-                    # Stage threshold - continuous cm value
-                    try:
-                        val = float(value)
-                        if not self._validate_param('stage_threshold', val):
-                            return False
-                        self.set_parameter('stage_threshold', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid stage threshold value: {value}')
-                        return False
-
-                elif channel == '12' and command == '92':
-                    # Monitoring frequency - minute value
-                    try:
-                        val = int(value)
-                        if not self._validate_param('monitoring_frequency', val):
-                            return False
-                        self.set_parameter('monitoring_frequency', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid monitoring frequency value: {value}')
-                        return False
-
-                elif channel == '13' and command == '93':
-                    # Emergency frequency - minute value
-                    try:
-                        val = int(value)
-                        if not self._validate_param('emergency_frequency', val):
-                            return False
-                        self.set_parameter('emergency_frequency', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid emergency frequency value: {value}')
-                        return False
-
-                elif channel == '14' and command == '94':
-                    # Photo interval - minute value
-                    try:
-                        val = int(value)
-                        if not self._validate_param('photo_interval', val):
-                            return False
-                        self.set_parameter('photo_interval', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid photo interval value: {value}')
-                        return False
-
-                elif channel == '15' and command == '95':
-                    # Neighborhood emergency frequency - minute value
-                    try:
-                        val = int(value)
-                        if not self._validate_param('neighborhood_emergency_frequency', val):
-                            return False
-                        self.set_parameter('neighborhood_emergency_frequency', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid neighborhood emergency frequency value: {value}')
-                        return False
-                        
-                # Removed: transmission enable/disable command (always-on policy)
-                        
-                elif channel == '22' and command == '00':
-                    # Debug mode
-                    try:
-                        val = bool(int(value))
-                        self.set_parameter('debug_mode', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid debug mode value: {value}')
-                        return False
-                        
-                # Removed: GPS enable/disable command (not supported)
-                        
-                # Removed: battery threshold command (not supported)
-                        
-                elif channel == '31' and command == '00':
-                    # Compression level
-                    try:
-                        val = int(value)
-                        val = max(1, min(10, val))  # Clamp between 1-10
-                        self.set_parameter('compression_level', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid compression level value: {value}')
-                        return False
-                        
-                elif channel == '32' and command == '00':
-                    # Max retransmissions
-                    try:
-                        val = int(value)
-                        if not self._validate_param('max_retransmissions', val):
-                            return False
-                        self.set_parameter('max_retransmissions', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid max retransmissions value: {value}')
-                        return False
-
-                elif channel == '40' and command == '00':
-                    # Auto shutdown enabled/disabled
-                    try:
-                        val = bool(int(value))
-                        self.set_parameter('auto_shutdown_enabled', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid auto shutdown value: {value}')
-                        return False
-
-                elif channel == '41' and command == '00':
-                    # Shutdown iteration limit
-                    try:
-                        val = int(value)
-                        if not self._validate_param('shutdown_iteration_limit', val):
-                            return False
-                        self.set_parameter('shutdown_iteration_limit', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid shutdown iteration limit value: {value}')
-                        return False
-
-                elif channel == '42' and command == '00':
-                    # Data retention days
-                    try:
-                        val = int(value)
-                        if not self._validate_param('data_retention_days', val):
-                            return False
-                        self.set_parameter('data_retention_days', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid data retention value: {value}')
-                        return False
-                        
-                elif channel == '43' and command == '00':
-                    # Backup enabled/disabled
-                    try:
-                        val = bool(int(value))
-                        self.set_parameter('backup_enabled', val)
-                        return True
-                    except ValueError:
-                        print(f'Invalid backup value: {value}')
-                        return False
-                        
-                elif channel == '21' and command == '00':
-                    # Emergency status: system enters emergency mode and stops scheduled shutdowns
-                    self.set_parameter('emergency_mode', True)
-                    return True
-                    
-                elif channel == '99' and command == '00':
-                    # Deactivate emergency mode
-                    self.set_parameter('emergency_mode', False)
-                    return True
-                    
-                else:
-                    print(f'Unknown channel/command combination: Channel {channel}, Command {command} with value: {value}')
+                except (ValueError, TypeError) as e:
+                    print(f'Invalid value for channel {channel} command {command}: {value!r} ({e})')
                     return False
             else:
                 print(f'Invalid payload format: {payload} (minimum 4 characters required for [Channel][Command][Value] format)')
