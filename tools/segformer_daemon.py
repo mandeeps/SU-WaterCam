@@ -191,6 +191,10 @@ def serve(session, socket_path: str) -> None:
             sys.exit(1)
         os.unlink(socket_path)
 
+    parent = os.path.dirname(socket_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
     server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     # Unix sockets use 0o777 as base mode; umask 0o117 → 0o777 & ~0o117 = 0o660.
     old_umask = os.umask(0o117)

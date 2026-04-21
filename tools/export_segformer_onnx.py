@@ -200,6 +200,17 @@ def collect_calibration_inputs(calibration_dir: str, n_images: int = 50,
         except Exception as e:
             print(f"  Skipping {path}: {e}")
 
+    if not inputs:
+        print(
+            f"WARNING: All {len(tiff_paths)} candidate file(s) failed to load from "
+            f"{calibration_dir}. Falling back to random calibration data — quantization "
+            "accuracy will be suboptimal. Re-run with valid captures for best results."
+        )
+        return [
+            np.random.rand(1, n_bands, height, width).astype(np.float32)
+            for _ in range(16)
+        ]
+
     print(f"Collected {len(inputs)} calibration images from {calibration_dir}")
     return inputs
 

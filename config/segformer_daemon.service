@@ -10,7 +10,7 @@ User=pi
 Group=pi
 Type=simple
 WorkingDirectory=/home/pi/segformer_5band
-# RuntimeDirectory creates /run/segformer/ owned by User=pi at 0o700,
+# RuntimeDirectory creates /run/segformer/ owned by User=pi at 0750,
 # placing the socket outside world-writable /tmp.
 RuntimeDirectory=segformer
 RuntimeDirectoryMode=0750
