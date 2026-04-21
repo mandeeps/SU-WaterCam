@@ -19,6 +19,8 @@
 # DEALINGS IN THE SOFTWARE.
 
 import argparse
+import hashlib
+import os
 import pickle
 import time
 #import timedinput
@@ -35,9 +37,46 @@ from ticktalkpython.Constants import get_readable_time
 from output_functions import get_applied_output_func
 
 
+def _sha256_file(path: str) -> str:
+    """Return the hex SHA-256 digest of a file."""
+    h = hashlib.sha256()
+    with open(path, 'rb') as f:
+        for chunk in iter(lambda: f.read(65536), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def write_graph_checksum(filename: str) -> None:
+    """Write a SHA-256 sidecar for filename (call this after building the .pkl)."""
+    sidecar = filename + ".sha256"
+    digest = _sha256_file(filename)
+    with open(sidecar, 'w') as f:
+        f.write(digest + "\n")
+
+
+def _verify_graph_checksum(filename: str) -> None:
+    """Raise RuntimeError if the .pkl.sha256 sidecar is missing or does not match."""
+    sidecar = filename + ".sha256"
+    if not os.path.exists(sidecar):
+        raise RuntimeError(
+            f"Graph checksum sidecar not found: {sidecar}. "
+            "Run write_graph_checksum() after building the .pkl file."
+        )
+    with open(sidecar, 'r') as f:
+        expected = f.read().strip()
+    actual = _sha256_file(filename)
+    if actual != expected:
+        raise RuntimeError(
+            f"Graph file integrity check failed: {filename}\n"
+            f"  expected {expected}\n"
+            f"  got      {actual}"
+        )
+
+
 def unpack_graph(filename):
-    inpickle = open(filename, 'rb')
-    graph = pickle.load(inpickle)
+    _verify_graph_checksum(filename)
+    with open(filename, 'rb') as inpickle:
+        graph = pickle.load(inpickle)
     assert isinstance(graph, Graph.TTGraph)
     return graph
 
