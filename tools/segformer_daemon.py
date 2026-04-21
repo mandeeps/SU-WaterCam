@@ -18,16 +18,21 @@ Server → client (newline-terminated JSON):
 
 Usage
 -----
-Run directly for testing:
+Run directly for testing (pass an explicit socket path under /tmp, because
+/run/segformer/ is created by systemd RuntimeDirectory and will not exist
+for a non-root user running outside systemd):
+
     /home/pi/miniforge3/envs/5band/bin/python tools/segformer_daemon.py \
-        --model /home/pi/segformer_5band/segformer_5band_int8.onnx
+        --model /home/pi/segformer_5band/segformer_5band_int8.onnx \
+        --socket /tmp/segformer_test.sock
 
-Or via systemd (see config/segformer_daemon.service).
+Or via systemd (see config/segformer_daemon.service), which creates
+/run/segformer/ automatically at daemon startup:
 
-The socket path is /run/segformer/segformer.sock by default (systemd
-RuntimeDirectory=segformer creates and owns this directory). ticktalk_main.py's
-segformer() function connects to this socket if it exists, and falls back to
-the legacy subprocess call otherwise.
+The production socket path is /run/segformer/segformer.sock (systemd
+RuntimeDirectory=segformer creates and owns this directory).
+ticktalk_main.py's segformer() function connects to this socket if it
+exists, and falls back to the legacy subprocess call otherwise.
 """
 
 import argparse

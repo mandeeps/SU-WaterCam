@@ -199,6 +199,9 @@ class _CalibrationReader:
                 import rasterio
                 with rasterio.open(path) as src:
                     img = src.read().astype(np.float32)
+                if img.shape[0] != self._n_bands:
+                    print(f"  Skipping {path}: expected {self._n_bands} bands, got {img.shape[0]}")
+                    continue
                 return {self._input_name: preprocess_bands(img, self._height, self._width)}
             except Exception as e:
                 print(f"  Skipping {path}: {e}")
