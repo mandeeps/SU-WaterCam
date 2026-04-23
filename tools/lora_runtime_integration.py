@@ -105,6 +105,7 @@ class LoRaRuntimeManager:
         'max_retransmissions':              (0, 10),
         'shutdown_iteration_limit':         (1, 100),
         'data_retention_days':              (1, 365),
+        'compression_level':               (1, 10),
     }
 
     # Parameters that must be stored as integers (not floats).
@@ -117,6 +118,7 @@ class LoRaRuntimeManager:
         'max_retransmissions',
         'shutdown_iteration_limit',
         'data_retention_days',
+        'compression_level',
     })
 
     def __init__(self, config_file='runtime_config.json'):
