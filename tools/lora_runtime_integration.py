@@ -97,7 +97,7 @@ class LoRaRuntimeManager:
     # Values outside these ranges are rejected with a warning.
     _PARAM_RANGES: dict = {
         'area_threshold':                   (0, 100),
-        'stage_threshold':                  (0, 1000),
+        'stage_threshold':                  (0, 255),
         'monitoring_frequency':             (1, 10080),
         'emergency_frequency':              (1, 1440),
         'photo_interval':                   (1, 1440),
@@ -240,12 +240,13 @@ class LoRaRuntimeManager:
         if not math.isfinite(numeric):
             print(f"Warning: non-finite value {value!r} for parameter '{key}', rejected")
             return False
-        # Reject fractional values for integer-only params (e.g. 1.9 must not silently become 1)
-        if key in self._INT_PARAMS and numeric != int(numeric):
-            print(f"Warning: fractional value {value} for integer parameter '{key}', rejected")
-            return False
+        # Range check before fractional check: avoids int() on huge finite floats
         if not (lo <= numeric <= hi):
             print(f"Warning: value {value} for '{key}' is outside allowed range [{lo}, {hi}], rejected")
+            return False
+        # Reject fractional values for integer-only params (e.g. 1.9 must not silently become 1)
+        if key in self._INT_PARAMS and not numeric.is_integer():
+            print(f"Warning: fractional value {value} for integer parameter '{key}', rejected")
             return False
         return True
 

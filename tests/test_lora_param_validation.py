@@ -67,7 +67,7 @@ class TestSetParameterRanges(unittest.TestCase):
         self.assertTrue(self.mgr.set_parameter('stage_threshold', 0))
 
     def test_stage_threshold_max_accepted(self):
-        self.assertTrue(self.mgr.set_parameter('stage_threshold', 1000))
+        self.assertTrue(self.mgr.set_parameter('stage_threshold', 255))
 
     def test_monitoring_frequency_min_accepted(self):
         self.assertTrue(self.mgr.set_parameter('monitoring_frequency', 1))
@@ -90,7 +90,7 @@ class TestSetParameterRanges(unittest.TestCase):
         self.assertFalse(self.mgr.set_parameter('area_threshold', 101))
 
     def test_stage_threshold_above_max_rejected(self):
-        self.assertFalse(self.mgr.set_parameter('stage_threshold', 1001))
+        self.assertFalse(self.mgr.set_parameter('stage_threshold', 256))
 
     def test_monitoring_frequency_zero_rejected(self):
         self.assertFalse(self.mgr.set_parameter('monitoring_frequency', 0))
