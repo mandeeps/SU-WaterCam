@@ -236,6 +236,27 @@ class TestSetParameterRanges(unittest.TestCase):
         self.assertIsInstance(result, int)
         self.assertEqual(result, 5)
 
+    # ---- overflow-safe float conversion ----------------------------------------
+
+    def test_very_large_int_rejected_without_overflow(self):
+        # int too large for float() raises OverflowError; must be caught and rejected
+        self.assertFalse(self.mgr.set_parameter('area_threshold', 10 ** 309))
+
+    def test_very_large_negative_int_rejected_without_overflow(self):
+        self.assertFalse(self.mgr.set_parameter('monitoring_frequency', -(10 ** 309)))
+
+    # ---- save_parameters failure propagates into set_parameter -----------------
+
+    def test_set_parameter_returns_false_on_save_failure(self):
+        with patch.object(self.mgr, 'save_parameters', return_value=False):
+            result = self.mgr.set_parameter('area_threshold', 50)
+            self.assertFalse(result)
+
+    def test_set_parameter_returns_true_on_save_success(self):
+        with patch.object(self.mgr, 'save_parameters', return_value=True):
+            result = self.mgr.set_parameter('area_threshold', 50)
+            self.assertTrue(result)
+
     # ---- set_parameter return value ------------------------------------------
 
     def test_set_parameter_returns_bool_true_on_success(self):

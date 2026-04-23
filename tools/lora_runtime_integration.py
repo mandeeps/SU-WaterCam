@@ -207,13 +207,15 @@ class LoRaRuntimeManager:
             self.save_parameters(default_params)
             return default_params
     
-    def save_parameters(self, params: Dict[str, Any]):
-        """Save runtime parameters to file"""
+    def save_parameters(self, params: Dict[str, Any]) -> bool:
+        """Save runtime parameters to file. Returns True on success, False on failure."""
         try:
             with open(self.config_file, 'w') as f:
                 json.dump(params, f, indent=2)
+            return True
         except Exception as e:
             print(f"Error saving runtime config: {e}")
+            return False
     
     def get_parameter(self, key: str, default: Any = None) -> Any:
         """Get a runtime parameter value"""
@@ -235,7 +237,7 @@ class LoRaRuntimeManager:
         lo, hi = bounds
         try:
             numeric = float(value)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError, OverflowError):
             print(f"Warning: non-numeric value {value!r} for parameter '{key}', rejected")
             return False
         # Reject non-finite values (inf/nan pass float() but crash int() with OverflowError/ValueError)
@@ -279,7 +281,9 @@ class LoRaRuntimeManager:
         coerced = self._coerce_param(key, value)
         old_value = self.parameters.get(key)
         self.parameters[key] = coerced
-        self.save_parameters(self.parameters)
+        saved = self.save_parameters(self.parameters)
+        if not saved:
+            print(f"Warning: parameter '{key}' updated in memory but failed to persist to disk")
 
         print(f"Runtime parameter '{key}' updated: {old_value} → {coerced}")
 
@@ -289,7 +293,7 @@ class LoRaRuntimeManager:
                     callback(coerced, old_value)
                 except Exception as e:
                     print(f"Error in parameter update callback for '{key}': {e}")
-        return True
+        return saved
     
     def register_update_callback(self, parameter: str, callback: Callable):
         """Register a callback to be called when a parameter is updated"""
@@ -403,7 +407,7 @@ class LoRaRuntimeManager:
                     self.set_parameter('debug_mode', bool(val_int))
                     return True
                 elif channel == '31' and command == '00':
-                    return _set('compression_level', max(1, min(10, val_int)))
+                    return _set('compression_level', val_int)
                 elif channel == '32' and command == '00':
                     return _set('max_retransmissions', val_int)
                 elif channel == '40' and command == '00':
@@ -473,7 +477,7 @@ class LoRaRuntimeManager:
                     elif channel == '22' and command == '00':
                         return self.set_parameter('debug_mode', bool(int(value)))
                     elif channel == '31' and command == '00':
-                        return self.set_parameter('compression_level', max(1, min(10, int(value))))
+                        return self.set_parameter('compression_level', int(value))
                     elif channel == '32' and command == '00':
                         return self.set_parameter('max_retransmissions', int(value))
                     elif channel == '40' and command == '00':
