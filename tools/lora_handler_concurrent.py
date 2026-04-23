@@ -617,7 +617,7 @@ class LoRaHandler:
                 add_u8(0x09, 0x19, data['status_area_threshold'])
             if 'stage_threshold' in data: 
                 print(f"DEBUG: Processing stage_threshold: {data['stage_threshold']}")
-                add_u8(0x09, 0x29, data['stage_threshold'])
+                add_u8(0x09, 0x29, min(255, int(data['stage_threshold'])))
             if 'monitoring_frequency' in data: 
                 print(f"DEBUG: Processing monitoring_frequency: {data['monitoring_frequency']}")
                 add_u16(0x09, 0x39, data['monitoring_frequency'])

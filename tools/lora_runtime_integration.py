@@ -97,7 +97,7 @@ class LoRaRuntimeManager:
     # Values outside these ranges are rejected with a warning.
     _PARAM_RANGES: dict = {
         'area_threshold':                   (0, 100),
-        'stage_threshold':                  (0, 255),
+        'stage_threshold':                  (0, 65535),
         'monitoring_frequency':             (1, 10080),
         'emergency_frequency':              (1, 1440),
         'photo_interval':                   (1, 1440),
@@ -401,7 +401,7 @@ class LoRaRuntimeManager:
                     self.set_parameter('debug_mode', bool(val_int))
                     return True
                 elif channel == '31' and command == '00':
-                    return True
+                    return _set('compression_level', max(1, min(10, val_int)))
                 elif channel == '32' and command == '00':
                     return _set('max_retransmissions', val_int)
                 elif channel == '40' and command == '00':

@@ -17,23 +17,26 @@ import tempfile
 import unittest
 from unittest.mock import patch, MagicMock
 
-# Ensure tools/ is importable
-_TOOLS_DIR = os.path.join(os.path.dirname(__file__), '..', 'tools')
-if _TOOLS_DIR not in sys.path:
-    sys.path.insert(0, _TOOLS_DIR)
+# Use the repo root so tests import via the same package path as production code
+_REPO_ROOT = os.path.join(os.path.dirname(__file__), '..')
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
-# Stub out the LoRa handler dependency so the module can be imported without hardware
+# Stub out the LoRa handler dependency so the module can be imported without hardware.
+# Patch both bare and package-prefixed names to cover all import strategy fallbacks.
 _mock_handler = MagicMock()
 _mock_handler.set_runtime_callback = MagicMock()
 _mock_handler.start_listening = MagicMock()
+_mock_lora_handler_module = MagicMock(
+    get_lora_handler=MagicMock(return_value=_mock_handler),
+    get_config_value=MagicMock(return_value=None),
+)
 
 with patch.dict('sys.modules', {
-    'lora_handler_concurrent': MagicMock(
-        get_lora_handler=MagicMock(return_value=_mock_handler),
-        get_config_value=MagicMock(return_value=None),
-    )
+    'lora_handler_concurrent': _mock_lora_handler_module,
+    'tools.lora_handler_concurrent': _mock_lora_handler_module,
 }):
-    from lora_runtime_integration import LoRaRuntimeManager
+    from tools.lora_runtime_integration import LoRaRuntimeManager
 
 
 class TestSetParameterRanges(unittest.TestCase):
@@ -67,7 +70,7 @@ class TestSetParameterRanges(unittest.TestCase):
         self.assertTrue(self.mgr.set_parameter('stage_threshold', 0))
 
     def test_stage_threshold_max_accepted(self):
-        self.assertTrue(self.mgr.set_parameter('stage_threshold', 255))
+        self.assertTrue(self.mgr.set_parameter('stage_threshold', 65535))
 
     def test_monitoring_frequency_min_accepted(self):
         self.assertTrue(self.mgr.set_parameter('monitoring_frequency', 1))
@@ -90,7 +93,7 @@ class TestSetParameterRanges(unittest.TestCase):
         self.assertFalse(self.mgr.set_parameter('area_threshold', 101))
 
     def test_stage_threshold_above_max_rejected(self):
-        self.assertFalse(self.mgr.set_parameter('stage_threshold', 256))
+        self.assertFalse(self.mgr.set_parameter('stage_threshold', 65536))
 
     def test_monitoring_frequency_zero_rejected(self):
         self.assertFalse(self.mgr.set_parameter('monitoring_frequency', 0))
