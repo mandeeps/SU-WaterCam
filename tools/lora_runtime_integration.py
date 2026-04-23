@@ -524,18 +524,21 @@ class LoRaRuntimeManager:
             # Get current LoRa config
             lora_config = self.lora_handler.config
             
-            # Update runtime parameters with any new values from LoRa.
-            # Route through set_parameter() so validation/coercion is applied.
+            # Validate/coerce all changes in-memory first, then persist once.
+            # Avoids one save_parameters() call per changed key on constrained hardware.
             changes = []
             for key, value in lora_config.items():
                 if key in self.parameters and self.parameters[key] != value:
                     old_value = self.parameters[key]
-                    if self.set_parameter(key, value):
-                        changes.append(f"{key}: {old_value} → {value}")
+                    if self._validate_param(key, value):
+                        coerced = self._coerce_param(key, value)
+                        self.parameters[key] = coerced
+                        changes.append(f"{key}: {old_value} → {coerced}")
                     else:
                         print(f"  Warning: skipped out-of-range value for '{key}': {value!r}")
 
             if changes:
+                self.save_parameters(self.parameters)
                 print(f"🔄 Synced {len(changes)} parameters from LoRa config:")
                 for change in changes:
                     print(f"  {change}")
