@@ -252,6 +252,12 @@ class TestSetParameterRanges(unittest.TestCase):
             result = self.mgr.set_parameter('area_threshold', 50)
             self.assertFalse(result)
 
+    def test_set_parameter_rolls_back_in_memory_on_save_failure(self):
+        self.mgr.set_parameter('area_threshold', 20)
+        with patch.object(self.mgr, 'save_parameters', return_value=False):
+            self.mgr.set_parameter('area_threshold', 50)
+        self.assertEqual(self.mgr.get_parameter('area_threshold'), 20)
+
     def test_set_parameter_returns_true_on_save_success(self):
         with patch.object(self.mgr, 'save_parameters', return_value=True):
             result = self.mgr.set_parameter('area_threshold', 50)

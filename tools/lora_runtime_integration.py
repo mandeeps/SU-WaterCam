@@ -281,9 +281,10 @@ class LoRaRuntimeManager:
         coerced = self._coerce_param(key, value)
         old_value = self.parameters.get(key)
         self.parameters[key] = coerced
-        saved = self.save_parameters(self.parameters)
-        if not saved:
-            print(f"Warning: parameter '{key}' updated in memory but failed to persist to disk")
+        if not self.save_parameters(self.parameters):
+            self.parameters[key] = old_value
+            print(f"Warning: failed to persist '{key}', change rolled back")
+            return False
 
         print(f"Runtime parameter '{key}' updated: {old_value} → {coerced}")
 
@@ -293,7 +294,7 @@ class LoRaRuntimeManager:
                     callback(coerced, old_value)
                 except Exception as e:
                     print(f"Error in parameter update callback for '{key}': {e}")
-        return saved
+        return True
     
     def register_update_callback(self, parameter: str, callback: Callable):
         """Register a callback to be called when a parameter is updated"""
@@ -404,28 +405,23 @@ class LoRaRuntimeManager:
                 elif channel == '15' and command == '95':
                     return _set('neighborhood_emergency_frequency', val_int)
                 elif channel == '22' and command == '00':
-                    self.set_parameter('debug_mode', bool(val_int))
-                    return True
+                    return _set('debug_mode', bool(val_int))
                 elif channel == '31' and command == '00':
                     return _set('compression_level', val_int)
                 elif channel == '32' and command == '00':
                     return _set('max_retransmissions', val_int)
                 elif channel == '40' and command == '00':
-                    self.set_parameter('auto_shutdown_enabled', bool(val_int))
-                    return True
+                    return _set('auto_shutdown_enabled', bool(val_int))
                 elif channel == '41' and command == '00':
                     return _set('shutdown_iteration_limit', val_int)
                 elif channel == '42' and command == '00':
                     return _set('data_retention_days', val_int)
                 elif channel == '43' and command == '00':
-                    self.set_parameter('backup_enabled', bool(val_int))
-                    return True
+                    return _set('backup_enabled', bool(val_int))
                 elif channel == '21' and command == '00':
-                    self.set_parameter('emergency_mode', True)
-                    return True
+                    return _set('emergency_mode', True)
                 elif channel == '99' and command == '00':
-                    self.set_parameter('emergency_mode', False)
-                    return True
+                    return _set('emergency_mode', False)
                 else:
                     print(f"Warning: unknown TLV channel/command {channel}/{command}, ignored")
                     return False
@@ -544,7 +540,9 @@ class LoRaRuntimeManager:
                         print(f"  Warning: skipped out-of-range value for '{key}': {value!r}")
 
             if changes:
-                self.save_parameters(self.parameters)
+                if not self.save_parameters(self.parameters):
+                    print(f"Warning: failed to persist {len(changes)} synced parameter(s) to disk")
+                    return False
                 print(f"🔄 Synced {len(changes)} parameters from LoRa config:")
                 for change in changes:
                     print(f"  {change}")
