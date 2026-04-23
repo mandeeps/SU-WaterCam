@@ -279,10 +279,14 @@ class LoRaRuntimeManager:
         if not self._validate_param(key, value):
             return False
         coerced = self._coerce_param(key, value)
-        old_value = self.parameters.get(key)
+        _MISSING = object()
+        old_value = self.parameters.get(key, _MISSING)
         self.parameters[key] = coerced
         if not self.save_parameters(self.parameters):
-            self.parameters[key] = old_value
+            if old_value is _MISSING:
+                del self.parameters[key]
+            else:
+                self.parameters[key] = old_value
             print(f"Warning: failed to persist '{key}', change rolled back")
             return False
 
@@ -395,7 +399,7 @@ class LoRaRuntimeManager:
                 if channel == '10' and command == '90':
                     return _set('area_threshold', val_int * 10)
                 elif channel == '11' and command == '91':
-                    return _set('stage_threshold', float(val_int))
+                    return _set('stage_threshold', val_int)
                 elif channel == '12' and command == '92':
                     return _set('monitoring_frequency', val_int)
                 elif channel == '13' and command == '93':
