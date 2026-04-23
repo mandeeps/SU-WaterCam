@@ -143,11 +143,11 @@ class LoRaRuntimeManager:
                 """Sync LoRa parameter updates with runtime parameters"""
                 print(f"🔄 LoRa parameter update: {key} = {value}")
                 print(f"   Current runtime value: {self.get_parameter(key)}")
-                
-                # Update the runtime parameter directly
-                self.set_parameter(key, value)
-                print(f"✅ Runtime parameter '{key}' synced to {value}")
-                print(f"   New runtime value: {self.get_parameter(key)}")
+                if self.set_parameter(key, value):
+                    print(f"✅ Runtime parameter '{key}' synced to {value}")
+                    print(f"   New runtime value: {self.get_parameter(key)}")
+                else:
+                    print(f"⚠️ Runtime parameter '{key}' rejected value {value!r} (out of range or invalid)")
             
             print(f"🔧 Attempting to set runtime callback...")
             self.lora_handler.set_runtime_callback(sync_lora_command)
@@ -524,19 +524,21 @@ class LoRaRuntimeManager:
             # Get current LoRa config
             lora_config = self.lora_handler.config
             
-            # Update runtime parameters with any new values from LoRa
+            # Update runtime parameters with any new values from LoRa.
+            # Route through set_parameter() so validation/coercion is applied.
             changes = []
             for key, value in lora_config.items():
                 if key in self.parameters and self.parameters[key] != value:
                     old_value = self.parameters[key]
-                    self.parameters[key] = value
-                    changes.append(f"{key}: {old_value} → {value}")
-            
+                    if self.set_parameter(key, value):
+                        changes.append(f"{key}: {old_value} → {value}")
+                    else:
+                        print(f"  Warning: skipped out-of-range value for '{key}': {value!r}")
+
             if changes:
                 print(f"🔄 Synced {len(changes)} parameters from LoRa config:")
                 for change in changes:
                     print(f"  {change}")
-                self.save_parameters(self.parameters)
                 return True
             else:
                 print("✓ Runtime parameters already in sync with LoRa config")
@@ -593,10 +595,10 @@ def get_parameter(key: str, default: Any = None) -> Any:
     manager = get_runtime_manager()
     return manager.get_parameter(key, default)
 
-def set_parameter(key: str, value: Any):
+def set_parameter(key: str, value: Any) -> bool:
     """Convenience function to set a runtime parameter"""
     manager = get_runtime_manager()
-    manager.set_parameter(key, value)
+    return manager.set_parameter(key, value)
 
 def register_callback(parameter: str, callback: Callable):
     """Convenience function to register a parameter update callback"""
