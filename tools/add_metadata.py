@@ -175,14 +175,18 @@ def add_metadata(image):
 
         gps_ifd = {
                 piexif.GPSIFD.GPSVersionID: (2,0,0,0),
-                piexif.GPSIFD.GPSAltitudeRef: 0,
-                piexif.GPSIFD.GPSAltitude: change_to_rational(round(packet.alt)),
                 piexif.GPSIFD.GPSLatitudeRef: lat_deg[3],
                 piexif.GPSIFD.GPSLatitude: exiv_lat,
                 piexif.GPSIFD.GPSLongitudeRef: lng_deg[3],
                 piexif.GPSIFD.GPSLongitude: exiv_lng,
                 piexif.GPSIFD.GPSTrack: change_to_rational(packet.track)
         }
+
+        # Altitude is only valid in a 3D fix (mode 3); skip for 2D fix to avoid
+        # AttributeError or writing stale/zero altitude into EXIF.
+        if packet.mode >= 3:
+            gps_ifd[piexif.GPSIFD.GPSAltitudeRef] = 0
+            gps_ifd[piexif.GPSIFD.GPSAltitude] = change_to_rational(round(packet.alt))
 
         # Since we have GPS data, add to Exif
         gps_exif = {"GPS": gps_ifd}
