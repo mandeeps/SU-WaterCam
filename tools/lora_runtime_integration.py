@@ -95,6 +95,7 @@ class LoRaRuntimeManager:
         self.config_file = config_file
         self.parameters = self.load_parameters()
         self.update_callbacks = {}
+        self._dispatching: set = set()
         self.lora_handler = None
         self.listening = False
         self.listener_thread = None
@@ -251,12 +252,16 @@ class LoRaRuntimeManager:
 
         print(f"Runtime parameter '{key}' updated: {prior} → {coerced}")
 
-        if key in self.update_callbacks:
-            for callback in self.update_callbacks[key]:
-                try:
-                    callback(coerced, prior)
-                except Exception as e:
-                    print(f"Error in parameter update callback for '{key}': {e}")
+        if key in self.update_callbacks and key not in self._dispatching:
+            self._dispatching.add(key)
+            try:
+                for callback in self.update_callbacks[key]:
+                    try:
+                        callback(coerced, prior)
+                    except Exception as e:
+                        print(f"Error in parameter update callback for '{key}': {e}")
+            finally:
+                self._dispatching.discard(key)
         return True
     
     def register_update_callback(self, parameter: str, callback: Callable):
