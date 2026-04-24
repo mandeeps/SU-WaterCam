@@ -105,7 +105,7 @@ class LoRaRuntimeManager:
         'max_retransmissions':              (0, 10),
         'shutdown_iteration_limit':         (1, 100),
         'data_retention_days':              (1, 365),
-        'compression_level':               (1, 10),
+        'compression_level':                (1, 10),
     }
 
     # Parameters that must be stored as integers (not floats).
@@ -281,6 +281,7 @@ class LoRaRuntimeManager:
         coerced = self._coerce_param(key, value)
         _MISSING = object()
         old_value = self.parameters.get(key, _MISSING)
+        prior = None if old_value is _MISSING else old_value
         self.parameters[key] = coerced
         if not self.save_parameters(self.parameters):
             if old_value is _MISSING:
@@ -290,12 +291,12 @@ class LoRaRuntimeManager:
             print(f"Warning: failed to persist '{key}', change rolled back")
             return False
 
-        print(f"Runtime parameter '{key}' updated: {old_value} → {coerced}")
+        print(f"Runtime parameter '{key}' updated: {prior} → {coerced}")
 
         if key in self.update_callbacks:
             for callback in self.update_callbacks[key]:
                 try:
-                    callback(coerced, old_value)
+                    callback(coerced, prior)
                 except Exception as e:
                     print(f"Error in parameter update callback for '{key}': {e}")
         return True
@@ -353,8 +354,7 @@ class LoRaRuntimeManager:
             
             # Handle legacy format (backward compatibility)
             if payload == '21':
-                self.set_parameter('emergency_mode', True)
-                return True
+                return self.set_parameter('emergency_mode', True)
             
             # First try TLV hex multi-command format: [ch:1B][cmd:1B][len:1B][value:len]
             def _is_hex_string(s: str) -> bool:
@@ -533,11 +533,13 @@ class LoRaRuntimeManager:
             # Validate/coerce all changes in-memory first, then persist once.
             # Avoids one save_parameters() call per changed key on constrained hardware.
             changes = []
+            prior_values = {}
             for key, value in lora_config.items():
                 if key in self.parameters and self.parameters[key] != value:
                     old_value = self.parameters[key]
                     if self._validate_param(key, value):
                         coerced = self._coerce_param(key, value)
+                        prior_values[key] = old_value
                         self.parameters[key] = coerced
                         changes.append(f"{key}: {old_value} → {coerced}")
                     else:
@@ -545,6 +547,8 @@ class LoRaRuntimeManager:
 
             if changes:
                 if not self.save_parameters(self.parameters):
+                    for key, old_value in prior_values.items():
+                        self.parameters[key] = old_value
                     print(f"Warning: failed to persist {len(changes)} synced parameter(s) to disk")
                     return False
                 print(f"🔄 Synced {len(changes)} parameters from LoRa config:")

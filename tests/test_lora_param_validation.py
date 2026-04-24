@@ -280,6 +280,15 @@ class TestSetParameterRanges(unittest.TestCase):
         self.mgr.set_parameter('area_threshold', 999)  # out of range
         self.assertEqual(self.mgr.get_parameter('area_threshold'), 20)
 
+    # ---- new-key rollback: key must not be left behind on save failure -------
+
+    def test_new_key_not_left_behind_on_save_failure(self):
+        # 'novel_param' does not exist in parameters before this call
+        self.mgr.parameters.pop('novel_param', None)
+        with patch.object(self.mgr, 'save_parameters', return_value=False):
+            self.mgr.set_parameter('novel_param', 'x')
+        self.assertNotIn('novel_param', self.mgr.parameters)
+
 
 if __name__ == '__main__':
     unittest.main()
