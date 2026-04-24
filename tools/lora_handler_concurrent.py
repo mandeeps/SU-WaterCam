@@ -183,7 +183,9 @@ class LoRaHandler:
             try:
                 if self.ser.in_waiting > 0:
                     try:
-                        res = self.ser.readline().decode().strip()
+                        with self.transmit_lock:
+                            raw = self.ser.readline()
+                        res = raw.decode().strip()
                         print(f"DEBUG: Raw received: '{res}'")
                         # Skip empty messages
                         if not res:
@@ -269,9 +271,7 @@ class LoRaHandler:
                         else:
                             print(f"DEBUG: Non-LoRa message (ignoring): '{res}'")
                     except UnicodeDecodeError:
-                        # Handle binary data that can't be decoded as UTF-8
-                        res_raw = self.ser.readline()
-                        print(f"Received binary data (hex): {res_raw.hex()}")
+                        print(f"Received binary data (hex): {raw.hex()}")
                 else:
                     time.sleep(0.5)  # Small delay to prevent busy waiting
             except Exception as e:
