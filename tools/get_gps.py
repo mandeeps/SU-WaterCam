@@ -12,47 +12,43 @@ except Exception:
     pass
 
 
-def get_packet():
+def _get_packet():
     if not _gps_available:
         return None
     packet = gpsd.get_current()
     print(f'Current packet mode: {packet.mode}')
-
     if packet.mode < 2:
         return None
-    else:
-        return packet
+    return packet
 
 def get_location() -> List[str]:
     if not _gps_available:
         return []
-    packet = get_packet()
+    packet = _get_packet()
     if not packet:
         return []
 
-    elif packet.mode >= 2:
-        gps_data = [
-            f"GPS Time UTC: {packet.time}\n",
-            f"Time Local: {time.asctime(time.localtime(time.time()))}\n",
-            f"Latitude: {packet.lat} degrees\n",
-            f"Longitude: {packet.lon} degrees\n",
-            f"Track: {packet.track}\n",
-            f"Satellites: {packet.sats}\n",
-            f"Error: {packet.error}\n",
-            f"Precision: {packet.position_precision()}\n",
-            f"Map URL: {packet.map_url()}\n",
-            f"Device: {gpsd.device()}\n"]
-
-        if packet.mode >= 3:
-            gps_data.append(f"Altitude: {packet.alt}\n")
-
-        return gps_data
+    gps_data = [
+        f"GPS Time UTC: {packet.time}\n",
+        f"Time Local: {time.asctime(time.localtime(time.time()))}\n",
+        f"Latitude: {packet.lat} degrees\n",
+        f"Longitude: {packet.lon} degrees\n",
+        f"Track: {packet.track}\n",
+        f"Satellites: {packet.sats}\n",
+        f"Error: {packet.error}\n",
+        f"Precision: {packet.position_precision()}\n",
+        f"Map URL: {packet.map_url()}\n",
+        f"Device: {gpsd.device()}\n",
+    ]
+    if packet.mode >= 3:
+        gps_data.append(f"Altitude: {packet.alt}\n")
+    return gps_data
 
 def _get_lat_lon_alt_with_packet() -> Tuple[dict, Optional[Any]]:
     """Internal function that returns GPS data and packet."""
     if not _gps_available:
         return ({}, None)
-    packet = get_packet()
+    packet = _get_packet()
 
     if not packet:
         return ({}, None)
