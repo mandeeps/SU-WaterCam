@@ -566,11 +566,11 @@ class TestFullPipelineSmoke:
 
         # ── 4. Photo capture (picamera2 absent → returns True) ─────────────
         from tt_take_photos import take_two_photos, flir
-        photo_result = take_two_photos(None, dirname)
+        photo_result = take_two_photos.__wrapped__(None, dirname)
         assert photo_result is True
 
         # ── 5. FLIR capture (binary absent → returns True) ─────────────────
-        flir_result = flir(dirname)
+        flir_result = flir.__wrapped__(dirname)
         assert flir_result is True
 
         # ── 6. Coregistration (mocked) ────────────────────────────────────
