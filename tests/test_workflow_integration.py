@@ -575,7 +575,11 @@ class TestFullPipelineSmoke:
 
         # ── 6. Coregistration (mocked) ────────────────────────────────────
         # patch is kept active through rest of the test via the context manager
-        import tools.coreg_multiple  # noqa: F401 — must be imported before patch resolves the target
+        import sys, types
+        if "tools.coreg_multiple" not in sys.modules:
+            _stub = types.ModuleType("tools.coreg_multiple")
+            _stub.coreg = None  # placeholder replaced by patch below
+            sys.modules["tools.coreg_multiple"] = _stub
         _coreg_patcher = patch("tools.coreg_multiple.coreg", return_value=dirname)
         _coreg_patcher.start()
         coreg_state = True  # non-False means success
