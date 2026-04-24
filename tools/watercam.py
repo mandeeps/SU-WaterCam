@@ -2,10 +2,14 @@
 # Main script for controlling automated WaterCam functions when running in field on a schedule
 # When the system wakes up this script will run functions from take_nir_photos to save images and data from the optical and Flir Lepton cameras and metadata from the IMU and GPS
 
+import os
 import time
+from pathlib import Path
 from time import sleep
 from subprocess import call
 from subprocess import Popen
+
+_REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent.parent)))
 import take_nir_photos # has functions for IR-CUT camera and Lepton
 import coreg_multiple
 from compress_segmented import compress_image
@@ -27,11 +31,11 @@ def main(autostart:bool = True):
     print(f"Will shutdown: {autostart}")
     # setup
     last_print = time.monotonic()
-    filepath = "/home/pi/SU-WaterCam/images/"
+    filepath = str(_REPO_ROOT / "images" / "")
 
-    segformer_location = "/home/pi/git/segformer_5band"
-    segformer_python = "/home/pi/miniforge3/envs/5band/bin/python"
-    segformer_coreg = "/home/pi/git/segformer_5band/segment_tiff_5band.py"
+    segformer_location = os.environ.get("SEGFORMER_DIR", "/home/pi/git/segformer_5band")
+    segformer_python = os.environ.get("SEGFORMER_PYTHON", "/home/pi/miniforge3/envs/5band/bin/python")
+    segformer_coreg = os.path.join(segformer_location, "segment_tiff_5band.py")
 
     # Sync time if network available by calling WittyPi script. WittyPi stock software disables other network time software like Chrony and systemd-timesyncd, so either we do time sync their way or use alternative software for the WittyPi 4 like: https://github.com/trackIT-Systems/wittypi4
     #if autostart:

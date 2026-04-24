@@ -2,9 +2,13 @@
 # Use picamera2 to take a photo
 # Assumes use of 5MP camera
 
+import os
 from os import path
 from datetime import datetime
+from pathlib import Path
 from picamera2 import Picamera2
+
+_REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent.parent)))
 
 try:
     picam2 = Picamera2()
@@ -30,7 +34,7 @@ if __name__ == '__main__':
     if len(sys.argv) > 1:
         filepath = sys.argv[1]
     else:
-        filepath = "/home/pi/SU-WaterCam/images/"
+        filepath = str(_REPO_ROOT / "images" / "")
 
     name = main(filepath)
     print(f"Photo: {name}")

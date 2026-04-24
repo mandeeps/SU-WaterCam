@@ -6,13 +6,18 @@
 # and trigger the take_two_photos.sh script upon a button press
 # (we could just run those processes directly...)
 
+import os
 import subprocess
+import sys
+from pathlib import Path
 from gpiozero import Button
 from signal import pause
 
+_REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent)))
+
 def single_press(button):
     print(f"Button DOWN on pin {button.pin}")
-    subprocess.call("/home/pi/SU-WaterCam/tools/take_nir_photos.py")
+    subprocess.call([sys.executable, str(_REPO_ROOT / "tools" / "take_nir_photos.py")])
 
 # Using GPIO 5 because it is HIGH by default and we connect it to ground
 # by pushing the button in. Already using GPIO 6 for the Lepton reset function 

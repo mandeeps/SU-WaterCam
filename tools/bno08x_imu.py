@@ -2,8 +2,12 @@
 # BNO085 IMU
 # Based on Adafruit example
 
+import os
 import time
+from pathlib import Path
 import board
+
+_REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent.parent)))
 import busio
 import adafruit_bno08x
 from adafruit_bno08x.i2c import BNO08X_I2C
@@ -48,7 +52,7 @@ def get_values() -> dict:
 def offset():
     offset_accel = []
     offset_gyro = []
-    OFFSET_PATH = "/home/pi/SU-WaterCam/data/imu_offsets.txt"
+    OFFSET_PATH = str(_REPO_ROOT / "data" / "imu_offsets.txt")
 
     try:
         with open(OFFSET_PATH) as file:
