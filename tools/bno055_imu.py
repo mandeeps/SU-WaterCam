@@ -2,7 +2,10 @@
 # BNO055 IMU
 # Based on Adafruit example
 
+import logging
 import time
+
+logger = logging.getLogger(__name__)
 
 try:
     import board
@@ -36,6 +39,10 @@ def _get_sensor():
                 if isinstance(e, tuple) and any(v not in (None, 0.0) for v in e):
                     break
                 _t.sleep(0.1)
+            else:
+                e = getattr(_sensor, 'euler', None)
+                if not (isinstance(e, tuple) and any(v not in (None, 0.0) for v in e)):
+                    logger.warning("BNO055 warmup timed out — fusion not yet initialised")
         except Exception:
             pass
         return _sensor
@@ -82,6 +89,9 @@ def get_orientation():
                 if isinstance(e, tuple) and any(v not in (None, 0.0) for v in e):
                     break
                 _t.sleep(0.1)
+            else:
+                if not (isinstance(e, tuple) and any(v not in (None, 0.0) for v in e)):
+                    logger.warning("BNO055 get_orientation: data still zero after retry")
         except Exception:
             pass
     return {"tilt_roll_yaw": e}
