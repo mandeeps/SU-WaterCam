@@ -26,66 +26,36 @@ import threading
 from typing import Dict, Any, Optional, Callable
 from datetime import datetime
 
-# Import the LoRa handler
 import sys
 import os
 
-# Determine the best import strategy based on current context
-current_file = os.path.abspath(__file__)
-current_dir = os.path.dirname(current_file)
-parent_dir = os.path.dirname(current_dir)
-working_dir = os.getcwd()
-
-print(f"🔧 Import context:")
-print(f"   Current file: {current_file}")
-print(f"   Current directory: {current_dir}")
-print(f"   Parent directory: {parent_dir}")
-print(f"   Working directory: {working_dir}")
+_current_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_current_dir)
 
 try:
-    # Strategy 1: Direct import (when running from tools directory)
     from lora_handler_concurrent import get_lora_handler, get_config_value
-    print("✅ Imported lora_handler_concurrent directly")
 except ImportError:
     try:
-        # Strategy 2: Tools prefix (when running from parent directory)
         from tools.lora_handler_concurrent import get_lora_handler, get_config_value
-        print("✅ Imported lora_handler_concurrent via tools. prefix")
     except ImportError:
+        for _d in (_current_dir, _parent_dir):
+            if _d not in sys.path:
+                sys.path.insert(0, _d)
         try:
-            # Strategy 3: Path manipulation with explicit file path
-            # Add both current and parent directories to Python path
-            if current_dir not in sys.path:
-                sys.path.insert(0, current_dir)
-                print(f"🔧 Added to Python path: {current_dir}")
-            if parent_dir not in sys.path:
-                sys.path.insert(0, parent_dir)
-                print(f"🔧 Added to Python path: {parent_dir}")
-            
-            # Try direct import again
             from lora_handler_concurrent import get_lora_handler, get_config_value
-            print("✅ Imported lora_handler_concurrent via path manipulation")
         except ImportError:
-            try:
-                # Strategy 4: Import from specific file path
-                import importlib.util
-                spec = importlib.util.spec_from_file_location("lora_handler_concurrent", os.path.join(current_dir, "lora_handler_concurrent.py"))
-                if spec and spec.loader:
-                    lora_module = importlib.util.module_from_spec(spec)
-                    spec.loader.exec_module(lora_module)
-                    get_lora_handler = lora_module.get_lora_handler
-                    get_config_value = lora_module.get_config_value
-                    print("✅ Imported lora_handler_concurrent via explicit file path")
-                else:
-                    raise ImportError("Could not load module from file path")
-            except Exception as e:
-                print(f"❌ Failed to import lora_handler_concurrent: {e}")
-                print(f"   Current working directory: {working_dir}")
-                print(f"   File location: {current_file}")
-                print(f"   Python path: {sys.path}")
-                print(f"   Available files in tools/: {os.listdir(current_dir) if os.path.exists(current_dir) else 'N/A'}")
-                print(f"   Available files in parent/: {os.listdir(parent_dir) if os.path.exists(parent_dir) else 'N/A'}")
-                raise
+            import importlib.util
+            _spec = importlib.util.spec_from_file_location(
+                "lora_handler_concurrent",
+                os.path.join(_current_dir, "lora_handler_concurrent.py")
+            )
+            if _spec and _spec.loader:
+                _lora_module = importlib.util.module_from_spec(_spec)
+                _spec.loader.exec_module(_lora_module)
+                get_lora_handler = _lora_module.get_lora_handler
+                get_config_value = _lora_module.get_config_value
+            else:
+                raise ImportError("lora_handler_concurrent not found")
 
 class LoRaRuntimeManager:
     """
@@ -135,32 +105,20 @@ class LoRaRuntimeManager:
     def _init_lora_handler(self):
         """Initialize LoRa handler and start listening for commands"""
         try:
-            print(f"🔧 Getting LoRa handler...")
             self.lora_handler = get_lora_handler()
-            print(f"🔧 LoRa handler received: {type(self.lora_handler)}")
-            print(f"🔧 LoRa handler methods: {[method for method in dir(self.lora_handler) if not method.startswith('_')]}")
-            
-            # Register callback to sync LoRa commands with runtime parameters
+
             def sync_lora_command(key, value):
-                """Sync LoRa parameter updates with runtime parameters"""
-                print(f"🔄 LoRa parameter update: {key} = {value}")
-                print(f"   Current runtime value: {self.get_parameter(key)}")
                 if self.set_parameter(key, value):
-                    print(f"✅ Runtime parameter '{key}' synced to {value}")
-                    print(f"   New runtime value: {self.get_parameter(key)}")
+                    print(f"LoRa sync: '{key}' updated to {self.get_parameter(key)}")
                 else:
-                    print(f"⚠️ Runtime parameter '{key}' rejected value {value!r} (out of range or invalid)")
-            
-            print(f"🔧 Attempting to set runtime callback...")
+                    print(f"LoRa sync: '{key}' rejected value {value!r}")
+
             self.lora_handler.set_runtime_callback(sync_lora_command)
-            
             self.lora_handler.start_listening()
             self.listening = True
-            print("✓ LoRa runtime integration initialized with command sync")
+            print("LoRa runtime integration initialised")
         except Exception as e:
-            print(f"✗ Failed to initialize LoRa runtime integration: {e}")
-            print("⚠️ LoRa functionality will not be available")
-            print("   Emergency mode and LoRa commands will not work")
+            print(f"LoRa unavailable: {e}")
             self.lora_handler = None
             self.listening = False
     
