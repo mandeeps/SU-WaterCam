@@ -162,12 +162,18 @@ def take_two_photos(trigger, directory):
     from datetime import datetime
     from tools.add_metadata import add_metadata
 
+    picam2 = None
     try:
         picam2 = Picamera2()
         config = picam2.create_still_configuration(main={"format": "RGB888", "size": (2592, 1944)})
         picam2.configure(config)
     except Exception as exc:
         print(f"Camera loading error: {exc}")
+        if picam2 is not None:
+            try:
+                picam2.close()
+            except Exception:
+                pass
         return True
 
     import time
@@ -225,6 +231,10 @@ def take_two_photos(trigger, directory):
             pass
         try:
             picam2.stop()
+        except Exception:
+            pass
+        try:
+            picam2.close()
         except Exception:
             pass
         pin.close()
