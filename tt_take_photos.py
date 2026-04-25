@@ -5,11 +5,7 @@
 # Call add_metadata to get info from IMU and GPS
 # Run lepton and capture binaries to save data from Flir in same directory
 
-import threading
-
 from ticktalkpython.SQ import SQify
-
-_camera_lock = threading.Lock()
 
 def take_photo(directory: str, nir: str, picam2) -> str:
     from os import path #, makedirs, chdir
@@ -166,17 +162,12 @@ def take_two_photos(trigger, directory):
     from datetime import datetime
     from tools.add_metadata import add_metadata
 
-    global sq_state
     try:
-        with _camera_lock:
-            if sq_state.get("picam") is None:
-                picam2 = Picamera2()
-                config = picam2.create_still_configuration(main={"format": "RGB888", "size": (2592, 1944)})
-                picam2.configure(config)
-                sq_state["picam"] = picam2
-        picam2 = sq_state["picam"]
-    except Exception:
-        print("Camera loading error")
+        picam2 = Picamera2()
+        config = picam2.create_still_configuration(main={"format": "RGB888", "size": (2592, 1944)})
+        picam2.configure(config)
+    except Exception as exc:
+        print(f"Camera loading error: {exc}")
         return True
 
     import time
