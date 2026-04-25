@@ -631,16 +631,18 @@ def initialize_lora_integration(trigger):
 @STREAMify
 def get_time(trigger):
     from datetime import datetime
-    from os import path, makedirs
+    from os import path, makedirs, environ
+    import os as _os
+    repo_root = environ.get("WATERCAM_REPO", _os.path.dirname(_os.path.abspath(__file__)))
     try:
         date = datetime.now().strftime('%Y%m%d-%H%M%S')
-        directory = path.join(_REPO_ROOT, "images", date)
+        directory = path.join(repo_root, "images", date)
         if not path.exists(directory):
             makedirs(directory)
         return directory
     except Exception as e:
         print(f"Failed to create directory: {e}")
-        return path.join(_REPO_ROOT, "images", "fallback")
+        return path.join(repo_root, "images", "fallback")
 
 @SQify
 def coregistration(dirname, lepton_state, photo_state):
