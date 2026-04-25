@@ -87,6 +87,8 @@ def main():
     print(f"Compiling '{file_name}'")
     graph = TTCompile(file_path, os.path.dirname(file_path))
     dump_pickle(graph, pickle_path)
+    from runrtm import write_graph_checksum
+    write_graph_checksum(pickle_path)
     print(f"Compiled output found at {pickle_path}")
 
     if print_graph:
