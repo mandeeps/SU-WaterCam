@@ -297,12 +297,23 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     sensors_to_transmit = {}
     if sensor_tracker and not always_transmit_sensors:
         try:
-            # Call check_sensor_changes directly since it's in the same module
-            sensors_to_transmit = check_sensor_changes(sensor_tracker, data)
+            for _sname, _cur in data.items():
+                if not isinstance(_cur, (int, float)) or _sname in ['timestamp', 'error']:
+                    continue
+                _prev = sensor_tracker['previous_values'].get(_sname)
+                if _prev is None:
+                    sensors_to_transmit[_sname] = {'current_value': _cur, 'previous_value': None,
+                                                    'change_percent': 100.0, 'reason': 'first_reading'}
+                    sensor_tracker['previous_values'][_sname] = _cur
+                else:
+                    _pct = abs((_cur - _prev) / _prev) if _prev != 0 else (100.0 if _cur != 0 else 0.0)
+                    if _pct >= sensor_tracker['change_threshold']:
+                        sensors_to_transmit[_sname] = {'current_value': _cur, 'previous_value': _prev,
+                                                        'change_percent': _pct * 100, 'reason': 'threshold_exceeded'}
+                    sensor_tracker['previous_values'][_sname] = _cur
             print(f"📊 Sensor change check: {len(sensors_to_transmit)} sensors qualify for transmission")
         except Exception as e:
             print(f"⚠️ Failed to check sensor changes: {e}")
-            # Fall back to transmitting all data if tracker fails
             sensors_to_transmit = {k: {'current_value': v, 'reason': 'tracker_failed'} for k, v in data.items()}
 
     try:
