@@ -632,8 +632,7 @@ def initialize_lora_integration(trigger):
 def get_time(trigger):
     from datetime import datetime
     from os import path, makedirs, environ
-    import os as _os
-    repo_root = environ.get("WATERCAM_REPO", _os.path.dirname(_os.path.abspath(__file__)))
+    repo_root = environ.get("WATERCAM_REPO", "/home/pi/SU-WaterCam")
     try:
         date = datetime.now().strftime('%Y%m%d-%H%M%S')
         directory = path.join(repo_root, "images", date)
