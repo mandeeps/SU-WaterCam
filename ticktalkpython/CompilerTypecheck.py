@@ -85,8 +85,9 @@ class TTTypechecker(ast.NodeVisitor):
             self.visit(child)
 
     def visit_Call(self, node: ast.Call):
-        # TODO: node.func may either be Attribute or Name
-        # following code may fail
+        if not isinstance(node.func, ast.Name):
+            # Attribute calls (obj.method()) are not TT-registered; skip check.
+            return
         func_name = node.func.id
 
         # check if the function has been SQified or STREAMified

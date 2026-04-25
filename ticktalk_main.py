@@ -1,7 +1,6 @@
 import os
-from pathlib import Path
 
-_REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent)))
+_REPO_ROOT = os.environ.get("WATERCAM_REPO", os.path.dirname(os.path.abspath(__file__)))
 
 from tt_take_photos import flir, take_two_photos
 
@@ -635,13 +634,13 @@ def get_time(trigger):
     from os import path, makedirs
     try:
         date = datetime.now().strftime('%Y%m%d-%H%M%S')
-        directory = str(_REPO_ROOT / "images" / date)
+        directory = path.join(_REPO_ROOT, "images", date)
         if not path.exists(directory):
             makedirs(directory)
         return directory
     except Exception as e:
         print(f"Failed to create directory: {e}")
-        return str(_REPO_ROOT / "images" / "fallback")
+        return path.join(_REPO_ROOT, "images", "fallback")
 
 @SQify
 def coregistration(dirname, lepton_state, photo_state):

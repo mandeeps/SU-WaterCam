@@ -31,6 +31,10 @@ jobs:
             dill multiprocess \
             astor astunparse
 
+      - name: Run TickTalkPython compile tests
+        run: |
+          python -m pytest tests/test_ticktalk_compile.py -v --tb=short
+
       - name: Run workflow integration tests
         run: |
           python -m pytest tests/test_workflow_integration.py -v --tb=short

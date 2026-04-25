@@ -460,6 +460,10 @@ class TTGraphCompilationVisitor(ast.NodeVisitor):
         return CompilationArtifact(sqs, self.context, [])
 
     def visit_Assign(self, node) -> CompilationArtifact:
+        # Module-level assignments are plain Python; ignore outside TT blocks.
+        if self.block_info_stack.tos() is None:
+            return CompilationArtifact([], self.context, [])
+
         assignment_list = node.targets
         # greater than 1 means multiple names being assigned (a = b = 1)
         if 1 < len(assignment_list):
