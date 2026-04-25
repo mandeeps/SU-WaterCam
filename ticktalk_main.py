@@ -714,7 +714,7 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
             print("⚠️ Daemon call failed, falling back to subprocess")
 
         # Legacy fallback: spawn a fresh Python process each cycle.
-        segformer_location = os.environ.get("SEGFORMER_DIR", "/home/pi/git/segformer_5band")
+        segformer_location = os.environ.get("SEGFORMER_DIR", "/home/pi/segformer_5band")
         segformer_python = os.environ.get("SEGFORMER_PYTHON", "/home/pi/miniforge3/envs/5band/bin/python")
         segformer_coreg = os.path.join(segformer_location, "segment_tiff_5band.py")
         subprocess.Popen(
