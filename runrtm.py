@@ -133,6 +133,24 @@ def run_application_rtm(name,
         #        f'wait for {subscription_time} secs for devices '
         #        'to connect... hit enter\n\n', subscription_time, ' ')
 
+        # Reset iteration_count at the start of every run so a fresh power-on
+        # (or manual restart) always begins at cycle 0.  All other parameters
+        # in runtime_config.json are permanent operator config and are left as-is.
+        try:
+            import json as _json, os as _os
+            _cfg_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
+                                      "runtime_config.json")
+            if _os.path.exists(_cfg_path):
+                with open(_cfg_path, "r") as _f:
+                    _cfg = _json.load(_f)
+                if _cfg.get("iteration_count", 0) != 0:
+                    _cfg["iteration_count"] = 0
+                    with open(_cfg_path, "w") as _f:
+                        _json.dump(_cfg, _f, indent=2)
+                    print("iteration_count reset to 0")
+        except Exception as _e:
+            print(f"Warning: could not reset iteration_count: {_e}")
+
         graph = unpack_graph(pickled_graph_file_path)
         instantiate_graph_msg = Message(RuntimeMsg.InstantiateAndMapGraph,
                                         graph, Recipient.ProcessRuntimeManager)
