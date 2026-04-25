@@ -225,6 +225,7 @@ def take_two_photos(trigger, directory):
     except Exception as exc:
         print(f"Camera capture failed: {exc}")
     finally:
+        import time as _time
         try:
             picam2.set_controls({"AwbEnable": True, "AeEnable": True})
         except Exception:
@@ -233,6 +234,7 @@ def take_two_photos(trigger, directory):
             picam2.stop()
         except Exception:
             pass
+        _time.sleep(0.5)  # let picamera2 listener thread drain before close()
         try:
             picam2.close()
         except Exception:
