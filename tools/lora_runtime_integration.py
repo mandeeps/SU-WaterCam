@@ -18,6 +18,7 @@ Usage:
     # Parameters are automatically updated when LoRa commands are received
 """
 
+import fcntl
 import json
 import math
 import os
@@ -169,8 +170,20 @@ class LoRaRuntimeManager:
     def save_parameters(self, params: Dict[str, Any]) -> bool:
         """Save runtime parameters to file. Returns True on success, False on failure."""
         try:
-            with open(self.config_file, 'w') as f:
-                json.dump(params, f, indent=2)
+            # Use the same flock + seek/truncate pattern as call_shutdown() so all
+            # writers coordinate on runtime_config.json and don't interleave.
+            try:
+                f = open(self.config_file, 'r+')
+            except FileNotFoundError:
+                f = open(self.config_file, 'w')
+            with f:
+                fcntl.flock(f, fcntl.LOCK_EX)
+                try:
+                    f.seek(0)
+                    json.dump(params, f, indent=2)
+                    f.truncate()
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
             return True
         except Exception as e:
             print(f"Error saving runtime config: {e}")

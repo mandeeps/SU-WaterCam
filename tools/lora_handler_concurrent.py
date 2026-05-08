@@ -60,24 +60,16 @@ class LoRaHandler:
         self.listener_thread = None
         self.transmit_lock = threading.Lock()
 
-        # Inter-process UART lock (fcntl.lockf — process-level, POSIX record locks).
-        # /tmp is guaranteed writable on all target systems; a single fixed path
-        # ensures every process coordinates on the same lock file regardless of
-        # working directory or user permissions.
-        self._lock_fd = open('/tmp/watercam-lora.lock', 'w')
-
         # Callback for runtime integration
         self.runtime_callback = None
-        
+
         # Size limit tracking
         self.current_size_limit = 242  # Default LoRaWAN payload size
-        
+
         # Transmission status tracking
         self.last_transmission_status = None
         self.transmission_history = []
-        
 
-        
         # Configure the serial port
         try:
             self.ser = serial.Serial(
@@ -88,11 +80,11 @@ class LoRaHandler:
                 bytesize=serial.EIGHTBITS,
                 timeout=1
             )
-            
+
             if not self.ser.is_open:
                 print(f"❌ Serial port {port} failed to open")
                 raise RuntimeError(f"Serial port {port} failed to open")
-                
+
         except serial.SerialException as e:
             print(f"❌ Serial port error on {port}: {e}")
             print(f"   Check if device exists and has proper permissions")
@@ -100,6 +92,12 @@ class LoRaHandler:
         except Exception as e:
             print(f"❌ Unexpected error initializing serial port {port}: {e}")
             raise RuntimeError(f"Serial port {port} initialization failed: {e}")
+
+        # Inter-process UART lock (fcntl.lockf — process-level, POSIX record locks).
+        # Opened after serial port succeeds to avoid leaking the FD if init fails.
+        # /tmp is guaranteed writable; single fixed path ensures all processes
+        # coordinate on the same lock file regardless of permissions.
+        self._lock_fd = open('/tmp/watercam-lora.lock', 'w')
     
     def load_config(self) -> Dict[str, Any]:
         """Load configuration from file or create default"""
@@ -1638,35 +1636,38 @@ class LoRaHandler:
                 self.stop_listening()
                 time.sleep(0.5)
             
-            # Hold the inter-process UART lock for the entire AT+TXS exchange so
-            # a concurrent lora_listener process cannot steal the numeric response.
-            fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
-            try:
-                # Clear buffers and send AT+TXS command
-                self.ser.reset_input_buffer()
-                self.ser.write('AT+TXS\r\n'.encode())
-                time.sleep(1)
+            # Acquire transmit_lock first (intra-process) then fcntl.lockf
+            # (inter-process).  The listener thread holds transmit_lock when it
+            # reads from the serial port, so this prevents it from stealing the
+            # AT+TXS response even if stop_listening() timed out.
+            with self.transmit_lock:
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
+                try:
+                    # Clear buffers and send AT+TXS command
+                    self.ser.reset_input_buffer()
+                    self.ser.write('AT+TXS\r\n'.encode())
+                    time.sleep(1)
 
-                # Read response directly to get immediate size limit.
-                # _extract_txs_size_limit() handles both "+TXS: 242" and bare "242"
-                # responses — run it on every line so we don't miss the numeric reply.
-                responses = []
-                while self.ser.in_waiting > 0:
-                    res = self.ser.read_until()
-                    if res:
-                        try:
-                            response = res.decode('utf-8').strip()
-                            responses.append(response)
-                            print(f"DEBUG: Manual TXS response: '{response}'")
+                    # Read response directly to get immediate size limit.
+                    # _extract_txs_size_limit() handles both "+TXS: 242" and bare "242"
+                    # responses — run it on every line so we don't miss the numeric reply.
+                    responses = []
+                    while self.ser.in_waiting > 0:
+                        res = self.ser.read_until()
+                        if res:
+                            try:
+                                response = res.decode('utf-8').strip()
+                                responses.append(response)
+                                print(f"DEBUG: Manual TXS response: '{response}'")
 
-                            size_limit = self._extract_txs_size_limit(response)
-                            if size_limit is not None:
-                                self.current_size_limit = size_limit
-                                print(f"DEBUG: Size limit refreshed to: {size_limit} bytes")
-                        except UnicodeDecodeError:
-                            print(f"DEBUG: Binary manual TXS response (hex): {res.hex()}")
-            finally:
-                fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
+                                size_limit = self._extract_txs_size_limit(response)
+                                if size_limit is not None:
+                                    self.current_size_limit = size_limit
+                                    print(f"DEBUG: Size limit refreshed to: {size_limit} bytes")
+                            except UnicodeDecodeError:
+                                print(f"DEBUG: Binary manual TXS response (hex): {res.hex()}")
+                finally:
+                    fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
             
             # Re-enable listening if it was active
             if was_listening:
