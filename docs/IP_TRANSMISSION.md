@@ -385,9 +385,9 @@ calls — zero overhead for LoRa-only deployments.
 
 ## Known Gaps / Next Steps
 
-1. **Full image upload** — the current `/ip/uplink` channel scheme only carries
-   the compressed bitmap.  A separate `POST /ip/image` endpoint would be needed
-   on the server side to receive full-resolution JPG/PGM/CSV files.
+1. **Full image upload** — not applicable.  Raw camera files (JPG/PGM/CSV) are
+   never transmitted; the compressed flood bitmap via channel `08 18` is the
+   intended image payload.
 2. **Auth** — if the server gains API key auth, populate `api_key` in config and
    update the server to check `Authorization: Bearer <key>` headers.
 3. **GPS decoder bug — fixed (API commit 0a63091)** — `decode_gps_8b` in

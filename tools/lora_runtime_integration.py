@@ -18,6 +18,7 @@ Usage:
     # Parameters are automatically updated when LoRa commands are received
 """
 
+import fcntl
 import json
 import math
 import os
@@ -153,7 +154,11 @@ class LoRaRuntimeManager:
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r') as f:
-                    loaded_params = json.load(f)
+                    fcntl.flock(f, fcntl.LOCK_SH)
+                    try:
+                        loaded_params = json.load(f)
+                    finally:
+                        fcntl.flock(f, fcntl.LOCK_UN)
                     # Merge with defaults to ensure all parameters exist
                     for key, value in default_params.items():
                         if key not in loaded_params:
@@ -169,13 +174,53 @@ class LoRaRuntimeManager:
     def save_parameters(self, params: Dict[str, Any]) -> bool:
         """Save runtime parameters to file. Returns True on success, False on failure."""
         try:
-            with open(self.config_file, 'w') as f:
-                json.dump(params, f, indent=2)
+            # os.open with O_CREAT|O_RDWR opens or creates the file without
+            # truncating it, so the lock is acquired before any data is lost.
+            # Opening with 'w' would truncate before flock, exposing an empty
+            # file to concurrent readers.
+            fd = os.open(self.config_file, os.O_CREAT | os.O_RDWR, 0o600)
+            with os.fdopen(fd, 'r+') as f:
+                fcntl.flock(f, fcntl.LOCK_EX)
+                try:
+                    f.seek(0)
+                    json.dump(params, f, indent=2)
+                    f.truncate()
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
             return True
         except Exception as e:
             print(f"Error saving runtime config: {e}")
             return False
     
+    def atomic_increment_iteration_count(self) -> dict:
+        """Atomically increment iteration_count; return shutdown control fields.
+
+        Uses os.open(O_CREAT|O_RDWR) so the file is created if absent, flock
+        for mutual exclusion with all other writers, and updates the in-memory
+        cache so subsequent set_parameter()/save_parameters() calls don't
+        overwrite the new count with a stale cached value.
+        """
+        fd = os.open(self.config_file, os.O_CREAT | os.O_RDWR, 0o600)
+        with os.fdopen(fd, 'r+') as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                content = f.read()
+                cfg = json.loads(content) if content.strip() else {}
+                new_count = cfg.get('iteration_count', 0) + 1
+                cfg['iteration_count'] = new_count
+                self.parameters['iteration_count'] = new_count  # keep cache consistent
+                f.seek(0)
+                json.dump(cfg, f, indent=2)
+                f.truncate()
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+        return {
+            'iteration_count': new_count,
+            'auto_shutdown_enabled': cfg.get('auto_shutdown_enabled', True),
+            'shutdown_iteration_limit': cfg.get('shutdown_iteration_limit', 3),
+            'emergency_mode': cfg.get('emergency_mode', False),
+        }
+
     def get_parameter(self, key: str, default: Any = None) -> Any:
         """Get a runtime parameter value"""
         return self.parameters.get(key, default)

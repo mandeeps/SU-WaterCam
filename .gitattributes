@@ -74,3 +74,4 @@ instructions/Flir_Lepton_v1_wiring.png filter=lfs diff=lfs merge=lfs -text
 instructions/SD_Install_0.png filter=lfs diff=lfs merge=lfs -text
 instructions/SD_Install_2.png filter=lfs diff=lfs merge=lfs -text
 instructions/Serial_TTL_Adapter.png filter=lfs diff=lfs merge=lfs -text
+*.stl filter=lfs diff=lfs merge=lfs -text

@@ -19,6 +19,12 @@ from tools.lora_runtime_integration import (
 # Import LoRa handler
 from tools.lora_handler_concurrent import get_lora_handler
 
+# LoRaWAN payload budgets at which the 14-byte TTLoRa header becomes significant.
+# Below this threshold bitmaps are sent as raw bytes (no TTLoRa wrapper), gaining
+# 14 bytes for actual image data.  Above it, the full TTToken is used.
+# 128 B ≈ SF8/US915 500 kHz limit; SF7 (242 B) stays tokenized.
+_BITMAP_RAW_MODE_THRESHOLD = 128
+
 # Import helper functions
 from tools.wittypi_control import get_wittypi_status
 
@@ -398,22 +404,39 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     except Exception as e:
         print(f"⚠️ Failed to transmit TTToken with sensor data: {e}")
 
-    try:
-        token_2 = TTToken(bitmap, time_1, False,
-        TTTag(context, sq_name, 4, recipient_device))
-        lora_msg2 = NetworkInterfaceLoRa.TTLoRaMessage(token_2, recipient_device)
-        encoded_msg2 = lora_msg2.encode_token()
-        packet2 = encoded_msg2.hex()
-        handler.queue_binary_transmit(packet2)
+    if not bitmap:
+        print("[lora_token_with_tracker] No bitmap data to transmit")
+    else:
+        try:
+            _lora_limit_for_bitmap = get_lora_handler().get_size_limit()
+        except Exception:
+            _lora_limit_for_bitmap = 242
+        _use_raw_bitmap_mode = _lora_limit_for_bitmap <= _BITMAP_RAW_MODE_THRESHOLD
 
-        handler.queue_binary_transmit(bitmap)
+        if _use_raw_bitmap_mode:
+            try:
+                handler.queue_binary_transmit(bitmap)
+                print(f"[lora_token_with_tracker] Raw bitmap mode: queued {len(bitmap)}B (mDot limit {_lora_limit_for_bitmap}B)")
+                handler.process_transmit_queue()
+            except Exception as e:
+                print(f"⚠️ Failed to transmit raw bitmap: {e}")
+        else:
+            try:
+                token_2 = TTToken(bitmap, time_1, False,
+                TTTag(context, sq_name, 4, recipient_device))
+                lora_msg2 = NetworkInterfaceLoRa.TTLoRaMessage(token_2, recipient_device)
+                encoded_msg2 = lora_msg2.encode_token()
+                packet2 = encoded_msg2.hex()
+                handler.queue_binary_transmit(packet2)
 
-        print(f" \n Size of Tokenized Bitmap object: {asizeof.asizeof(packet2)} \n")
-        print(f" \n Size of Tokenized Bitmap object getsizeof: {getsizeof(packet2)} \n")
-        handler.process_transmit_queue()
-    except Exception as e:
-        print(f"⚠️ Failed to transmit bitmap: {e}")
-    
+                handler.queue_binary_transmit(bitmap)
+
+                print(f" \n Size of Tokenized Bitmap object: {asizeof.asizeof(packet2)} \n")
+                print(f" \n Size of Tokenized Bitmap object getsizeof: {getsizeof(packet2)} \n")
+                handler.process_transmit_queue()
+            except Exception as e:
+                print(f"⚠️ Failed to transmit bitmap: {e}")
+
     # Update sensor tracker with transmission results
     if sensor_tracker:
         try:
@@ -741,46 +764,40 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
 def call_shutdown(state):
     import sys
     from subprocess import call
-    from tools.lora_runtime_integration import get_parameter, set_parameter
 
-    # Get current iteration count from runtime parameters
+    new_count = 1
+    auto_shutdown_enabled = True
+    shutdown_limit = 3
+    emergency_mode = False
+
     try:
-        current_count = get_parameter('iteration_count', 0)
-        new_count = current_count + 1
-        set_parameter('iteration_count', new_count)
+        result = get_runtime_manager().atomic_increment_iteration_count()
+        new_count = result['iteration_count']
+        auto_shutdown_enabled = result['auto_shutdown_enabled']
+        shutdown_limit = result['shutdown_iteration_limit']
+        emergency_mode = result['emergency_mode']
         print(f"\n Iteration: {new_count} \n")
     except Exception as e:
         print(f"⚠️ Failed to update iteration count: {e}")
-        new_count = 1
-    
-    # Check if emergency mode is active - if so, ignore shutdown limit
-    try:
-        emergency_mode = get_parameter('emergency_mode', False)
-        if emergency_mode:
-            print(f"🚨 EMERGENCY MODE ACTIVE - Ignoring shutdown limit, continuing data collection")
-            return "emergency_mode_active"
-    except Exception as e:
-        print(f"⚠️ Failed to check emergency mode: {e}")
-    
-    # Use runtime parameter for shutdown limit (only if not in emergency mode)
-    try:
-        shutdown_limit = get_parameter('shutdown_iteration_limit', 3)
-        auto_shutdown_enabled = get_parameter('auto_shutdown_enabled', True)
-        
-        print(f"🔍 Shutdown check: count={new_count}, limit={shutdown_limit}, enabled={auto_shutdown_enabled}")
-        
-        if auto_shutdown_enabled and new_count >= shutdown_limit:
-            print(f"\n🚨 SHUTDOWN TRIGGERED: {new_count} iterations >= {shutdown_limit} limit\n")
-            # using an /etc/doas.conf configured for user pi
-            #call("doas /usr/sbin/shutdown", shell=True) # shutdown Pi
-            print("🔄 Executing sys.exit('shutdown')...")
-            sys.exit("shutdown")
-        else:
-            print(f"✅ Continuing: count={new_count} < limit={shutdown_limit} or shutdown disabled")
-    except Exception as e:
-        print(f"⚠️ Failed to check shutdown parameters: {e}")
-        # Continue without shutdown
-    
+
+    if emergency_mode:
+        print("🚨 EMERGENCY MODE ACTIVE - Ignoring shutdown limit, continuing data collection")
+        return "emergency_mode_active"
+
+    print(f"🔍 Shutdown check: count={new_count}, limit={shutdown_limit}, enabled={auto_shutdown_enabled}")
+
+    if auto_shutdown_enabled and new_count >= shutdown_limit:
+        print(f"\n🚨 SHUTDOWN TRIGGERED: {new_count} iterations >= {shutdown_limit} limit\n")
+        try:
+            # Preferred: graceful OS shutdown via doas (configured in /etc/doas.conf for user pi)
+            call(["doas", "/usr/sbin/shutdown", "-h", "now"])
+        except Exception:
+            pass
+        # Fallback: terminate the TT runtime process
+        sys.exit("shutdown")
+    else:
+        print(f"✅ Continuing: count={new_count} < limit={shutdown_limit} or shutdown disabled")
+
     return "continue"
 
 @SQify
@@ -795,19 +812,39 @@ def flir_planb(dummy):
 @SQify
 def compress_bitmap(segmented_file):
     from tools.compress_segmented import compress_image
-    from tools.lora_runtime_integration import get_parameter
-    print(f"Compressing {segmented_file} for transmission")
-    
-    # Use runtime parameter for compression level
-    
-    
+
+    # Query the mDot's stored payload limit (updated by +TXS: responses).
+    # In raw mode (low budget) the bitmap is the entire payload — use the full
+    # limit.  In tokenized mode the 14-byte TTLoRa header must also fit.
+    # Fall back to 228 B (SF7/500kHz tokenized: 242 − 14).
+    max_bitmap_bytes = 228
     try:
-        bitmap_dict = compress_image(segmented_file)
-        print(f"Completed compressing {segmented_file}")
-        return bitmap_dict['compressed_data'] # this is the byte data
+        from tools.lora_handler_concurrent import get_size_limit
+        lora_limit = get_size_limit()
+        if lora_limit <= _BITMAP_RAW_MODE_THRESHOLD:
+            max_bitmap_bytes = lora_limit          # raw: full budget
+            mode_label = "raw"
+        else:
+            max_bitmap_bytes = lora_limit - 14     # tokenized: leave room for header
+            mode_label = "tokenized"
+        print(f"[compress_bitmap] mDot limit {lora_limit}B → {mode_label} mode, max bitmap {max_bitmap_bytes}B")
+    except Exception as e:
+        print(f"[compress_bitmap] Could not query mDot limit ({e}), using {max_bitmap_bytes}B default")
+
+    if max_bitmap_bytes < 32:
+        print(f"⚠️ [compress_bitmap] mDot limit too small for any bitmap ({max_bitmap_bytes}B after header); skipping")
+        return b''
+
+    print(f"Compressing {segmented_file} for transmission (max {max_bitmap_bytes}B)")
+    try:
+        bitmap_dict = compress_image(segmented_file, max_bytes=max_bitmap_bytes)
+        if not bitmap_dict.get('success'):
+            print(f"⚠️ Could not compress {segmented_file} to fit within {max_bitmap_bytes}B (SF too high?)")
+            return b''
+        print(f"Compressed {segmented_file}: {bitmap_dict['total_size']}B at {bitmap_dict['width']}×{bitmap_dict['height']}px")
+        return bitmap_dict['compressed_data']
     except Exception as e:
         print(f"⚠️ Failed to compress image: {e}")
-        # Return empty bytes as fallback
         return b''
 
 @SQify
@@ -965,22 +1002,40 @@ def lora_token(bitmap):
     except Exception as e:
         print(f"⚠️ Failed to transmit TTToken with sensor data: {e}")
 
+    if not bitmap:
+        print("[lora_token] No bitmap data to transmit")
+        return bitmap
+
     try:
-        token_2 = TTToken(bitmap, time_1, False,
-        TTTag(context, sq_name, 4, recipient_device))
-        lora_msg2 = NetworkInterfaceLoRa.TTLoRaMessage(token_2, recipient_device)
-        encoded_msg2 = lora_msg2.encode_token()
-        packet2 = encoded_msg2.hex()
-        handler.queue_binary_transmit(packet2)
+        _lora_limit_for_bitmap = get_lora_handler().get_size_limit()
+    except Exception:
+        _lora_limit_for_bitmap = 242
+    _use_raw_bitmap_mode = _lora_limit_for_bitmap <= _BITMAP_RAW_MODE_THRESHOLD
 
-        handler.queue_binary_transmit(bitmap)
+    if _use_raw_bitmap_mode:
+        try:
+            handler.queue_binary_transmit(bitmap)
+            print(f"[lora_token] Raw bitmap mode: queued {len(bitmap)}B (mDot limit {_lora_limit_for_bitmap}B)")
+            handler.process_transmit_queue()
+        except Exception as e:
+            print(f"⚠️ Failed to transmit raw bitmap: {e}")
+    else:
+        try:
+            token_2 = TTToken(bitmap, time_1, False,
+            TTTag(context, sq_name, 4, recipient_device))
+            lora_msg2 = NetworkInterfaceLoRa.TTLoRaMessage(token_2, recipient_device)
+            encoded_msg2 = lora_msg2.encode_token()
+            packet2 = encoded_msg2.hex()
+            handler.queue_binary_transmit(packet2)
 
-        print(f" \n Size of Tokenized Bitmap object: {asizeof.asizeof(packet2)} \n")
-        print(f" \n Size of Tokenized Bitmap object getsizeof: {getsizeof(packet2)} \n")
-        handler.process_transmit_queue()
-    except Exception as e:
-        print(f"⚠️ Failed to transmit bitmap: {e}")
-    
+            handler.queue_binary_transmit(bitmap)
+
+            print(f" \n Size of Tokenized Bitmap object: {asizeof.asizeof(packet2)} \n")
+            print(f" \n Size of Tokenized Bitmap object getsizeof: {getsizeof(packet2)} \n")
+            handler.process_transmit_queue()
+        except Exception as e:
+            print(f"⚠️ Failed to transmit bitmap: {e}")
+
     return bitmap
 
 @SQify
