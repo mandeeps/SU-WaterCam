@@ -48,6 +48,11 @@ from typing import Dict, Any, Optional
 # 2100 -> Channel 21, Command 00, Value 0 (Emergency status: system enters emergency mode)
 # 9999 -> Emergency clear message (Deactivate emergency mode)
 
+# LoRaWAN payload budget (bytes) below which raw (headerless) bitmap transmission
+# is used instead of TTLoRa-tokenized mode.  SF8/500 kHz = 125 B sits just below;
+# SF7 (133–242 B) sits just above.
+BITMAP_RAW_MODE_THRESHOLD = 128
+
 class LoRaHandler:
     def __init__(self, port='/dev/ttyAMA5', config_file='lora_config.json'):
         self.port = port

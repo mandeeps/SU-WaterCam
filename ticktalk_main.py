@@ -411,7 +411,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
             _lora_limit_for_bitmap = get_lora_handler().get_size_limit()
         except Exception:
             _lora_limit_for_bitmap = 242
-        _use_raw_bitmap_mode = _lora_limit_for_bitmap <= _BITMAP_RAW_MODE_THRESHOLD
+        _use_raw_bitmap_mode = _lora_limit_for_bitmap <= 128  # BITMAP_RAW_MODE_THRESHOLD
 
         if _use_raw_bitmap_mode:
             try:
@@ -821,7 +821,7 @@ def compress_bitmap(segmented_file):
     try:
         from tools.lora_handler_concurrent import get_size_limit
         lora_limit = get_size_limit()
-        if lora_limit <= _BITMAP_RAW_MODE_THRESHOLD:
+        if lora_limit <= 128:  # BITMAP_RAW_MODE_THRESHOLD
             max_bitmap_bytes = lora_limit          # raw: full budget
             mode_label = "raw"
         else:
@@ -1010,7 +1010,7 @@ def lora_token(bitmap):
         _lora_limit_for_bitmap = get_lora_handler().get_size_limit()
     except Exception:
         _lora_limit_for_bitmap = 242
-    _use_raw_bitmap_mode = _lora_limit_for_bitmap <= _BITMAP_RAW_MODE_THRESHOLD
+    _use_raw_bitmap_mode = _lora_limit_for_bitmap <= 128  # BITMAP_RAW_MODE_THRESHOLD
 
     if _use_raw_bitmap_mode:
         try:
