@@ -762,40 +762,20 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
 
 @SQify
 def call_shutdown(state):
-    import fcntl
-    import json
-    import os
     import sys
     from subprocess import call
 
-    # Atomically increment iteration_count using a file lock so concurrent TT
-    # subprocesses (multiple overlapping STREAM firings) each see a distinct count.
-    cfg_path = os.path.join(
-        os.environ.get("WATERCAM_REPO", "/home/pi/SU-WaterCam"),
-        "runtime_config.json",
-    )
     new_count = 1
     auto_shutdown_enabled = True
     shutdown_limit = 3
     emergency_mode = False
 
     try:
-        with open(cfg_path, 'r+') as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            try:
-                cfg = json.load(f)
-            except Exception:
-                cfg = {}
-            current_count = cfg.get('iteration_count', 0)
-            new_count = current_count + 1
-            cfg['iteration_count'] = new_count
-            auto_shutdown_enabled = cfg.get('auto_shutdown_enabled', True)
-            shutdown_limit = cfg.get('shutdown_iteration_limit', 3)
-            emergency_mode = cfg.get('emergency_mode', False)
-            f.seek(0)
-            json.dump(cfg, f, indent=2)
-            f.truncate()
-            fcntl.flock(f, fcntl.LOCK_UN)
+        result = get_runtime_manager().atomic_increment_iteration_count()
+        new_count = result['iteration_count']
+        auto_shutdown_enabled = result['auto_shutdown_enabled']
+        shutdown_limit = result['shutdown_iteration_limit']
+        emergency_mode = result['emergency_mode']
         print(f"\n Iteration: {new_count} \n")
     except Exception as e:
         print(f"⚠️ Failed to update iteration count: {e}")
