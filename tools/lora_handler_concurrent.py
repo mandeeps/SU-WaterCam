@@ -1639,30 +1639,35 @@ class LoRaHandler:
                 self.stop_listening()
                 time.sleep(0.5)
             
-            # Clear buffers and send AT+TXS command
-            self.ser.reset_input_buffer()
-            self.ser.write('AT+TXS\r\n'.encode())
-            time.sleep(1)
-            
-            # Read response directly to get immediate size limit
-            responses = []
-            while self.ser.in_waiting > 0:
-                res = self.ser.read_until()
-                if res:
-                    try:
-                        response = res.decode('utf-8').strip()
-                        responses.append(response)
-                        print(f"DEBUG: Manual TXS response: '{response}'")
-                        
-                        # Check if this is a +TXS: response
-                        if "+TXS:" in response.upper():
+            # Hold the inter-process UART lock for the entire AT+TXS exchange so
+            # a concurrent lora_listener process cannot steal the numeric response.
+            fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
+            try:
+                # Clear buffers and send AT+TXS command
+                self.ser.reset_input_buffer()
+                self.ser.write('AT+TXS\r\n'.encode())
+                time.sleep(1)
+
+                # Read response directly to get immediate size limit.
+                # _extract_txs_size_limit() handles both "+TXS: 242" and bare "242"
+                # responses — run it on every line so we don't miss the numeric reply.
+                responses = []
+                while self.ser.in_waiting > 0:
+                    res = self.ser.read_until()
+                    if res:
+                        try:
+                            response = res.decode('utf-8').strip()
+                            responses.append(response)
+                            print(f"DEBUG: Manual TXS response: '{response}'")
+
                             size_limit = self._extract_txs_size_limit(response)
                             if size_limit is not None:
                                 self.current_size_limit = size_limit
                                 print(f"DEBUG: Size limit refreshed to: {size_limit} bytes")
-                    except UnicodeDecodeError:
-                        response_hex = res.hex()
-                        print(f"DEBUG: Binary manual TXS response (hex): {response_hex}")
+                        except UnicodeDecodeError:
+                            print(f"DEBUG: Binary manual TXS response (hex): {res.hex()}")
+            finally:
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
             
             # Re-enable listening if it was active
             if was_listening:
