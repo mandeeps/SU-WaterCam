@@ -50,13 +50,15 @@ def wittypi_emergency_control(emergency_mode):
         else:
             # Emergency mode deactivated - regenerate normal schedule
             print("✅ EMERGENCY CLEARED: Regenerating WittyPi normal schedule")
-            
-            # Get schedule parameters from runtime configuration
-            schedule_config = get_wittypi_schedule_config()
-            start_hour = schedule_config['start_hour']
-            start_minute = schedule_config['start_minute']
-            interval_length_minutes = schedule_config['interval_length_minutes']
-            num_repetitions_per_day = schedule_config['num_repetitions_per_day']
+
+            # Read schedule parameters via local import — do not call the
+            # module-level get_wittypi_schedule_config(); module globals are
+            # not available when TTPython executes compiled pickles.
+            from tools.lora_runtime_integration import get_parameter
+            start_hour = get_parameter('wittypi_start_hour', 8)
+            start_minute = get_parameter('wittypi_start_minute', 0)
+            interval_length_minutes = get_parameter('wittypi_interval_minutes', 30)
+            num_repetitions_per_day = get_parameter('wittypi_repetitions_per_day', 8)
             
             next_startup_time = set_schedule(start_hour, start_minute, interval_length_minutes, num_repetitions_per_day)
             
