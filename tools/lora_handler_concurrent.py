@@ -59,7 +59,14 @@ class LoRaHandler:
         self.listening = False
         self.listener_thread = None
         self.transmit_lock = threading.Lock()
-        
+
+        # Inter-process UART lock (fcntl.lockf — process-level, POSIX record locks)
+        try:
+            self._lock_fd = open('/var/lock/watercam-lora.lock', 'w')
+        except OSError:
+            import tempfile
+            self._lock_fd = open(os.path.join(tempfile.gettempdir(), 'watercam-lora.lock'), 'w')
+
         # Callback for runtime integration
         self.runtime_callback = None
         
@@ -193,7 +200,11 @@ class LoRaHandler:
                 if self.ser.in_waiting > 0:
                     try:
                         with self.transmit_lock:
-                            raw = self.ser.readline()
+                            fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
+                            try:
+                                raw = self.ser.readline()
+                            finally:
+                                fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
                         res = raw.decode().strip()
                         print(f"DEBUG: Raw received: '{res}'")
                         # Skip empty messages
@@ -309,68 +320,54 @@ class LoRaHandler:
     def transmit(self, content: bytes, max_retries: int = 2) -> bool:
         """Transmit data with thread safety and error recovery"""
         with self.transmit_lock:
-            for attempt in range(max_retries + 1):
-                try:
-                    if attempt > 0:
-                        print(f"DEBUG: Retry attempt {attempt}/{max_retries}")
-                        # Clear mDot input on retry
-                        if not self._clear_mdot_input():
-                            print("ERROR: Failed to clear mDot input, aborting retry")
-                            return False
-                    
-                    print(f"DEBUG: Starting transmission of {len(content)} bytes (attempt {attempt + 1})")
-                    print(f"DEBUG: Content to send: {content}")
-                    
-                    # Ensure the serial connection is ready to send
-                    self.ser.flush()
-                    self.ser.reset_input_buffer()
-                    
-                    # Send newline to clear any partial commands
-                    print("DEBUG: Clearing AT interface with newline...")
-                    self.ser.write('\r\n'.encode())
-                    time.sleep(0.5)  # Brief pause to let mDot process
-                    
-                    # Use the stored size limit (updated via listening loop)
-                    size_limit = self.current_size_limit
-                    print(f"DEBUG: Using stored size limit: {size_limit} bytes")
-                    
-                    # Optionally refresh the size limit by sending AT+TXS
-                    print("DEBUG: Sending AT+TXS command to refresh size limit...")
-                    self.ser.write('AT+TXS\r\n'.encode())
-                    
-                    # Brief wait for mDot to process (size limit will be updated via listening loop)
-                    time.sleep(0.5)
-                    
-                    # Attempt transmission
-                    success, error_message = self._attempt_transmission(content, size_limit)
-                    
-                    if success:
-                        return True
-                    else:
-                        print(f"ERROR: Transmission attempt {attempt + 1} failed: {error_message}")
-                        
-                        # If this is not the last attempt, continue to retry
+            # Hold inter-process lock for entire TX sequence so concurrent processes
+            # (e.g. lora_listener subprocess) cannot steal the SENDB response.
+            fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
+            try:
+                for attempt in range(max_retries + 1):
+                    try:
+                        if attempt > 0:
+                            print(f"DEBUG: Retry attempt {attempt}/{max_retries}")
+                            if not self._clear_mdot_input():
+                                print("ERROR: Failed to clear mDot input, aborting retry")
+                                return False
+
+                        print(f"DEBUG: Starting transmission of {len(content)} bytes (attempt {attempt + 1})")
+                        print(f"DEBUG: Content to send: {content}")
+
+                        # Use the stored size limit (kept current by the listener loop).
+                        # Do NOT send AT+TXS here — it pollutes the RX buffer with "242\r\nOK\r\n"
+                        # that _attempt_transmission() would then misread as the SENDB response.
+                        size_limit = self.current_size_limit
+                        print(f"DEBUG: Using stored size limit: {size_limit} bytes")
+
+                        success, error_message = self._attempt_transmission(content, size_limit)
+
+                        if success:
+                            return True
+                        else:
+                            print(f"ERROR: Transmission attempt {attempt + 1} failed: {error_message}")
+                            if attempt < max_retries:
+                                print(f"DEBUG: Will retry transmission (attempt {attempt + 2}/{max_retries + 1})")
+                                time.sleep(1)
+                                continue
+                            else:
+                                print(f"ERROR: All {max_retries + 1} transmission attempts failed")
+                                return False
+
+                    except Exception as e:
+                        print(f"Error in transmission attempt {attempt + 1}: {e}")
+                        import traceback
+                        traceback.print_exc()
                         if attempt < max_retries:
-                            print(f"DEBUG: Will retry transmission (attempt {attempt + 2}/{max_retries + 1})")
-                            time.sleep(1)  # Brief delay before retry
+                            print(f"DEBUG: Will retry transmission after exception (attempt {attempt + 2}/{max_retries + 1})")
+                            time.sleep(1)
                             continue
                         else:
-                            print(f"ERROR: All {max_retries + 1} transmission attempts failed")
+                            print(f"ERROR: All {max_retries + 1} transmission attempts failed due to exceptions")
                             return False
-                        
-                except Exception as e:
-                    print(f"Error in transmission attempt {attempt + 1}: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    
-                    # If this is not the last attempt, continue to retry
-                    if attempt < max_retries:
-                        print(f"DEBUG: Will retry transmission after exception (attempt {attempt + 2}/{max_retries + 1})")
-                        time.sleep(1)  # Brief delay before retry
-                        continue
-                    else:
-                        print(f"ERROR: All {max_retries + 1} transmission attempts failed due to exceptions")
-                        return False
+            finally:
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
     
     def queue_transmit(self, data: Dict[str, Any]) -> bool:
         """Queue sensor data for transmission (thread-safe)"""
@@ -1151,6 +1148,10 @@ class LoRaHandler:
         self.stop_listening()
         if self.ser.is_open:
             self.ser.close()
+        try:
+            self._lock_fd.close()
+        except Exception:
+            pass
         print("LoRa handler closed")
     
     def test_reception_format(self, test_payload: str):
@@ -1348,182 +1349,144 @@ class LoRaHandler:
     
     def _attempt_transmission(self, content: bytes, size_limit: int) -> tuple[bool, str]:
         """Attempt a single transmission and return (success, error_message)"""
+
+        def _read_mdot_response(write_deadline_s: float) -> tuple[bool, str, list]:
+            """
+            Poll the serial port until we get OK/ERROR or the deadline expires.
+            Returns (success, error_message, responses).
+
+            Command echoes (lines starting with 'AT') arrive within milliseconds
+            of the write, but the mDot's actual OK/ERROR for AT+SENDB only arrives
+            after the over-air TX completes (typically 3–10 s).  The early-exit
+            idle timer must NOT be started on echo lines — only on real responses.
+            """
+            deadline = time.time() + write_deadline_s
+            final_responses = []
+            success = False
+            error_message = ""
+            got_real_response = False  # True once we see a non-echo line
+            idle_since = None
+
+            while time.time() < deadline:
+                if self.ser.in_waiting > 0:
+                    idle_since = None
+                    try:
+                        res = self.ser.read_until()
+                    except Exception as exc:
+                        print(f"DEBUG: Serial read error: {exc}")
+                        time.sleep(0.1)
+                        continue
+                    if not res:
+                        continue
+                    try:
+                        response = res.decode('utf-8').strip()
+                    except UnicodeDecodeError:
+                        response_hex = res.hex()
+                        final_responses.append(f"BINARY:{response_hex}")
+                        print(f"DEBUG: Binary response (hex): {response_hex}")
+                        if b'OK' in res:
+                            success = True
+                            got_real_response = True
+                            print("DEBUG: mDot confirmed OK (binary)")
+                        elif b'ERROR' in res or b'INVALID' in res:
+                            error_message = f"mDot reported error in binary response: {response_hex}"
+                            got_real_response = True
+                        continue
+
+                    if not response:
+                        continue
+
+                    # Command echoes (the mDot echoing our AT command back) arrive
+                    # quickly but are not terminal responses.  Don't start the
+                    # idle timer on them or we exit before the real OK arrives.
+                    is_cmd_echo = response.upper().startswith('AT')
+                    final_responses.append(response)
+
+                    if is_cmd_echo:
+                        print(f"DEBUG: mDot echo: '{response[:80]}'")
+                    else:
+                        print(f"DEBUG: mDot response: '{response}'")
+                        got_real_response = True
+
+                        if 'OK' in response:
+                            success = True
+                            print("DEBUG: mDot confirmed command execution with OK")
+                        elif 'INVALID COMMAND' in response.upper():
+                            error_message = f"mDot reported invalid command: {response}"
+                            print(f"ERROR: {error_message}")
+                        elif 'INVALID HEX' in response.upper() or 'INVALID STRING' in response.upper():
+                            error_message = f"mDot reported invalid hex string: {response}"
+                            print(f"ERROR: {error_message}")
+                        elif 'ERROR' in response.upper():
+                            error_message = f"mDot reported error: {response}"
+                            print(f"ERROR: {error_message}")
+
+                        # Stop as soon as we have a definitive terminal response
+                        if success or error_message:
+                            break
+                else:
+                    # Only start the idle timer after seeing a real (non-echo) response.
+                    # This avoids premature exit while the mDot is doing its air TX.
+                    if got_real_response:
+                        if idle_since is None:
+                            idle_since = time.time()
+                        elif time.time() - idle_since > 0.5:
+                            break  # 0.5 s of silence after real response → done
+                    time.sleep(0.1)
+
+            return success, error_message, final_responses
+
         try:
-            # Calculate actual payload size and construct AT command
             if isinstance(content, str):
-                # Validate hex string format before sending
                 if not self._is_valid_hex_string(content):
                     return False, f"Invalid hex string format: {content}"
-                
-                # For hex strings, each pair of characters = 1 byte
+
                 payload_size = len(content) // 2
                 print(f"DEBUG: Hex string length: {len(content)} chars, payload size: {payload_size} bytes")
-                
-                if payload_size <= size_limit:
-                    # Construct AT command for hex string
-                    at_command = f"AT+SENDB={content}\r\n".encode()
-                    print(f"DEBUG: Sending AT command: {at_command}")
-                    self.ser.write(at_command)
-                    print("DEBUG: AT command sent, waiting for response...")
-                    
-                    # Wait for response
-                    time.sleep(1)
-                    
-                    # Read response lines and verify success
-                    final_responses = []
-                    success = False
-                    error_message = ""
-                    
-                    while self.ser.in_waiting > 0:
-                        res = self.ser.read_until()
-                        if res:
-                            try:
-                                response = res.decode('utf-8').strip()
-                                final_responses.append(response)
-                                print(f"DEBUG: Final response: '{response}'")
-                                
-                                # Check for OK response and specific error conditions
-                                if 'OK' in response:
-                                    success = True
-                                    print("DEBUG: mDot confirmed command execution with OK")
-                                elif 'INVALID COMMAND' in response.upper():
-                                    error_message = f"mDot reported invalid command: {response}"
-                                    print(f"ERROR: {error_message}")
-                                    print(f"ERROR: Command was: {content}")
-                                elif 'INVALID HEX' in response.upper() or 'INVALID STRING' in response.upper():
-                                    error_message = f"mDot reported invalid hex string: {response}"
-                                    print(f"ERROR: {error_message}")
-                                    print(f"ERROR: Hex string was: {content}")
-                                elif 'ERROR' in response.upper():
-                                    error_message = f"mDot reported error: {response}"
-                                    print(f"ERROR: {error_message}")
-                                    print(f"ERROR: Command was: {content}")
-                            except UnicodeDecodeError:
-                                # Handle binary responses that can't be decoded as UTF-8
-                                response_hex = res.hex()
-                                final_responses.append(f"BINARY:{response_hex}")
-                                print(f"DEBUG: Binary response (hex): {response_hex}")
-                                
-                                # Check if this might be an OK response in binary form
-                                if b'OK' in res:
-                                    success = True
-                                    print("DEBUG: mDot confirmed command execution with OK (binary)")
-                    
-                    # Check if we already have a successful transmission status from the listening loop
-                    if not success and self.last_transmission_status and self.last_transmission_status.get('success', False):
-                        # Only use the status if it's recent (within last 5 seconds)
-                        status_time = self.last_transmission_status.get('timestamp', 0)
-                        if time.time() - status_time < 5:
-                            print("DEBUG: Using successful transmission status from listening loop")
-                            success = True
-                        else:
-                            print("DEBUG: Transmission status too old, ignoring")
-                    
-                    if success:
-                        print("Data sent to mDot successfully!")
-                        return True, ""
-                    else:
-                        if not error_message:
-                            error_message = f"mDot did not respond with OK - responses: {final_responses}"
-                        print(f"ERROR: {error_message}")
-                        return False, error_message
-                else:
-                    error_message = f"Payload size {payload_size} bytes exceeds limit {size_limit} bytes"
-                    print(f'DEBUG: {error_message}')
-                    print('Contents larger than current lora transmission payload')
-                    return False, error_message
+
+                if payload_size > size_limit:
+                    return False, f"Payload size {payload_size} bytes exceeds limit {size_limit} bytes"
+
+                # Discard any stale RX bytes (e.g. leftover echoes from earlier commands)
+                # before sending so they don't pollute our response window.
+                self.ser.reset_input_buffer()
+
+                at_command = f"AT+SENDB={content}\r\n".encode()
+                print(f"DEBUG: Sending AT command: {at_command}")
+                self.ser.write(at_command)
+                print("DEBUG: AT command sent, polling for response (up to 15 s)...")
+
+                success, error_message, final_responses = _read_mdot_response(15)
+
             else:
-                # For bytes, use actual length
                 payload_size = len(content)
                 print(f"DEBUG: Bytes length: {payload_size} bytes")
-                
-                if payload_size <= size_limit:
-                    # Convert bytes to hex string and validate
-                    hex_content = content.hex()
-                    if not self._is_valid_hex_string(hex_content):
-                        return False, f"Generated invalid hex string from bytes: {hex_content}"
-                    
-                    # Write the data to the serial port
-                    print(f"DEBUG: Sending data payload...")
-                    self.ser.write(f'AT+SENDB={hex_content}\r\n'.encode())
-                    print("DEBUG: Data payload sent, waiting for response...")
-                    
-                    # extended wait for response
-                    time.sleep(10)
-                    
-                    # Read response lines and verify success
-                    final_responses = []
-                    success = False
-                    error_message = ""
-                    
-                    while self.ser.in_waiting > 0:
-                        res = self.ser.read_until()
-                        if res:
-                            try:
-                                response = res.decode('utf-8').strip()
-                                final_responses.append(response)
-                                print(f"DEBUG: Final response: '{response}'")
-                                
-                                # Check for OK response and specific error conditions
-                                if 'OK' in response:
-                                    success = True
-                                    print("DEBUG: mDot confirmed command execution with OK")
-                                elif 'INVALID COMMAND' in response.upper():
-                                    error_message = f"mDot reported invalid command: {response}"
-                                    print(f"ERROR: {error_message}")
-                                    print(f"ERROR: Command was: {content}")
-                                elif 'INVALID HEX' in response.upper() or 'INVALID STRING' in response.upper():
-                                    error_message = f"mDot reported invalid hex string: {response}"
-                                    print(f"ERROR: {error_message}")
-                                    print(f"ERROR: Hex string was: {content}")
-                                elif 'ERROR' in response.upper():
-                                    error_message = f"mDot reported error: {response}"
-                                    print(f"ERROR: {error_message}")
-                                    print(f"ERROR: Command was: {content}")
-                            except UnicodeDecodeError:
-                                # Handle binary responses that can't be decoded as UTF-8
-                                response_hex = res.hex()
-                                final_responses.append(f"BINARY:{response_hex}")
-                                print(f"DEBUG: Binary response (hex): {response_hex}")
-                                
-                                # Check if this might be an OK response in binary form
-                                if b'OK' in res:
-                                    success = True
-                                    print("DEBUG: mDot confirmed command execution with OK (binary)")
-                                # Check for error responses in binary form
-                                elif b'ERROR' in res or b'INVALID' in res:
-                                    error_message = f"mDot reported error in binary response: {response_hex}"
-                                    print(f"ERROR: {error_message}")
-                                    print(f"ERROR: Command was: {content}")
-                                # For binary data, check if mDot echoed back the same data (indicates success)
-                                elif res == content:
-                                    success = True
-                                    print("DEBUG: mDot echoed back transmitted data - transmission successful")
-                    
-                    # Check if we already have a successful transmission status from the listening loop
-                    if not success and self.last_transmission_status and self.last_transmission_status.get('success', False):
-                        # Only use the status if it's recent (within last 5 seconds)
-                        status_time = self.last_transmission_status.get('timestamp', 0)
-                        if time.time() - status_time < 5:
-                            print("DEBUG: Using successful transmission status from listening loop")
-                            success = True
-                        else:
-                            print("DEBUG: Transmission status too old, ignoring")
-                    
-                    if success:
-                        print("Data sent to mDot successfully!")
-                        return True, ""
-                    else:
-                        if not error_message:
-                            error_message = f"mDot did not respond with OK - responses: {final_responses}"
-                        print(f"ERROR: {error_message}")
-                        return False, error_message
-                else:
-                    error_message = f"Payload size {payload_size} bytes exceeds limit {size_limit} bytes"
-                    print(f'DEBUG: {error_message}')
-                    print('Contents larger than current lora transmission payload')
-                    return False, error_message
-                    
+
+                if payload_size > size_limit:
+                    return False, f"Payload size {payload_size} bytes exceeds limit {size_limit} bytes"
+
+                hex_content = content.hex()
+                if not self._is_valid_hex_string(hex_content):
+                    return False, f"Generated invalid hex string from bytes: {hex_content}"
+
+                # Discard stale RX bytes before sending
+                self.ser.reset_input_buffer()
+
+                print(f"DEBUG: Sending data payload...")
+                self.ser.write(f'AT+SENDB={hex_content}\r\n'.encode())
+                print("DEBUG: Data payload sent, polling for response (up to 20 s)...")
+
+                success, error_message, final_responses = _read_mdot_response(20)
+
+            if success:
+                print("Data sent to mDot successfully!")
+                return True, ""
+            else:
+                if not error_message:
+                    error_message = f"mDot did not respond with OK - responses: {final_responses}"
+                print(f"ERROR: {error_message}")
+                return False, error_message
+
         except Exception as e:
             error_message = f"Exception during transmission: {e}"
             print(f"Error sending to mDot: {e}")
