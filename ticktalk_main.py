@@ -764,6 +764,7 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
 def call_shutdown(state):
     import sys
     from subprocess import call
+    from tools.lora_runtime_integration import get_runtime_manager
 
     new_count = 1
     auto_shutdown_enabled = True
