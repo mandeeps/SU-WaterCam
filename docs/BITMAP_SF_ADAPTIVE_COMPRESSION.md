@@ -75,14 +75,14 @@ sending zero-byte payloads to the mDot.
 
 ## Payload Budget by SF (US915)
 
-| SF | Limit | Mode | Bitmap budget | vs. old (always 228 B) |
+| SF | LoRaWAN limit | Mode | Bitmap budget | Old behaviour |
 |---|---|---|---|---|
-| SF7 / 500 kHz | 242 B | tokenized | 228 B | unchanged |
-| SF7 / 125 kHz | 133 B | tokenized | 119 B | **+119 B** (was 228, truncated) |
-| SF8 / 500 kHz | 125 B | **raw** | 125 B | **+125 B** (was 228, truncated) |
-| SF8 / 125 kHz | 61 B | **raw** | 61 B | **+61 B** (was 228, truncated) |
-| SF9 | 53 B | **raw** | 53 B | **+53 B** (was 228, truncated) |
-| SF12 | ~11 B | **raw** | 11 B (likely no fit) | was truncated |
+| SF7 / 500 kHz | 242 B | tokenized | 228 B | 228 B — fits, unchanged |
+| SF7 / 125 kHz | 133 B | tokenized | 119 B | 228 B sent → **truncated to 133 B** |
+| SF8 / 500 kHz | 125 B | **raw** | 125 B | 228 B sent → **truncated to 125 B** |
+| SF8 / 125 kHz | 61 B | **raw** | 61 B | 228 B sent → **truncated to 61 B** |
+| SF9 | 53 B | **raw** | 53 B | 228 B sent → **truncated to 53 B** |
+| SF12 | ~11 B | **raw** | skipped (< 32 B min) | 228 B sent → truncated, unusable |
 
 ## Interaction with `compress_segmented.py`
 

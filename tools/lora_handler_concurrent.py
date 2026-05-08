@@ -1783,6 +1783,16 @@ def get_lora_handler() -> LoRaHandler:
             print(f"🔧 LoRaHandler has set_runtime_callback: {hasattr(_lora_handler, 'set_runtime_callback')}")
             print(f"🔧 LoRaHandler has current_size_limit: {hasattr(_lora_handler, 'current_size_limit')}")
             print(f"🔧 LoRaHandler has _is_emergency_message: {hasattr(_lora_handler, '_is_emergency_message')}")
+            # Seed current_size_limit with the actual AT+TXS value BEFORE starting
+            # the listener so there is no response-parsing interference.
+            # Without this, current_size_limit stays at the 242 B default indefinitely
+            # because nothing else sends AT+TXS, and the SF-adaptive bitmap logic
+            # silently behaves as SF7 for the entire session.
+            try:
+                _lora_handler.refresh_size_limit()
+                print(f"🔧 Initial mDot size limit: {_lora_handler.current_size_limit} B")
+            except Exception as txs_err:
+                print(f"⚠️ Could not refresh initial size limit: {txs_err}; using default {_lora_handler.current_size_limit} B")
             _lora_handler.start_listening()
             print("✅ LoRa handler initialized successfully")
         except Exception as e:

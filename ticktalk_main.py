@@ -810,7 +810,7 @@ def call_shutdown(state):
         print(f"\n🚨 SHUTDOWN TRIGGERED: {new_count} iterations >= {shutdown_limit} limit\n")
         try:
             # Preferred: graceful OS shutdown via doas (configured in /etc/doas.conf for user pi)
-            call("doas /usr/sbin/shutdown -h now", shell=True)
+            call(["doas", "/usr/sbin/shutdown", "-h", "now"])
         except Exception:
             pass
         # Fallback: terminate the TT runtime process
