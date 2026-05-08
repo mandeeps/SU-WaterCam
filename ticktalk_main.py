@@ -797,15 +797,6 @@ def call_shutdown(state):
             f.truncate()
             fcntl.flock(f, fcntl.LOCK_UN)
         print(f"\n Iteration: {new_count} \n")
-        # Sync the in-memory LoRaRuntimeManager cache so it stays consistent
-        # with the file we just wrote directly.  call_shutdown() bypasses
-        # lora_runtime_integration (which has no file lock) to get atomic
-        # read-modify-write semantics; without this sync the in-memory cache
-        # would disagree with the file until the next set_parameter() call.
-        try:
-            set_parameter('iteration_count', new_count)
-        except Exception:
-            pass
     except Exception as e:
         print(f"⚠️ Failed to update iteration count: {e}")
 

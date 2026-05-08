@@ -60,12 +60,11 @@ class LoRaHandler:
         self.listener_thread = None
         self.transmit_lock = threading.Lock()
 
-        # Inter-process UART lock (fcntl.lockf — process-level, POSIX record locks)
-        try:
-            self._lock_fd = open('/var/lock/watercam-lora.lock', 'w')
-        except OSError:
-            import tempfile
-            self._lock_fd = open(os.path.join(tempfile.gettempdir(), 'watercam-lora.lock'), 'w')
+        # Inter-process UART lock (fcntl.lockf — process-level, POSIX record locks).
+        # /tmp is guaranteed writable on all target systems; a single fixed path
+        # ensures every process coordinates on the same lock file regardless of
+        # working directory or user permissions.
+        self._lock_fd = open('/tmp/watercam-lora.lock', 'w')
 
         # Callback for runtime integration
         self.runtime_callback = None
