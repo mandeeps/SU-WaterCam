@@ -95,6 +95,14 @@ budget. The only missing piece was that `compress_bitmap()` was not passing the 
 minimum). This case is now handled explicitly: `compress_bitmap()` returns `b''` and
 `lora_token()` skips transmission with a log message.
 
+## UART Inter-Process Lock
+
+`LoRaHandler` uses `fcntl.lockf` on `/run/lock/watercam-lora.lock` to serialize
+UART access across concurrent processes. The file is created with mode `0o600`
+(owner-only) to prevent symlink/hardlink attacks. `/run/lock` is a tmpfs directory
+cleared on reboot — if diagnosing UART contention issues, check for stale holders
+with `lsof /run/lock/watercam-lora.lock`.
+
 ## Server-Side Counterpart
 
 The WaterCam API also needed a fix: its raw bitmap detection only accepted `method == 0`

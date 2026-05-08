@@ -154,7 +154,11 @@ class LoRaRuntimeManager:
         if os.path.exists(self.config_file):
             try:
                 with open(self.config_file, 'r') as f:
-                    loaded_params = json.load(f)
+                    fcntl.flock(f, fcntl.LOCK_SH)
+                    try:
+                        loaded_params = json.load(f)
+                    finally:
+                        fcntl.flock(f, fcntl.LOCK_UN)
                     # Merge with defaults to ensure all parameters exist
                     for key, value in default_params.items():
                         if key not in loaded_params:
@@ -170,13 +174,12 @@ class LoRaRuntimeManager:
     def save_parameters(self, params: Dict[str, Any]) -> bool:
         """Save runtime parameters to file. Returns True on success, False on failure."""
         try:
-            # Use the same flock + seek/truncate pattern as call_shutdown() so all
-            # writers coordinate on runtime_config.json and don't interleave.
-            try:
-                f = open(self.config_file, 'r+')
-            except FileNotFoundError:
-                f = open(self.config_file, 'w')
-            with f:
+            # os.open with O_CREAT|O_RDWR opens or creates the file without
+            # truncating it, so the lock is acquired before any data is lost.
+            # Opening with 'w' would truncate before flock, exposing an empty
+            # file to concurrent readers.
+            fd = os.open(self.config_file, os.O_CREAT | os.O_RDWR, 0o600)
+            with os.fdopen(fd, 'r+') as f:
                 fcntl.flock(f, fcntl.LOCK_EX)
                 try:
                     f.seek(0)

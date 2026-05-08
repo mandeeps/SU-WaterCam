@@ -95,9 +95,13 @@ class LoRaHandler:
 
         # Inter-process UART lock (fcntl.lockf — process-level, POSIX record locks).
         # Opened after serial port succeeds to avoid leaking the FD if init fails.
-        # /tmp is guaranteed writable; single fixed path ensures all processes
-        # coordinate on the same lock file regardless of permissions.
-        self._lock_fd = open('/tmp/watercam-lora.lock', 'w')
+        # /run/lock is the standard runtime lock directory (tmpfs, cleared on reboot).
+        # os.open with mode 0o600 creates the file with owner-only permissions,
+        # preventing symlink/hardlink attacks possible with world-writable /tmp.
+        _lock_path = '/run/lock/watercam-lora.lock'
+        self._lock_fd = os.fdopen(
+            os.open(_lock_path, os.O_CREAT | os.O_WRONLY, 0o600), 'w'
+        )
     
     def load_config(self) -> Dict[str, Any]:
         """Load configuration from file or create default"""
