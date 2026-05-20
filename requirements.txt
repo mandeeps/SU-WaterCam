@@ -21,7 +21,7 @@ bitstring==4.3.1
 Brotli==1.2.0
 charset-normalizer==3.4.2
 dill==0.4.0
-idna==3.10
+idna==3.15
 intervaltree==3.1.0
 multiprocess==0.70.18
 py-gpsd2==0.1.0
