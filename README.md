@@ -390,55 +390,78 @@ Then configure the cellular modem and verify everything works as expected after 
 
 Setup connection with NetworkManager: `sudo nmcli c add type gsm ifname cdc-wdm0 con-name Quectel apn iot.1nce.net`
 
-On Bookworm: needs to be done on every modem
-`sudo mmcli -m 0 –-location-enable-gps-unmanaged` -- to tell ModemManager to start the GPS on the Quectel EC25 but not control it, so gpsd can manage it instead
-Enable gps.service in the git config directory so this will be done automatically on boot.
-
 Reduce the priority of the cellular modem so Ethernet or WiFi is preferred while you are still installing updates: https://superuser.com/a/1603124
 
 `sudo nmcli con mod Quectel ipv4.route-metric 100` and do the same for ipv6
 
-Might need to reboot before next step...
+**GPS/GNSS setup — needs to be done once per modem**
 
-Activate the GPS and enable autostart for future use - needs to be done on every modem
+The Quectel EC25 GNSS receiver is independent of the cellular data stack. It works even if the SIM has exhausted its data limit. The udev rule `config/77-mm-quectel-ignore-gps.rules` prevents ModemManager from claiming the ttyUSB serial ports, so ttyUSB1 (NMEA output) and ttyUSB2 (AT commands) are always available.
 
-Turn off ModemManager for the time being, with `sudo systemctl stop ModemManager`
+Configure these one-time NVRAM settings on the modem. Stop ModemManager first so the AT port is free:
 
-install minicom or tio if not already available and run it:
-tio /dev/ttyUSB2 or minicom -b 9600 -D /dev/ttyUSB2
+`sudo systemctl stop ModemManager`
 
-(ttyUSB2 is the AT port for the Quectel. ttyUSB1 is the GPS output port)
+Connect to the AT port with tio:
+`tio /dev/ttyUSB2`
 
-In minicom or tio, issue the following AT commands, you should see "OK" after you hit enter. If you don't, make sure ModemManager is off. You might not see what you are typing in -
+(ttyUSB2 is the AT port. ttyUSB1 is the GPS NMEA output port.)
 
-Enable NMEA:
-AT+QGPSCFG="nmeasrc",1
+Issue the following AT commands. You should see `OK` after each. You may not see what you are typing — just type and press Enter.
 
-Enable Autostart:
-AT+QGPSCFG="autogps",1
+Enable NMEA output:
+`AT+QGPSCFG="nmeasrc",1`
 
-Turn GPS on:
-AT+QGPS=1
+Enable GNSS autostart on modem power-on:
+`AT+QGPSCFG="autogps",1`
 
-Assisted location fix:
-AT+QGPSXTRA=1
+Turn GNSS on now:
+`AT+QGPS=1`
 
-Quit minicom with ctrl-a, x
-These should be saved to the device's NVRAM so this should only need to be done once.
+Enable assisted GPS (XTRA) — requires network access to download assistance data, skip if SIM is exhausted:
+`AT+QGPSXTRA=1`
 
-Now you can restart ModemManager with `sudo systemctl start ModemManager`
+Exit tio with `ctrl-t q`. These settings are saved to NVRAM and only need to be set once per modem.
 
-If you need to reboot the cellular modem, you can use `ATZ` as with other devices that accept AT commands like the mDot. See the EC25 AT commands reference in the instructions / documentation directory for more commands.
+Restart ModemManager: `sudo systemctl start ModemManager`
 
-Now edit /etc/default/gpsd to set the correct gps device, in this case /dev/ttyUSB1
+**Install the GNSS systemd service**
 
-Then in python we can get gps data with py-gpsd2:
+`quectel-gnss.service` sends `AT+QGPS=1` at boot, before gpsd starts. This is needed because the autogps NVRAM setting does not always persist across power cycles reliably.
+
+```
+sudo cp config/quectel-gnss-enable /usr/local/bin/
+sudo chmod +x /usr/local/bin/quectel-gnss-enable
+sudo cp config/quectel-gnss.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl disable gps.service   # disable old service if present
+sudo systemctl enable --now quectel-gnss.service
+```
+
+**Configure gpsd**
+
+Edit `/etc/default/gpsd`:
+```
+DEVICES="/dev/ttyUSB1"
+GPSD_OPTIONS="-n"
+START_DAEMON="true"
+```
+
+Then restart gpsd: `sudo systemctl restart gpsd`
+
+Verify NMEA is streaming: `timeout 10 cat /dev/ttyUSB1` — you should see `$GPGGA`, `$GPRMC`, etc.
+
+**Python GPS usage** (using py-gpsd2 installed via requirements.txt, or run tools/get_gps.py directly):
+```python
 import gpsd2
 gpsd2.connect()
 packet = gpsd2.get_current()
 print(packet.position())
+```
 
-If there are issues getting a fast location fix try updating the XTRA assist data by downloading a new xtra2.bin from xtrapath4.izatcloud.net/xtra2.bin and uploading it to the modem with sudo mmcli -m 0 --location-inject-assistance-data=xtra2.bin
+**XTRA assisted GPS data**
+
+XTRA data speeds up cold-start time-to-first-fix but requires network access to download. If the SIM data is exhausted, XTRA will not update but the receiver still works — expect a longer cold-start fix time (a few minutes outdoors with clear sky view instead of seconds). To manually refresh XTRA when network is available: download `xtra2.bin` and inject it with `sudo mmcli -m 0 --location-inject-assistance-data=xtra2.bin`
 
 sources:
 https://sigquit.wordpress.com/2012/03/29/enabling-gps-location-in-modemmanager/
