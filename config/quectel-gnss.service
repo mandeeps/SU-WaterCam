@@ -1,0 +1,16 @@
+[Unit]
+Description=Enable Quectel EC25 GNSS subsystem
+# Wait for the modem's AT port to appear on USB, not for network connectivity.
+# The SIM data limit being exhausted must not block GPS.
+After=dev-ttyUSB2.device ModemManager.service
+Requires=dev-ttyUSB2.device
+Before=gpsd.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/quectel-gnss-enable
+RemainAfterExit=yes
+
+[Install]
+# Pull this in whenever gpsd is enabled, so the ordering is always enforced.
+WantedBy=multi-user.target gpsd.service

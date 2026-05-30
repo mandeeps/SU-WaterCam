@@ -1,0 +1,16 @@
+#!/bin/bash
+set -euo pipefail
+
+DEVICE="/dev/ttyUSB2"
+
+# 115200 8N1, raw, no flow control, no hangup-on-close
+stty -F "$DEVICE" 115200 raw -echo -echoe -echok -hupcl cs8 -cstopb -parenb
+
+# Open bidirectional fd to avoid ENXIO on write-only open of a tty
+exec 3<>"$DEVICE"
+sleep 0.1
+
+# EC25 returns ERROR if GNSS is already running — that is acceptable
+printf 'AT+QGPS=1\r\n' >&3
+sleep 0.5
+exec 3>&-
