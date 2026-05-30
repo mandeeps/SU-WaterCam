@@ -40,10 +40,8 @@ def clear_shutdown_time():
     _require_wittypi()
     witty_pi_4.clear_shutdown_time()
 
-from ticktalkpython.SQ import SQify
 from datetime import datetime, timezone
 
-@SQify
 def get_wittypi_status():
     """
     Get current WittyPi status including temperature, battery voltage,
