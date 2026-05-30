@@ -3,11 +3,9 @@ set -euo pipefail
 
 DEVICE="/dev/ttyUSB2"
 
-# 115200 baud, raw mode. -hupcl and redundant flags omitted: USB serial drivers
-# reject them and stty exits non-zero, aborting the script under set -e.
-stty -F "$DEVICE" 115200 raw -echo
-
 # Open bidirectional fd to avoid ENXIO on write-only open of a tty
+# stty is not used: the EC25 USB serial port rejects mode changes but works
+# fine at its default settings for AT command communication.
 exec 3<>"$DEVICE"
 sleep 0.1
 
