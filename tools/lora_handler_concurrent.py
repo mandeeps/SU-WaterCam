@@ -345,6 +345,10 @@ class LoRaHandler:
                         # Do NOT send AT+TXS here — it pollutes the RX buffer with "242\r\nOK\r\n"
                         # that _attempt_transmission() would then misread as the SENDB response.
                         size_limit = self.current_size_limit
+                        if size_limit < 11:
+                            print(f"WARNING: Stored size limit {size_limit}B is invalid; refreshing from mDot")
+                            self._query_txs_locked()
+                            size_limit = self.current_size_limit
                         print(f"DEBUG: Using stored size limit: {size_limit} bytes")
 
                         success, error_message = self._attempt_transmission(content, size_limit)
@@ -1539,8 +1543,10 @@ class LoRaHandler:
             # If it's a numeric message, it might be the size limit
             if message.isdigit() and len(message) <= 3:
                 size_limit = int(message)
-                # Validate that it's a reasonable size limit (LoRaWAN typically 1-255 bytes)
-                if 1 <= size_limit <= 255:
+                # LoRaWAN minimum payload is 11 B (SF12/BW125). Reject anything smaller
+                # to avoid false matches on short numeric messages like single-byte
+                # downlink payloads ('02', '1', etc.) poisoning current_size_limit.
+                if 11 <= size_limit <= 255:
                     return size_limit
             
             # Legacy support for +TXS: format (in case it's used elsewhere)
@@ -1635,6 +1641,27 @@ class LoRaHandler:
     
 
     
+    def _query_txs_locked(self) -> None:
+        """Send AT+TXS and update current_size_limit.
+
+        Caller must already hold both transmit_lock and the fcntl inter-process
+        lock.  Use refresh_size_limit() from outside the transmit path instead.
+        """
+        self.ser.reset_input_buffer()
+        self.ser.write('AT+TXS\r\n'.encode())
+        time.sleep(1)
+        while self.ser.in_waiting > 0:
+            res = self.ser.read_until()
+            if res:
+                try:
+                    response = res.decode('utf-8').strip()
+                    size_limit = self._extract_txs_size_limit(response)
+                    if size_limit is not None:
+                        self.current_size_limit = size_limit
+                        print(f"DEBUG: Size limit refreshed to: {size_limit} bytes")
+                except UnicodeDecodeError:
+                    pass
+
     def refresh_size_limit(self) -> bool:
         """Manually refresh the size limit by sending AT+TXS command"""
         try:
