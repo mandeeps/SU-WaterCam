@@ -159,8 +159,10 @@ class TestIPUplink(unittest.TestCase):
         self.assertIn("battery_pct", decoded)
         self.assertIn("temperature_c", decoded)
         self.assertIn("humidity_pct", decoded)
-        self.assertIn("gps_block", decoded)
-        print(f"  GPS decoded: {decoded.get('gps_block')}")
+        # Server returns lat/lon as separate fields, not a nested gps_block
+        self.assertIn("gps_lat", decoded)
+        self.assertIn("gps_lon", decoded)
+        print(f"  GPS decoded: lat={decoded.get('gps_lat')}, lon={decoded.get('gps_lon')}")
 
     def test_03_uplink_with_flood_detect(self):
         """Uplink including camera flood detect flag."""
