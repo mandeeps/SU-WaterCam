@@ -12,7 +12,7 @@ Covers two areas flagged in Copilot review of PR #81:
 Hardware is provided by the autouse _mock_serial_port fixture in conftest.py.
 """
 import threading
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 import pytest
 
 import tools.lora_handler_concurrent as lhc
@@ -45,7 +45,8 @@ class TestGetLoraHandlerSingleton:
     def test_single_construction_under_concurrency(self):
         """20 concurrent threads calling get_lora_handler() must build one instance."""
         n = 20
-        barrier = threading.Barrier(n)
+        # Timeout on barrier.wait() so a deadlock fails the test instead of hanging CI.
+        barrier = threading.Barrier(n, timeout=5)
         results = []
         errors = []
 
@@ -63,8 +64,11 @@ class TestGetLoraHandlerSingleton:
             for t in threads:
                 t.start()
             for t in threads:
-                t.join()
+                t.join(timeout=10)
 
+        # Fail fast if any thread is still alive (deadlock / hang).
+        hung = [t for t in threads if t.is_alive()]
+        assert not hung, f"{len(hung)} thread(s) did not finish within timeout"
         assert not errors, f"Thread(s) raised: {errors}"
         assert len(results) == n
         # Every caller must receive the identical object.
