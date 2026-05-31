@@ -156,19 +156,23 @@ class WittyPi4:
     def generate_schedule(start_hour: int, start_minute: int, interval_length_minutes: int, num_repetitions_per_day: int) -> None:
         '''Generate a startup schedule file for Witty Pi 4'''
 
-        max_duration_minutes = 4
+        # ON window must cover the full capture+process+transmit cycle.
+        # Empirically the workflow takes 15–30 min; use 28 min to stay safely
+        # within a 30-min interval while leaving 2 min for the WittyPi grace
+        # period.  Tune this if the interval_length_minutes changes.
+        max_duration_minutes = max(4, interval_length_minutes - 2)
 
         # Basic validity check of parameters
-        if not 0 < start_hour < 24:
+        if not 0 <= start_hour < 24:
             start_hour = 8
 
-        if not 0 < start_minute < 60:
+        if not 0 <= start_minute < 60:
             start_minute = 0
 
-        if not 0 < interval_length_minutes < 1440:
+        if not 0 < interval_length_minutes <= 1440:
             interval_length_minutes = 30
 
-        if not 0 < num_repetitions_per_day < 250:
+        if not 0 < num_repetitions_per_day <= 250:
             num_repetitions_per_day = 8
 
         if ((num_repetitions_per_day * interval_length_minutes) + start_minute + (start_hour * 60)) > 1440:
@@ -220,7 +224,7 @@ class WittyPi4:
                 output = check_output(command, shell=True, executable="/bin/bash", stderr=STDOUT, universal_newlines=True, timeout=15)
                 output = output.split("\n")[1:3]
 
-                if "Schedule next startup at:" in output[1]:
+                if len(output) > 1 and "Schedule next startup at:" in output[1]:
                     logging.info("%s", output[0])
                     logging.info("%s", output[1])
                     next_startup_time = output[1][-19:]
