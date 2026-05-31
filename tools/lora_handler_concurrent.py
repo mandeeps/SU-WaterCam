@@ -1837,6 +1837,7 @@ def get_lora_handler() -> LoRaHandler:
             _lora_handler = handler  # publish only after full init
             print("✅ LoRa handler initialized successfully")
         except Exception as e:
+            _lora_handler = None  # explicit: global was never written, but make intent clear
             print(f"❌ Failed to initialize LoRa handler: {e}")
             print("⚠️ LoRa functionality will not be available")
             raise RuntimeError(f"LoRa handler initialization failed: {e}") from e
