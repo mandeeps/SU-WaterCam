@@ -73,7 +73,7 @@ class TestCallShutdown:
         """count < limit → function returns without calling sys.exit."""
         mgr = _mock_runtime_manager(count=1, limit=3)
         result = self._run(mgr)
-        assert result is None  # SQify wrapper returns None for normal exit
+        assert result == "continue"
 
     def test_emergency_mode_skips_shutdown(self):
         """emergency_mode=True → returns 'emergency_mode_active', no sys.exit."""

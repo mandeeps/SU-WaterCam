@@ -69,7 +69,77 @@ _stub("gpsd")
 _stub("libxmp")
 _stub("libxmp.consts")
 
+# Preload so patch("tools.compress_segmented.compress_image") resolves at import
+import tools.compress_segmented  # noqa: F401
+
 # ─────────────────────────────────────────────────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _mock_serial_port(monkeypatch, tmp_path):
+    """Patch serial.Serial and the inter-process lock file for CI environments.
+
+    Two things prevent LoRaHandler from constructing without real hardware:
+      1. serial.Serial raises SerialException when /dev/ttyAMA5 is absent.
+      2. os.open('/run/lock/watercam-lora.lock') raises PermissionError in
+         environments where /run/lock is not writable.
+
+    IMPORTANT: test_device_scenarios.py / test_utils.py replaces sys.modules['serial']
+    with its own mock module.  To survive that, we patch the serial module object
+    that lora_handler_concurrent actually holds (its .serial attribute), NOT
+    sys.modules['serial'] which may be the wrong object after test_device_scenarios runs.
+    """
+    import os as _os
+    import sys as _sys
+
+    mock_ser = MagicMock()
+    mock_ser.is_open = True
+    mock_ser.in_waiting = 0
+    mock_ser.read_until.return_value = b""
+    mock_ser.readline.return_value = b""
+    mock_ser.get_settings.return_value = {}
+
+    # Patch via the module-level 'serial' reference held by lora_handler_concurrent.
+    import tools.lora_handler_concurrent as _lhc
+    _real_serial_mod = _lhc.serial
+    monkeypatch.setattr(_real_serial_mod, "Serial", lambda *a, **kw: mock_ser)
+
+    # If lora_handler_concurrent is also importable without the tools. prefix
+    # and uses a different module object, patch that too.
+    _bare = _sys.modules.get("lora_handler_concurrent")
+    if _bare is not None and hasattr(_bare, "serial") and _bare.serial is not _real_serial_mod:
+        monkeypatch.setattr(_bare.serial, "Serial", lambda *a, **kw: mock_ser)
+
+    # Redirect the lock file from /run/lock/ to a writable tmp directory.
+    _real_os_open = _os.open
+    _lock_substitute = str(tmp_path / "watercam-lora.lock")
+
+    def _patched_os_open(path, flags, mode=0o666, **kwargs):
+        if "watercam-lora" in str(path) and not kwargs:
+            return _real_os_open(_lock_substitute, flags, mode)
+        return _real_os_open(path, flags, mode, **kwargs)
+
+    monkeypatch.setattr(_os, "open", _patched_os_open)
+
+    yield mock_ser
+
+
+@pytest.fixture
+def data():
+    """Minimal AHT20-style sensor dict used by test_aht20_data_flow.py."""
+    return {"temperature_celsius": 22.5, "relative_humidity": 55}
+
+
+@pytest.fixture
+def wittypi_data():
+    """Pre-fetched WittyPi status dict used by test_wittypi_lora.py."""
+    return {
+        "status": "wittypi_data_retrieved",
+        "temperature": 23.0,
+        "battery_voltage": 3.8,
+        "internal_voltage": 5.05,
+        "internal_current": 0.45,
+    }
 
 
 class _MockLoRaHandler:
