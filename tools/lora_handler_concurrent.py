@@ -1525,10 +1525,6 @@ class LoRaHandler:
         if any(keyword in message_upper for keyword in ['TRANSMITTED', 'SENT', 'DELIVERED', 'ACK']):
             return True
         
-        # Check for standard AT command responses that indicate success/failure
-        if any(keyword in message_upper for keyword in ['OK', 'ERROR']):
-            return True
-            
         return False
     
     def _extract_txs_size_limit(self, message: str) -> int:
@@ -1809,11 +1805,23 @@ class LoRaHandler:
 
 # Global instance for easy access from other modules
 _lora_handler = None
+_lora_handler_lock = threading.Lock()
 
 def get_lora_handler() -> LoRaHandler:
-    """Get the global LoRa handler instance"""
+    """Get the global LoRa handler instance (thread-safe singleton)."""
     global _lora_handler
-    if _lora_handler is None:
+    if _lora_handler is not None:
+        print(f"🔧 Returning existing LoRaHandler: {type(_lora_handler)}")
+        print(f"🔧 LoRaHandler methods: {[method for method in dir(_lora_handler) if not method.startswith('_')]}")
+        print(f"🔧 LoRaHandler has set_runtime_callback: {hasattr(_lora_handler, 'set_runtime_callback')}")
+        return _lora_handler
+    with _lora_handler_lock:
+        # Re-check inside the lock — another thread may have created it while we waited.
+        if _lora_handler is not None:
+            print(f"🔧 Returning existing LoRaHandler: {type(_lora_handler)}")
+            print(f"🔧 LoRaHandler methods: {[method for method in dir(_lora_handler) if not method.startswith('_')]}")
+            print(f"🔧 LoRaHandler has set_runtime_callback: {hasattr(_lora_handler, 'set_runtime_callback')}")
+            return _lora_handler
         try:
             print(f"🔧 Creating new LoRaHandler instance...")
             _lora_handler = LoRaHandler()
@@ -1837,14 +1845,11 @@ def get_lora_handler() -> LoRaHandler:
             _lora_handler.start_listening()
             print("✅ LoRa handler initialized successfully")
         except Exception as e:
+            _lora_handler = None  # don't return a partially-initialized instance
             print(f"❌ Failed to initialize LoRa handler: {e}")
             print("⚠️ LoRa functionality will not be available")
             # Don't create a mock handler - let the error propagate
             raise RuntimeError(f"LoRa handler initialization failed: {e}")
-    else:
-        print(f"🔧 Returning existing LoRaHandler: {type(_lora_handler)}")
-        print(f"🔧 LoRaHandler methods: {[method for method in dir(_lora_handler) if not method.startswith('_')]}")
-        print(f"🔧 LoRaHandler has set_runtime_callback: {hasattr(_lora_handler, 'set_runtime_callback')}")
     return _lora_handler
 
 def transmit_data(data: Dict[str, Any]) -> bool:
