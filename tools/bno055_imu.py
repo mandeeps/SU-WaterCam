@@ -2,12 +2,18 @@
 # BNO055 IMU
 # Based on Adafruit example
 
+import json
 import logging
 import os
+import struct
 import time
 from pathlib import Path
 
 _REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent.parent)))
+
+# Calibration file produced by bno055_calibration.py (Georeferencing repo).
+# Copy or symlink that file here after running the calibration procedure.
+_CALIB_FILE = _REPO_ROOT / "bno055_calibration.json"
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +32,62 @@ _sensor = None
 last_val = 0xFFFF
 
 
+def _apply_calibration(sensor) -> bool:
+    """
+    Load saved BNO055 calibration offsets and write them to the sensor.
+
+    Offsets are read from bno055_calibration.json (produced by
+    bno055_calibration.py in the Georeferencing repo). The sensor must be
+    in CONFIG mode to accept offset writes; this function handles the mode
+    switch and restores NDOF mode on exit.
+
+    Returns True if offsets were applied, False if the file is missing or
+    loading fails (sensor continues to run uncalibrated in that case).
+    """
+    if not _CALIB_FILE.exists():
+        logger.warning("BNO055: no calibration file at %s — running uncalibrated", _CALIB_FILE)
+        return False
+
+    try:
+        with open(_CALIB_FILE) as f:
+            data = json.load(f)
+
+        raw = bytes(data["offsets_bytes"])
+        if len(raw) != 22:
+            raise ValueError(f"Expected 22 offset bytes, got {len(raw)}")
+
+        # Byte layout matches BNO055 register block 0x55-0x6A:
+        # accel XYZ (6), mag XYZ (6), gyro XYZ (6), accel radius (2), mag radius (2)
+        accel   = struct.unpack_from('<hhh', raw,  0)
+        mag     = struct.unpack_from('<hhh', raw,  6)
+        gyro    = struct.unpack_from('<hhh', raw, 12)
+        accel_r = struct.unpack_from('<h',   raw, 18)[0]
+        mag_r   = struct.unpack_from('<h',   raw, 20)[0]
+
+        prev_mode = sensor.mode
+        sensor.mode = 0x00   # CONFIG_MODE — required to write offsets
+        time.sleep(0.025)    # 19 ms transition per datasheet
+
+        sensor.offsets_accelerometer = accel
+        sensor.offsets_magnetometer  = mag
+        sensor.offsets_gyroscope     = gyro
+        sensor.radius_accelerometer  = accel_r
+        sensor.radius_magnetometer   = mag_r
+
+        sensor.mode = prev_mode
+        time.sleep(0.012)    # 7 ms transition back to fusion mode
+
+        logger.info(
+            "BNO055: calibration loaded (node=%s, saved=%s)",
+            data.get("node_id", "?"), data.get("timestamp", "?"),
+        )
+        return True
+
+    except Exception as exc:
+        logger.warning("BNO055: failed to load calibration from %s: %s", _CALIB_FILE, exc)
+        return False
+
+
 def _get_sensor():
     global _sensor
     if _sensor is not None:
@@ -35,6 +97,7 @@ def _get_sensor():
             return None
         i2c = board.I2C()
         _sensor = adafruit_bno055.BNO055_I2C(i2c)
+        _apply_calibration(_sensor)
         # Warm-up: allow fusion to initialize
         try:
             import time as _t
@@ -100,22 +163,6 @@ def get_orientation():
             pass
     return {"tilt_roll_yaw": e}
 
-def offset():
-    offset_accel = []
-    offset_gyro = []
-    OFFSET_PATH = str(_REPO_ROOT / "data" / "imu_offsets.txt")
-
-    try:
-        with open(OFFSET_PATH) as file:
-            # first 3 lines are accelerometer offsets, iterate through them
-            for i in range(3):
-                # read the line, strip out newline char, convert to float
-                offset_accel.append(float(file.readline().rstrip()))
-            # now do the same for the gyro offset lines
-            for i in range(3):
-                offset_gyro.append(float(file.readline().rstrip()))
-    except IOError:
-        print("Offset file does not exist")
 
 def main():
     sensor = _get_sensor()
