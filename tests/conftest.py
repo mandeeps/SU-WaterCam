@@ -131,6 +131,53 @@ def data():
 
 
 @pytest.fixture
+def sensor():
+    """BNO055-style sensor stub for test_bno055_data_flow.py."""
+    from unittest.mock import MagicMock
+    s = MagicMock()
+    s.calibration_status = (3, 3, 3, 3)
+    s.euler = (0.0, 0.0, 0.0)
+    s.quaternion = (1.0, 0.0, 0.0, 0.0)
+    s.linear_acceleration = (0.0, 0.0, 0.0)
+    s.gravity = (0.0, 0.0, 9.81)
+    return s
+
+
+@pytest.fixture
+def sensor_data():
+    """Basic sensor dict used by test_lora_reception.py."""
+    return {
+        "temperature_celsius": 22.5,
+        "relative_humidity": 55,
+        "emergency_status": 0,
+        "status_area_threshold": 10,
+        "stage_threshold": 50,
+        "monitoring_frequency": 60,
+        "emergency_frequency": 5,
+        "neighborhood_emergency_frequency": 30,
+    }
+
+
+@pytest.fixture
+def flow_result():
+    """Minimal sensor+encoding result for test_tttoken_full_sensor_data.py."""
+    return {
+        "temperature_celsius": 22.5,
+        "relative_humidity": 55,
+        "gps_lat": 43.158,
+        "gps_lon": -76.138,
+        "gps_alt": 130.0,
+        "battery_percent": 75,
+        "emergency_status": 0,
+        "status_area_threshold": 10,
+        "stage_threshold": 50,
+        "monitoring_frequency": 60,
+        "emergency_frequency": 5,
+        "neighborhood_emergency_frequency": 30,
+    }
+
+
+@pytest.fixture
 def wittypi_data():
     """Pre-fetched WittyPi status dict used by test_wittypi_lora.py."""
     return {
