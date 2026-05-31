@@ -1811,45 +1811,35 @@ def get_lora_handler() -> LoRaHandler:
     """Get the global LoRa handler instance (thread-safe singleton)."""
     global _lora_handler
     if _lora_handler is not None:
-        print(f"🔧 Returning existing LoRaHandler: {type(_lora_handler)}")
-        print(f"🔧 LoRaHandler methods: {[method for method in dir(_lora_handler) if not method.startswith('_')]}")
-        print(f"🔧 LoRaHandler has set_runtime_callback: {hasattr(_lora_handler, 'set_runtime_callback')}")
         return _lora_handler
     with _lora_handler_lock:
         # Re-check inside the lock — another thread may have created it while we waited.
         if _lora_handler is not None:
-            print(f"🔧 Returning existing LoRaHandler: {type(_lora_handler)}")
-            print(f"🔧 LoRaHandler methods: {[method for method in dir(_lora_handler) if not method.startswith('_')]}")
-            print(f"🔧 LoRaHandler has set_runtime_callback: {hasattr(_lora_handler, 'set_runtime_callback')}")
             return _lora_handler
         try:
-            print(f"🔧 Creating new LoRaHandler instance...")
-            _lora_handler = LoRaHandler()
-            print(f"🔧 LoRaHandler created: {type(_lora_handler)}")
-            print(f"🔧 LoRaHandler class: {_lora_handler.__class__}")
-            print(f"🔧 LoRaHandler module: {_lora_handler.__class__.__module__}")
-            print(f"🔧 LoRaHandler methods: {[method for method in dir(_lora_handler) if not method.startswith('_')]}")
-            print(f"🔧 LoRaHandler has set_runtime_callback: {hasattr(_lora_handler, 'set_runtime_callback')}")
-            print(f"🔧 LoRaHandler has current_size_limit: {hasattr(_lora_handler, 'current_size_limit')}")
-            print(f"🔧 LoRaHandler has _is_emergency_message: {hasattr(_lora_handler, '_is_emergency_message')}")
+            print("🔧 Creating new LoRaHandler instance...")
+            # Build in a local variable so the global is only written once
+            # initialization is fully complete.  Any thread hitting the outer
+            # fast-path before this point sees None and will block on the lock,
+            # then pick up the fully-ready instance from the inner re-check.
+            handler = LoRaHandler()
             # Seed current_size_limit with the actual AT+TXS value BEFORE starting
             # the listener so there is no response-parsing interference.
             # Without this, current_size_limit stays at the 242 B default indefinitely
             # because nothing else sends AT+TXS, and the SF-adaptive bitmap logic
             # silently behaves as SF7 for the entire session.
             try:
-                _lora_handler.refresh_size_limit()
-                print(f"🔧 Initial mDot size limit: {_lora_handler.current_size_limit} B")
+                handler.refresh_size_limit()
+                print(f"🔧 Initial mDot size limit: {handler.current_size_limit} B")
             except Exception as txs_err:
-                print(f"⚠️ Could not refresh initial size limit: {txs_err}; using default {_lora_handler.current_size_limit} B")
-            _lora_handler.start_listening()
+                print(f"⚠️ Could not refresh initial size limit: {txs_err}; using default {handler.current_size_limit} B")
+            handler.start_listening()
+            _lora_handler = handler  # publish only after full init
             print("✅ LoRa handler initialized successfully")
         except Exception as e:
-            _lora_handler = None  # don't return a partially-initialized instance
             print(f"❌ Failed to initialize LoRa handler: {e}")
             print("⚠️ LoRa functionality will not be available")
-            # Don't create a mock handler - let the error propagate
-            raise RuntimeError(f"LoRa handler initialization failed: {e}")
+            raise RuntimeError(f"LoRa handler initialization failed: {e}") from e
     return _lora_handler
 
 def transmit_data(data: Dict[str, Any]) -> bool:
