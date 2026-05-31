@@ -58,3 +58,8 @@ battery_state.json.tmp
 # OS
 .DS_Store
 Thumbs.db
+
+# Large design/documentation assets — not needed on deployed sensors.
+# Keep local copies for design work; access via GitHub or shared drive.
+Reference Models/
+instructions/
