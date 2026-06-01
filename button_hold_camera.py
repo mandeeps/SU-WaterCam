@@ -64,6 +64,11 @@ if environ.get("BUTTON_HOLD_SEQUENTIAL_FLIR", "").strip().lower() in ("1", "true
 # after boot still fail in the field.
 STARTUP_DELAY_SEC = 0.0
 
+# Seconds to sleep between Button() construction and when_released assignment so
+# gpiozero's pin-factory polling stabilises before the handler is registered.
+# Distinct from STARTUP_DELAY_SEC (camera/subsystem readiness); both sleeps apply.
+BUTTON_SETTLE_SEC = 0.5
+
 # Retry attempts around NIR capture startup/capture failures (common right after boot).
 # Note: partial OFF-only captures are retained and reported distinctly from full-pair success.
 NIR_PAIR_MAX_ATTEMPTS = 3
@@ -545,6 +550,10 @@ for _name in ("capture", "lepton"):
     if not path.isfile(_bp):
         print(f"Warning: expected FLIR helper missing or not a file: {_bp}")
 
-button = Button(5, bounce_time=0.05)
+button = Button(5, bounce_time=0.1)
+# Sleep after Button() construction so gpiozero's pin-factory polling
+# settles before we attach the handler — reduces the chance of a spurious
+# when_released event if the pin reads HIGH (released) at startup.
+time.sleep(BUTTON_SETTLE_SEC)
 button.when_released = single_press  # Call on release
 pause()

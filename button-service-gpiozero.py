@@ -22,6 +22,7 @@ def single_press(button):
 # Using GPIO 5 because it is HIGH by default and we connect it to ground
 # by pushing the button in. Already using GPIO 6 for the Lepton reset function 
 # Adjust button GPIO as needed
-button = Button(5)
+button = Button(5, bounce_time=0.1)
+time.sleep(0.5)  # let pin-factory polling settle before registering handler
 button.when_released = single_press # Call on release 
 pause()

@@ -44,7 +44,7 @@ def single_press(button):
 
 
 if __name__ == "__main__":
-    button = Button(5)
+    button = Button(5, bounce_time=0.1)
 
     with open(log_file_name, 'a') as logfile:
         logfile.write(f'\nstart execution of phy ({name}) at %f\n' %
