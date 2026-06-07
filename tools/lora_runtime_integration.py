@@ -109,6 +109,11 @@ class LoRaRuntimeManager:
         try:
             self.lora_handler = get_lora_handler()
 
+            if self.lora_handler is None:
+                # Serial port is owned by another OS process; this manager will
+                # still serve parameter reads/writes but won't send AT commands.
+                return
+
             def sync_lora_command(key, value):
                 if self.set_parameter(key, value):
                     print(f"LoRa sync: '{key}' updated to {self.get_parameter(key)}")
