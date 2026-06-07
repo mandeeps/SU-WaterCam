@@ -28,6 +28,10 @@ def get_location() -> List[str]:
     if not packet:
         return []
 
+    try:
+        device_str = gpsd.device()
+    except Exception:
+        device_str = "unknown"
     gps_data = [
         f"GPS Time UTC: {packet.time}\n",
         f"Time Local: {time.asctime(time.localtime(time.time()))}\n",
@@ -38,7 +42,7 @@ def get_location() -> List[str]:
         f"Error: {packet.error}\n",
         f"Precision: {packet.position_precision()}\n",
         f"Map URL: {packet.map_url()}\n",
-        f"Device: {gpsd.device()}\n",
+        f"Device: {device_str}\n",
     ]
     if packet.mode >= 3:
         gps_data.append(f"Altitude: {packet.alt}\n")

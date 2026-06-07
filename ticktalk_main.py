@@ -681,10 +681,13 @@ def get_time(trigger):
 
 @SQify
 def coregistration(dirname, lepton_state, photo_state):
+    import fcntl
     from tools.coreg_multiple import coreg
     print(f"\n running coreg on {dirname}\n")
     try:
-        filepath = coreg(dirname)
+        with open("/tmp/watercam_coreg.lock", 'w') as _lf:
+            fcntl.flock(_lf, fcntl.LOCK_EX)
+            filepath = coreg(dirname)
         print(f"\n {filepath} images registered \n")
         return True
     except Exception as e:
@@ -735,6 +738,7 @@ def _segformer_via_daemon(tiff_path: str, output_path: str,
 
 @SQify
 def segformer(filepath, coreg_state): # operate on coregistered image file
+    import fcntl
     import os
     import subprocess
 
@@ -753,10 +757,12 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
         segformer_location = os.environ.get("SEGFORMER_DIR", "/home/pi/segformer_5band")
         segformer_python = os.environ.get("SEGFORMER_PYTHON", "/home/pi/miniforge3/envs/5band/bin/python")
         segformer_coreg = os.path.join(segformer_location, "segment_tiff_5band.py")
-        subprocess.Popen(
-            [segformer_python, segformer_coreg, tiff_path],
-            cwd=segformer_location,
-        ).wait()
+        with open("/tmp/watercam_segformer.lock", 'w') as _lf:
+            fcntl.flock(_lf, fcntl.LOCK_EX)
+            subprocess.Popen(
+                [segformer_python, segformer_coreg, tiff_path],
+                cwd=segformer_location,
+            ).wait()
         return output_path
     except Exception as e:
         print(f"⚠️ Failed to run segmentation: {e}")
@@ -1905,7 +1911,7 @@ def ttmain(trigger):
         # Take photos and capture lepton data at GRAPH level
         from tt_take_photos import flir, take_two_photos
         photo = take_two_photos(trigger, dirname)
-        deadline_time = READ_TTCLOCK(token, TTClock=root_clock) + 5_000_000
+        deadline_time = READ_TTCLOCK(token, TTClock=root_clock) + 30_000_000
         
         lepton_file = flir(dirname)
         lepton = TTFinishByOtherwise(lepton_file, TTTimeDeadline=deadline_time, TTPlanB=TTSingleRunTimeout(flir_planb(token), TTTimeout=3_000_000), TTWillContinue=False) 

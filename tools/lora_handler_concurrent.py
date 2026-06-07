@@ -53,6 +53,11 @@ from typing import Dict, Any, Optional
 # SF7 (133–242 B) sits just above.
 BITMAP_RAW_MODE_THRESHOLD = 128
 
+
+class LoRaSerialPortConflict(RuntimeError):
+    """Raised when another OS process already owns the LoRa serial port."""
+
+
 class LoRaHandler:
     def __init__(self, port='/dev/ttyAMA5', config_file='lora_config.json'):
         self.port = port
@@ -107,6 +112,17 @@ class LoRaHandler:
         self._lock_fd = os.fdopen(
             os.open(_lock_path, os.O_CREAT | os.O_WRONLY, 0o600), 'w'
         )
+        # Construction guard: flock(LOCK_EX | LOCK_NB) is independent of the
+        # lockf calls used during transmission and is held for the lifetime of
+        # this object.  A second OS process that tries to construct a handler
+        # will fail here instead of silently opening the same serial port.
+        try:
+            fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            self._lock_fd.close()
+            raise LoRaSerialPortConflict(
+                "LoRa serial port already owned by another process"
+            ) from None
     
     def load_config(self) -> Dict[str, Any]:
         """Load configuration from file or create default"""
@@ -1807,8 +1823,13 @@ class LoRaHandler:
 _lora_handler = None
 _lora_handler_lock = threading.Lock()
 
-def get_lora_handler() -> LoRaHandler:
-    """Get the global LoRa handler instance (thread-safe singleton)."""
+
+def get_lora_handler() -> Optional[LoRaHandler]:
+    """Get the global LoRa handler instance (thread-safe singleton).
+
+    Returns None if another OS process already owns the serial port.  Callers
+    must check for None before dereferencing the result.
+    """
     global _lora_handler
     if _lora_handler is not None:
         return _lora_handler
@@ -1836,6 +1857,13 @@ def get_lora_handler() -> LoRaHandler:
             handler.start_listening()
             _lora_handler = handler  # publish only after full init
             print("✅ LoRa handler initialized successfully")
+        except LoRaSerialPortConflict:
+            _lora_handler = None
+            print(
+                f"ℹ️ LoRa serial port already owned by another process; "
+                f"skipping handler creation in PID {os.getpid()}"
+            )
+            return None
         except Exception as e:
             _lora_handler = None  # explicit: global was never written, but make intent clear
             print(f"❌ Failed to initialize LoRa handler: {e}")
@@ -1846,21 +1874,29 @@ def get_lora_handler() -> LoRaHandler:
 def transmit_data(data: Dict[str, Any]) -> bool:
     """Convenience function to transmit sensor data"""
     handler = get_lora_handler()
+    if handler is None:
+        return False
     return handler.queue_transmit(data)
 
 def transmit_file(file_data: bytes) -> bool:
     """Convenience function to transmit file data"""
     handler = get_lora_handler()
+    if handler is None:
+        return False
     return handler.queue_file_transmit(file_data)
 
 def transmit_binary(binary_data) -> bool:
     """Convenience function to transmit arbitrary binary data (bytes or hex string)"""
     handler = get_lora_handler()
+    if handler is None:
+        return False
     return handler.queue_binary_transmit(binary_data)
 
 def transmit_auto(data) -> bool:
     """Convenience function to automatically detect data type and transmit"""
     handler = get_lora_handler()
+    if handler is None:
+        return False
     return handler.queue_auto(data)
 
 def get_config_value(key: str, default: Any = None) -> Any:

@@ -29,9 +29,12 @@ def flir(directory):
     from os import makedirs, path, rename
     from glob import glob
     import subprocess
+    import time as _time
     from datetime import datetime
 
     date = datetime.now().strftime('%Y%m%d-%H%M%S')
+    _flir_t0 = _time.time()
+    print(f"[flir] start")
 
     def _find_project_root(start):
         candidate = path.abspath(start)
@@ -130,11 +133,11 @@ def flir(directory):
     # the files produced by this run — no re-glob that could match a file
     # from a concurrent run sharing the same (fallback) directory.
     capture_fresh = _run_flir_cmd("capture", [capture_bin])
+    print(f"[flir] capture done: {_time.time() - _flir_t0:.1f}s")
     if not capture_fresh:
         return True
     lepton_fresh = _run_flir_cmd("lepton", [lepton_bin])
-    if not lepton_fresh:
-        return True
+    print(f"[flir] lepton done: {_time.time() - _flir_t0:.1f}s")
 
     # Rename outputs to timestamped names matching the coregistration pipeline's expectations.
     for fresh_files, dst_name in [
@@ -147,6 +150,7 @@ def flir(directory):
         except Exception as exc:
             print(f"Could not rename {src_path}: {exc}")
 
+    print(f"[flir] total: {_time.time() - _flir_t0:.1f}s")
     return True
 
 
