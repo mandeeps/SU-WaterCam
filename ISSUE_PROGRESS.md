@@ -6,23 +6,24 @@ Documents work already in the codebase against each open GitHub issue.
 
 ## #16 — Use IP when LoRa not available
 
-**Status: Substantially complete. Store-and-forward buffering not yet implemented.**
+**Status: Store-and-forward implemented. LoRa-unavailable detection not yet implemented.**
 
 ### What exists
 
 | File | What it does |
 |------|-------------|
 | `tools/transmit_ip.py` | `IPTransmitter` class — POST uplink to `/ip/uplink`, GET downlink from `/ip/downlink/{device_id}`, exponential-backoff retry, configurable timeout/retries, `is_reachable()` health check |
-| `ticktalk_main.py:1497` | `ip_uplink_transmit()` — TickTalkPython action that collects sensor data, encodes channel-coded hex, and calls `IPTransmitter.send_uplink()` each wake cycle |
-| `ticktalk_main.py:1657` | `ip_downlink_poll_and_apply()` — polls server for queued commands and applies them to runtime config each wake cycle |
-| `ticktalk_main.py:1810` | Both IP functions wired into the main loop, running after the LoRa path |
-| `runtime_config.json` | `ip_upload` block: `enabled`, `server_url`, `api_key`, `device_id`, `timeout_s`, `retry_attempts`, `retry_backoff_s`, `fallback_to_lora`, `downlink_poll_interval_s` |
+| `tools/transmit_ip.py` | `IPTransmitter._enqueue()` — atomic write to `data/ip_uplink_pending/<ts>_<n>.json`; evicts oldest entries when `max_queue_depth` is reached |
+| `tools/transmit_ip.py` | `IPTransmitter._drain_queue()` — oldest-first drain; evicts stale entries (> `max_queue_age_days`), deletes corrupt files, stops on first send failure |
+| `ticktalk_main.py` | `ip_uplink_transmit()` — sensor collection now runs before `is_reachable()`; on unreachable or send failure the reading is enqueued; on next wake queued entries are drained before the live reading is sent |
+| `ticktalk_main.py` | `ip_downlink_poll_and_apply()` — polls server for queued commands and applies them to runtime config each wake cycle |
+| `runtime_config.json` | `ip_upload` block: `enabled`, `server_url`, `api_key`, `device_id`, `timeout_s`, `retry_attempts`, `retry_backoff_s`, `fallback_to_lora`, `downlink_poll_interval_s`, `max_queue_depth` (48), `max_queue_age_days` (7) |
 | `tests/test_ip_upload.py` | Integration test suite for `IPTransmitter` — uplink, downlink, reachability, edge cases; skips cleanly when server is down |
+| `tests/test_ip_store_and_forward.py` | 29 tests covering queue creation, depth/age eviction, drain ordering, stop-on-failure, corrupt-file recovery, integration with `ip_uplink_transmit.__wrapped__` |
 
 ### What is missing
 
-- **Store-and-forward / disk buffer**: if the server is unreachable the data is silently dropped. The issue specifically calls for retaining data on disk and scheduling it for transmission when connectivity is restored. No disk queue exists yet.
-- **LoRa-unavailable detection**: the current implementation runs IP as a parallel path alongside LoRa, not as a fallback triggered by LoRa failure. True fallback logic (detect LoRa failure → switch to IP) is not implemented.
+- **LoRa-unavailable detection**: the current implementation runs IP as a parallel path alongside LoRa, not as a fallback triggered by LoRa failure. True fallback logic (detect LoRa failure → switch to IP) is not implemented. Needs design discussion — e.g. how to detect LoRa failure reliably without waiting for a full timeout on every cycle.
 
 ---
 
