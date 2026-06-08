@@ -23,6 +23,9 @@
     "timeout_s": 15,
     "retry_attempts": 3,
     "retry_backoff_s": 2,
-    "fallback_to_lora": true
+    "fallback_to_lora": true,
+    "downlink_poll_interval_s": 60,
+    "max_queue_depth": 48,
+    "max_queue_age_days": 7
   }
 }

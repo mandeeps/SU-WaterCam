@@ -314,6 +314,9 @@ def runtime_config(tmp_path):
             "retry_attempts": 1,
             "retry_backoff_s": 0,
             "fallback_to_lora": False,
+            "downlink_poll_interval_s": 60,
+            "max_queue_depth": 48,
+            "max_queue_age_days": 7,
         },
     }
     p = tmp_path / "runtime_config.json"

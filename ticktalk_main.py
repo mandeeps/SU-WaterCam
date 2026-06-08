@@ -1609,6 +1609,10 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
     humidity, flood_detect (inferred from bitmap), flood_bitmap, and the five
     status-report parameters.  IMU data is not included.
 
+    Failed transmissions are persisted to data/ip_uplink_pending/ and retried
+    on the next wake cycle (store-and-forward).  On a successful wake, queued
+    entries are drained oldest-first before the live reading is sent.
+
     Disabled by default — set ip_upload.enabled=true in runtime_config.json to
     activate.  Runs after the LoRa path in the wake cycle; both paths share the
     same sensor snapshot but neither affects the other's outcome.
@@ -1628,19 +1632,13 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
         tx.close()
         return {"status": "disabled", "success": False}
 
-    # Use a short timeout for the reachability probe — this runs on every wake
-    # cycle and a full timeout_s (default 15 s) would add significant dead time
-    # when the server is down.
-    if not tx.is_reachable(timeout_s=5):
-        print(f"⚠️ IP uplink: server unreachable at {tx.server_url}")
-        tx.close()
-        return {"status": "unreachable", "success": False}
-
     try:
         # ── Collect sensor data ────────────────────────────────────────────────
-        # IMU orientation is not transmitted (no 03 01 channel encoded below);
-        # do not read it here to avoid unnecessary hardware I/O and failure points.
+        # Sensor collection is done BEFORE the reachability check so that a
+        # reading can be queued to disk when the server is temporarily down.
+        # IMU orientation is not transmitted (no 03 01 channel encoded below).
         data = {}
+        ts_now = int(_time.time())
 
         try:
             from tools.aht20_temperature import get_aht20
@@ -1674,7 +1672,6 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
 
         # ── Build channel list ─────────────────────────────────────────────────
         channels = []
-        ts_now = int(_time.time())
 
         # 00 01 — device timestamp (8-byte uint64)
         channels.append({"code": "00 01", "payload_hex": struct.pack(">Q", ts_now).hex()})
@@ -1737,7 +1734,27 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
                          "payload_hex": struct.pack(">I",
                              _u32(data['neighborhood_emergency_frequency'])).hex()})
 
-        # ── Transmit ──────────────────────────────────────────────────────────
+        # ── Reachability check (after data is ready so we can queue on failure) ─
+        if not tx.is_reachable(timeout_s=5):
+            print(f"⚠️ IP uplink: server unreachable at {tx.server_url} — queuing reading")
+            tx._enqueue(channels, ts_now)
+            return {"status": "queued", "success": False, "channels_queued": len(channels)}
+
+        # ── Drain any previously queued readings ───────────────────────────────
+        drain = tx._drain_queue()
+        if drain["drained"]:
+            print(f"✅ IP uplink: drained {drain['drained']} queued reading(s)")
+        if drain["failed"]:
+            print(f"⚠️ IP uplink: drain failed on {drain['failed_file']} — queuing live reading")
+            tx._enqueue(channels, ts_now)
+            return {
+                "status": "queued_drain_failed",
+                "success": False,
+                "drained": drain["drained"],
+                "channels_queued": len(channels),
+            }
+
+        # ── Transmit live reading ──────────────────────────────────────────────
         result = tx.send_uplink(channels, device_ts=ts_now)
 
         if result["success"]:
@@ -1745,13 +1762,16 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
                   f"(attempt {result.get('attempts', '?')})")
         else:
             print(f"⚠️ IP uplink failed after {result.get('attempts', '?')} attempt(s): "
-                  f"{result.get('error', 'unknown error')}")
+                  f"{result.get('error', 'unknown error')} — queuing reading")
+            tx._enqueue(channels, ts_now)
             if tx.fallback_to_lora:
                 print("📡 LoRa fallback is enabled — data may also be sent via the LoRa path")
 
         return {
-            "status": "ok" if result["success"] else "failed",
-            "channels_sent": len(channels),
+            "status": "ok" if result["success"] else "queued",
+            "success": result["success"],
+            "channels_sent": len(channels) if result["success"] else 0,
+            "drained": drain["drained"],
             "result": result,
         }
     except Exception as exc:
