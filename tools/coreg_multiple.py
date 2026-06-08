@@ -433,7 +433,7 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
         registration_method.SetOptimizerAsGradientDescent(learningRate=config.LEARNING_RATE, numberOfIterations=config.MAX_ITERATIONS, convergenceMinimumValue=1e-6, convergenceWindowSize=10)
     registration_method.SetOptimizerScalesFromPhysicalShift()
     initial_transform = estimate_initial_transform(fixed_image_sitk, moving_image_sitk, config.TRANSFORM_TYPE)
-    registration_method.SetInitialTransform(initial_transform, inPlace=False)
+    registration_method.SetInitialTransform(initial_transform, inPlace=True)
     if config.ENABLE_MULTI_SCALE:
         if config.FAST_MODE:
             # Performing fast multi-scale registration

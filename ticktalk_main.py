@@ -19,12 +19,6 @@ from tools.lora_runtime_integration import (
 # Import LoRa handler
 from tools.lora_handler_concurrent import get_lora_handler
 
-# LoRaWAN payload budgets at which the 14-byte TTLoRa header becomes significant.
-# Below this threshold bitmaps are sent as raw bytes (no TTLoRa wrapper), gaining
-# 14 bytes for actual image data.  Above it, the full TTToken is used.
-# 128 B ≈ SF8/US915 500 kHz limit; SF7 (242 B) stays tokenized.
-_BITMAP_RAW_MODE_THRESHOLD = 128
-
 # Import helper functions
 from tools.wittypi_control import get_wittypi_status
 
@@ -226,9 +220,6 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     from tools.lora_runtime_integration import get_parameter
     # Helper functions are now imported at module level
 
-    from pympler import asizeof
-    from sys import getsizeof
-
     # LoRa transmission is always enabled
 
     root_clock = TTClock.root()
@@ -410,34 +401,14 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         print("[lora_token_with_tracker] No bitmap data to transmit")
     else:
         try:
-            _lora_limit_for_bitmap = get_lora_handler().get_size_limit()
-        except Exception:
-            _lora_limit_for_bitmap = 242
-        _use_raw_bitmap_mode = _lora_limit_for_bitmap <= 128  # BITMAP_RAW_MODE_THRESHOLD
-
-        if _use_raw_bitmap_mode:
-            try:
-                handler.queue_binary_transmit(bitmap)
-                print(f"[lora_token_with_tracker] Raw bitmap mode: queued {len(bitmap)}B (mDot limit {_lora_limit_for_bitmap}B)")
-                handler.process_transmit_queue()
-            except Exception as e:
-                print(f"⚠️ Failed to transmit raw bitmap: {e}")
-        else:
-            try:
-                token_2 = TTToken(bitmap, time_1, False,
-                TTTag(context, sq_name, 4, recipient_device))
-                lora_msg2 = NetworkInterfaceLoRa.TTLoRaMessage(token_2, recipient_device)
-                encoded_msg2 = lora_msg2.encode_token()
-                packet2 = encoded_msg2.hex()
-                handler.queue_binary_transmit(packet2)
-
-                handler.queue_binary_transmit(bitmap)
-
-                print(f" \n Size of Tokenized Bitmap object: {asizeof.asizeof(packet2)} \n")
-                print(f" \n Size of Tokenized Bitmap object getsizeof: {getsizeof(packet2)} \n")
-                handler.process_transmit_queue()
-            except Exception as e:
-                print(f"⚠️ Failed to transmit bitmap: {e}")
+            # TLV-wrap as channel 0x08 type 0x18 so ChirpStack codec can decode it.
+            # compressed_encoding({'flood_bitmap_compressed': bitmap}) produces:
+            #   08 18 [len 2B BE] [bitmap bytes]
+            handler.queue_transmit({'flood_bitmap_compressed': bitmap})
+            print(f"[lora_token_with_tracker] Bitmap queued: {len(bitmap)}B → TLV 08 18")
+            handler.process_transmit_queue()
+        except Exception as e:
+            print(f"⚠️ Failed to transmit bitmap: {e}")
 
     # Update sensor tracker with transmission results
     if sensor_tracker:
@@ -823,20 +794,15 @@ def compress_bitmap(segmented_file):
     from tools.compress_segmented import compress_image
 
     # Query the mDot's stored payload limit (updated by +TXS: responses).
-    # In raw mode (low budget) the bitmap is the entire payload — use the full
-    # limit.  In tokenized mode the 14-byte TTLoRa header must also fit.
-    # Fall back to 228 B (SF7/500kHz tokenized: 242 − 14).
-    max_bitmap_bytes = 228
+    # Bitmap is sent TLV-wrapped (08 18 [2B len] = 4B overhead) so the
+    # bitmap itself may be up to lora_limit - 4 bytes.
+    # Fall back to 238 B (SF7/500kHz: 242 − 4).
+    max_bitmap_bytes = 238
     try:
         from tools.lora_handler_concurrent import get_size_limit
         lora_limit = get_size_limit()
-        if lora_limit <= 128:  # BITMAP_RAW_MODE_THRESHOLD
-            max_bitmap_bytes = lora_limit          # raw: full budget
-            mode_label = "raw"
-        else:
-            max_bitmap_bytes = lora_limit - 14     # tokenized: leave room for header
-            mode_label = "tokenized"
-        print(f"[compress_bitmap] mDot limit {lora_limit}B → {mode_label} mode, max bitmap {max_bitmap_bytes}B")
+        max_bitmap_bytes = lora_limit - 4
+        print(f"[compress_bitmap] mDot limit {lora_limit}B → max bitmap {max_bitmap_bytes}B (TLV overhead 4B)")
     except Exception as e:
         print(f"[compress_bitmap] Could not query mDot limit ({e}), using {max_bitmap_bytes}B default")
 
@@ -871,9 +837,6 @@ def lora_token(bitmap):
     from tools.aht20_temperature import get_aht20
     from tools.get_gps import get_location_with_retry
     from tools.lora_runtime_integration import get_parameter
-
-    from pympler import asizeof
-    from sys import getsizeof
 
     # LoRa transmission is always enabled
 
@@ -1016,34 +979,11 @@ def lora_token(bitmap):
         return bitmap
 
     try:
-        _lora_limit_for_bitmap = get_lora_handler().get_size_limit()
-    except Exception:
-        _lora_limit_for_bitmap = 242
-    _use_raw_bitmap_mode = _lora_limit_for_bitmap <= 128  # BITMAP_RAW_MODE_THRESHOLD
-
-    if _use_raw_bitmap_mode:
-        try:
-            handler.queue_binary_transmit(bitmap)
-            print(f"[lora_token] Raw bitmap mode: queued {len(bitmap)}B (mDot limit {_lora_limit_for_bitmap}B)")
-            handler.process_transmit_queue()
-        except Exception as e:
-            print(f"⚠️ Failed to transmit raw bitmap: {e}")
-    else:
-        try:
-            token_2 = TTToken(bitmap, time_1, False,
-            TTTag(context, sq_name, 4, recipient_device))
-            lora_msg2 = NetworkInterfaceLoRa.TTLoRaMessage(token_2, recipient_device)
-            encoded_msg2 = lora_msg2.encode_token()
-            packet2 = encoded_msg2.hex()
-            handler.queue_binary_transmit(packet2)
-
-            handler.queue_binary_transmit(bitmap)
-
-            print(f" \n Size of Tokenized Bitmap object: {asizeof.asizeof(packet2)} \n")
-            print(f" \n Size of Tokenized Bitmap object getsizeof: {getsizeof(packet2)} \n")
-            handler.process_transmit_queue()
-        except Exception as e:
-            print(f"⚠️ Failed to transmit bitmap: {e}")
+        handler.queue_transmit({'flood_bitmap_compressed': bitmap})
+        print(f"[lora_token] Bitmap queued: {len(bitmap)}B → TLV 08 18")
+        handler.process_transmit_queue()
+    except Exception as e:
+        print(f"⚠️ Failed to transmit bitmap: {e}")
 
     return bitmap
 

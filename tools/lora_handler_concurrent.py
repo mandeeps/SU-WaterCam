@@ -48,10 +48,6 @@ from typing import Dict, Any, Optional
 # 2100 -> Channel 21, Command 00, Value 0 (Emergency status: system enters emergency mode)
 # 9999 -> Emergency clear message (Deactivate emergency mode)
 
-# LoRaWAN payload budget (bytes) below which raw (headerless) bitmap transmission
-# is used instead of TTLoRa-tokenized mode.  SF8/500 kHz = 125 B sits just below;
-# SF7 (133–242 B) sits just above.
-BITMAP_RAW_MODE_THRESHOLD = 128
 
 
 class LoRaSerialPortConflict(RuntimeError):
@@ -374,6 +370,9 @@ class LoRaHandler:
                         else:
                             print(f"ERROR: Transmission attempt {attempt + 1} failed: {error_message}")
                             if attempt < max_retries:
+                                if 'Tx buffer filled by MAC Commands' in error_message:
+                                    print("DEBUG: MAC buffer full — flushing LoRaWAN MAC queue with probe uplink...")
+                                    self._flush_mac_commands()
                                 print(f"DEBUG: Will retry transmission (attempt {attempt + 2}/{max_retries + 1})")
                                 time.sleep(1)
                                 continue
@@ -1372,7 +1371,46 @@ class LoRaHandler:
         except Exception as e:
             print(f"ERROR: Failed to clear mDot input: {e}")
             return False
-    
+
+    def _flush_mac_commands(self) -> bool:
+        """Send a 1-byte probe uplink to drain the LoRaWAN MAC command queue.
+
+        Called when AT+SENDB returns 'Tx buffer filled by MAC Commands'.
+        An AT command (AT, AT+TXS) does not trigger RF and cannot carry MAC
+        ACKs to the network server.  A real uplink — even a 1-byte payload —
+        piggybacks the pending MAC responses and clears the mDot TX buffer so
+        the next AT+SENDB for the actual payload can proceed.
+        """
+        try:
+            print("DEBUG: MAC flush: sending 1-byte probe to drain MAC command queue...")
+            self.ser.reset_input_buffer()
+            self.ser.write(b'AT+SENDB=00\r\n')
+            deadline = time.time() + 20
+            while time.time() < deadline:
+                if self.ser.in_waiting > 0:
+                    res = self.ser.read_until()
+                    if not res:
+                        continue
+                    try:
+                        response = res.decode('utf-8').strip()
+                    except UnicodeDecodeError:
+                        response = ""
+                    if response:
+                        print(f"DEBUG: MAC flush response: '{response}'")
+                    if 'OK' in response:
+                        print("DEBUG: MAC flush OK — MAC queue drained")
+                        return True
+                    if 'ERROR' in response.upper():
+                        print("DEBUG: MAC flush ERROR — continuing anyway")
+                        return False
+                else:
+                    time.sleep(0.1)
+            print("DEBUG: MAC flush timed out")
+            return False
+        except Exception as e:
+            print(f"DEBUG: MAC flush failed: {e}")
+            return False
+
     def _attempt_transmission(self, content: bytes, size_limit: int) -> tuple[bool, str]:
         """Attempt a single transmission and return (success, error_message)"""
 
@@ -1508,6 +1546,13 @@ class LoRaHandler:
                 print("Data sent to mDot successfully!")
                 return True, ""
             else:
+                # Promote the specific MAC buffer message so transmit() can detect it
+                # and call _flush_mac_commands() before retrying.
+                if not error_message or error_message == "mDot reported error: ERROR":
+                    for resp in final_responses:
+                        if 'Tx buffer filled' in resp or 'MAC Commands' in resp:
+                            error_message = f"mDot: Tx buffer filled by MAC Commands — {resp}"
+                            break
                 if not error_message:
                     error_message = f"mDot did not respond with OK - responses: {final_responses}"
                 print(f"ERROR: {error_message}")

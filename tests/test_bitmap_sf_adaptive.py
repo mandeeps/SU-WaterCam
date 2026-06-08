@@ -1,9 +1,13 @@
-"""Tests for SF-adaptive bitmap compression and raw/tokenized mode selection.
+"""Tests for bitmap compression budget and TLV transmission path.
+
+compress_bitmap() must pass max_bytes = lora_limit - 4 (TLV overhead) to
+compress_image() regardless of SF.  lora_token() must queue the bitmap via
+queue_transmit({'flood_bitmap_compressed': bitmap}) so compressed_encoding()
+wraps it as 08 18 [2B len] [bytes] — the format the ChirpStack codec expects.
 
 All tests call the real production functions via __wrapped__ (SQify uses
 functools.wraps so __wrapped__ points to the original) with hardware
-dependencies patched.  This ensures regressions in compress_bitmap() and
-lora_token() are caught rather than just testing re-implemented logic.
+dependencies patched.
 """
 import contextlib
 from unittest.mock import MagicMock, patch, call
@@ -13,7 +17,7 @@ from unittest.mock import MagicMock, patch, call
 # Helpers / fixtures
 # ---------------------------------------------------------------------------
 
-def _fake_compress_image(path, max_bytes=228, min_size=32, **_):
+def _fake_compress_image(path, max_bytes=238, min_size=32, **_):
     """Stub: succeed for max_bytes ≥ 32, return payload exactly max_bytes long."""
     if max_bytes < 32:
         return {"success": False}
@@ -43,13 +47,13 @@ def _make_lora_handler(size_limit: int) -> MagicMock:
 # ---------------------------------------------------------------------------
 
 class TestCompressBitmapBudget:
-    """compress_bitmap().__wrapped__ must pass the right max_bytes to compress_image."""
+    """compress_bitmap().__wrapped__ must pass max_bytes = lora_limit - 4."""
 
     def _run(self, lora_limit):
         import ticktalk_main
         captured = {}
 
-        def capturing_compress(path, max_bytes=228, **kw):
+        def capturing_compress(path, max_bytes=238, **kw):
             captured["max_bytes"] = max_bytes
             return _fake_compress_image(path, max_bytes=max_bytes)
 
@@ -59,35 +63,34 @@ class TestCompressBitmapBudget:
 
         return data, captured["max_bytes"]
 
-    def test_sf7_500khz_tokenized(self):
+    def test_sf7_500khz(self):
+        """SF7/500kHz (242B) → bitmap budget = 242 - 4 = 238."""
         data, max_bytes = self._run(242)
-        assert max_bytes == 228
-        assert len(data) == 228
+        assert max_bytes == 238
+        assert len(data) == 238
 
-    def test_sf7_125khz_tokenized(self):
+    def test_sf7_125khz(self):
+        """SF7/125kHz (133B) → bitmap budget = 133 - 4 = 129."""
         data, max_bytes = self._run(133)
-        assert max_bytes == 119
-        assert len(data) == 119
+        assert max_bytes == 129
+        assert len(data) == 129
 
-    def test_sf8_500khz_raw(self):
-        """SF8/500kHz (125B ≤ 128) → raw mode → full 125B budget."""
+    def test_sf8_500khz(self):
+        """SF8/500kHz (125B) → bitmap budget = 125 - 4 = 121."""
         data, max_bytes = self._run(125)
-        assert max_bytes == 125
-        assert len(data) == 125
+        assert max_bytes == 121
+        assert len(data) == 121
 
-    def test_sf9_raw(self):
+    def test_sf9(self):
+        """SF9 (53B) → bitmap budget = 53 - 4 = 49."""
         data, max_bytes = self._run(53)
-        assert max_bytes == 53
+        assert max_bytes == 49
 
-    def test_at_threshold_is_raw(self):
-        from ticktalk_main import _BITMAP_RAW_MODE_THRESHOLD as THR
-        data, max_bytes = self._run(THR)
-        assert max_bytes == THR
-
-    def test_one_above_threshold_is_tokenized(self):
-        from ticktalk_main import _BITMAP_RAW_MODE_THRESHOLD as THR
-        data, max_bytes = self._run(THR + 1)
-        assert max_bytes == THR + 1 - 14
+    def test_budget_formula_is_always_limit_minus_4(self):
+        """Formula is lora_limit - 4 at every limit, no threshold branching."""
+        for limit in (40, 53, 100, 125, 128, 129, 133, 200, 242):
+            _, max_bytes = self._run(limit)
+            assert max_bytes == limit - 4, f"limit={limit}: expected {limit-4}, got {max_bytes}"
 
 
 class TestCompressBitmapEdgeCases:
@@ -95,7 +98,8 @@ class TestCompressBitmapEdgeCases:
     def test_budget_below_min_returns_empty_without_calling_compress_image(self):
         """Budget < 32B → immediate b'', compress_image never called."""
         import ticktalk_main
-        with patch("tools.lora_handler_concurrent.get_size_limit", return_value=20), \
+        # lora_limit=35 → max_bitmap_bytes=31 < 32 → skip
+        with patch("tools.lora_handler_concurrent.get_size_limit", return_value=35), \
              patch("tools.compress_segmented.compress_image") as mock_ci:
             result = ticktalk_main.compress_bitmap.__wrapped__("fake.png")
         assert result == b""
@@ -109,12 +113,12 @@ class TestCompressBitmapEdgeCases:
             result = ticktalk_main.compress_bitmap.__wrapped__("fake.png")
         assert result == b""
 
-    def test_handler_unavailable_falls_back_to_228(self):
-        """get_size_limit() raises → fall back to 228B default (tokenized)."""
+    def test_handler_unavailable_falls_back_to_238(self):
+        """get_size_limit() raises → fall back to 238B default (242 - 4)."""
         import ticktalk_main
         captured = {}
 
-        def capturing_compress(path, max_bytes=228, **kw):
+        def capturing_compress(path, max_bytes=238, **kw):
             captured["max_bytes"] = max_bytes
             return _fake_compress_image(path, max_bytes=max_bytes)
 
@@ -124,8 +128,8 @@ class TestCompressBitmapEdgeCases:
                    side_effect=capturing_compress):
             result = ticktalk_main.compress_bitmap.__wrapped__("fake.png")
 
-        assert captured["max_bytes"] == 228
-        assert len(result) == 228
+        assert captured["max_bytes"] == 238
+        assert len(result) == 238
 
 
 # ---------------------------------------------------------------------------
@@ -155,7 +159,6 @@ def _lora_token_patches(handler):
         patch("ticktalkpython.TTToken.TTToken", return_value=mock_token),
         patch("ticktalkpython.NetworkInterfaceLoRa.TTLoRaMessage",
               return_value=mock_lora_msg),
-        patch("pympler.asizeof.asizeof", return_value=100),
     ]
 
 
@@ -170,31 +173,32 @@ class TestLoraTokenBitmapMode:
             ticktalk_main.lora_token.__wrapped__(bitmap)
         return handler
 
-    def test_raw_mode_queues_bare_bytes_only(self):
-        """SF8 (125B ≤ threshold): only bare bitmap bytes queued, no TTToken."""
-        bitmap = b"\x01" * 50
-        handler = self._invoke(bitmap, lora_limit=125)
-
-        queued = [c.args[0] for c in handler.queue_binary_transmit.call_args_list]
-        assert bitmap in queued
-        # TTToken-encoded would be b"\xde\xad\xbe\xef".hex() — must NOT be present
-        assert b"\xde\xad\xbe\xef".hex() not in queued
-
-    def test_tokenized_mode_queues_both(self):
-        """SF7 (242B > threshold): TTToken hex AND bare bitmap both queued."""
+    def test_bitmap_queued_as_tlv_sf7(self):
+        """SF7 (242B): bitmap sent via queue_transmit as flood_bitmap_compressed."""
         bitmap = b"\x01" * 100
         handler = self._invoke(bitmap, lora_limit=242)
+        handler.queue_transmit.assert_called_with({'flood_bitmap_compressed': bitmap})
 
-        queued = [c.args[0] for c in handler.queue_binary_transmit.call_args_list]
-        assert bitmap in queued
-        assert b"\xde\xad\xbe\xef".hex() in queued
+    def test_bitmap_queued_as_tlv_sf8(self):
+        """Former 'raw mode' SF8 (125B): also sent via queue_transmit, not queue_binary_transmit."""
+        bitmap = b"\x01" * 50
+        handler = self._invoke(bitmap, lora_limit=125)
+        handler.queue_transmit.assert_called_with({'flood_bitmap_compressed': bitmap})
 
-    def test_empty_bitmap_skips_all_transmission(self):
-        """Empty bitmap b'' → lora_token returns without any queue_binary_transmit call for bitmap."""
+    def test_no_raw_binary_transmit_for_bitmap(self):
+        """Bitmap bytes must never be passed directly to queue_binary_transmit."""
+        bitmap = b"\x01" * 100
+        handler = self._invoke(bitmap, lora_limit=242)
+        raw_calls = [c for c in handler.queue_binary_transmit.call_args_list
+                     if c.args and c.args[0] == bitmap]
+        assert raw_calls == []
+
+    def test_empty_bitmap_skips_transmission(self):
+        """Empty bitmap b'' → lora_token returns without any bitmap queue_transmit call."""
         handler = self._invoke(b"", lora_limit=242)
-        # Sensor data may be transmitted, but the bitmap-specific calls must not appear
         bitmap_calls = [
-            c for c in handler.queue_binary_transmit.call_args_list
-            if c.args[0] == b""
+            c for c in handler.queue_transmit.call_args_list
+            if c.args and isinstance(c.args[0], dict)
+            and 'flood_bitmap_compressed' in c.args[0]
         ]
         assert bitmap_calls == []
