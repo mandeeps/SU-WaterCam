@@ -107,7 +107,7 @@ Test files:
 
 ## #17 — Integrate Calibration Workflow
 
-**Status: Intrinsic calibration tooling exists. Extrinsic collection and full integration are not yet implemented.**
+**Status: Intrinsic calibration and coregistration integration exist. Extrinsic collection and guided installation workflow are not yet implemented.**
 
 ### What exists
 
@@ -115,11 +115,12 @@ Test files:
 
 `tools/generate_calibration_chessboard.py` — printable calibration target.
 
+`tools/coreg_multiple.py` — `_undistort_if_calibrated()` (line 52) applies `camera_calibration.json` lens correction to both fixed and moving images before registration and resampling (lines 256–257, 411–412). Integration with coregistration is complete.
+
 ### What is missing
 
 - **Extrinsic parameter collection**: no tooling for collecting or saving the extrinsic parameters (rotation/translation of the camera relative to a world reference) needed for georeferencing.
 - **Installation workflow**: no guided process to walk a new installation through capturing calibration data and validating the output.
-- **Integration with coregistration**: `coreg_multiple.py` does not consume the calibration JSON (see also #18).
 
 ---
 
