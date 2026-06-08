@@ -183,7 +183,7 @@ def save_transform_parameters(transform: sitk.Transform, directory: str, metadat
         return False
 
 
-def load_transform_parameters(directory: str) -> Optional[tuple[sitk.Transform, str]]:
+def load_transform_parameters(directory: str) -> Optional[tuple[sitk.Transform, str, Optional[list]]]:
     if config.FORCE_RECALCULATE_TRANSFORM:
         return None
     normed = os.path.normpath(directory)
@@ -199,6 +199,7 @@ def load_transform_parameters(directory: str) -> Optional[tuple[sitk.Transform, 
         transform_type = transform_data["transform_type"]
         parameters = transform_data["parameters"]
         fixed_parameters = transform_data["fixed_parameters"]
+        saved_image_size = transform_data.get("metadata", {}).get("image_size")
         transform_map = {
             "Euler2DTransform": sitk.Euler2DTransform,
             "AffineTransform": lambda: sitk.AffineTransform(2),
@@ -211,13 +212,13 @@ def load_transform_parameters(directory: str) -> Optional[tuple[sitk.Transform, 
         transform = transform_map[transform_type]()
         transform.SetParameters(parameters)
         transform.SetFixedParameters(fixed_parameters)
-        return (transform, transform_path)
+        return (transform, transform_path, saved_image_size)
     except Exception as e:
         print(f"Failed to load transform parameters: {e}")
         return None
 
 
-def validate_transform_compatibility(transform: sitk.Transform, fixed_image_path: str, moving_image_path: str) -> bool:
+def validate_transform_compatibility(transform: sitk.Transform, fixed_image_path: str, moving_image_path: str, saved_size: Optional[list] = None) -> bool:
     try:
         fixed_image = cv2.imread(fixed_image_path, cv2.IMREAD_UNCHANGED)
         moving_image = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
@@ -230,6 +231,12 @@ def validate_transform_compatibility(transform: sitk.Transform, fixed_image_path
             expected_size = (height, width)
         else:
             expected_size = fixed_image.shape[:2]
+        if saved_size is not None:
+            saved_hw = tuple(int(x) for x in saved_size)
+            if saved_hw != expected_size:
+                print(f"Transform invalid: saved for {saved_hw[1]}×{saved_hw[0]}, "
+                      f"current images are {expected_size[1]}×{expected_size[0]}")
+                return False
         print(f"Transform validation passed for image size: {expected_size}")
         return True
     except Exception as e:
@@ -380,13 +387,13 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
     if directory and not position_changed:
         cached = load_transform_parameters(directory)
         if cached is not None:
-            cached_transform, loaded_path = cached
+            cached_transform, loaded_path, saved_size = cached
             # Check transform type and parameter length
             expected_transform = create_transform(config.TRANSFORM_TYPE)
             if (
                 type(cached_transform) == type(expected_transform)
                 and len(cached_transform.GetParameters()) == len(expected_transform.GetParameters())
-                and validate_transform_compatibility(cached_transform, fixed_image_path, moving_image_path)
+                and validate_transform_compatibility(cached_transform, fixed_image_path, moving_image_path, saved_size)
             ):
                 print(f"Using cached transform parameters from {loaded_path}")
                 return apply_cached_transform(fixed_image_path, moving_image_path, cached_transform)
@@ -433,7 +440,7 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
         registration_method.SetOptimizerAsGradientDescent(learningRate=config.LEARNING_RATE, numberOfIterations=config.MAX_ITERATIONS, convergenceMinimumValue=1e-6, convergenceWindowSize=10)
     registration_method.SetOptimizerScalesFromPhysicalShift()
     initial_transform = estimate_initial_transform(fixed_image_sitk, moving_image_sitk, config.TRANSFORM_TYPE)
-    registration_method.SetInitialTransform(initial_transform, inPlace=False)
+    registration_method.SetInitialTransform(initial_transform, inPlace=True)
     if config.ENABLE_MULTI_SCALE:
         if config.FAST_MODE:
             # Performing fast multi-scale registration

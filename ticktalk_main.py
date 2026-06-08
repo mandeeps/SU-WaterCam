@@ -19,12 +19,6 @@ from tools.lora_runtime_integration import (
 # Import LoRa handler
 from tools.lora_handler_concurrent import get_lora_handler
 
-# LoRaWAN payload budgets at which the 14-byte TTLoRa header becomes significant.
-# Below this threshold bitmaps are sent as raw bytes (no TTLoRa wrapper), gaining
-# 14 bytes for actual image data.  Above it, the full TTToken is used.
-# 128 B ≈ SF8/US915 500 kHz limit; SF7 (242 B) stays tokenized.
-_BITMAP_RAW_MODE_THRESHOLD = 128
-
 # Import helper functions
 from tools.wittypi_control import get_wittypi_status
 
@@ -226,9 +220,6 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     from tools.lora_runtime_integration import get_parameter
     # Helper functions are now imported at module level
 
-    from pympler import asizeof
-    from sys import getsizeof
-
     # LoRa transmission is always enabled
 
     root_clock = TTClock.root()
@@ -410,34 +401,14 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         print("[lora_token_with_tracker] No bitmap data to transmit")
     else:
         try:
-            _lora_limit_for_bitmap = get_lora_handler().get_size_limit()
-        except Exception:
-            _lora_limit_for_bitmap = 242
-        _use_raw_bitmap_mode = _lora_limit_for_bitmap <= 128  # BITMAP_RAW_MODE_THRESHOLD
-
-        if _use_raw_bitmap_mode:
-            try:
-                handler.queue_binary_transmit(bitmap)
-                print(f"[lora_token_with_tracker] Raw bitmap mode: queued {len(bitmap)}B (mDot limit {_lora_limit_for_bitmap}B)")
-                handler.process_transmit_queue()
-            except Exception as e:
-                print(f"⚠️ Failed to transmit raw bitmap: {e}")
-        else:
-            try:
-                token_2 = TTToken(bitmap, time_1, False,
-                TTTag(context, sq_name, 4, recipient_device))
-                lora_msg2 = NetworkInterfaceLoRa.TTLoRaMessage(token_2, recipient_device)
-                encoded_msg2 = lora_msg2.encode_token()
-                packet2 = encoded_msg2.hex()
-                handler.queue_binary_transmit(packet2)
-
-                handler.queue_binary_transmit(bitmap)
-
-                print(f" \n Size of Tokenized Bitmap object: {asizeof.asizeof(packet2)} \n")
-                print(f" \n Size of Tokenized Bitmap object getsizeof: {getsizeof(packet2)} \n")
-                handler.process_transmit_queue()
-            except Exception as e:
-                print(f"⚠️ Failed to transmit bitmap: {e}")
+            # TLV-wrap as channel 0x08 type 0x18 so ChirpStack codec can decode it.
+            # compressed_encoding({'flood_bitmap_compressed': bitmap}) produces:
+            #   08 18 [len 2B BE] [bitmap bytes]
+            handler.queue_transmit({'flood_bitmap_compressed': bitmap})
+            print(f"[lora_token_with_tracker] Bitmap queued: {len(bitmap)}B → TLV 08 18")
+            handler.process_transmit_queue()
+        except Exception as e:
+            print(f"⚠️ Failed to transmit bitmap: {e}")
 
     # Update sensor tracker with transmission results
     if sensor_tracker:
@@ -823,20 +794,15 @@ def compress_bitmap(segmented_file):
     from tools.compress_segmented import compress_image
 
     # Query the mDot's stored payload limit (updated by +TXS: responses).
-    # In raw mode (low budget) the bitmap is the entire payload — use the full
-    # limit.  In tokenized mode the 14-byte TTLoRa header must also fit.
-    # Fall back to 228 B (SF7/500kHz tokenized: 242 − 14).
-    max_bitmap_bytes = 228
+    # Bitmap is sent TLV-wrapped (08 18 [2B len] = 4B overhead) so the
+    # bitmap itself may be up to lora_limit - 4 bytes.
+    # Fall back to 238 B (SF7/500kHz: 242 − 4).
+    max_bitmap_bytes = 238
     try:
         from tools.lora_handler_concurrent import get_size_limit
         lora_limit = get_size_limit()
-        if lora_limit <= 128:  # BITMAP_RAW_MODE_THRESHOLD
-            max_bitmap_bytes = lora_limit          # raw: full budget
-            mode_label = "raw"
-        else:
-            max_bitmap_bytes = lora_limit - 14     # tokenized: leave room for header
-            mode_label = "tokenized"
-        print(f"[compress_bitmap] mDot limit {lora_limit}B → {mode_label} mode, max bitmap {max_bitmap_bytes}B")
+        max_bitmap_bytes = lora_limit - 4
+        print(f"[compress_bitmap] mDot limit {lora_limit}B → max bitmap {max_bitmap_bytes}B (TLV overhead 4B)")
     except Exception as e:
         print(f"[compress_bitmap] Could not query mDot limit ({e}), using {max_bitmap_bytes}B default")
 
@@ -871,9 +837,6 @@ def lora_token(bitmap):
     from tools.aht20_temperature import get_aht20
     from tools.get_gps import get_location_with_retry
     from tools.lora_runtime_integration import get_parameter
-
-    from pympler import asizeof
-    from sys import getsizeof
 
     # LoRa transmission is always enabled
 
@@ -1016,34 +979,11 @@ def lora_token(bitmap):
         return bitmap
 
     try:
-        _lora_limit_for_bitmap = get_lora_handler().get_size_limit()
-    except Exception:
-        _lora_limit_for_bitmap = 242
-    _use_raw_bitmap_mode = _lora_limit_for_bitmap <= 128  # BITMAP_RAW_MODE_THRESHOLD
-
-    if _use_raw_bitmap_mode:
-        try:
-            handler.queue_binary_transmit(bitmap)
-            print(f"[lora_token] Raw bitmap mode: queued {len(bitmap)}B (mDot limit {_lora_limit_for_bitmap}B)")
-            handler.process_transmit_queue()
-        except Exception as e:
-            print(f"⚠️ Failed to transmit raw bitmap: {e}")
-    else:
-        try:
-            token_2 = TTToken(bitmap, time_1, False,
-            TTTag(context, sq_name, 4, recipient_device))
-            lora_msg2 = NetworkInterfaceLoRa.TTLoRaMessage(token_2, recipient_device)
-            encoded_msg2 = lora_msg2.encode_token()
-            packet2 = encoded_msg2.hex()
-            handler.queue_binary_transmit(packet2)
-
-            handler.queue_binary_transmit(bitmap)
-
-            print(f" \n Size of Tokenized Bitmap object: {asizeof.asizeof(packet2)} \n")
-            print(f" \n Size of Tokenized Bitmap object getsizeof: {getsizeof(packet2)} \n")
-            handler.process_transmit_queue()
-        except Exception as e:
-            print(f"⚠️ Failed to transmit bitmap: {e}")
+        handler.queue_transmit({'flood_bitmap_compressed': bitmap})
+        print(f"[lora_token] Bitmap queued: {len(bitmap)}B → TLV 08 18")
+        handler.process_transmit_queue()
+    except Exception as e:
+        print(f"⚠️ Failed to transmit bitmap: {e}")
 
     return bitmap
 
@@ -1669,6 +1609,10 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
     humidity, flood_detect (inferred from bitmap), flood_bitmap, and the five
     status-report parameters.  IMU data is not included.
 
+    Failed transmissions are persisted to data/ip_uplink_pending/ and retried
+    on the next wake cycle (store-and-forward).  On a successful wake, queued
+    entries are drained oldest-first before the live reading is sent.
+
     Disabled by default — set ip_upload.enabled=true in runtime_config.json to
     activate.  Runs after the LoRa path in the wake cycle; both paths share the
     same sensor snapshot but neither affects the other's outcome.
@@ -1688,19 +1632,13 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
         tx.close()
         return {"status": "disabled", "success": False}
 
-    # Use a short timeout for the reachability probe — this runs on every wake
-    # cycle and a full timeout_s (default 15 s) would add significant dead time
-    # when the server is down.
-    if not tx.is_reachable(timeout_s=5):
-        print(f"⚠️ IP uplink: server unreachable at {tx.server_url}")
-        tx.close()
-        return {"status": "unreachable", "success": False}
-
     try:
         # ── Collect sensor data ────────────────────────────────────────────────
-        # IMU orientation is not transmitted (no 03 01 channel encoded below);
-        # do not read it here to avoid unnecessary hardware I/O and failure points.
+        # Sensor collection is done BEFORE the reachability check so that a
+        # reading can be queued to disk when the server is temporarily down.
+        # IMU orientation is not transmitted (no 03 01 channel encoded below).
         data = {}
+        ts_now = int(_time.time())
 
         try:
             from tools.aht20_temperature import get_aht20
@@ -1734,7 +1672,6 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
 
         # ── Build channel list ─────────────────────────────────────────────────
         channels = []
-        ts_now = int(_time.time())
 
         # 00 01 — device timestamp (8-byte uint64)
         channels.append({"code": "00 01", "payload_hex": struct.pack(">Q", ts_now).hex()})
@@ -1797,7 +1734,27 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
                          "payload_hex": struct.pack(">I",
                              _u32(data['neighborhood_emergency_frequency'])).hex()})
 
-        # ── Transmit ──────────────────────────────────────────────────────────
+        # ── Reachability check (after data is ready so we can queue on failure) ─
+        if not tx.is_reachable(timeout_s=5):
+            print(f"⚠️ IP uplink: server unreachable at {tx.server_url} — queuing reading")
+            tx._enqueue(channels, ts_now)
+            return {"status": "queued", "success": False, "channels_queued": len(channels)}
+
+        # ── Drain any previously queued readings ───────────────────────────────
+        drain = tx._drain_queue()
+        if drain["drained"]:
+            print(f"✅ IP uplink: drained {drain['drained']} queued reading(s)")
+        if drain["failed"]:
+            print(f"⚠️ IP uplink: drain failed on {drain['failed_file']} — queuing live reading")
+            tx._enqueue(channels, ts_now)
+            return {
+                "status": "queued_drain_failed",
+                "success": False,
+                "drained": drain["drained"],
+                "channels_queued": len(channels),
+            }
+
+        # ── Transmit live reading ──────────────────────────────────────────────
         result = tx.send_uplink(channels, device_ts=ts_now)
 
         if result["success"]:
@@ -1805,13 +1762,16 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
                   f"(attempt {result.get('attempts', '?')})")
         else:
             print(f"⚠️ IP uplink failed after {result.get('attempts', '?')} attempt(s): "
-                  f"{result.get('error', 'unknown error')}")
+                  f"{result.get('error', 'unknown error')} — queuing reading")
+            tx._enqueue(channels, ts_now)
             if tx.fallback_to_lora:
                 print("📡 LoRa fallback is enabled — data may also be sent via the LoRa path")
 
         return {
-            "status": "ok" if result["success"] else "failed",
-            "channels_sent": len(channels),
+            "status": "ok" if result["success"] else "queued",
+            "success": result["success"],
+            "channels_sent": len(channels) if result["success"] else 0,
+            "drained": drain["drained"],
             "result": result,
         }
     except Exception as exc:

@@ -60,6 +60,11 @@ _DEFAULT_CONFIG_PATH = os.path.join(
     os.path.dirname(__file__), "..", "runtime_config.json"
 )
 
+# Pending-uplink queue directory — persists failed readings for retry next cycle.
+_DEFAULT_QUEUE_DIR = os.path.join(
+    os.path.dirname(__file__), "..", "data", "ip_uplink_pending"
+)
+
 
 def _coerce_int(value: Any, default: int) -> int:
     """Return ``int(value)`` or ``default`` if value is missing/invalid."""
@@ -130,6 +135,7 @@ class IPTransmitter:
         config_path: str = _DEFAULT_CONFIG_PATH,
         override_url: Optional[str] = None,
         override_device_id: Optional[str] = None,
+        queue_dir: Optional[str] = None,
     ) -> None:
         cfg = _load_ip_config(config_path)
 
@@ -141,6 +147,9 @@ class IPTransmitter:
         self.retry_attempts: int = max(1, _coerce_int(cfg.get("retry_attempts"), 3))
         self.retry_backoff_s: float = _coerce_float(cfg.get("retry_backoff_s"), 2.0)
         self.fallback_to_lora: bool = cfg.get("fallback_to_lora", True)
+        self.max_queue_depth: int = max(1, _coerce_int(cfg.get("max_queue_depth"), 48))
+        self.max_queue_age_days: float = max(0.0, _coerce_float(cfg.get("max_queue_age_days"), 7.0))
+        self._queue_dir: str = os.path.abspath(queue_dir or _DEFAULT_QUEUE_DIR)
 
         self._session = requests.Session()
         if self.api_key:
@@ -275,6 +284,100 @@ class IPTransmitter:
     def close(self) -> None:
         """Close the underlying requests.Session and release pooled connections."""
         self._session.close()
+
+    # ------------------------------------------------------------------ #
+    # Store-and-forward queue                                              #
+    # ------------------------------------------------------------------ #
+
+    def _enqueue(self, channels: List[Dict[str, str]], device_ts: int) -> bool:
+        """Persist a failed uplink to the pending queue for retry next cycle.
+
+        Writes an atomic JSON file to ``self._queue_dir``.  If the queue is
+        already at ``max_queue_depth``, the oldest entry is dropped to make
+        room.  Returns True on success, False on I/O error.
+        """
+        try:
+            os.makedirs(self._queue_dir, exist_ok=True)
+            existing = sorted(
+                f for f in os.listdir(self._queue_dir) if f.endswith(".json")
+            )
+            while len(existing) >= self.max_queue_depth:
+                try:
+                    os.unlink(os.path.join(self._queue_dir, existing.pop(0)))
+                except OSError:
+                    pass
+            record = {
+                "channels": channels,
+                "device_ts": device_ts,
+                "enqueued_at": time.time(),
+            }
+            fname = f"{device_ts}_{len(existing):06d}.json"
+            tmp_path = os.path.join(self._queue_dir, fname + ".tmp")
+            final_path = os.path.join(self._queue_dir, fname)
+            with open(tmp_path, "w") as f:
+                json.dump(record, f)
+            os.replace(tmp_path, final_path)
+            logger.info("Queued uplink to %s (%d channels)", fname, len(channels))
+            return True
+        except OSError as exc:
+            logger.warning("Failed to enqueue uplink: %s", exc)
+            return False
+
+    def _drain_queue(self) -> Dict[str, Any]:
+        """Send queued entries oldest-first; stop on first send failure.
+
+        Returns a dict with keys:
+            "drained"    : int            — number of entries successfully sent
+            "failed"     : bool           — True if a send failed mid-drain
+            "failed_file": Optional[str]  — filename of the entry that failed
+        """
+        result: Dict[str, Any] = {"drained": 0, "failed": False, "failed_file": None}
+        try:
+            entries = sorted(
+                f for f in os.listdir(self._queue_dir) if f.endswith(".json")
+            )
+        except FileNotFoundError:
+            return result
+
+        cutoff = time.time() - self.max_queue_age_days * 86400
+
+        for fname in entries:
+            path = os.path.join(self._queue_dir, fname)
+            try:
+                with open(path) as f:
+                    record = json.load(f)
+            except (OSError, ValueError):
+                logger.warning("Dropping corrupt queue file: %s", fname)
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+                continue
+
+            if record.get("enqueued_at", 0) < cutoff:
+                logger.info("Evicting stale queue entry: %s", fname)
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+                continue
+
+            send_result = self.send_uplink(
+                record["channels"], device_ts=record.get("device_ts")
+            )
+            if send_result["success"]:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+                result["drained"] += 1
+            else:
+                logger.warning("Drain failed on %s: %s", fname, send_result.get("error"))
+                result["failed"] = True
+                result["failed_file"] = fname
+                break
+
+        return result
 
     # ------------------------------------------------------------------ #
     # Internal helpers                                                     #

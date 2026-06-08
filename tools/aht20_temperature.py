@@ -17,6 +17,12 @@ except ImportError:
 
 _sensor = None
 
+# AHT20 physical operating range; readings outside this are hardware startup artifacts.
+_TEMP_MIN = -40.0
+_TEMP_MAX = 85.0
+_RH_MIN = 0
+_RH_MAX = 100
+
 
 def _get_sensor():
     global _sensor
@@ -54,15 +60,24 @@ def record_csv():
 
         sleep(60)
 
-def get_aht20():
+def get_aht20(retries: int = 2, retry_delay: float = 0.5) -> dict:
+    """Return AHT20 temp/humidity, retrying if the sensor returns out-of-range startup values."""
+    import time as _time
     sensor = _get_sensor()
     if sensor is None:
         return {}
-    try:
-        return {"temperature_celsius": float("%0.1f" % sensor.temperature),
-                "relative_humidity": int(float("%0.1f" % sensor.relative_humidity))}
-    except Exception:
-        return {}
+    for attempt in range(retries + 1):
+        try:
+            temp = float("%0.1f" % sensor.temperature)
+            rh = int(float("%0.1f" % sensor.relative_humidity))
+            if _TEMP_MIN <= temp <= _TEMP_MAX and _RH_MIN <= rh <= _RH_MAX:
+                return {"temperature_celsius": temp, "relative_humidity": rh}
+            if attempt < retries:
+                _time.sleep(retry_delay)
+        except Exception:
+            if attempt < retries:
+                _time.sleep(retry_delay)
+    return {}
 
 if __name__ == '__main__':
     import sys
