@@ -135,7 +135,11 @@ class LoRaHandler:
             'shutdown_iteration_limit': 2,
             'data_retention_days': 30,
             'backup_enabled': True,
-            'emergency_mode': False
+            'emergency_mode': False,
+            'lora_sf_enabled': True,
+            'lora_sf_drain_per_cycle': 2,
+            'lora_sf_max_depth': 96,
+            'lora_sf_max_age_days': 7,
         }
         
         if os.path.exists(self.config_file):
@@ -209,7 +213,31 @@ class LoRaHandler:
         if self.listener_thread and self.listener_thread.is_alive():
             self.listener_thread.join(timeout=2)
             print("LoRa listener stopped")
-    
+
+    def is_joined(self) -> bool:
+        """Return True if the mDot is currently joined to a LoRaWAN network.
+
+        Holds transmit_lock + the inter-process fcntl lock so the listener
+        thread cannot consume the AT+NJS? response between the write and read.
+        """
+        import re as _re
+        try:
+            with self.transmit_lock:
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
+                try:
+                    self.ser.reset_input_buffer()
+                    self.ser.write(b'AT+NJS?\r\n')
+                    time.sleep(0.8)
+                    n = self.ser.in_waiting
+                    raw = self.ser.read(n) if n else b''
+                finally:
+                    fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
+            text = raw.decode('utf-8', errors='replace')
+            nums = _re.findall(r'\d+', text)
+            return bool(nums) and nums[0] == '1'
+        except Exception:
+            return False
+
     def _listen_loop(self):
         """Main listening loop - runs in separate thread"""
         print('Listening for incoming packets')
