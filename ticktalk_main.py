@@ -205,12 +205,14 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     """
     Enhanced LoRa transmission function that uses sensor tracker to only transmit changed values
     """
+    import time as _time
     from ticktalkpython.Clock import TTClock
     from ticktalkpython.TTToken import TTToken
     from ticktalkpython.Time import TTTime
     import pickle
 
     from tools.lora_handler_concurrent import get_lora_handler, get_config_value, transmit_data, transmit_binary, compressed_encoding
+    from tools import lora_store_forward as _lsf
 
     from ticktalkpython.Tag import TTTag
     from ticktalkpython import NetworkInterfaceLoRa
@@ -221,6 +223,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     # Helper functions are now imported at module level
 
     # LoRa transmission is always enabled
+    captured_at = _time.time()
 
     root_clock = TTClock.root()
     # Create a time-tagged token using that interval and the derived clock
@@ -289,6 +292,10 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30)
     })
 
+    # Embed capture timestamp so stored packets carry original collection time
+    if 'timestamp' not in data:
+        data['timestamp'] = int(captured_at)
+
     # Check sensor changes using tracker if available (unless always_transmit_sensors is set)
     always_transmit_sensors = get_parameter('always_transmit_sensors', False)
     if always_transmit_sensors:
@@ -319,6 +326,37 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         handler = get_lora_handler()
     except Exception as e:
         print(f"⚠️ Failed to get LoRa handler: {e}")
+        return bitmap
+
+    # Store-and-forward: if the mDot is not joined, queue the payloads and skip
+    # transmission.  The mDot will rejoin autonomously; the next cycle drains the
+    # backlog (trickle: 2 packets/cycle) after sending the current data first.
+    _sf_enabled = get_config_value('lora_sf_enabled', True)
+    if _sf_enabled and not handler.is_joined():
+        _sensor_hex = None
+        _bitmap_hex = None
+        try:
+            # Always include 'timestamp' even when tracker filtering is active —
+            # the sensor tracker explicitly excludes it from sensors_to_transmit,
+            # but it must be in every stored packet so the gateway sees capture time.
+            _sf_data = ({k: v for k, v in data.items()
+                         if k in sensors_to_transmit or k == 'timestamp'}
+                        if (sensor_tracker and sensors_to_transmit) else data)
+            if always_transmit_sensors or not sensor_tracker or sensors_to_transmit:
+                _sensor_hex = handler.compressed_encoding(_sf_data).hex()
+        except Exception as _e:
+            print(f"⚠️ S&F: sensor encode failed: {_e}")
+        try:
+            if bitmap:
+                _bitmap_hex = handler.compressed_encoding({'flood_bitmap_compressed': bitmap}).hex()
+        except Exception as _e:
+            print(f"⚠️ S&F: bitmap encode failed: {_e}")
+        _lsf.enqueue(
+            _sensor_hex, _bitmap_hex, captured_at,
+            max_depth=get_config_value('lora_sf_max_depth', 96),
+            max_age_days=get_config_value('lora_sf_max_age_days', 7),
+        )
+        print(f"📦 LoRa not joined — data queued (depth: {_lsf.queue_depth()})")
         return bitmap
 
     # Transmit sensor data if: no tracker, always_transmit_sensors, or changes detected
@@ -409,6 +447,21 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
             handler.process_transmit_queue()
         except Exception as e:
             print(f"⚠️ Failed to transmit bitmap: {e}")
+
+    # Store-and-forward: trickle-drain backlog after current data is sent
+    if _sf_enabled:
+        try:
+            _drain = _lsf.drain(
+                handler,
+                max_packets=get_config_value('lora_sf_drain_per_cycle', 2),
+                max_age_days=get_config_value('lora_sf_max_age_days', 7),
+            )
+            if _drain['drained']:
+                print(f"📤 S&F: drained {_drain['drained']} queued packet(s)")
+            if _drain['failed']:
+                print(f"⚠️ S&F: drain stopped early (transmission failure)")
+        except Exception as _e:
+            print(f"⚠️ S&F: drain error: {_e}")
 
     # Update sensor tracker with transmission results
     if sensor_tracker:
