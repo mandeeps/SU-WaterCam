@@ -4,6 +4,7 @@
 
 import json
 import logging
+import math
 import os
 import struct
 import time
@@ -11,9 +12,12 @@ from pathlib import Path
 
 _REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent.parent)))
 
-# Calibration file produced by bno055_calibration.py (Georeferencing repo).
-# Copy or symlink that file here after running the calibration procedure.
-_CALIB_FILE = _REPO_ROOT / "bno055_calibration.json"
+# Calibration file produced by tools/bno055_calibration.py.
+# Override path with the WATERCAM_CALIB_FILE environment variable if needed.
+_CALIB_FILE = Path(os.environ.get(
+    "WATERCAM_CALIB_FILE",
+    str(_REPO_ROOT / "bno055_calibration.json"),
+))
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +41,7 @@ def _apply_calibration(sensor) -> bool:
     Load saved BNO055 calibration offsets and write them to the sensor.
 
     Offsets are read from bno055_calibration.json (produced by
-    bno055_calibration.py in the Georeferencing repo). The sensor must be
+    tools/bno055_calibration.py). The sensor must be
     in CONFIG mode to accept offset writes; this function handles the mode
     switch and restores NDOF mode on exit.
 
@@ -130,6 +134,9 @@ def temperature() -> int:
     return result
 
 def get_values() -> dict:
+    """Return raw sensor readings. Euler heading is in sensor frame (no mount
+    offset or declination applied). Corrections are owned by the Georeferencing
+    pipeline via the unit config JSON."""
     sensor = _get_sensor()
     if sensor is None:
         return {}
@@ -141,6 +148,49 @@ def get_values() -> dict:
             "Quaternion": sensor.quaternion,
             "Linear": sensor.linear_acceleration,
             "Gravity": sensor.gravity}
+
+def get_euler_stable(n: int = 20, interval_s: float = 0.015) -> dict:
+    """Return circular-mean heading and mean pitch/roll averaged over n samples.
+
+    Collecting 20 samples at 15 ms intervals adds ~300 ms per call.
+    Returns keys: heading_mean, pitch_mean, roll_mean, heading_std, n_samples.
+    Returns {} if the sensor is unavailable or all samples are None.
+    """
+    sensor = _get_sensor()
+    if sensor is None:
+        return {}
+
+    headings, pitches, rolls = [], [], []
+    for _ in range(n):
+        e = sensor.euler
+        if isinstance(e, tuple) and len(e) == 3 and e[0] is not None:
+            headings.append(e[0])
+            if e[1] is not None:
+                pitches.append(e[1])
+            if e[2] is not None:
+                rolls.append(e[2])
+        time.sleep(interval_s)
+
+    if not headings:
+        return {}
+
+    sin_sum = sum(math.sin(math.radians(h)) for h in headings)
+    cos_sum = sum(math.cos(math.radians(h)) for h in headings)
+    mean_heading = (math.degrees(math.atan2(sin_sum, cos_sum)) + 360.0) % 360.0
+
+    # Circular std dev (Mardia & Jupp): R is the mean resultant length
+    R = math.sqrt(sin_sum ** 2 + cos_sum ** 2) / len(headings)
+    R = min(max(R, 1e-9), 1.0 - 1e-9)
+    heading_std = math.degrees(math.sqrt(-2.0 * math.log(R)))
+
+    return {
+        "heading_mean": round(mean_heading, 2),
+        "pitch_mean":   round(sum(pitches) / len(pitches), 2) if pitches else None,
+        "roll_mean":    round(sum(rolls)   / len(rolls),   2) if rolls   else None,
+        "heading_std":  round(heading_std, 2),
+        "n_samples":    len(headings),
+    }
+
 
 def get_orientation():
     sensor = _get_sensor()
