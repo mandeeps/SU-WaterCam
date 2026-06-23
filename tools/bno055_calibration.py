@@ -482,7 +482,7 @@ def run_calibration_procedure(imu: BNO055,
         print(f"\n\nCalibration interrupted.")
         print(f"  Current status: sys={s['system']} gyro={s['gyro']} "
               f"accel={s['accel']} mag={s['mag']}")
-        if s["gyro"] < 3 or s["accel"] < 3 or s["mag"] < 3:
+        if s["gyro"] < 3 or s["accel"] < 2 or s["mag"] < 3:
             print("  WARNING: Saving partial calibration. "
                   "Heading accuracy may be reduced.")
 
@@ -520,6 +520,8 @@ def validate_heading(imu: BNO055,
         known_bearing_deg        : true bearing from camera to target (degrees)
         magnetic_declination_deg : local magnetic declination (from calibration file)
     """
+    import math as _math
+
     readings = []
     print(f"[VALIDATE] Collecting {n_samples} heading samples...")
     for _ in range(n_samples):
@@ -529,9 +531,13 @@ def validate_heading(imu: BNO055,
         readings.append(true_heading)
         time.sleep(0.05)
 
-    mean_h = sum(readings) / len(readings)
-    std_h  = (sum((r - mean_h)**2 for r in readings) / len(readings)) ** 0.5
-    error  = mean_h - known_bearing_deg
+    # Circular mean — required for headings near 0°/360° (north-pointing cameras)
+    sin_sum = sum(_math.sin(_math.radians(r)) for r in readings)
+    cos_sum = sum(_math.cos(_math.radians(r)) for r in readings)
+    mean_h  = (_math.degrees(_math.atan2(sin_sum, cos_sum)) + 360.0) % 360.0
+    std_h   = (sum((_math.sin(_math.radians(r - mean_h)))**2
+                   for r in readings) / len(readings)) ** 0.5 * (180.0 / _math.pi)
+    error   = mean_h - known_bearing_deg
 
     # Wrap error to [-180, 180]
     error = (error + 180) % 360 - 180
