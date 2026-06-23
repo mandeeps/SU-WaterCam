@@ -76,6 +76,8 @@ def add_metadata(image):
     roll = None
     pitch = None
     yaw = None
+    heading_std = None
+    calib_sys = calib_gyro = calib_accel = calib_mag = None
 
     # get IMU data
     try:
@@ -85,20 +87,43 @@ def add_metadata(image):
         imu_values = {}
 
     if imu_values:
+        # Read calibration status so we can log and gate on heading quality
+        try:
+            cal = bno055_imu._get_sensor().calibration_status
+            calib_sys, calib_gyro, calib_accel, calib_mag = cal
+        except Exception:
+            calib_sys = calib_gyro = calib_accel = calib_mag = None
+
+        calib_str = (f"sys={calib_sys} gyro={calib_gyro} "
+                     f"accel={calib_accel} mag={calib_mag}"
+                     if calib_sys is not None else "unknown")
+
         # log IMU data to text file
         imu = [f"\nFile: {image}\n",
             f"Time: {time.asctime(time.localtime(time.time()))}\n",
             f"Accelerometer: {imu_values.get('Accelerometer')}\n",
             f"Gyro: {imu_values.get('Gyro')}\n",
-            f"Temperature: {imu_values.get('Temperature')}\n"]
+            f"Temperature: {imu_values.get('Temperature')}\n",
+            f"CalibStatus: {calib_str}\n"]
 
         with open(DATA, 'a', encoding="utf8") as data:
             for line in imu:
                 data.writelines(line)
 
-        euler = imu_values.get('Euler')
-        if isinstance(euler, tuple) and len(euler) == 3:
-            yaw, roll, pitch = euler
+        # Average 20 samples (~300 ms) for stable heading, pitch, and roll
+        try:
+            euler_stable = bno055_imu.get_euler_stable()
+        except Exception:
+            euler_stable = {}
+
+        if euler_stable:
+            yaw         = euler_stable.get("heading_mean")
+            roll        = euler_stable.get("roll_mean")
+            pitch       = euler_stable.get("pitch_mean")
+            heading_std = euler_stable.get("heading_std")
+            if calib_mag is not None and calib_mag < 2:
+                print(f"WARNING: BNO055 magnetometer uncalibrated (mag={calib_mag}/3) "
+                      f"— heading in EXIF will be unreliable")
 
     # Start exif handling
     # load original exif data
@@ -111,17 +136,30 @@ def add_metadata(image):
 
     # Add roll/pitch/yaw to UserComment tag if they exist
     if roll is not None:
-        user_comment = piexif.helper.UserComment.dump(f"Roll {roll} Pitch {pitch} Yaw {yaw}")
-        exif_data["Exif"][piexif.ExifIFD.UserComment] = user_comment
+        uc = f"Roll {roll} Pitch {pitch} Yaw {yaw}"
+        if heading_std is not None:
+            uc += f" HeadingStd {heading_std}"
+        exif_data["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.UserComment.dump(uc)
 
-    # Write XMP tags for Pix4D: unit ID always, orientation when available
+    # Write XMP tags: unit ID always, orientation + quality when available
     xmp_props: dict = {}
     if device_id:
         xmp_props["DeviceID"] = device_id
     if roll is not None:
         xmp_props["Roll"] = str(roll)
         xmp_props["Pitch"] = str(pitch)
+        # Raw magnetic heading in sensor frame. Mount offset, magnetic declination,
+        # and pole correction are applied by the Georeferencing pipeline at
+        # processing time using values from the unit config JSON.
         xmp_props["Yaw"] = str(yaw)
+        xmp_props["HeadingRawSensorFrame"] = "true"
+    if heading_std is not None:
+        xmp_props["HeadingStdDev"] = str(heading_std)
+    if calib_sys is not None:
+        xmp_props["CalibSys"]   = str(calib_sys)
+        xmp_props["CalibGyro"]  = str(calib_gyro)
+        xmp_props["CalibAccel"] = str(calib_accel)
+        xmp_props["CalibMag"]   = str(calib_mag)
 
     if xmp_props:
         xmpfile = XMPFiles(file_path=image, open_forupdate=True)
