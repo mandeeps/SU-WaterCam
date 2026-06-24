@@ -160,15 +160,15 @@ def get_euler_stable(n: int = 20, interval_s: float = 0.015) -> dict:
     if sensor is None:
         return {}
 
-    headings, pitches, rolls = [], [], []
+    headings, rolls, pitches = [], [], []
     for _ in range(n):
         e = sensor.euler
         if isinstance(e, tuple) and len(e) == 3 and e[0] is not None:
             headings.append(e[0])
             if e[1] is not None:
-                pitches.append(e[1])
+                rolls.append(e[1])    # Adafruit euler[1] = roll
             if e[2] is not None:
-                rolls.append(e[2])
+                pitches.append(e[2])  # Adafruit euler[2] = pitch
         time.sleep(interval_s)
 
     if not headings:
