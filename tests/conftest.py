@@ -68,6 +68,11 @@ _stub("gpsd")
 # python-xmp-toolkit (needs exempi C library, not available in CI)
 _stub("libxmp")
 _stub("libxmp.consts")
+# Add attributes so `from libxmp import XMPFiles, XMPMeta, consts` succeeds
+sys.modules["libxmp.consts"].XMP_NS_DC = "http://purl.org/dc/elements/1.1/"
+sys.modules["libxmp"].XMPFiles = MagicMock
+sys.modules["libxmp"].XMPMeta = MagicMock
+sys.modules["libxmp"].consts = sys.modules["libxmp.consts"]
 
 # Preload so patch("tools.compress_segmented.compress_image") resolves at import
 import tools.compress_segmented  # noqa: F401

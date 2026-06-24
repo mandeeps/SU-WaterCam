@@ -68,9 +68,12 @@ def change_to_rational(number):
     return (f.numerator, f.denominator)
 
 
+_METADATA_LOG = "/home/pi/SU-WaterCam/data/metadata_log.txt"
+
+
 def add_metadata(image):
     # add metadata to an image
-    DATA = "/home/pi/SU-WaterCam/data/metadata_log.txt"
+    DATA = _METADATA_LOG
 
     # Initialize IMU variables
     roll = None
@@ -134,8 +137,8 @@ def add_metadata(image):
     if device_id:
         exif_data["Exif"][piexif.ExifIFD.BodySerialNumber] = device_id.encode("ascii", errors="replace")
 
-    # Add roll/pitch/yaw to UserComment tag if they exist
-    if roll is not None:
+    # Add roll/pitch/yaw to UserComment tag only when all three are available
+    if roll is not None and pitch is not None and yaw is not None:
         uc = f"Roll {roll} Pitch {pitch} Yaw {yaw}"
         if heading_std is not None:
             uc += f" HeadingStd {heading_std}"
@@ -145,7 +148,7 @@ def add_metadata(image):
     xmp_props: dict = {}
     if device_id:
         xmp_props["DeviceID"] = device_id
-    if roll is not None:
+    if roll is not None and pitch is not None and yaw is not None:
         xmp_props["Roll"] = str(roll)
         xmp_props["Pitch"] = str(pitch)
         # Raw magnetic heading in sensor frame. Mount offset, magnetic declination,

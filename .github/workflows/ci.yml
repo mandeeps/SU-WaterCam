@@ -27,6 +27,7 @@ jobs:
           pip install \
             pytest \
             numpy Pillow brotli \
+            piexif \
             bitstring bitarray \
             pyserial requests \
             pympler \
@@ -50,3 +51,10 @@ jobs:
             tests/test_ip_command_handling.py \
             -v --tb=short \
             -k "not TestLoRaPacketEncoding"
+
+      - name: Run IMU and metadata tests
+        run: |
+          python -m pytest \
+            tests/test_bno055_imu.py \
+            tests/test_add_metadata.py \
+            -v --tb=short
