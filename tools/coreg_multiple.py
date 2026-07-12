@@ -265,8 +265,13 @@ def apply_cached_transform(fixed_image_path: str, moving_image_path: str, cached
     else:
         moving_image_cv_resized = cv2.resize(moving_image_cv, (fixed_image_cv.shape[1], fixed_image_cv.shape[0]))
         fixed_image_cv_resized = fixed_image_cv
-    fixed_image_sitk = sitk.GetImageFromArray(fixed_image_cv_resized.astype(np.float32))
-    moving_image_sitk = sitk.GetImageFromArray(moving_image_cv_resized.astype(np.float32))
+    # sitk.GetImageFromArray treats a 3-channel (H, W, 3) array as a 3D volume, not a 2D
+    # image, which breaks Resample against the 2D cached_transform. Collapse to a single
+    # band first, matching how preprocess_image_for_registration() feeds the fresh path.
+    fixed_image_gray = cv2.cvtColor(fixed_image_cv_resized, cv2.COLOR_BGR2GRAY) if fixed_image_cv_resized.ndim == 3 else fixed_image_cv_resized
+    moving_image_gray = moving_image_cv_resized[:, :, 0] if moving_image_cv_resized.ndim == 3 else moving_image_cv_resized
+    fixed_image_sitk = sitk.GetImageFromArray(fixed_image_gray.astype(np.float32))
+    moving_image_sitk = sitk.GetImageFromArray(moving_image_gray.astype(np.float32))
     moving_resampled = sitk.Resample(moving_image_sitk, fixed_image_sitk, cached_transform, sitk.sitkLinear, 0.0, moving_image_sitk.GetPixelID())
     moving_resampled_np = sitk.GetArrayFromImage(moving_resampled)
     moving_resampled_np = normalize_image(moving_resampled_np)
