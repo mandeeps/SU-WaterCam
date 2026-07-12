@@ -1975,41 +1975,57 @@ def transmit_auto(data) -> bool:
 def get_config_value(key: str, default: Any = None) -> Any:
     """Convenience function to get configuration values"""
     handler = get_lora_handler()
+    if handler is None:
+        return default
     return handler.get_config(key, default)
 
 def check_lora_reception():
     """Convenience function to check LoRa reception status"""
     handler = get_lora_handler()
+    if handler is None:
+        return False
     return handler.check_reception_status()
 
 def check_mdot_data_config():
     """Convenience function to check mDot data reception configuration"""
     handler = get_lora_handler()
+    if handler is None:
+        return False
     return handler.check_mdot_data_config()
 
 def test_reception_format(test_payload: str):
     """Convenience function to test the new reception format"""
     handler = get_lora_handler()
+    if handler is None:
+        return False
     return handler.test_reception_format(test_payload)
 
 def get_size_limit() -> int:
     """Convenience function to get the current payload size limit"""
     handler = get_lora_handler()
+    if handler is None:
+        return 242  # default LoRaWAN payload size, matches LoRaHandler's own default
     return handler.get_size_limit()
 
 def refresh_size_limit() -> bool:
     """Convenience function to manually refresh the size limit"""
     handler = get_lora_handler()
+    if handler is None:
+        return False
     return handler.refresh_size_limit()
 
 def get_last_transmission_status() -> dict:
     """Convenience function to get the last transmission status"""
     handler = get_lora_handler()
+    if handler is None:
+        return {}
     return handler.get_last_transmission_status()
 
 def get_transmission_history() -> list:
     """Convenience function to get the transmission history"""
     handler = get_lora_handler()
+    if handler is None:
+        return []
     return handler.get_transmission_history()
 
 
@@ -2018,11 +2034,15 @@ def get_transmission_history() -> list:
 def transmit(content):
     """Legacy transmit function"""
     handler = get_lora_handler()
+    if handler is None:
+        return False
     return handler.transmit(content)
 
 def compressed_encoding(data):
     """Legacy encoding function"""
     handler = get_lora_handler()
+    if handler is None:
+        return None
     return handler.compressed_encoding(data)
 
 # Example packet for testing
