@@ -34,10 +34,18 @@ _current_dir = os.path.dirname(os.path.abspath(__file__))
 _parent_dir = os.path.dirname(_current_dir)
 
 try:
-    from lora_handler_concurrent import get_lora_handler, get_config_value
+    # Prefer the package-qualified import so this module shares the same
+    # sys.modules entry (and thus the same _lora_handler singleton/lock) as
+    # ticktalk_main.py, which always imports via "tools.lora_handler_concurrent".
+    # A bare "from lora_handler_concurrent import ..." here would silently
+    # create a second, independent copy of the module with its own singleton,
+    # causing the two copies to deadlock each other over the real serial-port
+    # flock ("LoRa serial port already owned by another process") even though
+    # only one OS process is actually running.
+    from tools.lora_handler_concurrent import get_lora_handler, get_config_value
 except ImportError:
     try:
-        from tools.lora_handler_concurrent import get_lora_handler, get_config_value
+        from lora_handler_concurrent import get_lora_handler, get_config_value
     except ImportError:
         for _d in (_current_dir, _parent_dir):
             if _d not in sys.path:
