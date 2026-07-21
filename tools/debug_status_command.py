@@ -202,11 +202,18 @@ def get_lora_status() -> Dict[str, Any]:
     """Get LoRa and application specific status."""
     try:
         # Try to get LoRa handler status
-        from lora_handler_concurrent import get_lora_handler
+        # Package-qualified so this shares the same sys.modules entry (and
+        # thus the same _lora_handler singleton/lock) as ticktalk_main.py,
+        # which always imports via "tools.lora_handler_concurrent". A bare
+        # import here previously created a second, independent copy of the
+        # module with its own singleton, which self-conflicted with the real
+        # one over the serial-port flock ("already owned by another process")
+        # whenever a debug-status request triggered this code path.
+        from tools.lora_handler_concurrent import get_lora_handler
         handler = get_lora_handler()
-        
+
         # Try to get runtime parameters
-        from lora_runtime_integration import get_parameter
+        from tools.lora_runtime_integration import get_parameter
         emergency_mode = get_parameter('emergency_mode', False)
         
         runtime_params = {
@@ -243,7 +250,7 @@ def get_wittypi_status() -> Dict[str, Any]:
             }
         
         # If hardware is present, try to get data
-        from wittypi_control import get_data
+        from tools.wittypi_control import get_data
         temperature, battery_voltage, internal_voltage, internal_current = get_data()
 
         return {
@@ -314,7 +321,7 @@ def get_sensor_status() -> Dict[str, Any]:
     
     # Check IMU sensor
     try:
-        from bno055_imu import get_orientation
+        from tools.bno055_imu import get_orientation
         imu_data = get_orientation()
         sensor_status['imu'] = {
             'available': True,
@@ -330,7 +337,7 @@ def get_sensor_status() -> Dict[str, Any]:
     
     # Check temperature sensor
     try:
-        from aht20_temperature import get_aht20
+        from tools.aht20_temperature import get_aht20
         temp_data = get_aht20()
         sensor_status['temperature'] = {
             'available': True,
@@ -346,7 +353,7 @@ def get_sensor_status() -> Dict[str, Any]:
     
     # Check GPS
     try:
-        from get_gps import get_lat_lon_alt
+        from tools.get_gps import get_lat_lon_alt
         gps_data = get_lat_lon_alt()
         sensor_status['gps'] = {
             'available': gps_data is not None,
