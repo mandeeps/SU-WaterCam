@@ -683,10 +683,13 @@ class LoRaHandler:
             if 'emergency_frequency' in data: 
                 print(f"DEBUG: Processing emergency_frequency: {data['emergency_frequency']}")
                 add_u16(0x09, 0x49, data['emergency_frequency'])
-            if 'neighborhood_emergency_frequency' in data: 
+            if 'neighborhood_emergency_frequency' in data:
                 print(f"DEBUG: Processing neighborhood_emergency_frequency: {data['neighborhood_emergency_frequency']}")
                 add_u16(0x09, 0x59, data['neighborhood_emergency_frequency'])
-            
+            if 'audio_recording_enabled' in data:
+                print(f"DEBUG: Processing audio_recording_enabled: {data['audio_recording_enabled']}")
+                add_u8(0x09, 0x69, data['audio_recording_enabled'])
+
             # WittyPi voltage measurements for battery status
             if 'wittypi_temperature' in data: 
                 print(f"DEBUG: Processing wittypi_temperature: {data['wittypi_temperature']}")
@@ -804,6 +807,9 @@ class LoRaHandler:
                 elif channel == '43' and command == '00':
                     self.update_config('backup_enabled', bool(val_int))
                     print(f'Backup {"enabled" if bool(val_int) else "disabled"}')
+                elif channel == '44' and command == '00':
+                    self.update_config('audio_recording_enabled', bool(val_int))
+                    print(f'Audio recording {"enabled" if bool(val_int) else "disabled"}')
                 elif channel == '21' and command == '00':
                     self.update_config('emergency_mode', True)
                     print('🚨 Emergency mode activated!')
@@ -970,7 +976,16 @@ class LoRaHandler:
                             print(f'Backup {"enabled" if val else "disabled"}')
                         except ValueError:
                             print(f'Invalid backup value: {value}')
-                            
+
+                    elif channel == '44' and command == '0':
+                        # Audio recording enabled/disabled
+                        try:
+                            val = bool(int(value))
+                            self.update_config('audio_recording_enabled', val)
+                            print(f'Audio recording {"enabled" if val else "disabled"}')
+                        except ValueError:
+                            print(f'Invalid audio recording value: {value}')
+
                     elif channel == '21' and command == '0':
                         # Emergency status: system enters emergency mode and stops scheduled shutdowns
                         self.update_config('emergency_mode', True)

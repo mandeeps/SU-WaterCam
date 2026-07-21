@@ -165,6 +165,28 @@ class TestFloodCodeFrequency(unittest.TestCase):
         self.assertIn("14 94", result["skipped"])
 
 
+class TestAudioRecordingEnabled(unittest.TestCase):
+    """16 96 — audio_recording_enabled: direct u8 bool (0/1)."""
+
+    def test_enable(self):
+        store, fn = _accumulator()
+        result = apply_downlink_command(_cmd(("16 96", struct.pack("B", 1))), fn)
+        self.assertEqual(store["audio_recording_enabled"], True)
+        self.assertIn("audio_recording_enabled=True", result["applied"])
+        self.assertEqual(result["skipped"], [])
+
+    def test_disable(self):
+        store, fn = _accumulator()
+        apply_downlink_command(_cmd(("16 96", struct.pack("B", 0))), fn)
+        self.assertEqual(store["audio_recording_enabled"], False)
+
+    def test_wrong_payload_length_skipped(self):
+        store, fn = _accumulator()
+        result = apply_downlink_command(_cmd(("16 96", b"\x00\x00")), fn)  # 2 bytes, expected 1
+        self.assertNotIn("audio_recording_enabled", store)
+        self.assertIn("16 96", result["skipped"])
+
+
 class TestMultiPartCommand(unittest.TestCase):
     """A single command dict may carry multiple parts."""
 

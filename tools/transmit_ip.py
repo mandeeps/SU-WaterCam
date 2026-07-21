@@ -551,6 +551,7 @@ def apply_downlink_command(
         "12 92": 1,
         "13 93": 1,
         "14 94": 1,
+        "16 96": 1,
     }
 
     parts_raw = cmd.get("parts")
@@ -657,6 +658,12 @@ def apply_downlink_command(
             else:
                 logger.warning("apply_downlink_command: flood_code_freq index %d out of range", idx)
                 skipped.append(code)
+
+        elif code == "16 96":  # audio_recording_enabled — direct u8 bool (0/1)
+            val = bool(int.from_bytes(payload_bytes, "big"))
+            set_param_fn("audio_recording_enabled", val)
+            logger.info("Applied: audio_recording_enabled = %s", val)
+            applied.append(f"audio_recording_enabled={val}")
 
         else:
             logger.warning("apply_downlink_command: unrecognised code '%s' — ignoring", code)

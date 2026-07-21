@@ -289,7 +289,8 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         'stage_threshold': stage_threshold,
         'monitoring_frequency': get_parameter('monitoring_frequency', 60),
         'emergency_frequency': get_parameter('emergency_frequency', 5),
-        'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30)
+        'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30),
+        'audio_recording_enabled': 1 if get_parameter('audio_recording_enabled', True) else 0,
     })
 
     # Embed capture timestamp so stored packets carry original collection time
@@ -711,6 +712,25 @@ def get_time(trigger):
         return path.join(repo_root, "images", "fallback")
 
 @SQify
+def record_audio(trigger, directory):
+    """Start this iteration's audio segment from the USB microphone, if enabled.
+
+    One WAV segment per iteration (same directory photos/thermal go into),
+    so a hard WittyPi power-cut loses at most the in-progress segment rather
+    than the whole wake window. See tools/audio_recorder.py.
+    """
+    from tools.audio_recorder import get_audio_recorder
+
+    if not get_parameter('audio_recording_enabled', True):
+        return "disabled"
+
+    retention_days = get_parameter('data_retention_days', 7)
+    recorder = get_audio_recorder(retention_days=retention_days)
+    if recorder.start_segment(directory):
+        return "recording"
+    return "unavailable"
+
+@SQify
 def coregistration(dirname, lepton_state, photo_state):
     import fcntl
     from tools.coreg_multiple import coreg
@@ -828,6 +848,13 @@ def call_shutdown(state):
 
     if auto_shutdown_enabled and new_count >= shutdown_limit:
         print(f"\n🚨 SHUTDOWN TRIGGERED: {new_count} iterations >= {shutdown_limit} limit\n")
+        try:
+            # Finalize the in-progress audio segment so its WAV header is
+            # written correctly before the OS goes down.
+            from tools.audio_recorder import stop_recording_if_active
+            stop_recording_if_active()
+        except Exception as e:
+            print(f"⚠️ Failed to finalize audio recording before shutdown: {e}")
         try:
             # Preferred: graceful OS shutdown via doas (configured in /etc/doas.conf for user pi)
             call(["doas", "/usr/sbin/shutdown", "-h", "now"])
@@ -966,7 +993,8 @@ def lora_token(bitmap):
         'stage_threshold': stage_threshold,
         'monitoring_frequency': get_parameter('monitoring_frequency', 60),
         'emergency_frequency': get_parameter('emergency_frequency', 5),
-        'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30)
+        'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30),
+        'audio_recording_enabled': 1 if get_parameter('audio_recording_enabled', True) else 0,
     })
 
     try:
@@ -1729,6 +1757,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
         data['monitoring_frequency']              = get_parameter('monitoring_frequency', 60)
         data['emergency_frequency']               = get_parameter('emergency_frequency', 5)
         data['neighborhood_emergency_frequency']  = get_parameter('neighborhood_emergency_frequency', 30)
+        data['audio_recording_enabled']           = 1 if get_parameter('audio_recording_enabled', True) else 0
 
         # ── Build channel list ─────────────────────────────────────────────────
         channels = []
@@ -1793,6 +1822,9 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
         channels.append({"code": "09 59",
                          "payload_hex": struct.pack(">I",
                              _u32(data['neighborhood_emergency_frequency'])).hex()})
+        channels.append({"code": "09 69",
+                         "payload_hex": struct.pack(">I",
+                             _u32(data['audio_recording_enabled'])).hex()})
 
         # ── Reachability check (after data is ready so we can queue on failure) ─
         if not tx.is_reachable(timeout_s=5):
@@ -1927,7 +1959,10 @@ def ttmain(trigger):
         
         # Call get_time as STREAM function to get directory name
         token, dirname = get_time(trigger, TTClock=root_clock, TTPeriod=60_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000)
-        
+
+        # Start this iteration's audio segment (USB microphone), if enabled
+        audio_status = record_audio(trigger, dirname)
+
         # Take photos and capture lepton data at GRAPH level
         from tt_take_photos import flir, take_two_photos
         photo = take_two_photos(trigger, dirname)
