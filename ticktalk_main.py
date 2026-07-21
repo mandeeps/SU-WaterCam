@@ -720,6 +720,7 @@ def record_audio(trigger, directory):
     than the whole wake window. See tools/audio_recorder.py.
     """
     from tools.audio_recorder import get_audio_recorder
+    from tools.lora_runtime_integration import get_parameter
 
     if not get_parameter('audio_recording_enabled', True):
         return "disabled"

@@ -6,17 +6,50 @@ bytecode in a namespace that was captured at compile time.  Any name that is
 only imported at the module level — rather than inside the function body with a
 local `import` statement — will not be present and raises NameError at runtime.
 
-These tests call each @SQify function via __wrapped__ (which bypasses the
-SQify machinery and invokes the raw Python function) with all hardware and
-network dependencies patched.  A NameError from any test means a module-level
-name leaked into a function body that TTPython will execute in isolation.
+Most tests below call each @SQify function via __wrapped__ (which bypasses
+the SQify machinery and invokes the raw Python function) with all hardware
+and network dependencies patched. IMPORTANT CAVEAT, found the hard way: a
+function reached this way still runs with its real __globals__ -- the full
+ticktalk_main module namespace, module-level imports included -- because
+`.__wrapped__` is just the plain function object as normally imported by
+this test file. That does NOT reproduce the actual runtime isolation, so
+this style only catches a name that is undefined *anywhere* (e.g. a typo);
+it cannot catch "works via a module-level import, missing the required
+local import" -- exactly the bug that shipped in record_audio() and caused
+a live "NameError: name 'get_parameter' is not defined" in production.
+TestRecordAudio below uses _exec_in_isolated_sq_namespace() instead, which
+re-extracts and re-execs the function's source the same way
+ticktalkpython/SQExecute.py:147,199 does at runtime, so it actually
+reproduces the isolation and would have caught that bug.
 
 Behavioral tests for call_shutdown() and wittypi_emergency_control() are also
 included here because those functions were the source of recent NameError bugs.
 """
 import contextlib
+import inspect
 import sys
 from unittest.mock import MagicMock, patch, call as mock_call
+
+from ticktalkpython import SQ as _SQ_module
+
+
+def _exec_in_isolated_sq_namespace(function_name):
+    """Re-extract and re-exec a function's source exactly as SQExecute.py does
+    at runtime, into a namespace containing ONLY {SQify, STREAMify, GRAPHify,
+    sq_state} -- nothing from ticktalk_main's module-level imports. Returns
+    the freshly-defined, undecorated function (via .__wrapped__).
+    """
+    import ticktalk_main
+    source = inspect.getsource(getattr(ticktalk_main, function_name).__wrapped__)
+    compiled_code = compile(source, '', 'exec')
+    namespace = {
+        "SQify": _SQ_module.SQify,
+        "STREAMify": _SQ_module.STREAMify,
+        "GRAPHify": _SQ_module.GRAPHify,
+        "sq_state": {},
+    }
+    exec(compiled_code, namespace)
+    return namespace[function_name].__wrapped__
 
 
 # ---------------------------------------------------------------------------
@@ -262,3 +295,45 @@ class TestInitializeLoraIntegration:
             result = ticktalk_main.initialize_lora_integration.__wrapped__("trigger")
         assert result['status'] == 'failed'
         assert 'Import error' in result['error']
+
+
+# ---------------------------------------------------------------------------
+# record_audio — NameError regression (missing local get_parameter import
+# caused a production crash: "NameError: name 'get_parameter' is not defined")
+# ---------------------------------------------------------------------------
+
+class TestRecordAudio:
+    """Uses _exec_in_isolated_sq_namespace(), not .__wrapped__ directly --
+    see the module docstring. A plain .__wrapped__ call would NOT have caught
+    the production NameError this class guards against, because it runs with
+    ticktalk_main's full module globals rather than the isolated namespace
+    TTPython's compiled runtime actually uses.
+    """
+
+    def test_no_name_error_when_enabled(self):
+        """record_audio() must resolve get_parameter via its own local import,
+        not the module-level one (absent from TTPython's isolated namespace)."""
+        mock_recorder = MagicMock()
+        mock_recorder.start_segment.return_value = True
+
+        with patch("tools.lora_runtime_integration.get_parameter",
+                   return_value=True), \
+             patch("tools.audio_recorder.get_audio_recorder",
+                   return_value=mock_recorder):
+            fn = _exec_in_isolated_sq_namespace("record_audio")
+            try:
+                result = fn("trigger", "/tmp/some-dir")
+            except NameError as exc:
+                raise AssertionError(f"NameError in record_audio: {exc}") from exc
+        assert result == "recording"
+
+    def test_no_name_error_when_disabled(self):
+        """Same NameError guard on the early-return (disabled) path."""
+        with patch("tools.lora_runtime_integration.get_parameter",
+                   return_value=False):
+            fn = _exec_in_isolated_sq_namespace("record_audio")
+            try:
+                result = fn("trigger", "/tmp/some-dir")
+            except NameError as exc:
+                raise AssertionError(f"NameError in record_audio: {exc}") from exc
+        assert result == "disabled"
