@@ -1,6 +1,10 @@
 [Unit]
 Description=Run main Watercam Python script (TTPython variant)
 After=multi-user.target
+# Cap restart attempts so a persistently broken deploy doesn't loop forever:
+# at most 3 restarts within any 5-minute window.
+StartLimitIntervalSec=300
+StartLimitBurst=3
 
 [Service]
 User=pi
@@ -8,6 +12,16 @@ Group=pi
 Type=simple
 WorkingDirectory=/home/pi/SU-WaterCam
 ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/runrtm.py -d 50 -s 0 --timeout=0 /home/pi/SU-WaterCam/output/ticktalk_main.pickle 8080
+# An uncaught exception anywhere in the TTPython graph (e.g. the flir()
+# max()-on-empty-list bug) kills this process entirely; without a restart
+# policy the device sits idle collecting no data until the next WittyPi
+# hardware wake, which can be hours away. Restart=on-failure recovers
+# automatically from that class of crash. This does not interfere with the
+# intentional shutdown path (call_shutdown() -> doas shutdown -h now): the
+# whole OS is going down at that point, so systemd does not restart
+# services during an actual system shutdown/reboot.
+Restart=on-failure
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target

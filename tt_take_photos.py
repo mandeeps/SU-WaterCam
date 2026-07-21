@@ -144,6 +144,12 @@ def flir(directory):
         (capture_fresh, f"lepton_{date}.pgm"),
         (lepton_fresh,  f"temperatures_{date}.csv"),
     ]:
+        if not fresh_files:
+            # e.g. lepton timed out (capture_fresh already returns early above,
+            # but lepton_fresh reaching here empty was previously unguarded:
+            # max() on an empty sequence raised ValueError and crashed the
+            # entire TTPython runtime process, not just this iteration).
+            continue
         src_path = max(fresh_files, key=path.getmtime)
         try:
             rename(src_path, path.join(directory, dst_name))

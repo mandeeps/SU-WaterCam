@@ -142,6 +142,38 @@ class TestCameraCapture:
         result = flir.__wrapped__(tmp_image_dir)
         assert result is True
 
+    def test_flir_lepton_timeout_after_successful_capture_does_not_crash(self, tmp_image_dir):
+        """Regression: capture succeeds (produces a fresh file) but lepton times
+        out (produces none). flir() must not crash with ValueError from
+        max() on the empty lepton_fresh list -- in production this took down
+        the entire TTPython runtime process, not just the current iteration.
+        """
+        import subprocess as subprocess_module
+        from tt_take_photos import flir
+
+        capture_result = MagicMock(returncode=0)
+
+        def fake_run(command, **kwargs):
+            if "lepton" in command[0]:
+                raise subprocess_module.TimeoutExpired(cmd=command, timeout=kwargs.get("timeout"))
+            return capture_result
+
+        def fake_glob(pattern):
+            if "IMG_" in pattern:
+                return [os.path.join(tmp_image_dir, "IMG_0001.pgm")]
+            return []  # lepton_temp_*.csv -- lepton timed out, nothing produced
+
+        with patch("os.path.isfile", return_value=True), \
+             patch("os.path.getmtime", return_value=9999999999.0), \
+             patch("subprocess.run", side_effect=fake_run), \
+             patch("glob.glob", side_effect=fake_glob), \
+             patch("os.rename"):
+            try:
+                result = flir.__wrapped__(tmp_image_dir)
+            except ValueError as exc:
+                raise AssertionError(f"flir() raised on empty lepton output: {exc}") from exc
+        assert result is True
+
 
 # ═════════════════════════════════════════════════════════════════════════
 # Stage 4 – Bitmap compression
