@@ -113,3 +113,143 @@ def test_sleep_called_once_per_sample(monkeypatch):
     imu.get_euler_stable(n=5, interval_s=0.015)
     assert len(sleep_calls) == 5
     assert all(abs(s - 0.015) < 1e-9 for s in sleep_calls)
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# _get_sensor() warm-up: waits for calibration_status to reconfirm mag,
+# not just non-zero euler output.
+#
+# Regression: writing saved offset registers does not instantly restore
+# calibration_status to its saved value -- the BNO055's own fusion algorithm
+# re-earns that confidence over a short window of live operation. The old
+# warm-up only waited for non-zero euler output, so the very first photo
+# captured right after boot could catch the sensor mid-settle and trigger
+# add_metadata.py's "magnetometer uncalibrated" warning even with valid,
+# fully-calibrated (mag=3) saved offsets -- confirmed happening on UFO010.
+# ═════════════════════════════════════════════════════════════════════════
+
+class _FakeFusionSensor:
+    """Sensor stub for _get_sensor()'s warm-up loop.
+
+    euler becomes non-zero after `euler_settle_calls` reads, and
+    calibration_status's mag value climbs to `final_mag` after
+    `mag_settle_calls` reads -- simulating the sensor needing a few
+    live-operation ticks before either settles, independently of each other.
+    """
+    def __init__(self, euler_settle_calls=0, mag_settle_calls=0, final_mag=3):
+        self._reads = 0
+        self._euler_settle_calls = euler_settle_calls
+        self._mag_settle_calls = mag_settle_calls
+        self._final_mag = final_mag
+        self.mode = 0x0C  # NDOF, arbitrary non-zero "previous mode"
+        self.offsets_accelerometer = None
+        self.offsets_magnetometer = None
+        self.offsets_gyroscope = None
+        self.radius_accelerometer = None
+        self.radius_magnetometer = None
+
+    @property
+    def euler(self):
+        self._reads += 1
+        settled = self._reads > self._euler_settle_calls
+        return (90.0, 0.0, 0.0) if settled else (0.0, 0.0, 0.0)
+
+    @property
+    def calibration_status(self):
+        settled = self._reads > self._mag_settle_calls
+        mag = self._final_mag if settled else 0
+        return (0, 3, 3, mag)
+
+
+class _FakeClock:
+    """Deterministic time.time()/time.sleep() so warm-up tests run instantly."""
+    def __init__(self):
+        self.now = 0.0
+
+    def time(self):
+        return self.now
+
+    def sleep(self, s):
+        self.now += s
+
+
+def _write_valid_calib_file(path):
+    import json
+    path.write_text(json.dumps({
+        "node_id": "test",
+        "timestamp": "2026-01-01T00:00:00",
+        "offsets_bytes": [0] * 22,
+    }))
+
+
+@pytest.fixture(autouse=True)
+def _reset_sensor_singleton():
+    import tools.bno055_imu as imu
+    imu._sensor = None
+    yield
+    imu._sensor = None
+
+
+def _patch_hardware(monkeypatch, imu, fake_sensor):
+    monkeypatch.setattr(imu.board, "I2C", lambda: object())
+    monkeypatch.setattr(imu.adafruit_bno055, "BNO055_I2C", lambda i2c: fake_sensor, raising=False)
+
+
+def test_get_sensor_waits_for_mag_reconfirmation_when_offsets_loaded(tmp_path, monkeypatch):
+    import tools.bno055_imu as imu
+    _write_valid_calib_file(tmp_path / "calib.json")
+    monkeypatch.setattr(imu, "_CALIB_FILE", tmp_path / "calib.json")
+    clock = _FakeClock()
+    monkeypatch.setattr(imu.time, "time", clock.time)
+    monkeypatch.setattr(imu.time, "sleep", clock.sleep)
+
+    # mag only reaches 3 after a few reads -- warm-up must wait for it.
+    sensor = _FakeFusionSensor(euler_settle_calls=3, mag_settle_calls=3, final_mag=3)
+    _patch_hardware(monkeypatch, imu, sensor)
+
+    result = imu._get_sensor()
+
+    assert result is sensor
+    assert sensor.calibration_status[3] == 3
+
+
+def test_get_sensor_warns_when_mag_never_reconfirms(tmp_path, monkeypatch, caplog):
+    import logging
+    import tools.bno055_imu as imu
+    _write_valid_calib_file(tmp_path / "calib.json")
+    monkeypatch.setattr(imu, "_CALIB_FILE", tmp_path / "calib.json")
+    clock = _FakeClock()
+    monkeypatch.setattr(imu.time, "time", clock.time)
+    monkeypatch.setattr(imu.time, "sleep", clock.sleep)
+
+    # euler settles quickly (fusion is fine), but mag never reaches >= 2
+    # within the 5s warm-up window.
+    sensor = _FakeFusionSensor(euler_settle_calls=0, mag_settle_calls=10_000, final_mag=0)
+    _patch_hardware(monkeypatch, imu, sensor)
+
+    with caplog.at_level(logging.WARNING):
+        imu._get_sensor()
+
+    assert any("magnetometer calibration status has not reconfirmed" in r.message
+               for r in caplog.records)
+
+
+def test_get_sensor_no_calibration_file_uses_short_timeout_and_old_warning(tmp_path, monkeypatch, caplog):
+    import logging
+    import tools.bno055_imu as imu
+    monkeypatch.setattr(imu, "_CALIB_FILE", tmp_path / "does-not-exist.json")
+    clock = _FakeClock()
+    monkeypatch.setattr(imu.time, "time", clock.time)
+    monkeypatch.setattr(imu.time, "sleep", clock.sleep)
+
+    # No calibration was loaded, and fusion never settles here either --
+    # warm-up should time out at 2s, not 5s, on the original
+    # "fusion not yet initialised" warning.
+    sensor = _FakeFusionSensor(euler_settle_calls=10_000, mag_settle_calls=10_000, final_mag=0)
+    _patch_hardware(monkeypatch, imu, sensor)
+
+    with caplog.at_level(logging.WARNING):
+        imu._get_sensor()
+
+    assert clock.now < 3.0  # short (2s) timeout, not the 5s calibrated-path one
+    assert any("fusion not yet initialised" in r.message for r in caplog.records)

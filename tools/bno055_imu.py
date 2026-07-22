@@ -101,19 +101,44 @@ def _get_sensor():
             return None
         i2c = board.I2C()
         _sensor = adafruit_bno055.BNO055_I2C(i2c)
-        _apply_calibration(_sensor)
-        # Warm-up: allow fusion to initialize
+        calibration_loaded = _apply_calibration(_sensor)
+        # Warm-up: allow fusion to initialize. If saved offsets were loaded,
+        # also wait for calibration_status to reconfirm mag >= 2 (the
+        # threshold add_metadata.py warns below) before returning. Writing
+        # the offset registers does not instantly restore calibration_status
+        # to its saved value -- the BNO055's own fusion algorithm re-earns
+        # that confidence over a short window of live operation, even though
+        # the offsets themselves are already correct. Without this wait, the
+        # very first photo captured right after boot can catch the sensor
+        # mid-settle and spuriously trigger the "uncalibrated" warning despite
+        # calibration actually being fine (confirmed happening on UFO010).
         try:
             import time as _t
-            for _ in range(20):  # ~2s max
+            max_wait_s = 5.0 if calibration_loaded else 2.0
+            deadline = _t.time() + max_wait_s
+            fusion_ready = False
+            mag_confirmed = not calibration_loaded
+            while _t.time() < deadline:
                 e = getattr(_sensor, 'euler', None)
                 if isinstance(e, tuple) and any(v not in (None, 0.0) for v in e):
+                    fusion_ready = True
+                if calibration_loaded and not mag_confirmed:
+                    try:
+                        mag = _sensor.calibration_status[3]
+                        if mag is not None and mag >= 2:
+                            mag_confirmed = True
+                    except Exception:
+                        pass
+                if fusion_ready and mag_confirmed:
                     break
                 _t.sleep(0.1)
-            else:
-                e = getattr(_sensor, 'euler', None)
-                if not (isinstance(e, tuple) and any(v not in (None, 0.0) for v in e)):
-                    logger.warning("BNO055 warmup timed out — fusion not yet initialised")
+            if not fusion_ready:
+                logger.warning("BNO055 warmup timed out — fusion not yet initialised")
+            elif not mag_confirmed:
+                logger.warning(
+                    "BNO055 warmup timed out — magnetometer calibration status has not "
+                    "reconfirmed yet despite loaded offsets; heading may be briefly unreliable"
+                )
         except Exception:
             pass
         return _sensor

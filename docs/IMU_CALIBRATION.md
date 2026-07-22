@@ -194,7 +194,21 @@ This loads offsets and prints live calibration status alongside heading output. 
 ```
 
 Expected when fully calibrated: `cal=3/3/2/3` (sys=3, gyro=3, accel=2, mag=3).  
-If `mag < 2` after boot: the calibration file is missing or corrupted — re-run Stage 1.
+If `mag < 2` immediately after boot but climbs to 3 within a few seconds on its
+own: that's normal — see the note below. If it stays below 2 for longer than
+that, the calibration file is missing or corrupted — re-run Stage 1.
+
+**Note on the first few seconds after boot:** writing saved offsets to the
+sensor does not instantly restore `calibration_status` to its saved value —
+the BNO055's own fusion algorithm re-earns that confidence over a short
+window of live operation (typically a few seconds), even though the offsets
+themselves are already correct. `tools/bno055_imu.py`'s `_get_sensor()` waits
+up to 5 seconds for `mag` to reconfirm before returning, specifically to
+avoid the very first photo after boot spuriously tripping
+`add_metadata.py`'s "magnetometer uncalibrated" warning. If you see that
+warning on a unit with valid, fully-calibrated (`mag: 3`) saved offsets, it
+most likely already resolved a few seconds later — check the *next* photo's
+EXIF/log rather than assuming calibration itself failed.
 
 ---
 
@@ -202,7 +216,12 @@ If `mag < 2` after boot: the calibration file is missing or corrupted — re-run
 
 **`mag` stays at 0 after loading offsets**
 
-The calibration file is missing, has the wrong path, or the offsets file has `"mag": 0` in the saved status (Stage 1 was incomplete). Re-run Stage 1 with the box off the pole.
+First check whether it's just slow to reconfirm rather than genuinely broken
+— see the note in the previous section; this can take a few seconds even
+with valid saved offsets. If it's still 0 well after that: the calibration
+file is missing, has the wrong path, or the offsets file itself has
+`"mag": 0` in the saved status (Stage 1 was incomplete). Re-run Stage 1 with
+the box off the pole.
 
 **Residual heading error > 5° in Stage 2**
 
