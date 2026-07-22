@@ -1924,8 +1924,23 @@ _lora_handler_lock = threading.Lock()
 def get_lora_handler() -> Optional[LoRaHandler]:
     """Get the global LoRa handler instance (thread-safe singleton).
 
-    Returns None if another OS process already owns the serial port.  Callers
-    must check for None before dereferencing the result.
+    Returns None if another OS process still owns the serial port after
+    retrying.  Callers must check for None before dereferencing the result.
+
+    TickTalk's own runtime spawns multiple separate OS processes to execute
+    graph nodes (confirmed via `ps` PPID chains on a real device,
+    2026-07-22) -- _lora_handler/_lora_handler_lock only provide a working
+    singleton *within one process*; a sibling/child process that also needs
+    LoRa access starts with its own independent _lora_handler = None and
+    genuinely, correctly races for the same hardware via the OS-level flock
+    in LoRaHandler.__init__. That's a real architectural mismatch (a
+    per-process singleton guarding a resource multiple processes want), not
+    a simple bug -- properly fixing it means one process owning the port and
+    others talking to it over IPC, mirroring tools/segformer_daemon.py.
+    Retrying with a short backoff here is a pragmatic mitigation: it doesn't
+    change the architecture, but the losing side gets one real chance to
+    succeed once whichever process currently holds the port finishes and
+    releases it, instead of immediately giving up and skipping the cycle.
     """
     global _lora_handler
     if _lora_handler is not None:
@@ -1934,51 +1949,63 @@ def get_lora_handler() -> Optional[LoRaHandler]:
         # Re-check inside the lock — another thread may have created it while we waited.
         if _lora_handler is not None:
             return _lora_handler
-        try:
-            print("🔧 Creating new LoRaHandler instance...")
-            # Build in a local variable so the global is only written once
-            # initialization is fully complete.  Any thread hitting the outer
-            # fast-path before this point sees None and will block on the lock,
-            # then pick up the fully-ready instance from the inner re-check.
-            handler = LoRaHandler()
-            # Seed current_size_limit with the actual AT+TXS value BEFORE starting
-            # the listener so there is no response-parsing interference.
-            # Without this, current_size_limit stays at the 242 B default indefinitely
-            # because nothing else sends AT+TXS, and the SF-adaptive bitmap logic
-            # silently behaves as SF7 for the entire session.
+
+        max_attempts = 3
+        retry_delay_s = 1.0
+        for attempt in range(1, max_attempts + 1):
             try:
-                handler.refresh_size_limit()
-                print(f"🔧 Initial mDot size limit: {handler.current_size_limit} B")
-            except Exception as txs_err:
-                print(f"⚠️ Could not refresh initial size limit: {txs_err}; using default {handler.current_size_limit} B")
-            handler.start_listening()
-            _lora_handler = handler  # publish only after full init
-            print("✅ LoRa handler initialized successfully")
-        except LoRaSerialPortConflict:
-            _lora_handler = None
-            print(
-                f"ℹ️ LoRa serial port already owned by another process; "
-                f"skipping handler creation in PID {os.getpid()}"
-            )
-            return None
-        except Exception as e:
-            _lora_handler = None  # explicit: global was never written, but make intent clear
-            # If LoRaHandler() itself succeeded (flock + serial port both
-            # acquired) but a later step (e.g. start_listening()) is what
-            # raised, `handler` is bound to a fully-flock-holding object that
-            # was never published to _lora_handler and would otherwise leak
-            # its FDs -- and keep the real flock held -- for as long as this
-            # exception's traceback keeps it referenced.
-            try:
-                handler.close()
-            except NameError:
-                pass
-            except Exception:
-                pass
-            print(f"❌ Failed to initialize LoRa handler: {e}")
-            print("⚠️ LoRa functionality will not be available")
-            raise RuntimeError(f"LoRa handler initialization failed: {e}") from e
-    return _lora_handler
+                print(f"🔧 Creating new LoRaHandler instance... (attempt {attempt}/{max_attempts})")
+                # Build in a local variable so the global is only written once
+                # initialization is fully complete.  Any thread hitting the outer
+                # fast-path before this point sees None and will block on the lock,
+                # then pick up the fully-ready instance from the inner re-check.
+                handler = LoRaHandler()
+                # Seed current_size_limit with the actual AT+TXS value BEFORE starting
+                # the listener so there is no response-parsing interference.
+                # Without this, current_size_limit stays at the 242 B default indefinitely
+                # because nothing else sends AT+TXS, and the SF-adaptive bitmap logic
+                # silently behaves as SF7 for the entire session.
+                try:
+                    handler.refresh_size_limit()
+                    print(f"🔧 Initial mDot size limit: {handler.current_size_limit} B")
+                except Exception as txs_err:
+                    print(f"⚠️ Could not refresh initial size limit: {txs_err}; using default {handler.current_size_limit} B")
+                handler.start_listening()
+                _lora_handler = handler  # publish only after full init
+                print("✅ LoRa handler initialized successfully")
+                return _lora_handler
+            except LoRaSerialPortConflict:
+                if attempt < max_attempts:
+                    print(
+                        f"ℹ️ LoRa serial port busy (attempt {attempt}/{max_attempts}); "
+                        f"retrying in {retry_delay_s}s"
+                    )
+                    time.sleep(retry_delay_s)
+                    continue
+                _lora_handler = None
+                print(
+                    f"ℹ️ LoRa serial port still owned by another process after "
+                    f"{max_attempts} attempts; skipping handler creation in PID {os.getpid()}"
+                )
+                return None
+            except Exception as e:
+                _lora_handler = None  # explicit: global was never written, but make intent clear
+                # If LoRaHandler() itself succeeded (flock + serial port both
+                # acquired) but a later step (e.g. start_listening()) is what
+                # raised, `handler` is bound to a fully-flock-holding object that
+                # was never published to _lora_handler and would otherwise leak
+                # its FDs -- and keep the real flock held -- for as long as this
+                # exception's traceback keeps it referenced.
+                try:
+                    handler.close()
+                except NameError:
+                    pass
+                except Exception:
+                    pass
+                print(f"❌ Failed to initialize LoRa handler: {e}")
+                print("⚠️ LoRa functionality will not be available")
+                raise RuntimeError(f"LoRa handler initialization failed: {e}") from e
+    return None  # unreachable: the loop above always returns or raises
 
 def transmit_data(data: Dict[str, Any]) -> bool:
     """Convenience function to transmit sensor data"""

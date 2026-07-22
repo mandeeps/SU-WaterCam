@@ -124,6 +124,54 @@ class TestGetLoraHandlerSingleton:
         assert h1 is h2
 
 
+class TestGetLoraHandlerRetry:
+    """get_lora_handler() retries a flock conflict a few times with a short
+    backoff before giving up, since TickTalk's own runtime spawns separate OS
+    processes to run graph nodes -- a sibling process racing for the same
+    hardware may simply finish and release the port moments later (confirmed
+    on UFO010, 2026-07-22, via a live process-tree/lsof capture)."""
+
+    def test_succeeds_on_a_later_attempt_after_conflicts(self, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr(lhc.time, "sleep", lambda s: sleeps.append(s))
+
+        good_handler = MagicMock()
+        construction_attempts = {"count": 0}
+
+        def fake_new(*a, **kw):
+            construction_attempts["count"] += 1
+            if construction_attempts["count"] < 3:
+                raise lhc.LoRaSerialPortConflict("busy")
+            return good_handler
+
+        monkeypatch.setattr(lhc, "LoRaHandler", fake_new)
+
+        result = lhc.get_lora_handler()
+
+        assert result is good_handler
+        assert construction_attempts["count"] == 3
+        assert sleeps == [1.0, 1.0]  # one delay between each of the 2 failed attempts
+
+    def test_gives_up_after_max_attempts(self, monkeypatch):
+        sleeps = []
+        monkeypatch.setattr(lhc.time, "sleep", lambda s: sleeps.append(s))
+
+        attempts = {"count": 0}
+
+        def always_conflicts(*a, **kw):
+            attempts["count"] += 1
+            raise lhc.LoRaSerialPortConflict("busy")
+
+        monkeypatch.setattr(lhc, "LoRaHandler", always_conflicts)
+
+        result = lhc.get_lora_handler()
+
+        assert result is None
+        assert attempts["count"] == 3  # max_attempts
+        assert sleeps == [1.0, 1.0]  # no sleep after the final failed attempt
+        assert lhc._lora_handler is None
+
+
 # ---------------------------------------------------------------------------
 # _is_transmission_response classification
 # ---------------------------------------------------------------------------
