@@ -28,61 +28,17 @@ def wittypi_emergency_control(emergency_mode):
     Control WittyPi schedule based on emergency mode status
     - Emergency ON: Clear shutdown schedule to prevent system shutdown
     - Emergency OFF: Regenerate and apply normal schedule
-    """
-    try:
-        from tools.wittypi_control import clear_shutdown_time, set_schedule
-        
-        if emergency_mode:
-            # Emergency mode activated - clear shutdown schedule
-            print("🚨 EMERGENCY MODE: Clearing WittyPi shutdown schedule")
-            clear_shutdown_time()
-            return {
-                'status': 'wittypi_emergency_activated',
-                'action': 'shutdown_schedule_cleared',
-                'message': 'WittyPi shutdown schedule cleared for emergency mode'
-            }
-        else:
-            # Emergency mode deactivated - regenerate normal schedule
-            print("✅ EMERGENCY CLEARED: Regenerating WittyPi normal schedule")
 
-            # Read schedule parameters via local import — do not call the
-            # module-level get_wittypi_schedule_config(); module globals are
-            # not available when TTPython executes compiled pickles.
-            from tools.lora_runtime_integration import get_parameter
-            start_hour = get_parameter('wittypi_start_hour', 8)
-            start_minute = get_parameter('wittypi_start_minute', 0)
-            interval_length_minutes = get_parameter('wittypi_interval_minutes', 30)
-            num_repetitions_per_day = get_parameter('wittypi_repetitions_per_day', 8)
-            
-            next_startup_time = set_schedule(start_hour, start_minute, interval_length_minutes, num_repetitions_per_day)
-            
-            return {
-                'status': 'wittypi_normal_schedule_restored',
-                'action': 'schedule_regenerated',
-                'next_startup': next_startup_time,
-                'schedule': {
-                    'start_hour': start_hour,
-                    'start_minute': start_minute,
-                    'interval_minutes': interval_length_minutes,
-                    'repetitions_per_day': num_repetitions_per_day
-                },
-                'message': f'WittyPi normal schedule restored, next startup: {next_startup_time}'
-            }
-            
-    except ImportError as e:
-        print(f"⚠️ WittyPi control not available: {e}")
-        return {
-            'status': 'wittypi_unavailable',
-            'error': f'Import error: {str(e)}',
-            'message': 'WittyPi control functions not available'
-        }
-    except Exception as e:
-        print(f"⚠️ Failed to control WittyPi: {e}")
-        return {
-            'status': 'wittypi_control_failed',
-            'error': str(e),
-            'message': 'Failed to control WittyPi schedule'
-        }
+    Thin wrapper around tools.wittypi_control.apply_emergency_schedule() so
+    the same logic is callable both as a graph node here and directly (via a
+    plain local import) from contexts that cannot resolve a bare reference to
+    this SQified function -- see lora_listener()'s on_emergency_mode_changed,
+    which must call apply_emergency_schedule() directly for exactly this
+    reason (a nested closure cannot resolve a sibling top-level @SQify
+    function's name in TickTalk's isolated per-function exec runtime).
+    """
+    from tools.wittypi_control import apply_emergency_schedule
+    return apply_emergency_schedule(emergency_mode)
 
 @SQify
 def create_sensor_tracker():
@@ -1091,24 +1047,30 @@ def lora_listener():
     
     # Register callbacks for parameter changes (only once)
     def on_emergency_mode_changed(value, old_value):
+        # Call tools.wittypi_control.apply_emergency_schedule() directly via
+        # a local import, NOT the @SQify-wrapped wittypi_emergency_control()
+        # graph node -- a nested closure inside an SQified function cannot
+        # resolve a bare reference to another top-level SQified function in
+        # TickTalk's isolated per-function exec runtime (confirmed via a
+        # minimal repro: NameError every time). wittypi_emergency_control(True)
+        # here would always raise NameError, silently caught below, meaning
+        # this safety-critical WittyPi-schedule side effect never actually
+        # ran in production. apply_emergency_schedule is a plain
+        # tools/-importable function, which resolves correctly the same way
+        # every other local import in this file already does.
+        from tools.wittypi_control import apply_emergency_schedule
         if value:
             print("🚨 EMERGENCY MODE ACTIVATED via LoRa command!")
-            # Control WittyPi to clear shutdown schedule
             try:
-                wittypi_result = wittypi_emergency_control(True)
+                wittypi_result = apply_emergency_schedule(True)
                 print(f"📋 WittyPi Control: {wittypi_result.get('message', 'Unknown status')}")
-            except NameError as e:
-                print(f"⚠️ WittyPi emergency control function not available: {e}")
             except Exception as e:
                 print(f"⚠️ Failed to control WittyPi during emergency: {e}")
         else:
             print("✅ Emergency mode deactivated via LoRa command")
-            # Control WittyPi to restore normal schedule
             try:
-                wittypi_result = wittypi_emergency_control(False)
+                wittypi_result = apply_emergency_schedule(False)
                 print(f"📋 WittyPi Control: {wittypi_result.get('message', 'Unknown status')}")
-            except NameError as e:
-                print(f"⚠️ WittyPi emergency control function not available: {e}")
             except Exception as e:
                 print(f"⚠️ Failed to control WittyPi during emergency deactivation: {e}")
     
@@ -1494,8 +1456,8 @@ def check_lora_availability(trigger):
     Check if LoRa functionality is available
     """
     try:
-        from tools.lora_runtime_integration import get_lora_runtime_integration
-        runtime = get_lora_runtime_integration()
+        from tools.lora_runtime_integration import get_runtime_manager
+        runtime = get_runtime_manager()
         return runtime.is_lora_available()
     except Exception as e:
         return False

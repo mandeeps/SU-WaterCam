@@ -684,16 +684,6 @@ def integrate_with_ticktalk():
     
     print("✓ LoRa runtime integration set up for ticktalk_main.py")
 
-# Global instance for easy access from other modules
-_lora_runtime_integration = None
-
-def get_lora_runtime_integration() -> LoRaRuntimeManager:
-    """Get the global LoRa runtime integration instance"""
-    global _lora_runtime_integration
-    if _lora_runtime_integration is None:
-        _lora_runtime_integration = LoRaRuntimeManager()
-    return _lora_runtime_integration
-
 # Example usage and testing
 if __name__ == "__main__":
     # Set up integration

@@ -40,6 +40,72 @@ def clear_shutdown_time():
     _require_wittypi()
     witty_pi_4.clear_shutdown_time()
 
+def apply_emergency_schedule(emergency_mode: bool) -> dict:
+    """Clear or restore the WittyPi hardware shutdown schedule for emergency mode.
+
+    Emergency ON: clear the shutdown schedule so the device stays powered on
+    (flood emergency in progress). Emergency OFF: regenerate and reapply the
+    normal wake schedule from the current runtime_config.json values.
+
+    Plain-bool, not @SQify-decorated, so it can be called directly from any
+    process (this repo's ticktalk_main.py graph node, or the LoRa daemon's
+    own emergency-mode callback) without going through TickTalk's token
+    machinery -- see docs/LORA_HANDLER_MULTIPROCESS_ISSUE.md for why the
+    daemon needs to call this directly, in-process, for instant reactivity.
+    """
+    try:
+        if emergency_mode:
+            print("🚨 EMERGENCY MODE: Clearing WittyPi shutdown schedule")
+            clear_shutdown_time()
+            return {
+                'status': 'wittypi_emergency_activated',
+                'action': 'shutdown_schedule_cleared',
+                'message': 'WittyPi shutdown schedule cleared for emergency mode'
+            }
+        else:
+            print("✅ EMERGENCY CLEARED: Regenerating WittyPi normal schedule")
+
+            # Read schedule parameters via local import — do not rely on a
+            # module-level cache; module globals are not available when
+            # TTPython executes compiled pickles, and a fresh read here keeps
+            # this correct whether called from ticktalk_main.py or the
+            # standalone LoRa daemon process.
+            from tools.lora_runtime_integration import get_parameter
+            start_hour = get_parameter('wittypi_start_hour', 8)
+            start_minute = get_parameter('wittypi_start_minute', 0)
+            interval_length_minutes = get_parameter('wittypi_interval_minutes', 30)
+            num_repetitions_per_day = get_parameter('wittypi_repetitions_per_day', 8)
+
+            next_startup_time = set_schedule(start_hour, start_minute, interval_length_minutes, num_repetitions_per_day)
+
+            return {
+                'status': 'wittypi_normal_schedule_restored',
+                'action': 'schedule_regenerated',
+                'next_startup': next_startup_time,
+                'schedule': {
+                    'start_hour': start_hour,
+                    'start_minute': start_minute,
+                    'interval_minutes': interval_length_minutes,
+                    'repetitions_per_day': num_repetitions_per_day
+                },
+                'message': f'WittyPi normal schedule restored, next startup: {next_startup_time}'
+            }
+
+    except ImportError as e:
+        print(f"⚠️ WittyPi control not available: {e}")
+        return {
+            'status': 'wittypi_unavailable',
+            'error': f'Import error: {str(e)}',
+            'message': 'WittyPi control functions not available'
+        }
+    except Exception as e:
+        print(f"⚠️ Failed to control WittyPi: {e}")
+        return {
+            'status': 'wittypi_control_failed',
+            'error': str(e),
+            'message': 'Failed to control WittyPi schedule'
+        }
+
 from datetime import datetime, timezone
 
 def get_wittypi_status():

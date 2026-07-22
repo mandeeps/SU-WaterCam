@@ -264,6 +264,58 @@ class TestLoraListenerNameResolution:
                     f"NameError in lora_listener: {exc}"
                 ) from exc
 
+    def test_on_emergency_mode_changed_no_name_error_isolated_exec(self):
+        """Reproduces the real TTPython isolated-exec runtime (not .__wrapped__,
+        which uses ticktalk_main's real __globals__ and would NOT catch this).
+
+        on_emergency_mode_changed is a closure nested inside the @SQify
+        lora_listener(). A bare reference to the sibling top-level @SQify
+        function wittypi_emergency_control() cannot resolve inside that
+        closure once lora_listener's source is re-compiled and re-exec'd into
+        a bare namespace the way SQExecute.py does at runtime -- this exact
+        shape of bug shipped to production silently (caught by an
+        overly-broad `except Exception`) because .__wrapped__-style tests
+        cannot see it. The fix calls tools.wittypi_control.apply_emergency_schedule
+        directly via a local import instead, which resolves correctly under
+        isolated exec because it's a plain module import, not a bare name
+        referring to another top-level SQified function in this same file.
+        """
+        mock_handler = MagicMock()
+        mock_mgr = MagicMock()
+        mock_mgr.parameters = {}
+        registered = {}
+        mock_mgr.register_update_callback.side_effect = (
+            lambda key, cb: registered.__setitem__(key, cb)
+        )
+
+        with patch("tools.lora_handler_concurrent.get_lora_handler",
+                   return_value=mock_handler), \
+             patch("tools.lora_runtime_integration.get_parameter",
+                   return_value=False), \
+             patch("tools.lora_runtime_integration.get_runtime_manager",
+                   return_value=mock_mgr), \
+             patch("tools.wittypi_control.apply_emergency_schedule",
+                   return_value={'status': 'ok', 'message': 'stubbed'}) as mock_apply:
+            fn = _exec_in_isolated_sq_namespace("lora_listener")
+            fn()
+
+            assert 'emergency_mode' in registered, (
+                "on_emergency_mode_changed was never registered"
+            )
+            on_emergency_mode_changed = registered['emergency_mode']
+
+            try:
+                on_emergency_mode_changed(True, False)
+                on_emergency_mode_changed(False, True)
+            except NameError as exc:
+                raise AssertionError(
+                    f"NameError in on_emergency_mode_changed under isolated "
+                    f"exec: {exc}"
+                ) from exc
+
+            mock_apply.assert_any_call(True)
+            mock_apply.assert_any_call(False)
+
 
 # ---------------------------------------------------------------------------
 # initialize_lora_integration — NameError smoke test
