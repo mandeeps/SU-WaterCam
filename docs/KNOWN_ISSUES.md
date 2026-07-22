@@ -4,6 +4,21 @@ Findings from a codebase audit conducted 2026-04-19. Issues are grouped by sever
 
 ---
 
+## Architectural
+
+### LoRa handler singleton doesn't account for TickTalk's multi-process runtime
+**Files:** `tools/lora_handler_concurrent.py`, `tools/lora_runtime_integration.py`
+`get_lora_handler()`'s singleton (`_lora_handler` + `threading.Lock`) only
+works within one OS process, but TickTalk's own runtime executes graph nodes
+across multiple separate processes — confirmed via a live process-tree
+capture on UFO010 (2026-07-22) showing a child process independently
+conflicting with its own parent over the same serial port. A
+retry-with-backoff mitigation shipped (`7bfcce4`), but the correct fix is a
+single-owner daemon process + IPC, mirroring `tools/segformer_daemon.py`.
+**Full writeup, evidence, and proposed fix:** `docs/LORA_HANDLER_MULTIPROCESS_ISSUE.md`
+
+---
+
 ## Critical — System Failure
 
 ### Serial port opened at import, never closed
