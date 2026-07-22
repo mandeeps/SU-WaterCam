@@ -140,3 +140,64 @@ class TestTransmitMacFlush:
 
         assert result is False
         assert len(flush_called) == 0, "flush must not be called for non-MAC errors"
+
+    def test_flush_loops_until_clean_drain_within_one_round_cap(self, _mock_serial_port):
+        """A single flush may not fully drain the MAC backlog -- transmit()
+        must retry _flush_mac_commands() (up to MAC_FLUSH_MAX_ROUNDS) within
+        the same retry attempt until it confirms a clean drain, not give up
+        after exactly one flush call. Regression for the bitmap transmission
+        that kept failing "Tx buffer filled by MAC Commands" across all 3
+        top-level attempts despite a flush being attempted between each."""
+        import tools.lora_handler_concurrent as lhc
+        handler = _make_handler()
+
+        mac_error_msg = "mDot: Tx buffer filled by MAC Commands — Tx buffer filled by MAC Commands, send data again"
+        attempt_results = [
+            (False, mac_error_msg),
+            (True, ""),
+        ]
+
+        flush_results = [False, False, True]  # dirty, dirty, clean
+        flush_calls = []
+
+        def fake_flush():
+            flush_calls.append(True)
+            return flush_results[len(flush_calls) - 1]
+
+        with patch.object(handler, '_attempt_transmission', side_effect=attempt_results), \
+             patch.object(handler, '_flush_mac_commands', side_effect=fake_flush), \
+             patch.object(handler, '_clear_mdot_input', return_value=True), \
+             patch('time.sleep'):
+            result = handler.transmit(b'\x00', max_retries=2)
+
+        assert result is True
+        assert len(flush_calls) == 3 == lhc.MAC_FLUSH_MAX_ROUNDS
+
+    def test_flush_gives_up_after_max_rounds_but_still_retries_payload(self, _mock_serial_port):
+        """If the flush never confirms a clean drain within MAC_FLUSH_MAX_ROUNDS,
+        transmit() must still proceed to retry the real payload afterward
+        (rather than aborting) -- the retry may still succeed even without a
+        confirmed-clean flush."""
+        import tools.lora_handler_concurrent as lhc
+        handler = _make_handler()
+
+        mac_error_msg = "mDot: Tx buffer filled by MAC Commands — Tx buffer filled by MAC Commands, send data again"
+        attempt_results = [
+            (False, mac_error_msg),
+            (True, ""),
+        ]
+
+        flush_calls = []
+
+        def fake_flush():
+            flush_calls.append(True)
+            return False  # never confirms a clean drain
+
+        with patch.object(handler, '_attempt_transmission', side_effect=attempt_results), \
+             patch.object(handler, '_flush_mac_commands', side_effect=fake_flush), \
+             patch.object(handler, '_clear_mdot_input', return_value=True), \
+             patch('time.sleep'):
+            result = handler.transmit(b'\x00', max_retries=2)
+
+        assert result is True
+        assert len(flush_calls) == lhc.MAC_FLUSH_MAX_ROUNDS

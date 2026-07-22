@@ -57,6 +57,14 @@ class LoRaSerialPortConflict(RuntimeError):
     """Raised when another OS process already owns the LoRa serial port."""
 
 
+# Max rounds of _flush_mac_commands() to try, within one retry attempt of
+# transmit(), when the mDot reports "Tx buffer filled by MAC Commands". A
+# single flush only drains whatever's pending at that instant; this bounds
+# how many extra probe uplinks we're willing to send chasing a clean drain
+# before giving up and retrying the real payload anyway.
+MAC_FLUSH_MAX_ROUNDS = 3
+
+
 def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
     """Encode and compress sensor data into the TLV wire format for LoRa transmission.
 
@@ -569,8 +577,24 @@ class LoRaHandler:
                             print(f"ERROR: Transmission attempt {attempt + 1} failed: {error_message}")
                             if attempt < max_retries:
                                 if 'Tx buffer filled by MAC Commands' in error_message:
+                                    # A single flush only drains whatever MAC command
+                                    # backlog is pending at that instant -- if the
+                                    # backlog needs more than one uplink to fully clear
+                                    # (or a new command queues in the gap), one flush
+                                    # attempt isn't enough and the real payload's retry
+                                    # hits the same error again. Loop until the mDot
+                                    # confirms a clean drain (or a small round cap is
+                                    # hit) before retrying, rather than assuming success
+                                    # after exactly one attempt.
                                     print("DEBUG: MAC buffer full — flushing LoRaWAN MAC queue with probe uplink...")
-                                    self._flush_mac_commands()
+                                    for flush_round in range(1, MAC_FLUSH_MAX_ROUNDS + 1):
+                                        if self._flush_mac_commands():
+                                            print(f"DEBUG: MAC queue confirmed clear after {flush_round} flush round(s)")
+                                            break
+                                        print(f"DEBUG: MAC flush round {flush_round}/{MAC_FLUSH_MAX_ROUNDS} "
+                                              f"did not confirm a clean drain")
+                                        if flush_round < MAC_FLUSH_MAX_ROUNDS:
+                                            time.sleep(0.3)
                                 print(f"DEBUG: Will retry transmission (attempt {attempt + 2}/{max_retries + 1})")
                                 time.sleep(1)
                                 continue

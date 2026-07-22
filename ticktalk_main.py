@@ -841,6 +841,16 @@ def compress_bitmap(segmented_file):
     # Bitmap is sent TLV-wrapped (08 18 [2B len] = 4B overhead) so the
     # bitmap itself may be up to lora_limit - 4 bytes.
     # Fall back to 238 B (SF7/500kHz: 242 − 4).
+    #
+    # Deliberately uses the FULL reported limit, not the full limit minus
+    # margin for LoRaWAN MAC command overhead (FOpts, up to 15B) -- maximizing
+    # bitmap resolution is the priority; an occasional "Tx buffer filled by
+    # MAC Commands, send data again" from a pending MAC command colliding
+    # with a near-limit payload is handled by transmit()'s retry loop
+    # thoroughly draining the MAC queue before retrying the same packet
+    # (tools/lora_handler_concurrent.py's _flush_mac_commands(), looped up to
+    # MAC_FLUSH_MAX_ROUNDS times), not by permanently shrinking every bitmap
+    # to reserve headroom that's usually unused.
     max_bitmap_bytes = 238
     try:
         from tools.lora_handler_concurrent import get_size_limit
