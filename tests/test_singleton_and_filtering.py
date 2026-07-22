@@ -1,6 +1,6 @@
 """Regression tests for the LoRa handler singleton and listener classification fixes.
 
-Covers two areas flagged in Copilot review of PR #81:
+Covers three areas flagged in Copilot review of PR #81, plus a leaked-FD fix:
 
 1. get_lora_handler() thread-safety — N concurrent callers must produce exactly
    one LoRaHandler instance and the global must not be published until after
@@ -9,10 +9,18 @@ Covers two areas flagged in Copilot review of PR #81:
 2. _is_transmission_response() classification — bare 'OK'/'ERROR' must not match
    (they are AT echo responses, not TX outcomes); real TX status patterns must.
 
+3. A failed construction (flock conflict, or a later step like
+   start_listening() raising) must not leak the already-opened serial port --
+   otherwise a failed attempt keeps an open FD (and, via the app-level flock,
+   the lock itself) alive for as long as the exception's traceback keeps the
+   discarded handler referenced, causing later attempts to also spuriously
+   conflict. Suspected contributor to LoRa handler conflicts recurring across
+   many iterations on UFO010 (2026-07-22).
+
 Hardware is provided by the autouse _mock_serial_port fixture in conftest.py.
 """
 import threading
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 import pytest
 
 import tools.lora_handler_concurrent as lhc
@@ -162,3 +170,47 @@ class TestTransmissionResponseClassification:
         """'ERROR' must be classified as an AT response (ignored), not a TX response."""
         assert not handler._is_transmission_response("ERROR")
         assert handler._is_at_response("ERROR")
+
+
+# ---------------------------------------------------------------------------
+# Leaked-FD-on-conflict regression
+# ---------------------------------------------------------------------------
+
+class TestConflictDoesNotLeakSerialPort:
+
+    def test_serial_port_closed_when_flock_conflicts(self, monkeypatch):
+        """LoRaHandler.__init__ opens the serial port before checking the
+        inter-process flock. If the flock check fails, the already-open
+        serial port must be closed before raising -- previously it was left
+        open, leaking an FD on /dev/ttyAMA5 for every failed attempt."""
+        created_sers = []
+
+        def fake_serial(*a, **kw):
+            m = MagicMock()
+            m.is_open = True
+            created_sers.append(m)
+            return m
+
+        monkeypatch.setattr(lhc.serial, "Serial", fake_serial)
+        monkeypatch.setattr(lhc.fcntl, "flock", MagicMock(side_effect=OSError("locked")))
+
+        with pytest.raises(lhc.LoRaSerialPortConflict):
+            lhc.LoRaHandler()
+
+        assert len(created_sers) == 1
+        created_sers[0].close.assert_called_once()
+
+    def test_handler_closed_when_a_later_init_step_fails(self, monkeypatch):
+        """If LoRaHandler() itself succeeds (flock + serial both acquired)
+        but a later step in get_lora_handler() -- e.g. start_listening() --
+        raises, the fully-flock-holding handler must be closed rather than
+        discarded still holding the real lock."""
+        with patch.object(lhc.LoRaHandler, "refresh_size_limit", autospec=True, return_value=True), \
+             patch.object(lhc.LoRaHandler, "start_listening", autospec=True,
+                          side_effect=RuntimeError("boom")), \
+             patch.object(lhc.LoRaHandler, "close", autospec=True) as mock_close:
+            with pytest.raises(RuntimeError):
+                lhc.get_lora_handler()
+
+        mock_close.assert_called_once()
+        assert lhc._lora_handler is None

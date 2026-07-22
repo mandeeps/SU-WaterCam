@@ -116,6 +116,15 @@ class LoRaHandler:
             fcntl.flock(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError:
             self._lock_fd.close()
+            # self.ser (the already-opened serial port, above) was leaked here
+            # on every conflict: never closed, so a failed construction still
+            # held an open FD on /dev/ttyAMA5 for as long as this exception's
+            # traceback kept the partially-built handler alive. Close it
+            # before raising so a failed attempt doesn't hold hardware/FDs.
+            try:
+                self.ser.close()
+            except Exception:
+                pass
             raise LoRaSerialPortConflict(
                 "LoRa serial port already owned by another process"
             ) from None
@@ -1954,6 +1963,18 @@ def get_lora_handler() -> Optional[LoRaHandler]:
             return None
         except Exception as e:
             _lora_handler = None  # explicit: global was never written, but make intent clear
+            # If LoRaHandler() itself succeeded (flock + serial port both
+            # acquired) but a later step (e.g. start_listening()) is what
+            # raised, `handler` is bound to a fully-flock-holding object that
+            # was never published to _lora_handler and would otherwise leak
+            # its FDs -- and keep the real flock held -- for as long as this
+            # exception's traceback keeps it referenced.
+            try:
+                handler.close()
+            except NameError:
+                pass
+            except Exception:
+                pass
             print(f"❌ Failed to initialize LoRa handler: {e}")
             print("⚠️ LoRa functionality will not be available")
             raise RuntimeError(f"LoRa handler initialization failed: {e}") from e
