@@ -1,7 +1,10 @@
 #!/usr/bin/env python
+import base64
 import fcntl
 import time
 from sys import getsizeof
+import socket
+import stat
 import struct
 import serial
 import threading
@@ -52,6 +55,164 @@ from typing import Dict, Any, Optional
 
 class LoRaSerialPortConflict(RuntimeError):
     """Raised when another OS process already owns the LoRa serial port."""
+
+
+def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
+    """Encode and compress sensor data into the TLV wire format for LoRa transmission.
+
+    Pure function of `data` alone -- no handler state involved -- so it's
+    shared verbatim by LoRaHandler.compressed_encoding() (real handler,
+    inside the daemon) and LoRaHandlerClient.compressed_encoding() (every
+    other process), computed locally in both rather than round-tripped over
+    IPC.
+    """
+    print(f"DEBUG: Starting compressed_encoding with data: {data}")
+    print(f"DEBUG: Data types: {[(k, type(v)) for k, v in data.items()]}")
+    packet = bytearray()
+
+    def add_u8(ch, t, v):
+        try:
+            print(f"DEBUG: add_u8 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
+            packet.extend(bytes([ch, t, int(v)]))
+        except Exception as e:
+            print(f"Error in add_u8: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
+            raise
+
+    def add_u16(ch, t, v):
+        try:
+            print(f"DEBUG: add_u16 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
+            packet.extend(bytes([ch, t]))
+            packet.extend(struct.pack(">H", int(v)))
+        except Exception as e:
+            print(f"Error in add_u16: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
+            raise
+
+    def add_u32(ch, t, v):
+        try:
+            print(f"DEBUG: add_u32 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
+            packet.extend(bytes([ch, t]))
+            packet.extend(struct.pack(">I", int(v)))
+        except Exception as e:
+            print(f"Error in add_u32: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
+            raise
+
+    def add_f32(ch, t, v):
+        try:
+            print(f"DEBUG: add_f32 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
+            packet.extend(bytes([ch, t]))
+            packet.extend(struct.pack(">f", float(v)))
+        except Exception as e:
+            print(f"Error in add_f32: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
+            raise
+
+    def add_f32_3(ch, t, v):
+        try:
+            print(f"DEBUG: add_f32_3 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
+            packet.extend(bytes([ch, t]))
+            if not isinstance(v, (list, tuple)):
+                raise ValueError(f"Expected list/tuple for f32_3, got {type(v)}: {v}")
+            for x in v:
+                packet.extend(struct.pack(">f", float(x)))
+        except Exception as e:
+            print(f"Error in add_f32_3: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
+            raise
+
+    def add_blob(ch, t, b):
+        try:
+            print(f"DEBUG: add_blob called with ch={ch}, t={t}, b={b}, type(b)={type(b)}")
+            packet.extend(bytes([ch, t]))
+            # Ensure b is bytes
+            if isinstance(b, str):
+                print(f"DEBUG: Converting string to bytes: '{b}'")
+                b = b.encode('utf-8')
+            elif not isinstance(b, (bytes, bytearray)):
+                print(f"DEBUG: Converting {type(b)} to bytes: {b}")
+                b = str(b).encode('utf-8')
+
+            print(f"DEBUG: Final blob data type: {type(b)}, length: {len(b)}")
+            packet.extend(struct.pack(">H", len(b)))
+            packet.extend(b)
+        except Exception as e:
+            print(f"Error in add_blob: ch={ch}, t={t}, b={b}, type(b)={type(b)}")
+            print(f"Error details: {e}")
+            import traceback
+            traceback.print_exc()
+            raise
+
+    try:
+        print("DEBUG: Processing data fields...")
+        if 'timestamp' in data:
+            print(f"DEBUG: Processing timestamp: {data['timestamp']}")
+            add_u32(0x00, 0x01, data['timestamp'])
+        if 'emergency_status' in data:
+            print(f"DEBUG: Processing emergency_status: {data['emergency_status']}")
+            add_u8(0x01, 0x04, data['emergency_status'])
+        if 'health_status' in data:
+            print(f"DEBUG: Processing health_status: {data['health_status']}")
+            add_u8(0x01, 0x05, data['health_status'])
+        if 'movement_threshold' in data:
+            print(f"DEBUG: Processing movement_threshold: {data['movement_threshold']}")
+            add_u8(0x01, 0x06, data['movement_threshold'])
+        if data.get('battery_percent') is not None:
+            print(f"DEBUG: Processing battery_percent: {data['battery_percent']}")
+            add_u8(0x02, 0x01, data['battery_percent'])
+        if 'tilt_roll_yaw' in data:
+            print(f"DEBUG: Processing tilt_roll_yaw: {data['tilt_roll_yaw']}")
+            add_f32_3(0x03, 0x01, data['tilt_roll_yaw'])
+        if 'lat_lon_z' in data:
+            print(f"DEBUG: Processing lat_lon_z: {data['lat_lon_z']}")
+            add_f32_3(0x04, 0x01, data['lat_lon_z'])
+        if 'temperature_celsius' in data:
+            print(f"DEBUG: Processing temperature_celsius: {data['temperature_celsius']}")
+            add_f32(0x05, 0x01, data['temperature_celsius'])
+        if 'relative_humidity' in data:
+            print(f"DEBUG: Processing relative_humidity: {data['relative_humidity']}")
+            add_u8(0x06, 0x01, data['relative_humidity'])
+        if 'camera_flood_detected' in data:
+            print(f"DEBUG: Processing camera_flood_detected: {data['camera_flood_detected']}")
+            add_u8(0x07, 0x17, data['camera_flood_detected'])
+        if 'camera_flood_growing' in data:
+            print(f"DEBUG: Processing camera_flood_growing: {data['camera_flood_growing']}")
+            add_u8(0x07, 0x27, data['camera_flood_growing'])
+        if 'flood_bitmap_compressed' in data:
+            print(f"DEBUG: Processing flood_bitmap_compressed: {data['flood_bitmap_compressed']}")
+            add_blob(0x08, 0x18, data['flood_bitmap_compressed'])
+        if 'status_area_threshold' in data:
+            print(f"DEBUG: Processing status_area_threshold: {data['status_area_threshold']}")
+            add_u8(0x09, 0x19, data['status_area_threshold'])
+        if 'stage_threshold' in data:
+            print(f"DEBUG: Processing stage_threshold: {data['stage_threshold']}")
+            add_u8(0x09, 0x29, max(0, min(255, int(data['stage_threshold']))))
+        if 'monitoring_frequency' in data:
+            print(f"DEBUG: Processing monitoring_frequency: {data['monitoring_frequency']}")
+            add_u16(0x09, 0x39, data['monitoring_frequency'])
+        if 'emergency_frequency' in data:
+            print(f"DEBUG: Processing emergency_frequency: {data['emergency_frequency']}")
+            add_u16(0x09, 0x49, data['emergency_frequency'])
+        if 'neighborhood_emergency_frequency' in data:
+            print(f"DEBUG: Processing neighborhood_emergency_frequency: {data['neighborhood_emergency_frequency']}")
+            add_u16(0x09, 0x59, data['neighborhood_emergency_frequency'])
+        if 'audio_recording_enabled' in data:
+            print(f"DEBUG: Processing audio_recording_enabled: {data['audio_recording_enabled']}")
+            add_u8(0x09, 0x69, data['audio_recording_enabled'])
+
+        # WittyPi voltage measurements for battery status
+        if 'wittypi_temperature' in data:
+            print(f"DEBUG: Processing wittypi_temperature: {data['wittypi_temperature']}")
+            add_f32(0x0A, 0x01, data['wittypi_temperature'])
+        if 'wittypi_battery_voltage' in data:
+            print(f"DEBUG: Processing wittypi_battery_voltage: {data['wittypi_battery_voltage']}")
+            add_f32(0x0A, 0x02, data['wittypi_battery_voltage'])
+        if 'wittypi_internal_voltage' in data:
+            print(f"DEBUG: Processing wittypi_internal_voltage: {data['wittypi_internal_voltage']}")
+            add_f32(0x0A, 0x03, data['wittypi_internal_voltage'])
+
+        print(f"DEBUG: Final packet size: {len(packet)} bytes")
+        return bytes(packet)
+    except Exception as e:
+        print(f"Error in compressed_encoding: {e}")
+        print(f"Data: {data}")
+        raise
 
 
 class LoRaHandler:
@@ -566,157 +727,15 @@ class LoRaHandler:
                 print(f"Error location: {e.__traceback__.tb_lineno if hasattr(e, '__traceback__') else 'unknown'}")
                 import traceback
                 traceback.print_exc()
-    
+
+    def get_queue_depth(self) -> int:
+        """Number of items currently queued for transmission."""
+        return self.transmit_queue.qsize()
+
     def compressed_encoding(self, data: Dict[str, Any]) -> bytes:
         """Handle encoding and compression of data from sensors for transmission over LoRa"""
-        print(f"DEBUG: Starting compressed_encoding with data: {data}")
-        print(f"DEBUG: Data types: {[(k, type(v)) for k, v in data.items()]}")
-        packet = bytearray()
-        
-        def add_u8(ch, t, v): 
-            try:
-                print(f"DEBUG: add_u8 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-                packet.extend(bytes([ch, t, int(v)]))
-            except Exception as e:
-                print(f"Error in add_u8: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-                raise
-        
-        def add_u16(ch, t, v): 
-            try:
-                print(f"DEBUG: add_u16 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-                packet.extend(bytes([ch, t]))
-                packet.extend(struct.pack(">H", int(v)))
-            except Exception as e:
-                print(f"Error in add_u16: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-                raise
-        
-        def add_u32(ch, t, v): 
-            try:
-                print(f"DEBUG: add_u32 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-                packet.extend(bytes([ch, t]))
-                packet.extend(struct.pack(">I", int(v)))
-            except Exception as e:
-                print(f"Error in add_u32: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-                raise
-        
-        def add_f32(ch, t, v): 
-            try:
-                print(f"DEBUG: add_f32 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-                packet.extend(bytes([ch, t]))
-                packet.extend(struct.pack(">f", float(v)))
-            except Exception as e:
-                print(f"Error in add_f32: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-                raise
-        
-        def add_f32_3(ch, t, v): 
-            try:
-                print(f"DEBUG: add_f32_3 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-                packet.extend(bytes([ch, t]))
-                if not isinstance(v, (list, tuple)):
-                    raise ValueError(f"Expected list/tuple for f32_3, got {type(v)}: {v}")
-                for x in v:
-                    packet.extend(struct.pack(">f", float(x)))
-            except Exception as e:
-                print(f"Error in add_f32_3: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-                raise
-        
-        def add_blob(ch, t, b): 
-            try:
-                print(f"DEBUG: add_blob called with ch={ch}, t={t}, b={b}, type(b)={type(b)}")
-                packet.extend(bytes([ch, t]))
-                # Ensure b is bytes
-                if isinstance(b, str):
-                    print(f"DEBUG: Converting string to bytes: '{b}'")
-                    b = b.encode('utf-8')
-                elif not isinstance(b, (bytes, bytearray)):
-                    print(f"DEBUG: Converting {type(b)} to bytes: {b}")
-                    b = str(b).encode('utf-8')
-                
-                print(f"DEBUG: Final blob data type: {type(b)}, length: {len(b)}")
-                packet.extend(struct.pack(">H", len(b)))
-                packet.extend(b)
-            except Exception as e:
-                print(f"Error in add_blob: ch={ch}, t={t}, b={b}, type(b)={type(b)}")
-                print(f"Error details: {e}")
-                import traceback
-                traceback.print_exc()
-                raise
+        return _encode_compressed_packet(data)
 
-        try:
-            print("DEBUG: Processing data fields...")
-            if 'timestamp' in data: 
-                print(f"DEBUG: Processing timestamp: {data['timestamp']}")
-                add_u32(0x00, 0x01, data['timestamp'])
-            if 'emergency_status' in data: 
-                print(f"DEBUG: Processing emergency_status: {data['emergency_status']}")
-                add_u8(0x01, 0x04, data['emergency_status'])
-            if 'health_status' in data: 
-                print(f"DEBUG: Processing health_status: {data['health_status']}")
-                add_u8(0x01, 0x05, data['health_status'])
-            if 'movement_threshold' in data: 
-                print(f"DEBUG: Processing movement_threshold: {data['movement_threshold']}")
-                add_u8(0x01, 0x06, data['movement_threshold'])
-            if data.get('battery_percent') is not None:
-                print(f"DEBUG: Processing battery_percent: {data['battery_percent']}")
-                add_u8(0x02, 0x01, data['battery_percent'])
-            if 'tilt_roll_yaw' in data: 
-                print(f"DEBUG: Processing tilt_roll_yaw: {data['tilt_roll_yaw']}")
-                add_f32_3(0x03, 0x01, data['tilt_roll_yaw'])
-            if 'lat_lon_z' in data: 
-                print(f"DEBUG: Processing lat_lon_z: {data['lat_lon_z']}")
-                add_f32_3(0x04, 0x01, data['lat_lon_z'])
-            if 'temperature_celsius' in data: 
-                print(f"DEBUG: Processing temperature_celsius: {data['temperature_celsius']}")
-                add_f32(0x05, 0x01, data['temperature_celsius'])
-            if 'relative_humidity' in data: 
-                print(f"DEBUG: Processing relative_humidity: {data['relative_humidity']}")
-                add_u8(0x06, 0x01, data['relative_humidity'])
-            if 'camera_flood_detected' in data: 
-                print(f"DEBUG: Processing camera_flood_detected: {data['camera_flood_detected']}")
-                add_u8(0x07, 0x17, data['camera_flood_detected'])
-            if 'camera_flood_growing' in data: 
-                print(f"DEBUG: Processing camera_flood_growing: {data['camera_flood_growing']}")
-                add_u8(0x07, 0x27, data['camera_flood_growing'])
-            if 'flood_bitmap_compressed' in data: 
-                print(f"DEBUG: Processing flood_bitmap_compressed: {data['flood_bitmap_compressed']}")
-                add_blob(0x08, 0x18, data['flood_bitmap_compressed'])
-            if 'status_area_threshold' in data: 
-                print(f"DEBUG: Processing status_area_threshold: {data['status_area_threshold']}")
-                add_u8(0x09, 0x19, data['status_area_threshold'])
-            if 'stage_threshold' in data: 
-                print(f"DEBUG: Processing stage_threshold: {data['stage_threshold']}")
-                add_u8(0x09, 0x29, max(0, min(255, int(data['stage_threshold']))))
-            if 'monitoring_frequency' in data: 
-                print(f"DEBUG: Processing monitoring_frequency: {data['monitoring_frequency']}")
-                add_u16(0x09, 0x39, data['monitoring_frequency'])
-            if 'emergency_frequency' in data: 
-                print(f"DEBUG: Processing emergency_frequency: {data['emergency_frequency']}")
-                add_u16(0x09, 0x49, data['emergency_frequency'])
-            if 'neighborhood_emergency_frequency' in data:
-                print(f"DEBUG: Processing neighborhood_emergency_frequency: {data['neighborhood_emergency_frequency']}")
-                add_u16(0x09, 0x59, data['neighborhood_emergency_frequency'])
-            if 'audio_recording_enabled' in data:
-                print(f"DEBUG: Processing audio_recording_enabled: {data['audio_recording_enabled']}")
-                add_u8(0x09, 0x69, data['audio_recording_enabled'])
-
-            # WittyPi voltage measurements for battery status
-            if 'wittypi_temperature' in data: 
-                print(f"DEBUG: Processing wittypi_temperature: {data['wittypi_temperature']}")
-                add_f32(0x0A, 0x01, data['wittypi_temperature'])
-            if 'wittypi_battery_voltage' in data: 
-                print(f"DEBUG: Processing wittypi_battery_voltage: {data['wittypi_battery_voltage']}")
-                add_f32(0x0A, 0x02, data['wittypi_battery_voltage'])
-            if 'wittypi_internal_voltage' in data: 
-                print(f"DEBUG: Processing wittypi_internal_voltage: {data['wittypi_internal_voltage']}")
-                add_f32(0x0A, 0x03, data['wittypi_internal_voltage'])
-
-            print(f"DEBUG: Final packet size: {len(packet)} bytes")
-            return bytes(packet)
-        except Exception as e:
-            print(f"Error in compressed_encoding: {e}")
-            print(f"Data: {data}")
-            raise
-    
     def decode(self, payload: str):
         """Decode incoming payload and update configuration"""
         try:
@@ -1916,31 +1935,34 @@ class LoRaHandler:
             print(f"Serial port reconnection error: {e}")
             return False
 
-# Global instance for easy access from other modules
+# Global instance for easy access from other modules -- only ever populated
+# in the LoRa daemon process (tools/lora_daemon.py) now, via
+# create_lora_handler_with_retry(). Every other process gets a
+# LoRaHandlerClient from get_lora_handler() instead; see that function.
 _lora_handler = None
 _lora_handler_lock = threading.Lock()
 
 
-def get_lora_handler() -> Optional[LoRaHandler]:
-    """Get the global LoRa handler instance (thread-safe singleton).
+def create_lora_handler_with_retry() -> Optional[LoRaHandler]:
+    """Construct the one real LoRaHandler instance (thread-safe singleton
+    within this process), retrying briefly on a serial-port conflict.
 
     Returns None if another OS process still owns the serial port after
     retrying.  Callers must check for None before dereferencing the result.
 
+    Called exactly once, at startup, by tools/lora_daemon.py -- the single
+    process that owns the physical LoRa serial port for its entire lifetime.
+    Every other process talks to the daemon over IPC via get_lora_handler()'s
+    LoRaHandlerClient instead of calling this directly.
+
     TickTalk's own runtime spawns multiple separate OS processes to execute
     graph nodes (confirmed via `ps` PPID chains on a real device,
-    2026-07-22) -- _lora_handler/_lora_handler_lock only provide a working
-    singleton *within one process*; a sibling/child process that also needs
-    LoRa access starts with its own independent _lora_handler = None and
-    genuinely, correctly races for the same hardware via the OS-level flock
-    in LoRaHandler.__init__. That's a real architectural mismatch (a
-    per-process singleton guarding a resource multiple processes want), not
-    a simple bug -- properly fixing it means one process owning the port and
-    others talking to it over IPC, mirroring tools/segformer_daemon.py.
-    Retrying with a short backoff here is a pragmatic mitigation: it doesn't
-    change the architecture, but the losing side gets one real chance to
-    succeed once whichever process currently holds the port finishes and
-    releases it, instead of immediately giving up and skipping the cycle.
+    2026-07-22) -- a per-process singleton like this one cannot provide
+    cross-process exclusivity on its own; that's exactly why only the daemon
+    calls it now, and every other process goes through the daemon's IPC
+    socket instead of constructing its own LoRaHandler. Retrying with a short
+    backoff here remains useful defense-in-depth (e.g. a stale leftover
+    process still releasing the port during a daemon restart).
     """
     global _lora_handler
     if _lora_handler is not None:
@@ -2006,6 +2028,204 @@ def get_lora_handler() -> Optional[LoRaHandler]:
                 print("⚠️ LoRa functionality will not be available")
                 raise RuntimeError(f"LoRa handler initialization failed: {e}") from e
     return None  # unreachable: the loop above always returns or raises
+
+
+# ---------------------------------------------------------------------------
+# IPC helpers shared by LoRaHandlerClient and tools/lora_daemon.py
+# ---------------------------------------------------------------------------
+
+LORA_DAEMON_SOCKET_PATH = "/run/lora/lora.sock"
+
+
+def _jsonify_bytes(obj):
+    """Recursively wrap bytes/bytearray values so they survive json.dumps.
+
+    queue_transmit()'s data dict and transmit()'s content argument can both
+    carry raw bytes (e.g. a compressed flood bitmap) alongside plain
+    JSON-serializable values -- json.dumps() cannot handle bytes directly, so
+    wrap each one in a small tagged dict and reverse it with
+    _unjsonify_bytes() on the other end.
+    """
+    if isinstance(obj, (bytes, bytearray)):
+        return {"__bytes_b64__": base64.b64encode(bytes(obj)).decode("ascii")}
+    if isinstance(obj, dict):
+        return {k: _jsonify_bytes(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonify_bytes(v) for v in obj]
+    return obj
+
+
+def _unjsonify_bytes(obj):
+    """Inverse of _jsonify_bytes()."""
+    if isinstance(obj, dict):
+        if set(obj.keys()) == {"__bytes_b64__"}:
+            return base64.b64decode(obj["__bytes_b64__"])
+        return {k: _unjsonify_bytes(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [_unjsonify_bytes(v) for v in obj]
+    return obj
+
+
+class LoRaHandlerClient:
+    """RPC proxy for the one real LoRaHandler owned by tools/lora_daemon.py.
+
+    Exposes the same method names the real handler's callers already use
+    (is_joined, queue_transmit, queue_binary_transmit,
+    process_transmit_queue, transmit, get_queue_depth, get_size_limit) so
+    ticktalk_main.py's existing call sites need no changes -- only
+    get_lora_handler() itself changed, from constructing a real LoRaHandler
+    to returning one of these.
+
+    compressed_encoding() is NOT proxied: it's pure/stateless (confirmed --
+    no `self` references in its body), so it's computed locally, matching
+    what the daemon does with the exact same code.
+
+    Connects fresh per call (mirroring ticktalk_main.py's
+    _segformer_via_daemon() style) rather than holding a persistent
+    connection, since calls here are infrequent (once per wake cycle, not a
+    tight loop).
+    """
+
+    # Generous budgets: transmit()/process_transmit_queue() can block on real
+    # mDot retries for tens of seconds; queue_*/get_* calls are fast, in-memory
+    # ops on the daemon side and should fail fast if the daemon is stuck.
+    _SHORT_TIMEOUT_S = 8
+    _LONG_TIMEOUT_S = 90
+
+    def __init__(self, socket_path: str = LORA_DAEMON_SOCKET_PATH, config_file: str = 'lora_config.json'):
+        self.socket_path = socket_path
+        self.config_file = config_file
+
+    @property
+    def config(self) -> Dict[str, Any]:
+        """Read lora_config.json fresh on every access.
+
+        Not proxied over IPC: this file is written by LoRaHandler.save_config()
+        (fcntl-locked) and read here the same way LoRaHandler.load_config()
+        does, so any process can see the current config without round-
+        tripping through the daemon -- consistent with get_config_value()/
+        get_config(), which stay local for the same reason.
+        """
+        try:
+            with open(self.config_file, 'r') as f:
+                fcntl.flock(f, fcntl.LOCK_SH)
+                try:
+                    return json.load(f)
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
+        except Exception as e:
+            print(f"Error loading config: {e}, using empty config")
+            return {}
+
+    def get_config(self, key: str, default: Any = None) -> Any:
+        return self.config.get(key, default)
+
+    def _call(self, action: str, timeout: float, **params):
+        req = json.dumps({"action": action, "params": _jsonify_bytes(params)}) + "\n"
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(min(5, timeout))  # connect: fail fast if daemon isn't ready
+            sock.connect(self.socket_path)
+            sock.settimeout(timeout)          # read: full budget for the RPC itself
+            sock.sendall(req.encode())
+            sock.shutdown(socket.SHUT_WR)
+
+            data = bytearray()
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                data.extend(chunk)
+
+        resp = json.loads(data.strip())
+        if resp.get("status") != "ok":
+            raise RuntimeError(resp.get("message", "LoRa daemon returned an error"))
+        return _unjsonify_bytes(resp.get("result"))
+
+    def is_joined(self) -> bool:
+        try:
+            return bool(self._call("is_joined", self._LONG_TIMEOUT_S))
+        except Exception as e:
+            print(f"⚠️ LoRa daemon unreachable (is_joined): {e}")
+            return False
+
+    def queue_transmit(self, data: Dict[str, Any]) -> bool:
+        try:
+            return bool(self._call("queue_transmit", self._SHORT_TIMEOUT_S, data=data))
+        except Exception as e:
+            print(f"⚠️ LoRa daemon unreachable (queue_transmit): {e}")
+            return False
+
+    def queue_binary_transmit(self, binary_data) -> bool:
+        try:
+            return bool(self._call(
+                "queue_binary_transmit", self._SHORT_TIMEOUT_S, binary_data=binary_data
+            ))
+        except Exception as e:
+            print(f"⚠️ LoRa daemon unreachable (queue_binary_transmit): {e}")
+            return False
+
+    def process_transmit_queue(self) -> None:
+        try:
+            self._call("process_transmit_queue", self._LONG_TIMEOUT_S)
+        except Exception as e:
+            print(f"⚠️ LoRa daemon unreachable (process_transmit_queue): {e}")
+
+    def transmit(self, content, max_retries: int = 2) -> bool:
+        try:
+            return bool(self._call(
+                "transmit", self._LONG_TIMEOUT_S, content=content, max_retries=max_retries
+            ))
+        except Exception as e:
+            print(f"⚠️ LoRa daemon unreachable (transmit): {e}")
+            return False
+
+    def get_queue_depth(self) -> int:
+        try:
+            return int(self._call("get_queue_depth", self._SHORT_TIMEOUT_S))
+        except Exception as e:
+            print(f"⚠️ LoRa daemon unreachable (get_queue_depth): {e}")
+            return 0
+
+    def get_size_limit(self) -> int:
+        try:
+            return int(self._call("get_size_limit", self._SHORT_TIMEOUT_S))
+        except Exception as e:
+            print(f"⚠️ LoRa daemon unreachable (get_size_limit): {e}, using default")
+            return 242  # default LoRaWAN payload size, matches LoRaHandler's own default
+
+    def compressed_encoding(self, data: Dict[str, Any]) -> bytes:
+        # Pure/stateless -- computed locally, not via RPC (see class docstring).
+        return _encode_compressed_packet(data)
+
+
+def get_lora_handler(socket_path: str = LORA_DAEMON_SOCKET_PATH) -> Optional["LoRaHandlerClient"]:
+    """Get a client connected to the LoRa daemon that owns the serial port.
+
+    Returns None if the daemon's socket doesn't exist -- e.g. the daemon
+    hasn't started yet, isn't installed on this system, or (in tests/dev)
+    isn't running at all. Callers must check for None before dereferencing
+    the result, exactly as before this function returned a real LoRaHandler.
+
+    Before this, get_lora_handler() constructed a real LoRaHandler directly
+    in whichever OS process called it -- broken because TickTalk's own
+    runtime spawns multiple separate OS processes to execute graph nodes, so
+    a per-process singleton can't provide real cross-process exclusivity
+    over the one physical serial port (confirmed via `ps` PPID chains on a
+    real device, 2026-07-22; see docs/LORA_HANDLER_MULTIPROCESS_ISSUE.md).
+    Now exactly one process -- tools/lora_daemon.py -- ever constructs a real
+    LoRaHandler (via create_lora_handler_with_retry()), and every other
+    process gets this lightweight IPC client instead.
+    """
+    if not os.path.exists(socket_path):
+        return None
+    try:
+        if not stat.S_ISSOCK(os.lstat(socket_path).st_mode):
+            print(f"⚠️ {socket_path} exists but is not a socket — LoRa daemon unavailable")
+            return None
+    except OSError:
+        return None
+    return LoRaHandlerClient(socket_path)
+
 
 def transmit_data(data: Dict[str, Any]) -> bool:
     """Convenience function to transmit sensor data"""

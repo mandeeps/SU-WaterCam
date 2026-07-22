@@ -2,9 +2,10 @@
 
 Covers three areas flagged in Copilot review of PR #81, plus a leaked-FD fix:
 
-1. get_lora_handler() thread-safety — N concurrent callers must produce exactly
-   one LoRaHandler instance and the global must not be published until after
-   refresh_size_limit() and start_listening() both complete.
+1. create_lora_handler_with_retry() thread-safety — N concurrent callers must
+   produce exactly one LoRaHandler instance and the global must not be
+   published until after refresh_size_limit() and start_listening() both
+   complete.
 
 2. _is_transmission_response() classification — bare 'OK'/'ERROR' must not match
    (they are AT echo responses, not TX outcomes); real TX status patterns must.
@@ -16,6 +17,14 @@ Covers three areas flagged in Copilot review of PR #81, plus a leaked-FD fix:
    discarded handler referenced, causing later attempts to also spuriously
    conflict. Suspected contributor to LoRa handler conflicts recurring across
    many iterations on UFO010 (2026-07-22).
+
+NOTE: this file tests create_lora_handler_with_retry(), not get_lora_handler().
+Since the LoRa daemon + IPC redesign (docs/LORA_HANDLER_MULTIPROCESS_ISSUE.md),
+get_lora_handler() returns a LoRaHandlerClient (or None) and no longer
+constructs a real LoRaHandler or retries on conflict -- that construction
+logic, and this exact retry/thread-safety/leaked-FD behavior, now lives in
+create_lora_handler_with_retry(), called once at startup by the sole process
+that owns the port: tools/lora_daemon.py.
 
 Hardware is provided by the autouse _mock_serial_port fixture in conftest.py.
 """
@@ -51,7 +60,7 @@ def handler():
 class TestGetLoraHandlerSingleton:
 
     def test_single_construction_under_concurrency(self):
-        """20 concurrent threads calling get_lora_handler() must build one instance."""
+        """20 concurrent threads calling create_lora_handler_with_retry() must build one instance."""
         n = 20
         # Timeout on barrier.wait() so a deadlock fails the test instead of hanging CI.
         barrier = threading.Barrier(n, timeout=5)
@@ -64,7 +73,7 @@ class TestGetLoraHandlerSingleton:
             def _call():
                 try:
                     barrier.wait()
-                    results.append(lhc.get_lora_handler())
+                    results.append(lhc.create_lora_handler_with_retry())
                 except Exception as exc:
                     errors.append(exc)
 
@@ -104,7 +113,7 @@ class TestGetLoraHandlerSingleton:
                           side_effect=capture_refresh), \
              patch.object(lhc.LoRaHandler, 'start_listening', autospec=True,
                           side_effect=capture_start):
-            handler = lhc.get_lora_handler()
+            handler = lhc.create_lora_handler_with_retry()
 
         assert lora_during_refresh[0] is None, (
             "_lora_handler was set before refresh_size_limit() returned"
@@ -115,17 +124,17 @@ class TestGetLoraHandlerSingleton:
         assert lhc._lora_handler is handler
 
     def test_second_call_returns_same_instance(self):
-        """Calling get_lora_handler() twice returns the cached singleton."""
+        """Calling create_lora_handler_with_retry() twice returns the cached singleton."""
         with patch.object(lhc.LoRaHandler, 'refresh_size_limit', autospec=True, return_value=True), \
              patch.object(lhc.LoRaHandler, 'start_listening', autospec=True):
-            h1 = lhc.get_lora_handler()
-            h2 = lhc.get_lora_handler()
+            h1 = lhc.create_lora_handler_with_retry()
+            h2 = lhc.create_lora_handler_with_retry()
 
         assert h1 is h2
 
 
 class TestGetLoraHandlerRetry:
-    """get_lora_handler() retries a flock conflict a few times with a short
+    """create_lora_handler_with_retry() retries a flock conflict a few times with a short
     backoff before giving up, since TickTalk's own runtime spawns separate OS
     processes to run graph nodes -- a sibling process racing for the same
     hardware may simply finish and release the port moments later (confirmed
@@ -146,7 +155,7 @@ class TestGetLoraHandlerRetry:
 
         monkeypatch.setattr(lhc, "LoRaHandler", fake_new)
 
-        result = lhc.get_lora_handler()
+        result = lhc.create_lora_handler_with_retry()
 
         assert result is good_handler
         assert construction_attempts["count"] == 3
@@ -164,7 +173,7 @@ class TestGetLoraHandlerRetry:
 
         monkeypatch.setattr(lhc, "LoRaHandler", always_conflicts)
 
-        result = lhc.get_lora_handler()
+        result = lhc.create_lora_handler_with_retry()
 
         assert result is None
         assert attempts["count"] == 3  # max_attempts
@@ -250,7 +259,7 @@ class TestConflictDoesNotLeakSerialPort:
 
     def test_handler_closed_when_a_later_init_step_fails(self, monkeypatch):
         """If LoRaHandler() itself succeeds (flock + serial both acquired)
-        but a later step in get_lora_handler() -- e.g. start_listening() --
+        but a later step in create_lora_handler_with_retry() -- e.g. start_listening() --
         raises, the fully-flock-holding handler must be closed rather than
         discarded still holding the real lock."""
         with patch.object(lhc.LoRaHandler, "refresh_size_limit", autospec=True, return_value=True), \
@@ -258,7 +267,7 @@ class TestConflictDoesNotLeakSerialPort:
                           side_effect=RuntimeError("boom")), \
              patch.object(lhc.LoRaHandler, "close", autospec=True) as mock_close:
             with pytest.raises(RuntimeError):
-                lhc.get_lora_handler()
+                lhc.create_lora_handler_with_retry()
 
         mock_close.assert_called_once()
         assert lhc._lora_handler is None

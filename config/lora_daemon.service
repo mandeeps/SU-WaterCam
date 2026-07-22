@@ -1,0 +1,27 @@
+[Unit]
+Description=LoRa handler daemon (owns the mDot serial port)
+After=local-fs.target
+# Must be fully up, with its socket present, before ticktalk.service starts --
+# every LoRa call in ticktalk_main.py goes through this daemon now.
+Before=ticktalk.service
+
+[Service]
+User=pi
+Group=pi
+Type=simple
+WorkingDirectory=/home/pi/SU-WaterCam
+# RuntimeDirectory creates /run/lora/ owned by User=pi at 0750,
+# placing the socket outside world-writable /tmp.
+RuntimeDirectory=lora
+RuntimeDirectoryMode=0750
+ExecStart=/home/pi/SU-WaterCam/venv/bin/python \
+    /home/pi/SU-WaterCam/tools/lora_daemon.py \
+    --socket /run/lora/lora.sock
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=60
+# Wait up to 30 s (60 x 0.5 s) for the socket to appear; fail cleanly if it doesn't.
+ExecStartPost=/bin/bash -c 'retries=0; until [ -S /run/lora/lora.sock ]; do sleep 0.5; retries=$((retries+1)); [ $retries -ge 60 ] && exit 1; done'
+
+[Install]
+WantedBy=multi-user.target

@@ -33,7 +33,7 @@ else:
 # which imports via "tools.lora_handler_concurrent". A bare import here would
 # resolve to a second, independent copy of the module and self-conflict over
 # the real serial-port flock.
-from tools.lora_handler_concurrent import LoRaHandler, get_lora_handler
+from tools.lora_handler_concurrent import LoRaHandler, create_lora_handler_with_retry
 from tools.lora_runtime_integration import get_parameter, set_parameter, get_runtime_manager
 
 def test_lora_command_processing():
@@ -67,7 +67,7 @@ def test_lora_command_processing():
     
     # Simulate LoRa command to change frequency
     # Use the same handler instance that the runtime manager is using
-    test_handler = get_lora_handler()
+    test_handler = create_lora_handler_with_retry()
     test_handler.decode('1292')  # Set monitoring frequency to 2 minutes (Channel 12, Command 9, Value 2)
     
     # Verify change
@@ -220,7 +220,7 @@ def test_main_application_integration():
     
     # Step 2: Simulate LoRa command to change frequency
     print("\n2️⃣ Simulating LoRa command to change monitoring frequency...")
-    test_handler = get_lora_handler()
+    test_handler = create_lora_handler_with_retry()
     test_handler.decode('1292')  # Set monitoring frequency to 2 minutes (Channel 12, Command 9, Value 2)
     
     new_freq = get_parameter('monitoring_frequency')

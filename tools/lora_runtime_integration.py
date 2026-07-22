@@ -100,28 +100,38 @@ class LoRaRuntimeManager:
         'compression_level',
     })
 
-    def __init__(self, config_file='runtime_config.json'):
+    def __init__(self, config_file='runtime_config.json', lora_handler=None):
         self.config_file = config_file
         self.parameters = self.load_parameters()
+        self._config_mtime = self._get_config_mtime()
         self.update_callbacks = {}
         self._dispatching: set = set()
         self.lora_handler = None
         self.listening = False
         self.listener_thread = None
-        
-        # Initialize LoRa handler and start listening
-        self._init_lora_handler()
-    
-    def _init_lora_handler(self):
-        """Initialize LoRa handler and start listening for commands"""
+
+        if lora_handler is not None:
+            # Daemon-mode: caller already constructed the one real LoRaHandler
+            # and is passing it in directly (see tools/lora_daemon.py).
+            self._adopt_daemon_owned_handler(lora_handler)
+        else:
+            # Client-mode: every other process talks to the daemon over IPC.
+            self._init_lora_handler()
+
+    def _adopt_daemon_owned_handler(self, lora_handler):
+        """Wire incoming-message handling directly, in-process, around an
+        already-constructed real LoRaHandler.
+
+        Only tools/lora_daemon.py calls this (via
+        LoRaRuntimeManager(lora_handler=...)) -- it is the single process
+        that owns the real LoRaHandler and its listener thread for the
+        LoRaWAN device's entire lifetime. Every other process is client-mode
+        (see _init_lora_handler()) and never wires set_runtime_callback()/
+        start_listening() itself, since decode() needs the real handler's own
+        queue/config state and must run in exactly one place -- here.
+        """
+        self.lora_handler = lora_handler
         try:
-            self.lora_handler = get_lora_handler()
-
-            if self.lora_handler is None:
-                # Serial port is owned by another OS process; this manager will
-                # still serve parameter reads/writes but won't send AT commands.
-                return
-
             def sync_lora_command(key, value):
                 if self.set_parameter(key, value):
                     print(f"LoRa sync: '{key}' updated to {self.get_parameter(key)}")
@@ -131,12 +141,31 @@ class LoRaRuntimeManager:
             self.lora_handler.set_runtime_callback(sync_lora_command)
             self.lora_handler.start_listening()
             self.listening = True
-            print("LoRa runtime integration initialised")
+            print("LoRa runtime integration initialised (daemon-owned handler)")
+        except Exception as e:
+            print(f"LoRa unavailable: {e}")
+            self.listening = False
+
+    def _init_lora_handler(self):
+        """Connect to the LoRa daemon (client-mode).
+
+        get_lora_handler() returns a LoRaHandlerClient (IPC proxy) or None if
+        the daemon is unreachable -- this manager still serves parameter
+        reads/writes either way, it just can't send AT commands or receive
+        messages without a reachable daemon. Does NOT wire
+        set_runtime_callback()/start_listening(): that wiring is daemon-only,
+        see _adopt_daemon_owned_handler().
+        """
+        try:
+            self.lora_handler = get_lora_handler()
+            if self.lora_handler is None:
+                return
+            print("LoRa runtime integration initialised (client mode)")
         except Exception as e:
             print(f"LoRa unavailable: {e}")
             self.lora_handler = None
             self.listening = False
-    
+
     def load_parameters(self) -> Dict[str, Any]:
         """Load runtime parameters from file or create defaults"""
         default_params = {
@@ -235,8 +264,67 @@ class LoRaRuntimeManager:
             'emergency_mode': cfg.get('emergency_mode', False),
         }
 
+    def _get_config_mtime(self) -> Optional[float]:
+        try:
+            return os.stat(self.config_file).st_mtime
+        except OSError:
+            return None
+
+    def _reload_if_changed(self) -> None:
+        """Re-read runtime_config.json if it changed on disk since this
+        instance last read it, firing register_update_callback() hooks for
+        any key whose value actually changed.
+
+        self.parameters is loaded once at __init__ and otherwise only
+        updated by this instance's own set_parameter() calls -- so a change
+        written by a DIFFERENT process (chiefly: the LoRa daemon applying an
+        incoming command via its own LoRaRuntimeManager) would otherwise
+        never be observed here, and callbacks registered on this instance
+        (e.g. ticktalk_main.py's lora_listener() callbacks) would silently
+        stop firing for remotely-driven changes once decode() moved
+        server-side into the daemon.
+
+        Gated on os.stat().st_mtime so the common case is a cheap stat(),
+        only re-parsing+re-locking the file when it actually changed.
+        """
+        current_mtime = self._get_config_mtime()
+        if current_mtime is None or current_mtime == self._config_mtime:
+            return
+        self._config_mtime = current_mtime
+
+        try:
+            with open(self.config_file, 'r') as f:
+                fcntl.flock(f, fcntl.LOCK_SH)
+                try:
+                    new_params = json.load(f)
+                finally:
+                    fcntl.flock(f, fcntl.LOCK_UN)
+        except Exception as e:
+            print(f"Error reloading runtime config: {e}")
+            return
+
+        changed = [
+            (key, self.parameters.get(key), value)
+            for key, value in new_params.items()
+            if key not in self.parameters or self.parameters[key] != value
+        ]
+        self.parameters.update(new_params)
+
+        for key, old_value, value in changed:
+            if key in self.update_callbacks and key not in self._dispatching:
+                self._dispatching.add(key)
+                try:
+                    for callback in self.update_callbacks[key]:
+                        try:
+                            callback(value, old_value)
+                        except Exception as e:
+                            print(f"Error in parameter update callback for '{key}': {e}")
+                finally:
+                    self._dispatching.discard(key)
+
     def get_parameter(self, key: str, default: Any = None) -> Any:
-        """Get a runtime parameter value"""
+        """Get a runtime parameter value, reloading from disk first if changed."""
+        self._reload_if_changed()
         return self.parameters.get(key, default)
     
     def is_lora_available(self) -> bool:
@@ -308,6 +396,12 @@ class LoRaRuntimeManager:
                 self.parameters[key] = old_value
             print(f"Warning: failed to persist '{key}', change rolled back")
             return False
+
+        # Refresh our own mtime baseline immediately: without this, the next
+        # get_parameter() call would see the file we just wrote as an
+        # "external" change (mtime advanced since __init__/last reload) and
+        # fire this same key's callbacks a second time via _reload_if_changed().
+        self._config_mtime = self._get_config_mtime()
 
         print(f"Runtime parameter '{key}' updated: {prior} → {coerced}")
 
@@ -534,7 +628,7 @@ class LoRaRuntimeManager:
             'lora_status': {
                 'listening': self.listening,
                 'handler_available': self.lora_handler is not None,
-                'queue_size': self.lora_handler.transmit_queue.qsize() if self.lora_handler else 0
+                'queue_size': self.lora_handler.get_queue_depth() if self.lora_handler else 0
             }
         }
     
@@ -622,6 +716,22 @@ def get_runtime_manager() -> LoRaRuntimeManager:
     if _runtime_manager is None:
         _runtime_manager = LoRaRuntimeManager()
     return _runtime_manager
+
+def set_runtime_manager(manager: LoRaRuntimeManager) -> None:
+    """Publish `manager` as this process's LoRaRuntimeManager singleton.
+
+    Used exclusively by tools/lora_daemon.py: the daemon constructs its own
+    LoRaRuntimeManager(lora_handler=<real handler>) directly, then publishes
+    it here so that get_runtime_manager() -- and the module-level
+    get_parameter()/set_parameter() convenience functions, which always route
+    through it -- return this exact instance within the daemon process. That
+    matters because _listen_loop()'s fast-path emergency-message detection
+    calls the module-level set_parameter(), which must reach the same
+    instance the daemon registered its emergency-mode callback against, or
+    the WittyPi shutdown-schedule safety path silently never fires.
+    """
+    global _runtime_manager
+    _runtime_manager = manager
 
 def get_parameter(key: str, default: Any = None) -> Any:
     """Convenience function to get a runtime parameter"""

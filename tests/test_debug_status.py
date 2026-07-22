@@ -23,33 +23,30 @@ class TestGetLoraStatusSharesSingleton:
     handler's LoRaHandler() construction stole the flock, and every
     subsequent transmit cycle reported "LoRa serial port already owned by
     another process" for the rest of that boot.
+
+    Since the LoRa daemon/IPC redesign (docs/LORA_HANDLER_MULTIPROCESS_ISSUE.md),
+    get_lora_handler() itself returns a lightweight LoRaHandlerClient (or
+    None) rather than constructing a real, flock-guarded LoRaHandler -- the
+    original cross-module-duplication scenario can no longer occur through
+    this path (a client has no serial port/flock to conflict over; only
+    tools/lora_daemon.py ever constructs a real handler). This test now
+    confirms get_lora_status() reaches the real, qualified
+    tools.lora_handler_concurrent.get_lora_handler() -- not a bare-import
+    duplicate that would silently miss test/production monkeypatches -- by
+    substituting a sentinel and checking it's reflected in the status.
     """
 
-    @pytest.fixture(autouse=True)
-    def _reset_singleton(self):
-        import tools.lora_handler_concurrent as lhc
-        lhc._lora_handler = None
-        yield
-        lhc._lora_handler = None
-
-    def test_reuses_existing_handler_instead_of_conflicting(self):
-        pytest.importorskip("psutil")
+    def test_reports_handler_from_qualified_import(self, monkeypatch):
         import tools.lora_handler_concurrent as lhc
         from tools.debug_status_command import get_lora_status
 
-        with pytest.MonkeyPatch.context() as mp:
-            mp.setattr(lhc.LoRaHandler, "refresh_size_limit", lambda self: True)
-            mp.setattr(lhc.LoRaHandler, "start_listening", lambda self: None)
-            handler = lhc.get_lora_handler()
-        assert handler is not None
+        sentinel_client = object()
+        monkeypatch.setattr(lhc, "get_lora_handler", lambda: sentinel_client)
 
         status = get_lora_status()
 
         assert status["status"] == "lora_available"
         assert status["lora_handler_available"] is True
-        # The real regression: a second module copy would construct its own
-        # LoRaHandler, hit the already-held flock, and report unavailable.
-        assert lhc._lora_handler is handler
 
 def test_debug_status_command():
     """Test the debug status command functionality."""

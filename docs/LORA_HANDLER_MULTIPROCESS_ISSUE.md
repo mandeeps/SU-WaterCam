@@ -1,7 +1,10 @@
 # LoRa Handler Multi-Process Conflict
 
 **Status:** Root cause confirmed (2026-07-22). Pragmatic mitigation shipped
-(retry-with-backoff). Proper architectural fix not yet implemented.
+(retry-with-backoff). Proper architectural fix (single-owner daemon + IPC)
+implemented (2026-07-22) — see "Implemented fix" below. **Not yet installed
+on any field device**; requires deploying `config/lora_daemon.service` (see
+that section for the manual install steps).
 
 **Severity:** Medium — reduces LoRa transmission reliability (a sensor-change
 cycle occasionally gets skipped), but does not corrupt data or crash the
@@ -152,101 +155,164 @@ unconditionally skipping the whole transmission cycle. It measurably helps
 guarantee success under sustained contention, and adds up to ~2s of latency
 to the failure path.
 
-## Proposed proper fix: single-owner daemon + IPC
+## Implemented fix: single-owner daemon + IPC (2026-07-22)
 
-The codebase already has a working precedent for exactly this class of
-problem: `tools/segformer_daemon.py`. The SegFormer ONNX model has the same
-"one expensive/exclusive resource, wanted by code that may run in more than
-one process" shape (there it's model load time + memory residency; here
-it's exclusive ownership of one UART). The existing solution: **one
-long-lived daemon process owns the resource permanently; every other
-process talks to it over a Unix domain socket instead of touching the
-resource directly.**
+Mirrors the codebase's existing precedent for exactly this class of problem,
+`tools/segformer_daemon.py` (an expensive/exclusive resource wanted by code
+that may run in more than one process — there, ONNX model load time and
+memory residency; here, exclusive ownership of one UART): **one long-lived
+daemon process owns the resource permanently; every other process talks to
+it over a Unix domain socket instead of touching the resource directly.**
 
-Concretely, mirroring that pattern for LoRa would look like:
+1. **`tools/lora_daemon.py`** — a persistent process that constructs exactly
+   one `LoRaHandler` at startup (via the renamed
+   `create_lora_handler_with_retry()` — the same retry-on-conflict
+   construction logic that used to live directly in `get_lora_handler()`)
+   and holds it for its entire lifetime. Listens on `/run/lora/lora.sock`
+   (matching `/run/segformer/segformer.sock`'s convention) with a
+   thread-per-connection accept loop, accepting newline-delimited JSON
+   requests (`is_joined`, `queue_transmit`, `queue_binary_transmit`,
+   `process_transmit_queue`, `transmit`, `get_queue_depth`,
+   `get_size_limit`) and replying `{"status": "ok", "result": ...}` /
+   `{"status": "error", "message": ...}`. Raw bytes values (e.g. a
+   compressed flood bitmap) are base64-wrapped for the JSON transport by
+   `_jsonify_bytes()`/`_unjsonify_bytes()` in `lora_handler_concurrent.py`.
 
-1. **`tools/lora_daemon.py`** (new) — a persistent process that constructs
-   exactly one `LoRaHandler` at startup and holds it for its entire
-   lifetime. Listens on a Unix domain socket (e.g.
-   `/run/lora/lora.sock`, matching `/run/segformer/segformer.sock`'s
-   convention), accepting newline-delimited JSON requests
-   (`{"action": "transmit_data", "data": {...}}`,
-   `{"action": "transmit_file", ...}`, `{"action": "get_config_value", "key": ...}`,
-   etc. — one action per existing `tools.lora_handler_concurrent` public
-   function that callers currently invoke) and replying with
-   `{"status": "ok", ...}` / `{"status": "error", "message": ...}`.
+2. **`config/lora_daemon.service`** — modeled directly on
+   `config/segformer_daemon.service`: `RuntimeDirectory=lora`,
+   `Before=ticktalk.service`, `Restart=on-failure`, an `ExecStartPost`
+   health-check loop. **Not yet installed on any field device** — deploying
+   this fix requires `sudo cp config/lora_daemon.service
+   /etc/systemd/system/`, `sudo systemctl daemon-reload`,
+   `sudo systemctl enable --now lora_daemon.service` on each unit, then
+   confirming `/run/lora/lora.sock` exists before `ticktalk.service` starts.
 
-2. **`config/lora_daemon.service`** (new systemd unit) — modeled directly on
-   `config/segformer_daemon.service`: `RuntimeDirectory=lora` (creates
-   `/run/lora/` at boot, owned by `pi`), `Before=ticktalk.service` so the
-   socket exists before the main application starts, `Restart=on-failure`,
-   and an `ExecStartPost` health-check loop waiting for the socket file to
-   appear before considering the unit started.
+3. **Client side**: `tools/lora_handler_concurrent.py`'s `get_lora_handler()`
+   now returns a `LoRaHandlerClient` (connects to the socket fresh per call,
+   mirroring `_segformer_via_daemon()`'s style) or `None` if the socket is
+   missing — preserving the existing "callers must check for `None`"
+   contract every call site already implements. `compressed_encoding()`,
+   `get_config_value()`/`.config`, are computed/read locally rather than
+   proxied (pure, or a plain file read — no daemon round-trip needed).
+   `get_size_limit()` **is** proxied (corrected from the original proposal
+   below, which assumed it was stateless — it isn't: it reflects the mDot's
+   live, radio-condition-dependent `AT+TXS` payload limit, refreshed by the
+   daemon's listener thread, and `compress_bitmap()` in `ticktalk_main.py`
+   depends on the real current value to size bitmaps correctly).
 
-3. **Client side** — replace `tools/lora_handler_concurrent.py`'s direct
-   `get_lora_handler()` singleton with a thin client (mirroring
-   `ticktalk_main.py`'s existing `_segformer_via_daemon()` helper at
-   line ~750): connect to the socket, send the request, read the response,
-   with a short connect timeout so a missing/dead daemon fails fast rather
-   than hanging a cycle. Every current call site
-   (`transmit_data`, `transmit_file`, `queue_binary_transmit`,
-   `get_config_value`, the LoRa command-decode path in
-   `lora_handler_concurrent.LoRaHandler.decode()`, etc.) needs to route
-   through this client instead of constructing/using a `LoRaHandler`
-   directly.
+4. **Dual-singleton fix (prerequisite, landed first)**:
+   `tools/lora_runtime_integration.py` had two independent
+   `LoRaRuntimeManager` singleton factories (`get_runtime_manager()` and
+   `get_lora_runtime_integration()`); consolidated into one, since incoming
+   emergency-mode messages always route through `get_runtime_manager()`
+   specifically (`_listen_loop()`'s fast path calls the module-level
+   `set_parameter()`), so the daemon's emergency-mode callback (below) has
+   to attach to that exact instance.
 
-4. **Fallback behavior**: decide whether an unreachable daemon should fall
-   back to the current direct-construction path (matching `segformer()`'s
-   "legacy subprocess fallback" pattern) or simply skip the cycle. Given the
-   whole point is *one* process should own the hardware, a direct-construct
-   fallback risks recreating this exact bug during the fallback window —
-   worth deciding deliberately rather than copying the SegFormer pattern
-   without thinking it through.
+5. **Emergency-mode safety path**: `LoRaRuntimeManager.__init__` now accepts
+   an optional `lora_handler=` — when the daemon passes its own real,
+   already-constructed handler, incoming-message wiring
+   (`set_runtime_callback()`/`start_listening()`) happens directly,
+   in-process, right there; every other (client-mode) process's
+   `LoRaRuntimeManager` does *not* wire that (decode() needs the real
+   handler's own state and now runs in exactly one place — the daemon). The
+   daemon publishes its manager via the new `set_runtime_manager()` so
+   `get_runtime_manager()` calls from `_listen_loop()`'s fast path reach the
+   same instance, then registers `register_update_callback('emergency_mode',
+   ...)` calling `tools.wittypi_control.apply_emergency_schedule()` directly
+   — this also fixed an independent, real, pre-existing bug: the old
+   callback called the bare name `wittypi_emergency_control()` (a sibling
+   top-level `@SQify` function) from inside a nested closure, which always
+   raised `NameError` under TTPython's isolated per-function exec runtime,
+   silently caught by an overly-broad `except Exception` — meaning the
+   WittyPi shutdown-schedule-clearing safety path had likely never actually
+   run in production.
 
-### Open questions for whoever implements this
+6. **Parameter change-detection reload**: `LoRaRuntimeManager.get_parameter()`
+   now re-reads `runtime_config.json` when its `os.stat().st_mtime` has
+   advanced since last read (cheap in the common case — a wake-cycle-scale
+   device, not a tight loop), diffs old vs. new per key, and fires
+   `register_update_callback()` hooks for keys that changed — otherwise a
+   change written by the daemon's manager would never be observed by any
+   other process's cached `self.parameters`, and callbacks registered on
+   client-side instances (e.g. `ticktalk_main.py`'s `lora_listener()`
+   callbacks) would silently stop firing for remotely-driven changes now
+   that `decode()` runs server-side.
 
-- **Incoming LoRa messages**: `LoRaHandler.start_listening()` runs a
-  background thread that processes *incoming* downlink messages via
-  registered callbacks (`set_runtime_callback`, used by
-  `tools/lora_runtime_integration.py` to apply remote parameter changes).
-  In a daemon model, the daemon process holds these callbacks, but the
-  callback logic (updating `runtime_config.json`) currently assumes it's
-  running in the same process as everything else reading that config. Confirm
-  this still behaves correctly with the daemon as a separate process (the
-  file-based config with `fcntl` locking should still work correctly since
-  it's already designed for multi-process access, but this needs to be
-  verified, not assumed).
-- **Emergency-mode/shutdown ordering**: `wittypi_emergency_control()` and
-  `call_shutdown()` need the LoRa handler in specific ways (checking
-  `is_joined()`, sending final status). Confirm the daemon stays alive
-  through the main process's shutdown sequence, or that these call sites
-  are updated to go through the client/daemon protocol too.
-- **`get_config_value` / channel-decode dispatch**: some LoRa command
-  handling currently lives on the `LoRaHandler` instance itself
-  (`LoRaHandler.decode()`). Decide whether decode logic moves into the
-  daemon (decoding happens where the handler lives) or stays client-side
-  (daemon just proxies raw transmit/receive) — this affects how much of
-  `tools/lora_handler_concurrent.py` moves into the new daemon file versus
-  staying as shared/importable logic.
-- **Testing**: the existing test suite
-  (`tests/test_singleton_and_filtering.py`,
-  `tests/test_lora_handler_concurrent.py`, etc.) is built around the
-  in-process singleton and mocks `serial.Serial` directly. A daemon
-  architecture needs a different test strategy — likely a test daemon
-  bound to a `/tmp` socket path (matching `segformer_daemon.py`'s own
-  `--socket /tmp/segformer_test.sock` testing convention) with a real
-  client/server round trip, rather than mocking the transport away
-  entirely.
+## Testing
 
-## Affected files (current state)
+`tests/test_lora_daemon.py` — a real client/server round trip for every RPC
+action (a test daemon bound to a `/tmp` socket, mirroring
+`segformer_daemon.py`'s own `--socket /tmp/segformer_test.sock` convention),
+`get_lora_handler()`'s socket-existence contract, `LoRaRuntimeManager`
+daemon-mode vs. client-mode wiring, `set_runtime_manager()`/
+`get_runtime_manager()` publishing, and the change-detection reload
+(including the "own write doesn't self-trigger a duplicate callback" case).
+`tests/test_singleton_and_filtering.py` was retargeted from
+`get_lora_handler()` to `create_lora_handler_with_retry()` (which now holds
+that exact retry/thread-safety/leaked-FD behavior, called only by the
+daemon). `tests/test_name_resolution.py` gained an isolated-exec regression
+test (see caveat below) proving the `on_emergency_mode_changed` `NameError`
+was real pre-fix and is gone post-fix.
 
-- `tools/lora_handler_concurrent.py` — `get_lora_handler()` (singleton +
-  retry mitigation), `LoRaHandler.__init__` (flock acquisition)
-- `tools/lora_runtime_integration.py` — `LoRaRuntimeManager._init_lora_handler()`
-  (the other main caller of `get_lora_handler()`)
-- `ticktalk_main.py` — `initialize_lora_integration()`, `lora_listener()`,
-  `lora_token_with_tracker()` (all call into the LoRa handler path per
-  iteration)
-- Reference implementation to mirror: `tools/segformer_daemon.py` +
-  `config/segformer_daemon.service` + `ticktalk_main.py`'s
-  `_segformer_via_daemon()` (~line 750) and `segformer()` (~line 791)
+**Caveat repeated from elsewhere in this codebase's test suite**: tests that
+call an `@SQify` function via `.__wrapped__()` use the real module
+`__globals__` and do NOT reproduce TTPython's actual isolated per-function
+exec runtime — they cannot catch "resolves via a module-level import/sibling
+function reference, missing the required local import" bugs. The existing
+`lora_listener()` name-resolution test used exactly this style and would not
+have caught the `on_emergency_mode_changed` bug; the new test uses
+`_exec_in_isolated_sq_namespace()` instead, which faithfully reproduces the
+isolation.
+
+## Remaining work
+
+- **Deploy `config/lora_daemon.service` to field devices** — implemented but
+  not yet installed anywhere; see step 2 above.
+- **Live verification on a real device once deployed**: confirm no more
+  "already owned by another process" (including re-running the same
+  process-tree/`lsof` capture from the Evidence section above to confirm the
+  conflict is genuinely gone, not just less frequent), and specifically
+  confirm an incoming LoRa emergency-mode command still clears the WittyPi
+  shutdown schedule promptly end-to-end on hardware.
+- The retry-with-backoff mitigation (`7bfcce4`) in
+  `create_lora_handler_with_retry()` remains as defense-in-depth for the
+  daemon's own startup (e.g. a stale leftover process still releasing the
+  port during a daemon restart) — no longer the primary mitigation now that
+  only one process ever constructs a real `LoRaHandler`.
+
+## Affected files (final state)
+
+- **New**: `tools/lora_daemon.py`, `config/lora_daemon.service`,
+  `tests/test_lora_daemon.py`
+- **`tools/lora_handler_concurrent.py`** — `get_lora_handler()` now returns a
+  `LoRaHandlerClient`/`None`; `create_lora_handler_with_retry()` (renamed
+  from the old `get_lora_handler()`) holds the real construction/retry
+  logic, called only by the daemon; `_encode_compressed_packet()` extracted
+  as a module-level pure function shared by both the real handler and the
+  client; `LoRaHandler.get_queue_depth()` added
+- **`tools/lora_runtime_integration.py`** — dual singleton consolidated;
+  `LoRaRuntimeManager(lora_handler=...)` for daemon-mode construction;
+  `set_runtime_manager()`; change-detection reload in `get_parameter()`
+- **`tools/wittypi_control.py`** — `apply_emergency_schedule()` (shared,
+  plain-bool-callable logic extracted from `wittypi_emergency_control()`)
+- **`ticktalk_main.py`** — `wittypi_emergency_control()` now a thin wrapper;
+  `lora_listener()`'s `on_emergency_mode_changed` calls
+  `apply_emergency_schedule()` directly; `check_lora_availability()`
+  repointed to `get_runtime_manager()`
+- **Unchanged**: `tools/lora_store_forward.py` — its existing "mDot not
+  joined" store-and-forward path in `ticktalk_main.py` (checked via
+  `handler.is_joined()` before any `queue_transmit()` call) is unaffected by
+  this change and still applies. A daemon that's unreachable for an entire
+  cycle (`get_lora_handler()` returns `None`) skips that cycle's
+  transmission entirely — the same behavior as before this daemon existed
+  (`ticktalk_main.py:288-293`'s pre-existing `None` check), not a regression;
+  `LoRaHandlerClient.queue_transmit()`/`queue_binary_transmit()` do not
+  additionally enqueue to store-and-forward on a mid-cycle RPC failure,
+  since `enqueue()`'s hex-payload shape doesn't cleanly compose at that
+  layer for both the dict (`queue_transmit`) and pre-encoded
+  (`queue_binary_transmit`) cases — narrow enough (daemon reachable at
+  `is_joined()` but not moments later) not to be worth forcing.
+
+Reference implementation this mirrors: `tools/segformer_daemon.py` +
+`config/segformer_daemon.service`
