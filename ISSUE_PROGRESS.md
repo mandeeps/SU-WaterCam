@@ -88,7 +88,7 @@ Test files:
 
 ### What exists
 
-`../Georeferencing/camera_calibration.py` is the canonical calibration tool (produces the `K`/`D`/`img_size`/`rms` schema that `coreg_multiple.py` actually reads). `tools/camera_calibration.py` and `tools/generate_calibration_chessboard.py` in this repo are deprecated — see the notices at the top of each file — kept only as a reference/fallback for on-device Picamera2 capture, since Georeferencing's script uses `cv2.VideoCapture` and can't drive the Pi's CSI camera.
+`tools/camera_calibration.py` is the canonical calibration tool — a copy of the calibration script from this project's separate Georeferencing codebase (not published on GitHub), the source of truth. Produces the `K`/`D`/`img_size`/`rms` schema that `coreg_multiple.py` actually reads. Its two local dependencies, `camera_geometry.py` and `geo_core.py`, are also copied into `tools/`. `tools/camera_calibration_legacy.py` (the old SU-WaterCam-specific script) and `tools/generate_calibration_chessboard.py` are deprecated — see the notices at the top of each file — kept only as a reference/fallback for on-device Picamera2 capture, since `tools/camera_calibration.py` uses `cv2.VideoCapture` and can't drive the Pi's CSI camera.
 
 `config/camera_calibration.json` holds the current OV5647 calibration (produced by the Georeferencing tool).
 
@@ -105,7 +105,7 @@ Test files:
 
 ### What exists
 
-`../Georeferencing/camera_calibration.py` — canonical tool; computes and saves lens intrinsics (`K`/`D`). `tools/camera_calibration.py` is deprecated (see notice at top of file).
+`tools/camera_calibration.py` — canonical tool (copied from this project's separate Georeferencing codebase, not published on GitHub); computes and saves lens intrinsics (`K`/`D`). `tools/camera_calibration_legacy.py` is deprecated (see notice at top of file).
 
 `tools/coreg_multiple.py` — `_undistort_if_calibrated()` applies `config/camera_calibration.json` lens correction to the fixed/optical (OV5647) image only before registration and resampling. Integration with coregistration is complete.
 

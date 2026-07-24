@@ -3,8 +3,9 @@
 DEPRECATED: this project uses a purchased 25x18-square, 30mm calib.io
 checkerboard for calibration, not a printed one. This script's 9x6/24mm
 pattern doesn't match it and shouldn't be printed/used. Kept for reference
-only. See ../Georeferencing/camera_calibration.py, the canonical
-calibration tool.
+only. See tools/camera_calibration.py, the canonical calibration tool
+(copied from this project's separate Georeferencing codebase, not
+published on GitHub).
 
 Generate a chessboard PNG for camera calibration.
 

@@ -148,13 +148,15 @@ Verify `bno055_calibration.json` shows `"mag": 3` when done. Without it heading 
 Calibration for our set of hardware is done and the file should transfer from unit to unit as long as hardware does not change. I forgot to copy it to the SD card image, so download from (https://drive.google.com/file/d/1Lpb0LEcR_ePSkGa5xrXXbkxigSQw4oQi/view?usp=drive_link) and copy it to `config/camera_calibration.json` in the SU-WaterCam directory using scp or an SD card reader.
 
 ```bash
-ls config/camera_calibration.json 2>/dev/null || echo "MISSING — see ../Georeferencing/camera_calibration.py"
+ls config/camera_calibration.json 2>/dev/null || echo "MISSING — see tools/camera_calibration.py"
 ```
 
 If missing, this needs to be redone before deployment (it requires our
 25x18-square, 30mm calib.io checkerboard and can't easily be done remotely
-afterward) — use `../Georeferencing/camera_calibration.py`, the canonical
-calibration tool (`tools/camera_calibration.py` in this repo is deprecated).
+afterward) — use `tools/camera_calibration.py`, the canonical calibration
+tool (a copy of the calibration script from this project's separate
+Georeferencing codebase, not published on GitHub; `tools/camera_calibration_legacy.py`
+in this repo is deprecated).
 
 ### 1.10 Enable the production service
 

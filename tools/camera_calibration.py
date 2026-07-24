@@ -1,406 +1,678 @@
-#!/usr/bin/env python3
 """
-DEPRECATED: superseded by ../Georeferencing/camera_calibration.py, which is
-the canonical calibration tool for this project. Its output schema
-(K/D/img_size/rms) is what tools/coreg_multiple.py actually reads; this
-script's camera_matrix/dist_coeffs schema is not consumed anywhere. Kept
-around only for on-device Picamera2 capture convenience (Georeferencing's
-script uses cv2.VideoCapture, which can't drive the Pi CSI camera) — if
-you use it to capture images, run them through Georeferencing's
-calibrate_camera() rather than this script's own calibration/output step.
+Camera Calibration & Georeferencing Pipeline
+=============================================
+DEPENDENCIES:
+    pip install opencv-python numpy scipy Pillow piexif pyproj
 
-Camera calibration and parameter collection script.
-
-This script helps you calibrate the main RGB/NIR camera and save
-intrinsic parameters for later use in georeferencing and image
-coregistration.
-
-Default chessboard pattern
---------------------------
-- Inner corners: 24 (columns) × 17 (rows)
-  - This corresponds to the 25×18-square calib.io checkerboard used for
-    this project's calibration.
-- Physical square size: 0.03 m (30 mm) per square edge.
-  - You can change this with --square-size, but it MUST match the
-    actual printed square size to get a correct scale in meters.
-
-It supports two workflows:
-- Capture calibration images directly from Picamera2
-- Calibrate from an existing directory of chessboard images
-
-Typical usage (on the device):
-    # Capture and calibrate in one go (using Picamera2)
-    python3 tools/camera_calibration.py --capture --output calibration/camera_calibration.json
-
-    # Calibrate from an existing directory of images
-    python3 tools/camera_calibration.py --image-dir calibration/images --output calibration/camera_calibration.json
-
-The output JSON contains:
-- image_size: [width, height]
-- camera_matrix: 3x3 intrinsics
-- dist_coeffs: distortion coefficients
-- reprojection_error: mean reprojection error
-- fov_degrees: horizontal/vertical/diagonal estimated from intrinsics
+WORKFLOW OVERVIEW:
+    1. Capture calibration images of a checkerboard
+    2. Detect corners and compute intrinsic parameters (K, D)
+    3. Save/load calibration parameters
+    4. Undistort images using computed parameters
+    5. Georeference image pixels using GPS metadata + camera geometry
 """
-
-import argparse
-import json
-import math
-import os
-from pathlib import Path
-from typing import List, Tuple
 
 import cv2
 import numpy as np
+import json
+import os
+import glob
+from pathlib import Path
+from dataclasses import dataclass, asdict
+from typing import Optional
 
+from camera_geometry import build_rotation_matrix
+from geo_core import pixel_to_world_flat
 
-def create_chessboard_object_points(board_size: Tuple[int, int], square_size: float) -> np.ndarray:
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 1: CONFIGURATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+# STEP 1: Set your checkerboard dimensions.
+# These are the number of INTERIOR corners (not squares).
+# Example: a 9x6 board has 8x5 interior corners.
+BOARD_W = 24          # interior corners horizontally
+BOARD_H = 17          # interior corners vertically
+SQUARE_SIZE_M = 0.03  # physical size of one square in meters (e.g. 2.5 cm)
+
+BOARD_SIZE = (BOARD_W, BOARD_H)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 2: DATA STRUCTURES
+# ─────────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class CameraIntrinsics:
     """
-    Create the 3D object points for a planar chessboard pattern.
+    Stores intrinsic camera parameters.
 
-    board_size: (cols, rows) inner corners (e.g. 9x6)
-    square_size: physical size of each square (in meters, or any consistent unit)
+    K (camera matrix):
+        [[fx,  0, cx],
+         [ 0, fy, cy],
+         [ 0,  0,  1]]
+        fx, fy = focal lengths in pixels
+        cx, cy = principal point (optical center in pixels)
+
+    D (distortion coefficients):
+        [k1, k2, p1, p2, k3] or with CALIB_RATIONAL_MODEL [k1, k2, p1, p2, k3, k4, k5, k6]
+        k1..k3 (and optionally k4..k6) = radial; p1, p2 = tangential
+
+    rms: reprojection error in pixels (lower is better; <1.0 is good)
+    camera_height_m: optional mounting height above ground (saved for georeferencing)
     """
-    cols, rows = board_size
-    objp = np.zeros((rows * cols, 3), np.float32)
-    # X axis: columns, Y axis: rows; Z = 0 (planar board)
-    objp[:, :2] = np.mgrid[0:cols, 0:rows].T.reshape(-1, 2)
-    objp *= square_size
-    return objp
+    K: list          # 3x3 camera matrix as nested list
+    D: list          # 1x5 or 1x8 distortion coefficients
+    img_size: list   # [width, height]
+    rms: float       # reprojection error
+    camera_height_m: Optional[float] = None  # height above ground in meters (user-provided)
+
+    def K_np(self):
+        return np.array(self.K, dtype=np.float64)
+
+    def D_np(self):
+        return np.array(self.D, dtype=np.float64)
+
+    def save(self, path: str):
+        with open(path, 'w') as f:
+            json.dump(asdict(self), f, indent=2)
+        print(f"Calibration saved to {path}")
+
+    @classmethod
+    def load(cls, path: str):
+        with open(path) as f:
+            d = json.load(f)
+        # Support older calibration files without camera_height_m
+        return cls(
+            K=d["K"],
+            D=d["D"],
+            img_size=d["img_size"],
+            rms=d["rms"],
+            camera_height_m=d.get("camera_height_m"),
+        )
 
 
-def find_chessboard_corners(
-    image: np.ndarray,
-    board_size: Tuple[int, int],
-    criteria: Tuple[int, int, float],
-) -> Tuple[bool, np.ndarray]:
-    """Detect and refine chessboard corners in a single image."""
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
-    ret, corners = cv2.findChessboardCorners(gray, board_size, None)
-    if not ret:
-        return False, None  # type: ignore[return-value]
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 3: CAPTURE CALIBRATION IMAGES (optional live capture)
+# ─────────────────────────────────────────────────────────────────────────────
 
-    # Refine corner locations
-    corners_subpix = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
-    return True, corners_subpix
-
-
-def calibrate_from_images(
-    image_paths: List[Path],
-    board_size: Tuple[int, int],
-    square_size: float,
-) -> dict:
+def capture_calibration_images(output_dir: str, n_images: int = 20, camera_index: int = 0):
     """
-    Run camera calibration from a list of image files.
+    STEP 2 (Live capture): Open a camera feed and save frames when SPACE is
+    pressed. Press Q to quit.
 
-    Returns a dict with calibration results suitable for JSON serialization.
+    INSTRUCTIONS (for low reprojection error):
+      - Print a checkerboard pattern (search "OpenCV checkerboard PDF" online).
+      - Mount it flat on a rigid surface — no warping.
+      - Vary pose: tilt the board (not always level), different distances (near/far),
+        and positions (center, corners, edges). Level-only or same-distance views
+        give high RMS; variety is essential.
+      - Aim for 15-25 images with varied orientations.
+      - Avoid motion blur; ensure good, even lighting.
+
+    Alternatively, skip this and point `calibrate_camera()` at a folder of
+    pre-captured images.
     """
+    os.makedirs(output_dir, exist_ok=True)
+    cap = cv2.VideoCapture(camera_index)
+    count = 0
+
+    print(f"[CAPTURE] Press SPACE to save image, Q to quit. Target: {n_images} images.")
+
+    while count < n_images:
+        ret, frame = cap.read()
+        if not ret:
+            print("Camera read failed.")
+            break
+
+        display = frame.copy()
+        cv2.putText(display, f"Saved: {count}/{n_images}  SPACE=save  Q=quit",
+                    (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+        cv2.imshow("Calibration Capture", display)
+
+        key = cv2.waitKey(1) & 0xFF
+        if key == ord(' '):
+            path = os.path.join(output_dir, f"calib_{count:03d}.jpg")
+            cv2.imwrite(path, frame)
+            print(f"  Saved {path}")
+            count += 1
+        elif key == ord('q'):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
+    print(f"[CAPTURE] Done. {count} images saved to {output_dir}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 4: INTRINSIC CALIBRATION
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _reprojection_errors_per_image(objpoints, imgpoints, K, D, rvecs, tvecs):
+    """Compute RMS reprojection error per image (in pixels)."""
+    errors = []
+    for i in range(len(objpoints)):
+        projected, _ = cv2.projectPoints(
+            objpoints[i], rvecs[i], tvecs[i], K, D
+        )
+        projected = projected.reshape(-1, 2)
+        diff = imgpoints[i].reshape(-1, 2) - projected
+        rms_i = np.sqrt(np.mean(diff ** 2))
+        errors.append(float(rms_i))
+    return np.array(errors)
+
+
+def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
+                     show_corners: bool = True,
+                     reject_outliers: bool = True,
+                     outlier_threshold_px: float = 2.0,
+                     use_rational_model: bool = False,
+                     max_outlier_rounds: int = 3,
+                     camera_height_m: Optional[float] = None,
+                     board_w: Optional[int] = None,
+                     board_h: Optional[int] = None,
+                     square_size_m: Optional[float] = None) -> CameraIntrinsics:
+    """
+    STEP 3: Detect checkerboard corners in all images and compute intrinsics.
+
+    WHAT THIS DOES:
+      - Finds the 2D positions of checkerboard corners in each image
+      - Pairs them with known 3D positions (flat board = Z=0)
+      - Solves for K and D using OpenCV's calibrateCamera()
+      - Optionally removes images with high per-image error and re-calibrates
+
+    INSTRUCTIONS FOR LOWER RMS ERROR:
+      - Vary board pose: tilt the board (left/right, up/down), don't keep it
+        always level. Level-only views give poor constraint on intrinsics.
+      - Vary distance: include both near and far shots so the board fills
+        different portions of the frame (reduces correlation between K and pose).
+      - Move the board to different positions: corners, center, edges of frame.
+      - Ensure SQUARE_SIZE_M is exact (measure with a ruler).
+      - Keep board flat and rigid; avoid motion blur and uneven lighting.
+    Aim for RMS < 1.0 pixel. If higher: add more varied poses or enable
+    reject_outliers to drop bad frames.
+
+    board_w, board_h, square_size_m:
+        If provided, override module-level BOARD_W, BOARD_H, SQUARE_SIZE_M
+        (interior corners and square size in metres).
+    """
+    bw = int(board_w) if board_w is not None else BOARD_W
+    bh = int(board_h) if board_h is not None else BOARD_H
+    sq = float(square_size_m) if square_size_m is not None else SQUARE_SIZE_M
+    board_size = (bw, bh)
+
+    # 3D object points for one board image (Z=0 since board is flat)
+    objp = np.zeros((bw * bh, 3), np.float32)
+    objp[:, :2] = np.mgrid[0:bw, 0:bh].T.reshape(-1, 2)
+    objp *= sq
+
+    objpoints = []  # 3D points in world space
+    imgpoints = []  # 2D points in image space
+    valid_paths = []  # paths for images that had corners found (same order as objpoints)
+    img_size  = None
+
+    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
+    image_paths = sorted(glob.glob(os.path.join(image_dir, "*.jpg")) +
+                         glob.glob(os.path.join(image_dir, "*.png")))
+
     if not image_paths:
-        raise RuntimeError("No calibration images provided.")
+        raise FileNotFoundError(f"No .jpg or .png images found in {image_dir}")
 
-    # Termination criteria for corner refinement
-    criteria = (
-        cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
-        30,
-        0.001,
-    )
-
-    objp = create_chessboard_object_points(board_size, square_size)
-    objpoints: List[np.ndarray] = []  # 3D points in world space
-    imgpoints: List[np.ndarray] = []  # 2D points in image plane
-
-    image_size = None
-    used_images = 0
+    print(f"[CALIBRATE] Processing {len(image_paths)} images...")
 
     for path in image_paths:
-        img = cv2.imread(str(path))
-        if img is None:
-            print(f"Skipping unreadable image: {path}")
-            continue
+        img  = cv2.imread(path)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        img_size = (gray.shape[1], gray.shape[0])  # (width, height)
 
-        if image_size is None:
-            h, w = img.shape[:2]
-            image_size = (w, h)
+        found, corners = cv2.findChessboardCorners(gray, board_size, None)
+
+        if found:
+            # Refine corner positions to sub-pixel accuracy
+            corners_refined = cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), criteria)
+            objpoints.append(objp)
+            imgpoints.append(corners_refined)
+            valid_paths.append(path)
+
+            if show_corners:
+                vis = cv2.drawChessboardCorners(img.copy(), board_size, corners_refined, found)
+                cv2.imshow("Detected Corners", vis)
+                cv2.waitKey(200)
+            print(f"  ✓ {Path(path).name}")
         else:
-            h, w = img.shape[:2]
-            if (w, h) != image_size:
-                print(f"Skipping {path} due to size mismatch: {(w, h)} != {image_size}")
-                continue
+            print(f"  ✗ {Path(path).name} — corners not found (check lighting/board size)")
 
-        found, corners = find_chessboard_corners(img, board_size, criteria)
-        if not found:
-            print(f"Chessboard not found in {path}, skipping.")
-            continue
+    cv2.destroyAllWindows()
 
-        objpoints.append(objp)
-        imgpoints.append(corners)
-        used_images += 1
+    if len(objpoints) < 6:
+        raise RuntimeError(f"Only {len(objpoints)} valid images. Need at least 6.")
 
-    if image_size is None or used_images < 3:
-        raise RuntimeError(
-            f"Not enough valid calibration images. "
-            f"Need at least 3 with detected chessboard. Got {used_images}."
+    # Calibration flags: rational model adds k4,k5,k6 and can improve wide-angle/phone lenses
+    calib_flags = 0
+    if use_rational_model:
+        calib_flags |= cv2.CALIB_RATIONAL_MODEL
+
+    for round_num in range(max_outlier_rounds):
+        n_used = len(objpoints)
+        print(f"\n[CALIBRATE] Running calibration on {n_used} images (round {round_num + 1})...")
+
+        rms, K, D, rvecs, tvecs = cv2.calibrateCamera(
+            objpoints, imgpoints, img_size, None, None, flags=calib_flags
         )
 
-    print(f"Running calibration with {used_images} images, image_size={image_size}")
-
-    # Calibrate camera
-    ret, camera_matrix, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
-        objpoints,
-        imgpoints,
-        image_size,
-        None,
-        None,
-    )
-
-    # Compute reprojection error
-    total_error = 0.0
-    total_points = 0
-    for i in range(len(objpoints)):
-        imgpoints2, _ = cv2.projectPoints(
-            objpoints[i],
-            rvecs[i],
-            tvecs[i],
-            camera_matrix,
-            dist_coeffs,
+        per_image_errors = _reprojection_errors_per_image(
+            objpoints, imgpoints, K, D, rvecs, tvecs
         )
-        err = cv2.norm(imgpoints[i], imgpoints2, cv2.NORM_L2)
-        n = len(imgpoints[i])
-        total_error += err * err
-        total_points += n
 
-    mean_error = math.sqrt(total_error / total_points) if total_points > 0 else float("nan")
-    print(f"Mean reprojection error: {mean_error:.4f} pixels")
+        if reject_outliers and round_num < max_outlier_rounds - 1:
+            bad = per_image_errors > outlier_threshold_px
+            n_bad = int(np.sum(bad))
+            if n_bad == 0:
+                break
+            if n_used - n_bad < 6:
+                print(f"  [CALIBRATE] Would remove {n_bad} outliers but need ≥6 images; keeping all.")
+                break
+            # Remove worst images
+            keep = ~bad
+            objpoints = [objpoints[i] for i in range(n_used) if keep[i]]
+            imgpoints = [imgpoints[i] for i in range(n_used) if keep[i]]
+            valid_paths = [valid_paths[i] for i in range(n_used) if keep[i]]
+            removed_names = [Path(valid_paths[i]).name for i in range(n_used) if bad[i]]
+            print(f"  Removed {n_bad} outlier(s): {removed_names}")
+        else:
+            break
 
-    # Estimate FOV from intrinsics
-    fx = float(camera_matrix[0, 0])
-    fy = float(camera_matrix[1, 1])
-    cx = float(camera_matrix[0, 2])
-    cy = float(camera_matrix[1, 2])
-    width, height = image_size
+    # Report per-image errors for the final solution
+    print(f"\n  Per-image RMS (px): min={per_image_errors.min():.3f}, max={per_image_errors.max():.3f}, mean={per_image_errors.mean():.3f}")
+    print("\n  Filename                          RMS (px)")
+    print("  " + "-" * 42)
+    for path, rms in zip(valid_paths, per_image_errors):
+        print(f"  {Path(path).name:32s}  {rms:.4f}")
+    worst_idx = int(np.argmax(per_image_errors))
+    if per_image_errors[worst_idx] > 1.0:
+        print(f"\n  Worst image: {Path(valid_paths[worst_idx]).name} ({per_image_errors[worst_idx]:.3f} px)")
 
-    fov_x = 2.0 * math.degrees(math.atan(width / (2.0 * fx)))
-    fov_y = 2.0 * math.degrees(math.atan(height / (2.0 * fy)))
-    fov_diag = 2.0 * math.degrees(
-        math.atan(math.hypot(width, height) / (2.0 * (fx + fy) * 0.5))
+    print(f"\n{'='*50}")
+    print(f"  RMS Reprojection Error: {rms:.4f} px")
+    print(f"  (< 0.5 = excellent, < 1.0 = good, > 1.0 = add varied poses or check SQUARE_SIZE_M)")
+    print(f"\n  Camera Matrix K:\n{K}")
+    print(f"\n  Distortion Coefficients D:\n{D.ravel()}")
+    print(f"{'='*50}\n")
+
+    intrinsics = CameraIntrinsics(
+        K=K.tolist(),
+        D=D.tolist(),
+        img_size=list(img_size),
+        rms=float(rms),
+        camera_height_m=camera_height_m,
     )
+    intrinsics.save(save_path)
+    return intrinsics
 
-    result = {
-        "image_size": {"width": width, "height": height},
-        "board_size": {"cols": board_size[0], "rows": board_size[1]},
-        "square_size": square_size,
-        "camera_matrix": camera_matrix.tolist(),
-        "dist_coeffs": dist_coeffs.ravel().tolist(),
-        "reprojection_error": mean_error,
-        "principal_point": {"cx": cx, "cy": cy},
-        "fov_degrees": {
-            "horizontal": fov_x,
-            "vertical": fov_y,
-            "diagonal": fov_diag,
-        },
-        "num_images_used": used_images,
-    }
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 5: UNDISTORT IMAGES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def undistort_image(image_path: str, intrinsics: CameraIntrinsics,
+                    output_path: str = None) -> np.ndarray:
+    """
+    STEP 4: Remove lens distortion from an image using calibrated parameters.
+
+    INSTRUCTIONS:
+      - Always undistort before any geometric measurements or georeferencing.
+      - The output image will have black borders where pixels were remapped;
+        you can crop these using the optimal new camera matrix (alpha=0 below).
+    """
+    img = cv2.imread(image_path)
+    K   = intrinsics.K_np()
+    D   = intrinsics.D_np()
+    w, h = intrinsics.img_size
+
+    # Get optimal new camera matrix (alpha=0 crops black borders, alpha=1 keeps all pixels)
+    K_new, roi = cv2.getOptimalNewCameraMatrix(K, D, (w, h), alpha=0)
+
+    undistorted = cv2.undistort(img, K, D, None, K_new)
+
+    # Crop to valid region
+    x, y, cw, ch = roi
+    undistorted = undistorted[y:y+ch, x:x+cw]
+
+    if output_path:
+        cv2.imwrite(output_path, undistorted)
+        print(f"Undistorted image saved to {output_path}")
+
+    return undistorted
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 6: READ GPS METADATA FROM IMAGE EXIF
+# ─────────────────────────────────────────────────────────────────────────────
+
+def read_exif_gps(image_path: str) -> dict:
+    """
+    STEP 5: Extract GPS metadata from image EXIF data.
+
+    Returns dict with:
+        lat        : decimal degrees (positive = N)
+        lon        : decimal degrees (positive = E)
+        altitude   : meters above sea level (if available)
+        heading    : compass bearing in degrees (if available)
+        pitch      : camera tilt in degrees (if available)
+        roll       : camera roll in degrees (if available)
+    """
+    from PIL import Image
+    from PIL.ExifTags import TAGS, GPSTAGS
+
+    img  = Image.open(image_path)
+    exif = img._getexif()
+
+    if not exif:
+        raise ValueError(f"No EXIF data found in {image_path}")
+
+    # Decode tag names
+    decoded = {TAGS.get(k, k): v for k, v in exif.items()}
+    gps_raw = decoded.get("GPSInfo", {})
+    gps     = {GPSTAGS.get(k, k): v for k, v in gps_raw.items()}
+
+    def dms_to_decimal(dms, ref):
+        """Convert degrees/minutes/seconds tuple to decimal degrees."""
+        d, m, s = [float(x) for x in dms]
+        decimal  = d + m / 60 + s / 3600
+        if ref in ('S', 'W'):
+            decimal = -decimal
+        return decimal
+
+    result = {}
+
+    if "GPSLatitude" in gps:
+        result["lat"] = dms_to_decimal(gps["GPSLatitude"], gps.get("GPSLatitudeRef", "N"))
+    if "GPSLongitude" in gps:
+        result["lon"] = dms_to_decimal(gps["GPSLongitude"], gps.get("GPSLongitudeRef", "E"))
+    if "GPSAltitude" in gps:
+        result["altitude"] = float(gps["GPSAltitude"])
+    if "GPSImgDirection" in gps:
+        result["heading"] = float(gps["GPSImgDirection"])
+    if "GPSDestBearing" in gps:
+        result["pitch"] = float(gps["GPSDestBearing"])
+
+    print(f"[EXIF GPS] {result}")
     return result
 
 
-def collect_images_from_camera(
-    output_dir: Path,
-    board_size: Tuple[int, int],
-    square_size: float,
-    num_images: int,
-) -> List[Path]:
-    """
-    Capture calibration images from Picamera2 until we have enough valid chessboard detections.
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 7: BUILD EXTRINSIC MATRIX FROM GPS + ORIENTATION
+# ─────────────────────────────────────────────────────────────────────────────
 
-    Images with a detected chessboard are saved to output_dir and returned as a list of paths.
+def build_extrinsic_matrix(lat: float, lon: float, altitude: float,
+                            heading_deg: float, pitch_deg: float,
+                            roll_deg: float = 0.0) -> tuple:
+    """
+    STEP 6: Build the camera extrinsic matrix [R | t] from GPS + orientation.
+
+    The extrinsic matrix transforms points from WORLD coordinates (ENU local
+    frame centered on the camera) to CAMERA coordinates.
+
+    COORDINATE SYSTEM:
+        World (ENU): X=East, Y=North, Z=Up
+        Camera:      X=right, Y=down, Z=forward (into scene)
+
+    PARAMETERS:
+        heading_deg : compass bearing (0=North, 90=East, clockwise)
+        pitch_deg   : tilt from horizontal (0=level, -90=straight down)
+        roll_deg    : roll (0=level)
+
+    RETURNS:
+        R (3x3): rotation matrix (world -> camera)
+        t (3x1): translation (camera origin in world ENU coords)
+        origin  : (lat, lon, alt) of camera
+    """
+    # Use shared geometry so conventions match georeference_tool
+    R = build_rotation_matrix(heading_deg, pitch_deg, roll_deg)
+
+    # Translation: for local ENU we treat camera as origin
+    t = np.zeros((3, 1))
+
+    return R, t, (lat, lon, altitude)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 8: PROJECT IMAGE PIXEL TO GROUND COORDINATES
+# ─────────────────────────────────────────────────────────────────────────────
+
+def pixel_to_ground_coords(pixel_xy: tuple, intrinsics: CameraIntrinsics,
+                            R: np.ndarray, t: np.ndarray,
+                            origin_lat: float, origin_lon: float,
+                            camera_height_m: float) -> tuple:
+    """
+    STEP 7: Project a 2D image pixel to a geographic coordinate on the ground.
+
+    This uses the ground plane intersection method:
+      1. Convert pixel to a normalized ray in camera space using K^-1
+      2. Rotate the ray into the world (ENU) frame using R^T
+      3. Find where the ray intersects Z=0 (ground plane)
+      4. Convert ENU offset (meters) to lat/lon using pyproj
+
+    PARAMETERS:
+        pixel_xy         : (u, v) pixel coordinates in the undistorted image
+        intrinsics       : calibrated camera intrinsics
+        R, t             : extrinsic rotation and translation
+        origin_lat/lon   : GPS position of the camera
+        camera_height_m  : height of camera above ground in meters
+
+    RETURNS:
+        (latitude, longitude) of the ground point below that pixel
+
+    NOTE: This assumes flat ground. For sloped terrain, you'd need a DEM.
+    """
+    K = intrinsics.K_np()
+    result = pixel_to_world_flat(
+        pixel_xy[0], pixel_xy[1], K, R,
+        origin_lat, origin_lon, camera_height_m,
+    )
+    if result is None:
+        raise ValueError("Ray is parallel to the ground plane or points upward — no intersection.")
+    lat_out, lon_out = result
+    return lat_out, lon_out
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 9: GEOREFERENCE ENTIRE IMAGE (produce coordinate grid)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def georeference_image(image_path: str, intrinsics: CameraIntrinsics,
+                        heading_deg: float, pitch_deg: float, roll_deg: float,
+                        camera_height_m: float,
+                        sample_step: int = 50) -> list:
+    """
+    STEP 8: Georeference an image by projecting a grid of pixels to ground coords.
+
+    INSTRUCTIONS:
+        - heading_deg: camera compass bearing from GPS/IMU
+        - pitch_deg: camera tilt — for a downward-looking flood camera,
+                     this will be negative (e.g., -75° = mostly downward)
+        - roll_deg: camera roll from IMU
+        - camera_height_m: mounting height above ground
+        - sample_step: pixels between sampled grid points (lower = denser but slower)
+
+    RETURNS:
+        List of dicts: {pixel_x, pixel_y, lat, lon}
+
+    This output can be used as Ground Control Points (GCPs) for GIS software
+    (e.g., QGIS, GDAL) to produce a georeferenced GeoTIFF.
+    """
+    gps = read_exif_gps(image_path)
+    lat, lon, alt = gps["lat"], gps["lon"], gps.get("altitude", camera_height_m)
+
+    # Override orientation from EXIF if available, else use provided values
+    heading = gps.get("heading", heading_deg)
+    pitch   = gps.get("pitch",   pitch_deg)
+    roll    = gps.get("roll",    roll_deg)
+
+    R, t, origin = build_extrinsic_matrix(lat, lon, alt, heading, pitch, roll)
+
+    img = cv2.imread(image_path)
+    h, w = img.shape[:2]
+
+    gcps = []
+    print(f"[GEOREFERENCE] Projecting pixel grid (step={sample_step}px)...")
+
+    for v in range(0, h, sample_step):
+        for u in range(0, w, sample_step):
+            try:
+                lat_g, lon_g = pixel_to_ground_coords(
+                    (u, v), intrinsics, R, t, lat, lon, camera_height_m
+                )
+                gcps.append({
+                    "pixel_x": u, "pixel_y": v,
+                    "lat": lat_g, "lon": lon_g
+                })
+            except ValueError:
+                pass  # skip pixels with no ground intersection
+
+    print(f"[GEOREFERENCE] {len(gcps)} ground control points computed.")
+    return gcps
+
+
+def save_gcps_to_csv(gcps: list, output_path: str):
+    """Save GCPs to CSV for use in QGIS or GDAL."""
+    import csv
+    with open(output_path, 'w', newline='') as f:
+        writer = csv.DictWriter(f, fieldnames=["pixel_x", "pixel_y", "lat", "lon"])
+        writer.writeheader()
+        writer.writerows(gcps)
+    print(f"GCPs saved to {output_path}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 10: APPLY GCPS IN GDAL (produce GeoTIFF)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def create_geotiff(image_path: str, gcps: list, output_path: str):
+    """
+    STEP 9: Write a georeferenced GeoTIFF using GDAL and the computed GCPs.
+
+    INSTRUCTIONS:
+        - Requires: pip install gdal  (or install via conda: conda install gdal)
+        - Output is a GeoTIFF readable by QGIS, ArcGIS, or any GIS tool.
+        - The GCP-based warping gives a proper georeferenced raster output.
     """
     try:
-        from picamera2 import Picamera2
+        from osgeo import gdal, osr
     except ImportError:
-        raise RuntimeError(
-            "Picamera2 is not available. Install python3-picamera2 as a system package."
-        )
+        print("GDAL not installed. Save GCPs to CSV and use QGIS to georeference manually.")
+        return
 
-    output_dir.mkdir(parents=True, exist_ok=True)
+    # Open source image
+    src_ds = gdal.Open(image_path)
+    driver = gdal.GetDriverByName("GTiff")
+    dst_ds = driver.CreateCopy(output_path, src_ds, 0)
 
-    picam2 = Picamera2()
-    config = picam2.create_still_configuration(
-        main={"format": "RGB888", "size": (2592, 1944)}
-    )
-    picam2.configure(config)
-    picam2.start()
+    # Define spatial reference (WGS84)
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(4326)  # WGS84 geographic
 
-    print(
-        f"Collecting calibration images into {output_dir} "
-        f"(need {num_images} with detected chessboard)."
-    )
-    print(
-        f"Board size (inner corners): {board_size[0]} x {board_size[1]}, "
-        f"square_size={square_size}"
-    )
-    print("Press Ctrl+C to stop early.")
+    # Build GDAL GCP objects
+    gdal_gcps = [
+        gdal.GCP(g["lon"], g["lat"], 0, g["pixel_x"], g["pixel_y"])
+        for g in gcps
+    ]
 
-    criteria = (
-        cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER,
-        30,
-        0.001,
-    )
+    dst_ds.SetGCPs(gdal_gcps, srs.ExportToWkt())
 
-    saved_paths: List[Path] = []
-    captured = 0
+    # Warp to remove distortion and apply geotransform
+    gdal.Warp(output_path.replace(".tif", "_warped.tif"),
+              dst_ds,
+              format="GTiff",
+              tps=True,           # thin-plate spline warping
+              dstSRS="EPSG:4326")
 
-    try:
-        while len(saved_paths) < num_images:
-            frame = picam2.capture_array()
-            if frame is None:
-                print("Warning: failed to capture frame, retrying...")
-                continue
+    dst_ds = None
+    print(f"GeoTIFF saved to {output_path}")
 
-            found, corners = find_chessboard_corners(frame, board_size, criteria)
-            captured += 1
 
-            if not found:
-                print(f"[{captured}] Chessboard not detected, skipping.")
-                continue
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 11: PROMPT FOR USER-PROVIDED VALUES
+# ─────────────────────────────────────────────────────────────────────────────
 
-            # Draw and save visualization
-            vis = frame.copy()
-            cv2.drawChessboardCorners(vis, board_size, corners, True)
+def prompt_calibration_inputs() -> tuple:
+    """
+    Ask the user for values that are not obtained from the calibration images.
+    Checkerboard dimensions (BOARD_W, BOARD_H, SQUARE_SIZE_M) remain constants
+    at the top of this file.
 
-            filename = output_dir / f"calib_{captured:03d}.png"
-            cv2.imwrite(str(filename), vis)
-            saved_paths.append(filename)
-            print(f"[{captured}] Detected chessboard, saved {filename}")
+    Returns:
+        (image_dir, save_path, camera_height_m)
+        camera_height_m is None if the user leaves it blank.
+    """
+    print("\n[CALIBRATION INPUTS] Enter values (press Enter for default where shown).\n")
 
-    except KeyboardInterrupt:
-        print("Capture interrupted by user.")
-    finally:
+    image_dir = input("Folder containing checkerboard images [./calib_images]: ").strip()
+    if not image_dir:
+        image_dir = "./calib_images"
+
+    save_path = input("Path to save calibration JSON [./calibration.json]: ").strip()
+    if not save_path:
+        save_path = "./calibration.json"
+
+    height_str = input(
+        "Camera height above ground in meters (for georeferencing; optional): "
+    ).strip()
+    camera_height_m = None
+    if height_str:
         try:
-            picam2.close()
-        except Exception:
-            pass
+            camera_height_m = float(height_str)
+            if camera_height_m <= 0:
+                print("  (ignored: height must be positive)")
+                camera_height_m = None
+        except ValueError:
+            print("  (ignored: not a number)")
 
-    if len(saved_paths) < 3:
-        print(
-            f"Warning: only {len(saved_paths)} valid images captured. "
-            "Calibration may be unreliable."
-        )
-
-    return saved_paths
+    return image_dir, save_path, camera_height_m
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="Calibrate the RGB/NIR camera and export parameters for georeferencing.",
-        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-    )
-    parser.add_argument(
-        "--image-dir",
-        type=str,
-        help="Directory containing chessboard calibration images.",
-    )
-    parser.add_argument(
-        "--capture",
-        action="store_true",
-        help="Capture calibration images from Picamera2 before calibrating.",
-    )
-    parser.add_argument(
-        "--output",
-        type=str,
-        default="camera_calibration.json",
-        help="Path to write calibration JSON.",
-    )
-    parser.add_argument(
-        "--board-cols",
-        type=int,
-        default=24,
-        help="Number of inner corners along the chessboard width (columns).",
-    )
-    parser.add_argument(
-        "--board-rows",
-        type=int,
-        default=17,
-        help="Number of inner corners along the chessboard height (rows).",
-    )
-    parser.add_argument(
-        "--square-size",
-        type=float,
-        default=0.03,
-        help="Physical size of one square (meters or consistent units).",
-    )
-    parser.add_argument(
-        "--num-images",
-        type=int,
-        default=20,
-        help="Target number of valid calibration images.",
-    )
-
-    args = parser.parse_args()
-
-    board_size = (args.board_cols, args.board_rows)
-    square_size = float(args.square_size)
-
-    image_dir: Path
-    image_paths: List[Path] = []
-
-    if args.capture:
-        # If capture is requested, collect images to a new directory (or reuse image-dir if provided).
-        if args.image_dir:
-            image_dir = Path(args.image_dir)
-        else:
-            image_dir = Path("calibration_images")
-        print(f"Using image directory: {image_dir}")
-        image_paths = collect_images_from_camera(
-            image_dir,
-            board_size=board_size,
-            square_size=square_size,
-            num_images=args.num_images,
-        )
-    else:
-        if not args.image_dir:
-            raise SystemExit(
-                "Either --capture or --image-dir must be provided. "
-                "Use --capture to collect images from Picamera2."
-            )
-        image_dir = Path(args.image_dir)
-        if not image_dir.is_dir():
-            raise SystemExit(f"Image directory not found: {image_dir}")
-        # Use all image files in directory
-        exts = {".png", ".jpg", ".jpeg", ".bmp"}
-        image_paths = [
-            p
-            for p in sorted(image_dir.iterdir())
-            if p.is_file() and p.suffix.lower() in exts
-        ]
-
-    if not image_paths:
-        raise SystemExit("No calibration images found.")
-
-    print(f"Found {len(image_paths)} calibration images.")
-
-    calibration = calibrate_from_images(
-        image_paths=image_paths,
-        board_size=board_size,
-        square_size=square_size,
-    )
-
-    output_path = Path(args.output)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w", encoding="utf-8") as f:
-        json.dump(calibration, f, indent=2)
-
-    print(f"\nCalibration saved to {output_path}")
-    print("Summary:")
-    print(f"  Image size       : {calibration['image_size']}")
-    print(f"  Reproj. error    : {calibration['reprojection_error']:.4f} px")
-    print(
-        f"  FOV (h/v/diag)   : "
-        f"{calibration['fov_degrees']['horizontal']:.1f} / "
-        f"{calibration['fov_degrees']['vertical']:.1f} / "
-        f"{calibration['fov_degrees']['diagonal']:.1f} deg"
-    )
-
+# ─────────────────────────────────────────────────────────────────────────────
+# SECTION 12: MAIN PIPELINE
+# ─────────────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    main()
 
+    # ── A. CALIBRATE (run once per camera) ───────────────────────────────────
+
+    # Optional: capture calibration images live
+    # capture_calibration_images("./calib_images", n_images=20)
+
+    image_dir, save_path, camera_height_m = prompt_calibration_inputs()
+
+    intrinsics = calibrate_camera(
+        image_dir=image_dir,
+        save_path=save_path,
+        show_corners=True,
+        camera_height_m=camera_height_m,
+    )
+
+    # ── B. LOAD CALIBRATION (subsequent runs) ────────────────────────────────
+
+    # intrinsics = CameraIntrinsics.load("./calibration.json")
+
+    # ── C. UNDISTORT A FIELD IMAGE ────────────────────────────────────────────
+
+    # undistort_image("./field_image.jpg", intrinsics, "./field_image_undistorted.jpg")
+
+    # ── D. GEOREFERENCE A FIELD IMAGE ────────────────────────────────────────
+
+    # For a flood camera mounted ~10m high, looking mostly downward:
+    gcps = georeference_image(
+        image_path="./field_image.jpg",
+        intrinsics=intrinsics,
+        heading_deg=90.0,      # camera faces NE
+        pitch_deg=0.0,       # camera angled steeply downward
+        roll_deg=0.0,
+        camera_height_m=1.0,
+        sample_step=100
+    )
+
+    save_gcps_to_csv(gcps, "./gcps.csv")
+
+    # ── E. PRODUCE GEOTIFF (requires GDAL) ───────────────────────────────────
+
+    # create_geotiff("./field_image_undistorted.jpg", gcps, "./output.tif")
