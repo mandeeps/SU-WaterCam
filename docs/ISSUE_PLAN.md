@@ -192,7 +192,7 @@ parent_directory = os.path.dirname(os.path.normpath(directory)) or os.path.normp
 
 ### #17 — Integrate calibration workflow
 
-**Status:** `tools/camera_calibration.py` and `tools/generate_calibration_chessboard.py` already exist and compute + save intrinsics. Gap is extrinsic collection and a guided workflow doc.
+**Status:** `../Georeferencing/camera_calibration.py` is the canonical calibration tool and computes + saves intrinsics (`K`/`D`). `tools/camera_calibration.py` and `tools/generate_calibration_chessboard.py` in this repo are deprecated (see notices at top of each file). Gap is extrinsic collection and a guided workflow doc.
 
 **Remaining work (out of scope for code fixes — tracked in issue):**
 - Extrinsic parameter collection tooling

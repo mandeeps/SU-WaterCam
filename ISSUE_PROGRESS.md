@@ -88,20 +88,14 @@ Test files:
 
 ### What exists
 
-`tools/camera_calibration.py`:
+`../Georeferencing/camera_calibration.py` is the canonical calibration tool (produces the `K`/`D`/`img_size`/`rms` schema that `coreg_multiple.py` actually reads). `tools/camera_calibration.py` and `tools/generate_calibration_chessboard.py` in this repo are deprecated — see the notices at the top of each file — kept only as a reference/fallback for on-device Picamera2 capture, since Georeferencing's script uses `cv2.VideoCapture` and can't drive the Pi's CSI camera.
 
-- Captures calibration images from Picamera2 or reads from a directory
-- Detects chessboard corners, runs `cv2.calibrateCamera()`
-- Saves camera matrix, distortion coefficients, reprojection error, and FOV to a JSON file (default: `camera_calibration.json`)
-
-`tools/generate_calibration_chessboard.py`:
-
-- Generates a printable 9×6 inner-corner chessboard PNG sized for US Letter paper at 300 DPI
+`config/camera_calibration.json` holds the current OV5647 calibration (produced by the Georeferencing tool).
 
 `tools/coreg_multiple.py`:
 
-- `_undistort_if_calibrated()` loads `camera_calibration.json` and calls `cv2.undistort()` if the file exists
-- Called on both fixed and moving images in `mutual_information_registration()` (lines 404–405) and `apply_cached_transform()` (lines 249–250) before any registration or resampling occurs
+- `_undistort_if_calibrated()` loads `config/camera_calibration.json` by default and calls `cv2.undistort()` if the file exists
+- Applied only to the fixed/optical (OV5647/NIR) image in `mutual_information_registration()` and `apply_cached_transform()`, before any registration or resampling occurs — the moving/Lepton (LWIR) image is never undistorted with this calibration, since it has different optics and no calibration data of its own
 
 ---
 
@@ -111,11 +105,9 @@ Test files:
 
 ### What exists
 
-`tools/camera_calibration.py` — computes and saves lens intrinsics (camera matrix + distortion coefficients).
+`../Georeferencing/camera_calibration.py` — canonical tool; computes and saves lens intrinsics (`K`/`D`). `tools/camera_calibration.py` is deprecated (see notice at top of file).
 
-`tools/generate_calibration_chessboard.py` — printable calibration target.
-
-`tools/coreg_multiple.py` — `_undistort_if_calibrated()` (line 52) applies `camera_calibration.json` lens correction to both fixed and moving images before registration and resampling (lines 256–257, 411–412). Integration with coregistration is complete.
+`tools/coreg_multiple.py` — `_undistort_if_calibrated()` applies `config/camera_calibration.json` lens correction to the fixed/optical (OV5647) image only before registration and resampling. Integration with coregistration is complete.
 
 ### What is missing
 
