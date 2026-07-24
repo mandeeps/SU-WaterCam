@@ -49,15 +49,25 @@ class CoregistrationConfig:
 config = CoregistrationConfig()
 
 
+def _default_calibration_path() -> str:
+    """Resolve config/camera_calibration.json relative to the repo root, so calibration works without copying it into every capture directory."""
+    repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(repo_root, "config", config.CALIBRATION_FILE)
+
+
 def _undistort_if_calibrated(image: np.ndarray, calib_path: str) -> np.ndarray:
-    """Apply lens undistortion using camera_calibration.json if it exists; otherwise return image unchanged."""
+    """Apply lens undistortion using camera_calibration.json if it exists; otherwise return image unchanged.
+
+    Only valid for OV5647 (NIR) frames — the Lepton (LWIR) camera has different optics
+    and has no calibration data of its own, so it must never be passed through this.
+    """
     if not calib_path or not os.path.exists(calib_path):
         return image
     try:
         with open(calib_path) as f:
             cal = json.load(f)
-        mtx = np.array(cal["camera_matrix"], dtype=np.float64)
-        dist = np.array(cal["dist_coeffs"], dtype=np.float64).reshape(-1, 1)
+        mtx = np.array(cal["K"], dtype=np.float64)
+        dist = np.array(cal["D"], dtype=np.float64).reshape(-1, 1)
         h, w = image.shape[:2]
         new_mtx, _ = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
         return cv2.undistort(image, mtx, dist, None, new_mtx)
@@ -246,15 +256,16 @@ def validate_transform_compatibility(transform: sitk.Transform, fixed_image_path
 
 def apply_cached_transform(fixed_image_path: str, moving_image_path: str, cached_transform: sitk.Transform, temperature_data: Optional[np.ndarray] = None, calibration_file: str = "") -> Tuple[sitk.Transform, np.ndarray, np.ndarray]:
     print("Applying cached transform to images...")
-    calib_path = calibration_file or os.path.join(os.path.dirname(fixed_image_path), config.CALIBRATION_FILE)
+    calib_path = calibration_file or _default_calibration_path()
     fixed_image_cv = cv2.imread(fixed_image_path, cv2.IMREAD_UNCHANGED)
     moving_image_cv = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
     if fixed_image_cv is None:
         raise ValueError(f"Could not load fixed image: {fixed_image_path}")
     if moving_image_cv is None:
         raise ValueError(f"Could not load moving image: {moving_image_path}")
+    # calib_path holds OV5647 intrinsics only; the moving image is the Lepton (LWIR) frame,
+    # which has different optics, so it must not be undistorted with this calibration.
     fixed_image_cv = _undistort_if_calibrated(fixed_image_cv, calib_path)
-    moving_image_cv = _undistort_if_calibrated(moving_image_cv, calib_path)
     if (fixed_image_cv.shape[0] > config.MAX_IMAGE_SIZE or fixed_image_cv.shape[1] > config.MAX_IMAGE_SIZE):
         print(f"Resizing large images by {config.SCALE_PERCENT}%")
         width = int(fixed_image_cv.shape[1] * config.SCALE_PERCENT / 100)
@@ -401,20 +412,21 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
                 and validate_transform_compatibility(cached_transform, fixed_image_path, moving_image_path, saved_size)
             ):
                 print(f"Using cached transform parameters from {loaded_path}")
-                return apply_cached_transform(fixed_image_path, moving_image_path, cached_transform)
+                return apply_cached_transform(fixed_image_path, moving_image_path, cached_transform, calibration_file=calibration_file)
             else:
                 print(f"Cached transform from {loaded_path} is not compatible with current config. Will generate a new transform.")
     elif position_changed:
         print("Position changed flag is True - forcing new registration")
-    calib_path = calibration_file or os.path.join(os.path.dirname(fixed_image_path), config.CALIBRATION_FILE)
+    calib_path = calibration_file or _default_calibration_path()
     fixed_image_cv = cv2.imread(fixed_image_path, cv2.IMREAD_UNCHANGED)
     moving_image_cv = cv2.imread(moving_image_path, cv2.IMREAD_UNCHANGED)
     if fixed_image_cv is None:
         raise ValueError(f"Could not load fixed image: {fixed_image_path}")
     if moving_image_cv is None:
         raise ValueError(f"Could not load moving image: {moving_image_path}")
+    # calib_path holds OV5647 intrinsics only; the moving image is the Lepton (LWIR) frame,
+    # which has different optics, so it must not be undistorted with this calibration.
     fixed_image_cv = _undistort_if_calibrated(fixed_image_cv, calib_path)
-    moving_image_cv = _undistort_if_calibrated(moving_image_cv, calib_path)
     original_fixed_size = fixed_image_cv.shape[:2]
     if (fixed_image_cv.shape[0] > config.MAX_IMAGE_SIZE or fixed_image_cv.shape[1] > config.MAX_IMAGE_SIZE):
         print(f"Resizing large images by {config.SCALE_PERCENT}%")
@@ -661,7 +673,7 @@ def main():
     parser.add_argument("--fast", action="store_true", help="Enable fast mode with reduced iterations and preprocessing")
     parser.add_argument("--single-strategy", action="store_true", help="Use only the best registration strategy (faster)")
     parser.add_argument("--multiple-strategies", action="store_true", help="Try multiple registration strategies (slower but potentially better)")
-    parser.add_argument("--calibration-file", default="", help="Path to camera_calibration.json (default: look in image directory)")
+    parser.add_argument("--calibration-file", default="", help="Path to camera_calibration.json (default: config/camera_calibration.json in repo root)")
     args = parser.parse_args()
     directory = args.directory
     position_changed = args.position_changed
