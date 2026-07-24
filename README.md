@@ -270,11 +270,11 @@ Set default Python to the venv by adding 'source /home/pi/SU-WaterCam/venv/bin/a
 
 ### Calibrate the IMU prior to use:
 
-TODO add instructions
-
-Calibrate BNO055
+Calibrate BNO055 - use the bno055_calibration.py script in the tools directory `bno055_calibration.py --mode calibrate`. It will walk you through the procedure.
 
 Calibrate BNO085
+
+TODO
 
 </details>
 
@@ -557,11 +557,11 @@ For the remote start over Lora function, the WittyPi ground should be connected 
 
 
 
-On the Pi run tio /dev/ttyAMA1 and issue AT commands to control the mDot, see the mDot AT reference document in the instructions directory. For example, "ATI" will tell you the installed firmware version.
+On the Pi run tio /dev/ttyAMA5 and issue AT commands to control the mDot, see the mDot AT reference document in the instructions directory. For example, "ATI" will tell you the installed firmware version.
 
 if using minicom or screen:
 
-sudo minicom -s -D /dev/serial0 to connect to the mDot if it is on the default TX/RX pins, minicom -s -D /dev/ttyAMA1 if on uart5,
+sudo minicom -s -D /dev/serial0 to connect to the mDot if it is on the default TX/RX pins, minicom -s -D /dev/ttyAMA5 if on uart5,
 
 Use the settings specified in the mDot manual:
 
