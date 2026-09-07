@@ -47,7 +47,8 @@ import time
 
 import numpy as np
 
-from segformer_preprocess import preprocess_bands
+from segformer_preprocess import (normalization_mode, normalization_spec,
+                                  preprocess_bands)
 
 SOCKET_PATH = "/run/segformer/segformer.sock"
 LOG_FORMAT = "%(asctime)s [segformer_daemon] %(levelname)s: %(message)s"
@@ -79,11 +80,13 @@ def load_session(model_path: str):
         providers=["CPUExecutionProvider"],
     )
     input_meta = session.get_inputs()[0]
+    _, how = normalization_mode(session)
     log.info(
-        "Model loaded: %s | input '%s' %s",
+        "Model loaded: %s | input '%s' %s | normalisation: %s",
         os.path.basename(model_path),
         input_meta.name,
         input_meta.shape,
+        how,
     )
     return session
 
@@ -92,13 +95,14 @@ def load_session(model_path: str):
 # Inference
 # ---------------------------------------------------------------------------
 
-def load_and_preprocess(tiff_path: str, expected_h: int, expected_w: int) -> np.ndarray:
+def load_and_preprocess(tiff_path: str, expected_h: int, expected_w: int,
+                        spec: dict | None = None) -> np.ndarray:
     import rasterio
 
     with rasterio.open(tiff_path) as src:
         img = src.read()  # (bands, H, W); preprocess_bands handles float32 conversion
 
-    return preprocess_bands(img, expected_h, expected_w)
+    return preprocess_bands(img, expected_h, expected_w, spec=spec)
 
 
 def run_inference(session, tiff_path: str, output_path: str) -> float:
@@ -111,7 +115,10 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
     expected_h = input_shape[2] if isinstance(input_shape[2], int) else 512
     expected_w = input_shape[3] if isinstance(input_shape[3], int) else 512
 
-    arr = load_and_preprocess(tiff_path, expected_h, expected_w)
+    # The model states how it was normalised; anything else hands it a
+    # distribution it never saw in training, silently and without error.
+    arr = load_and_preprocess(tiff_path, expected_h, expected_w,
+                              spec=normalization_spec(session))
 
     t0 = time.perf_counter()
     logits = session.run(None, {input_name: arr})[0]  # (1, classes, h, w)

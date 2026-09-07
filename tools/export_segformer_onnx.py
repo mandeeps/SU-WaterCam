@@ -27,7 +27,7 @@ import os
 
 import numpy as np
 
-from segformer_preprocess import preprocess_bands
+from segformer_preprocess import normalization_spec, preprocess_bands
 
 
 # ---------------------------------------------------------------------------
@@ -184,13 +184,15 @@ class _CalibrationReader:
 
     def __init__(self, tiff_paths: list[str], input_name: str,
                  height: int, width: int, n_bands: int,
-                 random_fallback: list[np.ndarray] | None = None):
+                 random_fallback: list[np.ndarray] | None = None,
+                 spec: dict | None = None):
         self._paths = tiff_paths
         self._fallback = random_fallback
         self._input_name = input_name
         self._height = height
         self._width = width
         self._n_bands = n_bands
+        self._spec = spec
         self._idx = 0
 
     def get_next(self):
@@ -210,7 +212,8 @@ class _CalibrationReader:
                 if img.shape[0] != self._n_bands:
                     print(f"  Skipping {path}: expected {self._n_bands} bands, got {img.shape[0]}")
                     continue
-                return {self._input_name: preprocess_bands(img, self._height, self._width)}
+                return {self._input_name: preprocess_bands(
+                    img, self._height, self._width, spec=self._spec)}
             except Exception as e:
                 print(f"  Skipping {path}: {e}")
         return None
@@ -240,8 +243,19 @@ def quantize_to_int8(fp32_onnx_path: str, int8_onnx_path: str,
     sess = ort.InferenceSession(prep_path, providers=["CPUExecutionProvider"])
     input_name = sess.get_inputs()[0].name
 
+    # Calibration must see exactly what inference will see. Read that from the
+    # ORIGINAL model: quant_pre_process may not carry metadata_props across,
+    # and calibrating on a different distribution than the model is served
+    # picks quantization ranges for data that never arrives.
+    orig = ort.InferenceSession(fp32_onnx_path, providers=["CPUExecutionProvider"])
+    spec = normalization_spec(orig)
+    print(f"Calibration preprocessing: {spec['desc']}")
+    if spec["mode"] == "embedded" and random_fallback is not None:
+        # the graph normalises internally, so it expects raw 0-255 units
+        random_fallback = [a * 255.0 for a in random_fallback]
+
     reader = _CalibrationReader(tiff_paths, input_name, height, width, n_bands,
-                                random_fallback)
+                                random_fallback, spec=spec)
 
     # Softmax is not in onnxruntime's default quantizable op set, so it stays
     # FP32 automatically. LayerNormalization ops are also left to the default
