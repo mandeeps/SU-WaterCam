@@ -225,10 +225,14 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
         img_size = (gray.shape[1], gray.shape[0])  # (width, height)
 
         # Try the sector-based detector first. The classic findChessboardCorners
-        # with no flags cannot find a dense board: on the calib.io 24x17 target
-        # used by this project it detected nothing at all across the existing
-        # capture set, while SB found it in every frame. SB also returns
-        # sub-pixel corners already, so it needs no cornerSubPix pass.
+        # with no flags handles the calib.io 24x17 target fine on clean frames
+        # (6/6 on Calibration Data/calib_images, which is the set the shipped
+        # config/camera_calibration.json was computed from). It degrades badly on
+        # marginal ones: on Calibration Data/usable, which mixes NIR-ON frames
+        # with low board contrast, it found 0/6 where SB found 3/6. SB is also
+        # slightly more accurate -- recomputing calib_images through it gives
+        # 0.2636 px against the shipped 0.2784. SB returns sub-pixel corners
+        # already, so it needs no cornerSubPix pass.
         found, corners = False, None
         used_sb = False
         if hasattr(cv2, "findChessboardCornersSB"):
