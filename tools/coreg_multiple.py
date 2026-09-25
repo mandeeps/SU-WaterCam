@@ -33,6 +33,13 @@ class CoregistrationConfig:
     THERMAL_COLORMAP = cv2.COLORMAP_JET
     INVERT_THERMAL = False
     SAVE_TRANSFORM_PARAMETERS = True
+    #: How band 4 is built. "difference" is cv2.subtract(red(NIR-ON), red(NIR-OFF)),
+    #: which saturates at 0 and depends on the two frames sharing an exposure.
+    #: "raw" ships red(NIR-ON) unaltered; the difference stays recoverable in the
+    #: model as band4 - band0, signed and unclipped, since band 0 is red(NIR-OFF).
+    #: Changing this changes the input distribution, so it needs a retrained
+    #: checkpoint. See segformer_5band/NEXT_CHECKPOINT.md section 2.
+    NIR_BAND_MODE = "difference"
     TRANSFORM_CACHE_FILENAME = "registration_transform.json"
     #: sitk serialisation of the same transform. JSON carries only
     #: GetParameters(), which for a CompositeTransform is just its active
@@ -537,7 +544,18 @@ def extract_nir_band(nir_on_path: str, nir_off_path: str, target_size: Tuple[int
     nir_off_rgb = cv2.cvtColor(nir_off, cv2.COLOR_BGR2RGB)
     red_channel_nir = nir_on_rgb[:, :, 0]
     red_channel_off = nir_off_rgb[:, :, 0]
-    nir_band = cv2.subtract(red_channel_nir, red_channel_off)
+
+    if config.NIR_BAND_MODE == "raw":
+        # Ship the NIR-ON red channel as measured. cv2.subtract below saturates
+        # at 0, so every pixel where NIR-OFF >= NIR-ON is destroyed, and the two
+        # frames are separate exposures, so the difference also carries whatever
+        # the auto-exposure did between them. Handing the model the raw band
+        # keeps both terms: band 0 is red(NIR-OFF), so the network can form the
+        # difference itself, signed and unclipped.
+        nir_band = red_channel_nir
+    else:
+        nir_band = cv2.subtract(red_channel_nir, red_channel_off)
+
     nir_band_resized = cv2.resize(nir_band, target_size)
     return nir_band_resized
 
