@@ -34,6 +34,11 @@ class CoregistrationConfig:
     INVERT_THERMAL = False
     SAVE_TRANSFORM_PARAMETERS = True
     TRANSFORM_CACHE_FILENAME = "registration_transform.json"
+    #: sitk serialisation of the same transform. JSON carries only
+    #: GetParameters(), which for a CompositeTransform is just its active
+    #: component, so the JSON alone cannot round-trip what registration
+    #: actually returns.
+    TRANSFORM_FILE_FILENAME = "registration_transform.tfm"
     CALIBRATION_FILE = "camera_calibration.json"
     FORCE_RECALCULATE_TRANSFORM = False
     ENABLE_MULTIPLE_STRATEGIES = False
@@ -185,6 +190,12 @@ def save_transform_parameters(transform: sitk.Transform, directory: str, metadat
         normed = os.path.normpath(directory)
         parent_directory = os.path.dirname(normed) or normed
         transform_path = os.path.join(parent_directory, config.TRANSFORM_CACHE_FILENAME)
+        tfm_path = os.path.join(parent_directory, config.TRANSFORM_FILE_FILENAME)
+        try:
+            sitk.WriteTransform(transform, tfm_path)
+            transform_data["transform_file"] = os.path.basename(tfm_path)
+        except Exception as e:                      # noqa: BLE001
+            print(f"Could not serialise transform to {tfm_path}: {e}")
         with open(transform_path, "w") as f:
             json.dump(transform_data, f, indent=2)
         return True
@@ -210,6 +221,17 @@ def load_transform_parameters(directory: str) -> Optional[tuple[sitk.Transform, 
         parameters = transform_data["parameters"]
         fixed_parameters = transform_data["fixed_parameters"]
         saved_image_size = transform_data.get("metadata", {}).get("image_size")
+        #: the TRANSFORM_TYPE config that produced this, not the concrete sitk
+        #: class, which is what should be compared against the current config
+        saved_config_type = transform_data.get("metadata", {}).get("transform_type")
+
+        tfm_name = transform_data.get("transform_file")
+        if tfm_name:
+            tfm_path = os.path.join(os.path.dirname(transform_path), tfm_name)
+            if os.path.exists(tfm_path):
+                return (sitk.ReadTransform(tfm_path), transform_path,
+                        saved_image_size, saved_config_type)
+
         transform_map = {
             "Euler2DTransform": sitk.Euler2DTransform,
             "AffineTransform": lambda: sitk.AffineTransform(2),
@@ -219,10 +241,17 @@ def load_transform_parameters(directory: str) -> Optional[tuple[sitk.Transform, 
         if transform_type not in transform_map:
             print(f"Unknown transform type: {transform_type}")
             return None
+        if transform_type == "CompositeTransform":
+            # GetParameters() held only the active component, so this file
+            # predates the .tfm companion and cannot be restored faithfully.
+            print(f"{transform_path} stores a CompositeTransform without a "
+                  f"{config.TRANSFORM_FILE_FILENAME} companion; re-registering once "
+                  f"to regenerate it.")
+            return None
         transform = transform_map[transform_type]()
         transform.SetParameters(parameters)
         transform.SetFixedParameters(fixed_parameters)
-        return (transform, transform_path, saved_image_size)
+        return (transform, transform_path, saved_image_size, saved_config_type)
     except Exception as e:
         print(f"Failed to load transform parameters: {e}")
         return None
@@ -403,12 +432,14 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
     if directory and not position_changed:
         cached = load_transform_parameters(directory)
         if cached is not None:
-            cached_transform, loaded_path, saved_size = cached
-            # Check transform type and parameter length
-            expected_transform = create_transform(config.TRANSFORM_TYPE)
+            cached_transform, loaded_path, saved_size, saved_config_type = cached
+            # Compare against the TRANSFORM_TYPE that produced the cache, not the
+            # concrete sitk class: registration returns a CompositeTransform even
+            # when TRANSFORM_TYPE is "affine", so comparing classes rejected every
+            # cache entry and the transform was re-solved on every capture.
             if (
-                type(cached_transform) == type(expected_transform)
-                and len(cached_transform.GetParameters()) == len(expected_transform.GetParameters())
+                (saved_config_type is None or saved_config_type == config.TRANSFORM_TYPE)
+                and cached_transform.GetDimension() == 2
                 and validate_transform_compatibility(cached_transform, fixed_image_path, moving_image_path, saved_size)
             ):
                 print(f"Using cached transform parameters from {loaded_path}")
