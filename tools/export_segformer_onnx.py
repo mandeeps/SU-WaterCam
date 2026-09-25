@@ -21,6 +21,10 @@ For mmseg checkpoints (optional, alternative to HuggingFace):
     pip install mmengine mmsegmentation
 """
 
+# PEP 604 unions (`list[...] | None`) are evaluated at def time, and the node
+# runs Python 3.9, so annotations are deferred to keep this importable there.
+from __future__ import annotations
+
 import argparse
 import glob
 import os
@@ -134,6 +138,57 @@ def export_to_onnx(model, output_path: str, framework: str,
         )
 
     print(f"Exported ONNX FP32 model to {output_path}")
+
+
+#: There is deliberately no default for mmseg checkpoints. `Normalize_5band`
+#: exists in at least three incompatible versions as of 2026-09-24:
+#:
+#:   * on node ufo-01-01-005: `mmcv.imnormalize` commented out, applies
+#:     per-band per-image MIN-MAX, ignoring img_norm_cfg entirely
+#:   * segformer_5band HEAD: applies MEAN/STD over `range(img.shape[2])`,
+#:     which indexes a 3-element mean with 5 bands
+#:   * segformer_5band working tree: applies MEAN/STD over `range(len(self.mean))`,
+#:     normalising the first 3 bands and leaving thermal and NIR raw
+#:
+#: Guessing between those is exactly the failure this metadata exists to
+#: prevent, so the caller must say which one a given checkpoint was trained
+#: with. Check the `Normalize_5band` that was live when the checkpoint was
+#: trained, not the one in front of you.
+MMSEG_NORM_VERSIONS = "min-max, mean/std over 5 bands, or mean/std over 3 bands"
+
+
+def stamp_normalization(onnx_path: str, normalization: str,
+                        input_range: str = "raw_0_255",
+                        source: str | None = None) -> None:
+    """Record in the graph what preprocessing it expects.
+
+    Metadata only — the graph itself is untouched. Without this a consumer has
+    to guess, and `normalization_spec()` guesses min-max, which is right for the
+    mmseg checkpoints and wrong for anything trained with fixed band statistics.
+    A wrong guess produces no error, only a wrong mask.
+    """
+    import onnx
+
+    model = onnx.load(onnx_path)
+    existing = {p.key for p in model.metadata_props}
+    pairs = [("normalization", normalization), ("input_range", input_range)]
+    if source:
+        pairs.append(("normalization_source", source))
+    added = []
+    for key, value in pairs:
+        if key in existing:          # never silently overwrite a declaration
+            print(f"  metadata '{key}' already present, left alone")
+            continue
+        entry = model.metadata_props.add()
+        entry.key, entry.value = key, value
+        added.append(key)
+
+    name = os.path.basename(onnx_path)
+    if not added:
+        print(f"{name}: already declares its normalization, nothing changed")
+        return
+    onnx.save(model, onnx_path)
+    print(f"Stamped {name}: " + ", ".join(f"{k}={dict(pairs)[k]}" for k in added))
 
 
 def verify_onnx(onnx_path: str, height: int = 512, width: int = 512, n_bands: int = 5) -> None:
@@ -327,6 +382,15 @@ def parse_args():
                    help="Inference width (should match INFERENCE_WIDTH in coreg_multiple.py)")
     p.add_argument("--bands", type=int, default=5,
                    help="Number of input bands (default 5)")
+    p.add_argument("--normalization", default=None,
+                   help="Normalization the exported graph expects, recorded in its "
+                        "metadata (e.g. external:minmax, external:meanstd, "
+                        "embedded:meanstd). No default: Normalize_5band has shipped "
+                        "in incompatible versions, so the correct value depends on "
+                        "which one was live when the checkpoint was trained.")
+    p.add_argument("--normalization-source", default=None,
+                   help="Free-text note recorded alongside --normalization, e.g. which "
+                        "Normalize_5band version the checkpoint was trained under.")
     p.add_argument("--skip-quantization", action="store_true",
                    help="Export FP32 only, skip INT8 quantization")
     p.add_argument("--benchmark", action="store_true",
@@ -351,6 +415,23 @@ def main():
                    height=args.height, width=args.width, n_bands=args.bands)
     verify_onnx(fp32_path, height=args.height, width=args.width, n_bands=args.bands)
 
+    # Declare the preprocessing contract in the graph, so neither the daemon nor
+    # the INT8 calibration reader has to fall back on a guess.
+    normalization = args.normalization
+    source = args.normalization_source
+    if normalization:
+        stamp_normalization(fp32_path, normalization, source=source)
+    elif framework == "mmseg":
+        print("WARNING: no --normalization given. This graph will declare nothing, so "
+              "consumers fall back to per-image min-max.\n"
+              "         Do not assume that is correct: Normalize_5band has shipped in "
+              f"incompatible versions ({MMSEG_NORM_VERSIONS}).\n"
+              "         Check which one was live when this checkpoint was trained and "
+              "pass --normalization.")
+    else:
+        print("WARNING: no --normalization given, so the graph declares nothing. "
+              "Consumers will assume per-image min-max.")
+
     if not args.skip_quantization:
         # 3. Collect calibration paths
         print("\n=== Collecting calibration data ===")
@@ -374,6 +455,11 @@ def main():
                          height=args.height, width=args.width, n_bands=args.bands,
                          random_fallback=random_fallback)
         verify_onnx(int8_path, height=args.height, width=args.width, n_bands=args.bands)
+
+        # quant_pre_process does not necessarily carry metadata_props across, and
+        # the INT8 file is the one that gets deployed, so stamp it too.
+        if normalization:
+            stamp_normalization(int8_path, normalization, source=source)
 
     # 5. Optional benchmark
     if args.benchmark:

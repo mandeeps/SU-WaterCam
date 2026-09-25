@@ -16,6 +16,10 @@ Models exported before this metadata existed declare nothing, and are handled
 exactly as before: per-band min-max, computed per image.
 """
 
+# PEP 604 unions (`dict | None`) are evaluated at def time, and the node runs
+# Python 3.9, so annotations are deferred to keep this importable there.
+from __future__ import annotations
+
 import numpy as np
 
 #: prefix a graph uses to say it normalises its own input
@@ -47,18 +51,27 @@ def normalization_spec(session) -> dict:
     if declared.startswith(EMBEDDED_PREFIX):
         return {"mode": "embedded",
                 "desc": f"none here; graph applies {declared[len(EMBEDDED_PREFIX):]}"}
-    method = declared.split(":", 1)[-1] if declared else "minmax"
-    if method == "minmax" or not declared:
-        return {"mode": "minmax", "desc": "min-max per image"}
+
+    # A model that declares nothing is *assumed* to want min-max, which is the
+    # historical default. Say so, so a log line cannot be read as the model
+    # having asked for it. Silently treating a default as a contract is how the
+    # normalisation mismatch this metadata exists to prevent went unnoticed.
+    if not declared:
+        return {"mode": "minmax",
+                "desc": "min-max per image (DEFAULT — model declares nothing)"}
+
+    method = declared.split(":", 1)[-1]
+    if method == "minmax":
+        return {"mode": "minmax", "desc": "min-max per image (declared)"}
     if method not in SUPPORTED_EXTERNAL:
         return {"mode": "minmax",
-                "desc": f"min-max (WARNING: model declares unknown '{declared}')"}
+                "desc": f"min-max FALLBACK (WARNING: model declares unknown '{declared}')"}
     try:
         if method == "meanstd":
-            return {"mode": "meanstd", "desc": "mean/std from model metadata",
+            return {"mode": "meanstd", "desc": "mean/std from model metadata (declared)",
                     "mean": np.asarray(json.loads(meta["norm_mean"]), np.float32),
                     "std": np.asarray(json.loads(meta["norm_std"]), np.float32)}
-        return {"mode": "percentile", "desc": "percentile from model metadata",
+        return {"mode": "percentile", "desc": "percentile from model metadata (declared)",
                 "lo": np.asarray(json.loads(meta["norm_p_lo"]), np.float32),
                 "hi": np.asarray(json.loads(meta["norm_p_hi"]), np.float32)}
     except (KeyError, ValueError) as e:
