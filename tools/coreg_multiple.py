@@ -74,6 +74,23 @@ def _undistort_if_calibrated(image: np.ndarray, calib_path: str) -> np.ndarray:
         mtx = np.array(cal["K"], dtype=np.float64)
         dist = np.array(cal["D"], dtype=np.float64).reshape(-1, 1)
         h, w = image.shape[:2]
+
+        # K is only valid at the resolution it was calibrated at: fx, fy, cx and
+        # cy are all in pixels. Applied to a differently sized frame it silently
+        # mis-centres and mis-scales the correction rather than failing. The
+        # distortion coefficients are in normalised coordinates and do not scale.
+        cal_w, cal_h = (cal.get("img_size") or [w, h])[:2]
+        if (cal_w, cal_h) != (w, h):
+            sx, sy = w / float(cal_w), h / float(cal_h)
+            if abs(sx - sy) > 1e-3:
+                print(f"Warning: calibration {cal_w}x{cal_h} has a different aspect ratio "
+                      f"than the {w}x{h} frame; skipping undistort")
+                return image
+            print(f"Scaling calibration from {cal_w}x{cal_h} to {w}x{h} (factor {sx:.3f})")
+            mtx = mtx.copy()
+            mtx[0, 0] *= sx; mtx[0, 2] *= sx
+            mtx[1, 1] *= sy; mtx[1, 2] *= sy
+
         new_mtx, _ = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
         return cv2.undistort(image, mtx, dist, None, new_mtx)
     except Exception as e:
