@@ -150,7 +150,7 @@ class TestIPUplink(unittest.TestCase):
             encode_battery(65),
             encode_temperature(18.75),
             encode_humidity(62),
-            encode_gps(43.0389, -76.1322),
+            encode_gps(40.7128, -74.0060),
         ]
         result = self.tx.send_uplink(channels, device_ts=ts)
 

@@ -169,8 +169,8 @@ def flow_result():
     return {
         "temperature_celsius": 22.5,
         "relative_humidity": 55,
-        "gps_lat": 43.158,
-        "gps_lon": -76.138,
+        "gps_lat": 40.7128,
+        "gps_lon": -74.0060,
         "gps_alt": 130.0,
         "battery_percent": 75,
         "emergency_status": 0,

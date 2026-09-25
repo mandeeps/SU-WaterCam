@@ -312,7 +312,7 @@ class TestIPUplinkTransmitIntegration:
             ),
             "gps": patch(
                 "tools.get_gps.get_location_with_retry",
-                return_value=({"gps_lat": 43.0, "gps_lon": -76.0}, None),
+                return_value=({"gps_lat": 40.7, "gps_lon": -74.0}, None),
             ),
             "battery": patch(
                 "tools.battery_manager.get_battery_status",

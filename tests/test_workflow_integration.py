@@ -251,8 +251,8 @@ class TestLoRaTransmission:
     _SENSOR_DATA = {
         "temperature_celsius": 22.5,
         "relative_humidity": 58.0,
-        "gps_lat": 43.049,
-        "gps_lon": -76.147,
+        "gps_lat": 40.7128,
+        "gps_lon": -74.0060,
         "battery_percent": 75,
         "emergency_status": 0,
         "status_area_threshold": 10,
@@ -366,7 +366,7 @@ class TestIPUplink:
 
     def test_gps_channel_encoding(self):
         """GPS lat/lon must be packed as two signed int32 values in big-endian order."""
-        lat, lon = 43.049, -76.147
+        lat, lon = 40.7128, -74.0060
         packed = struct.pack(">ii",
                              int(round(lat * 1_000_000)),
                              int(round(lon * 1_000_000)))
