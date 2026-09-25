@@ -22,7 +22,15 @@ Restart=on-failure
 RestartSec=5
 TimeoutStartSec=60
 # Wait up to 30 s (60 × 0.5 s) for the socket to appear; fail cleanly if it doesn't.
-ExecStartPost=/bin/bash -c 'retries=0; until [ -S /run/segformer/segformer.sock ]; do sleep 0.5; retries=$((retries+1)); [ $retries -ge 60 ] && exit 1; done'
+#
+# Written as a for-loop with an explicit exit, not an until-loop. An until-loop
+# returns the status of the last command run in its body, and the last command
+# here would be `[ $retries -ge 60 ] && exit 1`, which is false-and-so-status-1
+# on every iteration below the limit. The loop therefore reported failure in
+# exactly the normal case: socket absent for one or more polls, then appearing.
+# It only passed when the socket already existed on the first check, so the
+# service could never start from cold.
+ExecStartPost=/bin/bash -c 'for i in $(seq 1 60); do [ -S /run/segformer/segformer.sock ] && exit 0; sleep 0.5; done; exit 1'
 
 [Install]
 WantedBy=multi-user.target
