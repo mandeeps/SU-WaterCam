@@ -120,6 +120,29 @@ DEFAULT_IMG_SCALE = (1024, 512)
 #: input dimensions divide by 32.
 SIZE_DIVISOR = 32
 
+#: "pad" resizes keeping aspect, then zero-pads up to SIZE_DIVISOR, which is what
+#: the mmseg path does and what the current checkpoint was validated against.
+#: "divisible" resizes straight to a divisible size and never pads. Prefer it once
+#: a checkpoint exists to validate it against.
+SIZE_POLICY = os.environ.get("SEGFORMER_SIZE_POLICY", "pad")
+
+
+def round_to_divisor(h: int, w: int, divisor: int = SIZE_DIVISOR) -> tuple[int, int]:
+    """Nearest size whose dimensions both divide by `divisor`, minimum one step.
+
+    Padding to a multiple of 32 is not free. MiT's spatial-reduction attention
+    pools globally, so a padded strip perturbs predictions across the whole
+    frame. Measured over 64 real captures in segformer_5band: 3.27% of pixels
+    move on average, and water fraction shifts by more than a point in 39 of
+    64. Resizing to a size that already divides avoids the pad entirely, at the
+    cost of a slightly different scale.
+
+    This changes model output, so it cannot be validated against the current
+    100-iteration checkpoint. See segformer_5band/NEXT_CHECKPOINT.md section 3.
+    """
+    return (max(divisor, int(round(h / divisor)) * divisor),
+            max(divisor, int(round(w / divisor)) * divisor))
+
 
 def keep_ratio_size(oh: int, ow: int, img_scale=DEFAULT_IMG_SCALE) -> tuple[int, int]:
     """`mmcv.imrescale` semantics: fit inside img_scale without distorting aspect.
@@ -154,6 +177,8 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
         expected_h, expected_w = static_h, static_w
     else:
         expected_h, expected_w = keep_ratio_size(ori_h, ori_w)
+        if SIZE_POLICY == "divisible":
+            expected_h, expected_w = round_to_divisor(expected_h, expected_w)
 
     # The model states how it was normalised; anything else hands it a
     # distribution it never saw in training, silently and without error.
