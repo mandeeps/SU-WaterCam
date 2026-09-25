@@ -3,6 +3,8 @@ __pycache__/
 *.py[cod]
 *$py.class
 
+tailscale-key.txt
+
 # Virtual environment
 venv/
 env/
@@ -63,3 +65,18 @@ Thumbs.db
 # Keep local copies for design work; access via GitHub or shared drive.
 Reference Models/
 instructions/
+
+# --- Captured sensor data. Never commit. -------------------------------------
+# add_metadata() writes GPS and IMU into the EXIF of every optical frame when
+# GPS is active, so a capture is location data, not just an image. These paths
+# are untracked today and this keeps a stray `git add -A` from changing that.
+images/
+**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-*-NIR-ON.jpg
+**/[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-*-NIR-OFF.jpg
+**/lepton_*.pgm
+**/temperatures_*.csv
+**/final_5_band*.tiff
+**/color_preserved_5_band*.tiff
+**/*_segmentation.png
+registration_transform.json
+registration_transform.tfm
