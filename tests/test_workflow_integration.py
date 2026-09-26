@@ -532,7 +532,7 @@ class TestCoregSegmentation:
     def test_segformer_absent_returns_none(self, tmp_image_dir):
         """segformer returns None gracefully when daemon socket and binary are absent."""
         import subprocess
-        tiff_path = os.path.join(tmp_image_dir, "final_5_band.tiff")
+        tiff_path = os.path.join(tmp_image_dir, "color_preserved_5_band.tiff")
         output_path = os.path.join(tmp_image_dir, "final_5_band_segmentation.png")
 
         # Simulate daemon not present (no socket) and subprocess returning non-zero

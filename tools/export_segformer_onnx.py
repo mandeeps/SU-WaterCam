@@ -215,13 +215,17 @@ def verify_onnx(onnx_path: str, height: int = 512, width: int = 512, n_bands: in
 # ---------------------------------------------------------------------------
 
 def collect_calibration_paths(calibration_dir: str, n_images: int = 50) -> list[str]:
-    """Walk calibration_dir for up to n_images final_5_band.tiff paths.
+    """Walk calibration_dir for up to n_images color_preserved_5_band.tiff paths.
 
     Uses iglob to stop traversal early once n_images are collected, avoiding
     a full directory walk and in-memory materialisation of all matches.
     """
     paths = []
-    pattern = os.path.join(calibration_dir, "**", "final_5_band.tiff")
+    # color_preserved, not final_5_band: calibration must see exactly what
+    # inference sees, and ticktalk_main serves color_preserved. final_5_band
+    # is BGR at 512x512 and would calibrate the quantisation ranges against a
+    # different distribution than the one that arrives.
+    pattern = os.path.join(calibration_dir, "**", "color_preserved_5_band.tiff")
     for p in glob.iglob(pattern, recursive=True):
         paths.append(p)
         if len(paths) >= n_images:
@@ -373,7 +377,7 @@ def parse_args():
     p.add_argument("--output", default="/home/pi/segformer_5band",
                    help="Directory to write ONNX files")
     p.add_argument("--calibration-dir", default="/home/pi/SU-WaterCam/images",
-                   help="Root directory to search for final_5_band.tiff calibration images")
+                   help="Root directory to search for color_preserved_5_band.tiff calibration images")
     p.add_argument("--calibration-images", type=int, default=50,
                    help="Max calibration images to use (default 50)")
     p.add_argument("--height", type=int, default=512,
@@ -438,7 +442,7 @@ def main():
         calib_paths = collect_calibration_paths(args.calibration_dir, args.calibration_images)
         if not calib_paths:
             print(
-                f"WARNING: No final_5_band.tiff files found under {args.calibration_dir}. "
+                f"WARNING: No color_preserved_5_band.tiff files found under {args.calibration_dir}. "
                 "Using random calibration data — quantization accuracy will be suboptimal."
             )
             random_fallback = [

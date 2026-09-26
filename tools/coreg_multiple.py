@@ -46,8 +46,22 @@ class CoregistrationConfig:
     PARALLEL_PROCESSING = False
     ENABLE_MEMORY_OPTIMIZATION = True
     CHUNK_SIZE = 512
-    # Resolution written to final_5_band.tiff for SegFormer inference.
-    # color_preserved_5_band.tiff is kept at full co-registration resolution.
+    # Resolution written to final_5_band.tiff.
+    #
+    # The two five-band TIFFs are NOT the same image, and the difference is easy
+    # to miss because only one of them is ever looked at:
+    #
+    #   final_5_band.tiff           B, G, R, thermal, NIR   512x512, aspect squashed
+    #   color_preserved_5_band.tiff R, G, B, thermal, NIR   native 972x1296
+    #
+    # final_5_band carries OpenCV's native channel order straight from
+    # cv2.imread; save_color_preserved_tiff() is the one that reverses the
+    # optical channels, which is what "color preserved" refers to.
+    #
+    # **Inference and training both use color_preserved_5_band.tiff.**
+    # ticktalk_main.segformer() serves it and photo_processing/export_dataset.py
+    # trains on it. final_5_band is kept for backward compatibility with older
+    # captures and tooling; do not feed it to a model.
     INFERENCE_HEIGHT = 512
     INFERENCE_WIDTH = 512
 

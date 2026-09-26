@@ -70,6 +70,28 @@ This is by design and matches what `ticktalk_main.segformer()` does with a subpr
 Neither environment can run the other's stage. `mmseg` also only imports with the working directory
 set to `segformer_5band`, because the package is vendored there.
 
+## The two five-band TIFFs are not interchangeable
+
+Co-registration writes both, and they differ in channel order and geometry:
+
+| file | channels | size |
+|---|---|---|
+| `color_preserved_5_band.tiff` | **R, G, B**, thermal, NIR | native 972x1296, 4:3 |
+| `final_5_band.tiff` | **B, G, R**, thermal, NIR | 512x512, aspect squashed |
+
+`final_5_band` carries OpenCV's native order straight from `cv2.imread`.
+`save_color_preserved_tiff()` is the function that reverses the optical channels, which is what
+"color preserved" refers to. Verified against the source JPEG read as true RGB: `color_preserved[0]`
+correlates 1.0000 with true red, `final_5_band[0]` correlates 1.0000 with true blue.
+
+**Everything that feeds a model uses `color_preserved_5_band.tiff`**: `ticktalk_main.segformer()`
+serves it, `photo_processing/export_dataset.py` trains on it, and
+`tools/export_segformer_onnx.py` calibrates INT8 on it. `final_5_band.tiff` is kept for backward
+compatibility with older captures and tooling. **Do not feed it to a model.**
+
+The segmentation output keeps the name `final_5_band_segmentation.png` because `tools/watercam.py`
+reads it by that name. The name is historical and no longer describes its input.
+
 ## Reference run, sensors through to mask
 
 Node 005, indoors, `iter_100.pth`:
