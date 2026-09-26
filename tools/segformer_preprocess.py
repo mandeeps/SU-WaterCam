@@ -99,7 +99,21 @@ def canonical_bands(descriptions) -> list:
     return out
 
 
-def band_order_problem(session, descriptions) -> str:
+def tiff_band_order(descriptions, tags=None) -> list:
+    """The TIFF's band order, preferring its BAND_ORDER tag over prose.
+
+    `tools/coreg_multiple.py` writes BAND_ORDER as the same comma-separated
+    canonical names the .onnx declares, so when it is present no interpretation
+    is needed. Captures written before that tag existed carry only the prose
+    band descriptions, which still have to be keyword-matched.
+    """
+    declared = ((tags or {}).get("BAND_ORDER") or "").strip()
+    if declared:
+        return [b.strip().lower() or None for b in declared.split(",")]
+    return canonical_bands(descriptions)
+
+
+def band_order_problem(session, descriptions, tags=None) -> str:
     """Does the TIFF's band order match what the model was trained on?
 
     The model stamps its band order at export (`training/models/segformer.py`).
@@ -115,7 +129,7 @@ def band_order_problem(session, descriptions) -> str:
     want = [b.strip().lower() for b in (meta.get("bands") or "").split(",") if b.strip()]
     if not want:
         return ""                          # exported before this metadata existed
-    got = canonical_bands(descriptions)
+    got = tiff_band_order(descriptions, tags)
     if not got or all(g is None for g in got):
         return ""                          # TIFF carries no readable descriptions
     if len(got) != len(want):

@@ -18,6 +18,7 @@ from segformer_preprocess import (  # noqa: E402
     canonical_bands,
     normalization_spec,
     preprocess_bands,
+    tiff_band_order,
 )
 
 #: The band descriptions `tools/coreg_multiple.py` writes into the five-band TIFF.
@@ -179,3 +180,35 @@ def test_a_model_that_declares_nothing_is_not_accused(session):
 @pytest.mark.parametrize("descriptions", [None, (), (None,) * 5, ("",) * 5])
 def test_a_tiff_that_names_nothing_is_not_accused(descriptions):
     assert band_order_problem(_FakeSession({"bands": MODEL_BANDS}), descriptions) == ""
+
+
+# --- the BAND_ORDER tag ------------------------------------------------------
+
+def test_band_order_tag_is_preferred_over_prose():
+    """A tag needs no interpretation, so it wins over keyword-matched prose."""
+    assert tiff_band_order(TIFF_BANDS, {"BAND_ORDER": MODEL_BANDS}) == \
+        ["red", "green", "blue", "thermal", "nir"]
+
+
+def test_prose_is_used_when_there_is_no_tag():
+    """Captures written before the tag existed still have to be read."""
+    for tags in (None, {}, {"BAND_ORDER": ""}, {"BAND_ORDER": "   "}):
+        assert tiff_band_order(TIFF_BANDS, tags) == \
+            ["red", "green", "blue", "thermal", "nir"]
+
+
+def test_tag_whitespace_and_case_are_tolerated():
+    assert tiff_band_order((), {"BAND_ORDER": " Red , GREEN ,blue, Thermal ,NIR "}) == \
+        ["red", "green", "blue", "thermal", "nir"]
+
+
+def test_a_legacy_bgr_tag_is_caught_against_an_rgb_model():
+    """final_5_band.tiff now tags itself BGR — the check must act on that."""
+    problem = band_order_problem(_FakeSession({"bands": MODEL_BANDS}), (),
+                                 {"BAND_ORDER": "blue,green,red,thermal,nir"})
+    assert "blue,green,red" in problem
+
+
+def test_tag_agreeing_with_the_model_is_silent():
+    assert band_order_problem(_FakeSession({"bands": MODEL_BANDS}), (),
+                              {"BAND_ORDER": MODEL_BANDS}) == ""

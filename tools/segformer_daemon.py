@@ -149,11 +149,12 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
     with rasterio.open(tiff_path) as src:
         ori_h, ori_w = src.height, src.width
         descriptions = src.descriptions
+        tiff_tags = src.tags()
 
     # Band order is the one mismatch that still produces a plausible mask, so
     # say so loudly and keep going — a metadata disagreement should not take a
     # field node offline.
-    problem = band_order_problem(session, descriptions)
+    problem = band_order_problem(session, descriptions, tiff_tags)
     if problem and problem != _band_warning[0]:
         _band_warning[0] = problem
         logging.warning("band order mismatch: %s", problem)

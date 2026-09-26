@@ -84,13 +84,38 @@ Co-registration writes both, and they differ in channel order and geometry:
 "color preserved" refers to. Verified against the source JPEG read as true RGB: `color_preserved[0]`
 correlates 1.0000 with true red, `final_5_band[0]` correlates 1.0000 with true blue.
 
-**Everything that feeds a model uses `color_preserved_5_band.tiff`**: `ticktalk_main.segformer()`
-serves it, `photo_processing/export_dataset.py` trains on it, and
-`tools/export_segformer_onnx.py` calibrates INT8 on it. `final_5_band.tiff` is kept for backward
-compatibility with older captures and tooling. **Do not feed it to a model.**
+**Everything that feeds or reads a model uses `color_preserved_5_band.tiff`**:
+`ticktalk_main.segformer()` and `tools/watercam.py` serve it, `photo_processing/export_dataset.py`
+trains on it, and `tools/export_segformer_onnx.py` calibrates INT8 on it. The names live in
+`CoregistrationConfig` (`MODEL_INPUT_TIFF`, `SEGMENTATION_PNG`) rather than as string literals.
 
-The segmentation output keeps the name `final_5_band_segmentation.png` because `tools/watercam.py`
-reads it by that name. The name is historical and no longer describes its input.
+`final_5_band.tiff` is **legacy output, no longer read by any UFONet software.** It is still
+written so older captures and external tooling keep working. **Do not feed it to a model.**
+
+### Every TIFF states its own band order
+
+Both writers now set a `BAND_ORDER` tag — `red,green,blue,thermal,nir` for `color_preserved`,
+`blue,green,red,thermal,nir` for `final_5_band`, which also carries a `BAND_ORDER_NOTE` saying it is
+legacy. The value is the same comma-separated format the exported `.onnx` declares in its `bands`
+metadata, so `tools/segformer_daemon.py` compares the file against the model directly instead of
+keyword-matching prose band descriptions. `final_5_band` previously carried no band descriptions and
+no tags at all, which is how the file easiest to confuse was also the one that said nothing about
+itself.
+
+Captures written before the tag existed carry only the prose descriptions, and
+`segformer_preprocess.tiff_band_order()` still reads those, so nothing already captured is
+invalidated. An audit of all 6489 `color_preserved_5_band.tiff` in the archive found **zero** files
+with the bands in the wrong order.
+
+### Mask name
+
+The segmentation mask is `color_preserved_5_band_segmentation.png`. It is named after its input and
+cannot be named independently: `segment_tiff_5band.py` takes no output argument and writes
+`<input stem>_segmentation.png`. While the mask was still called `final_5_band_segmentation.png`,
+the daemon path wrote that name but the subprocess fallback wrote the stem-derived name and then
+returned the name it had not written. Masks are resolved through
+`coreg_multiple.segmentation_path()`, which accepts the superseded name so directories segmented
+earlier stay readable.
 
 ## Reference run, sensors through to mask
 

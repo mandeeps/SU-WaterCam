@@ -78,6 +78,14 @@ class CoregistrationConfig:
     LEGACY_TIFF = "final_5_band.tiff"
     LEGACY_SEGMENTATION_PNG = "final_5_band_segmentation.png"
 
+    #: Band order, written into every TIFF as the BAND_ORDER tag. The format is
+    #: the same comma-separated canonical names the exported .onnx carries in
+    #: its `bands` metadata (photo_processing/training/models/segformer.py), so
+    #: a runtime can compare the two directly instead of parsing prose band
+    #: descriptions and guessing.
+    BAND_ORDER = ("red", "green", "blue", "thermal", "nir")
+    LEGACY_BAND_ORDER = ("blue", "green", "red", "thermal", "nir")
+
 config = CoregistrationConfig()
 
 
@@ -600,10 +608,40 @@ def extract_nir_band(nir_on_path: str, nir_off_path: str, target_size: Tuple[int
     return nir_band_resized
 
 
+#: Human-readable band descriptions, keyed by the canonical name used in
+#: BAND_ORDER. Both TIFF writers use these so the prose and the machine-readable
+#: tag can never drift apart.
+_BAND_DESCRIPTIONS = {
+    "red": "Red Channel (Optical)",
+    "green": "Green Channel (Optical)",
+    "blue": "Blue Channel (Optical)",
+    "thermal": "Thermal Data (Normalized 0-255)",
+    "nir": "NIR Band (NIR-ON minus NIR-OFF)",
+}
+
+
 def save_multiband_tiff(image_data: np.ndarray, output_path: str, transform_params: Tuple = config.DEFAULT_TRANSFORM_ORIGIN + config.DEFAULT_TRANSFORM_SCALE) -> None:
+    """Write final_5_band.tiff — **legacy output, no longer read by anything.**
+
+    Kept so older captures and external tooling keep working. It is B,G,R at a
+    squashed 512x512; `save_color_preserved_tiff` writes the file the model and
+    the annotator actually use. Until now this wrote no band descriptions and no
+    tags at all, which is exactly how a file this easy to confuse should not be
+    written, so it now states its own band order.
+    """
     transform = from_origin(*transform_params)
     with rasterio.open(output_path, "w", driver="GTiff", height=image_data.shape[1], width=image_data.shape[2], count=image_data.shape[0], dtype=image_data.dtype, transform=transform) as dst:
         dst.write(image_data)
+        if image_data.shape[0] == len(config.LEGACY_BAND_ORDER):
+            for i, name in enumerate(config.LEGACY_BAND_ORDER, 1):
+                dst.set_band_description(i, _BAND_DESCRIPTIONS[name])
+            dst.update_tags(
+                BAND_ORDER=",".join(config.LEGACY_BAND_ORDER),
+                BAND_ORDER_NOTE="Legacy output, no longer read by any UFONet software. "
+                                "B,G,R at a squashed 512x512 — OpenCV's native channel "
+                                "order. Use color_preserved_5_band.tiff instead.",
+                CREATOR="Coregistration Script",
+            )
     print(f"Saved multiband TIFF: {output_path}")
 
 
@@ -612,13 +650,24 @@ def save_color_preserved_tiff(rgb_data: np.ndarray, thermal_data: np.ndarray, ni
     rgb_uint8 = np.clip(rgb_data, 0, 255).astype(np.uint8)
     thermal_uint8 = np.clip(thermal_data, 0, 255).astype(np.uint8)
     nir_uint8 = np.clip(nir_data, 0, 255).astype(np.uint8)
+    # rgb_data arrives BGR from cv2.imread; [2],[1],[0] is what makes this file
+    # R,G,B — the "color preserved" in the name. Must stay in step with
+    # config.BAND_ORDER.
     stacked_data = np.stack([rgb_uint8[:, :, 2], rgb_uint8[:, :, 1], rgb_uint8[:, :, 0], thermal_uint8, nir_uint8], axis=0)
     with rasterio.open(output_path, "w", driver="GTiff", height=stacked_data.shape[1], width=stacked_data.shape[2], count=stacked_data.shape[0], dtype=stacked_data.dtype, transform=transform, photometric="rgb", compress="lzw") as dst:
         dst.write(stacked_data)
-        band_descriptions = ["Red Channel (Optical)", "Green Channel (Optical)", "Blue Channel (Optical)", "Thermal Data (Normalized 0-255)", "NIR Band (NIR-ON minus NIR-OFF)"]
-        for i, description in enumerate(band_descriptions, 1):
-            dst.set_band_description(i, description)
-        dst.update_tags(CREATOR="Coregistration Script", DESCRIPTION="Color-preserved multispectral data with RGB, Thermal, and NIR bands", BAND_COUNT=str(stacked_data.shape[0]), DATA_SOURCES="Optical (RGB), Thermal (LWIR), NIR (NIR-ON/NIR-OFF difference)")
+        for i, name in enumerate(config.BAND_ORDER, 1):
+            dst.set_band_description(i, _BAND_DESCRIPTIONS[name])
+        # BAND_ORDER is the machine-readable one. The descriptions above are
+        # prose a reader has to keyword-match; this is the same string format
+        # the exported .onnx declares in its `bands` metadata, so a runtime can
+        # compare the file against the model directly.
+        dst.update_tags(
+            BAND_ORDER=",".join(config.BAND_ORDER),
+            CREATOR="Coregistration Script",
+            DESCRIPTION="Color-preserved multispectral data with RGB, Thermal, and NIR bands",
+            BAND_COUNT=str(stacked_data.shape[0]),
+            DATA_SOURCES="Optical (RGB), Thermal (LWIR), NIR (NIR-ON/NIR-OFF difference)")
     print(f"Saved color-preserved TIFF: {output_path}")
 
 
