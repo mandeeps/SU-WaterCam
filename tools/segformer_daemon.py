@@ -51,8 +51,8 @@ import time
 
 import numpy as np
 
-from segformer_preprocess import (normalization_mode, normalization_spec,
-                                  preprocess_bands)
+from segformer_preprocess import (band_order_problem, normalization_mode,
+                                  normalization_spec, preprocess_bands)
 
 SOCKET_PATH = "/run/segformer/segformer.sock"
 LOG_FORMAT = "%(asctime)s [segformer_daemon] %(levelname)s: %(message)s"
@@ -133,6 +133,11 @@ def keep_ratio_size(oh: int, ow: int, img_scale=DEFAULT_IMG_SCALE) -> tuple[int,
     return int(oh * scale + 0.5), int(ow * scale + 0.5)
 
 
+#: The last band-order complaint, so a per-frame check does not fill the log
+#: with the same line every wake cycle.
+_band_warning = [""]
+
+
 def run_inference(session, tiff_path: str, output_path: str) -> float:
     import cv2
     import rasterio
@@ -143,6 +148,15 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
 
     with rasterio.open(tiff_path) as src:
         ori_h, ori_w = src.height, src.width
+        descriptions = src.descriptions
+
+    # Band order is the one mismatch that still produces a plausible mask, so
+    # say so loudly and keep going — a metadata disagreement should not take a
+    # field node offline.
+    problem = band_order_problem(session, descriptions)
+    if problem and problem != _band_warning[0]:
+        _band_warning[0] = problem
+        logging.warning("band order mismatch: %s", problem)
 
     # A static graph fixes its own input size. A dynamic one does not, and
     # squashing the capture into a square would destroy its aspect ratio —

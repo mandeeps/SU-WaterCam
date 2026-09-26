@@ -14,9 +14,17 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 from segformer_preprocess import (  # noqa: E402
+    band_order_problem,
+    canonical_bands,
     normalization_spec,
     preprocess_bands,
 )
+
+#: The band descriptions `tools/coreg_multiple.py` writes into the five-band TIFF.
+TIFF_BANDS = ("Red Channel (Optical)", "Green Channel (Optical)",
+              "Blue Channel (Optical)", "Thermal Data (Normalized 0-255)",
+              "NIR Band (NIR-ON minus NIR-OFF)")
+MODEL_BANDS = "red,green,blue,thermal,nir"
 
 
 class _FakeMeta:
@@ -129,3 +137,45 @@ def test_caller_buffer_is_never_modified():
 def test_output_is_float32_batched(mode):
     out = preprocess_bands(_img(), 8, 8, spec={"mode": mode})
     assert out.dtype == np.float32 and out.ndim == 4 and out.shape[0] == 1
+
+
+# --- band order --------------------------------------------------------------
+
+def test_tiff_descriptions_read_as_the_bands_they_name():
+    assert canonical_bands(TIFF_BANDS) == ["red", "green", "blue", "thermal", "nir"]
+
+
+def test_nir_is_not_read_as_red():
+    """"NIR" contains "r"... and the naive keyword order would call it red."""
+    assert canonical_bands(("NIR Band (NIR-ON minus NIR-OFF)",)) == ["nir"]
+
+
+def test_matching_order_is_silent():
+    assert band_order_problem(_FakeSession({"bands": MODEL_BANDS}), TIFF_BANDS) == ""
+
+
+def test_bgr_tiff_against_an_rgb_model_is_reported():
+    """The exact mismatch that final_5_band.tiff had: R and B transposed."""
+    bgr = (TIFF_BANDS[2], TIFF_BANDS[1], TIFF_BANDS[0]) + TIFF_BANDS[3:]
+    problem = band_order_problem(_FakeSession({"bands": MODEL_BANDS}), bgr)
+    assert "blue,green,red" in problem
+
+
+def test_band_count_disagreement_is_reported():
+    problem = band_order_problem(_FakeSession({"bands": "red,green,blue"}), TIFF_BANDS)
+    assert "3 bands" in problem and "has 5" in problem
+
+
+@pytest.mark.parametrize("session", [
+    _FakeSession({}),                      # exported before the metadata existed
+    _FakeSession({"bands": ""}),
+    _FakeSession(None),
+    _FakeSession(raises=True),
+])
+def test_a_model_that_declares_nothing_is_not_accused(session):
+    assert band_order_problem(session, TIFF_BANDS) == ""
+
+
+@pytest.mark.parametrize("descriptions", [None, (), (None,) * 5, ("",) * 5])
+def test_a_tiff_that_names_nothing_is_not_accused(descriptions):
+    assert band_order_problem(_FakeSession({"bands": MODEL_BANDS}), descriptions) == ""
