@@ -533,7 +533,7 @@ class TestCoregSegmentation:
         """segformer returns None gracefully when daemon socket and binary are absent."""
         import subprocess
         tiff_path = os.path.join(tmp_image_dir, "color_preserved_5_band.tiff")
-        output_path = os.path.join(tmp_image_dir, "final_5_band_segmentation.png")
+        output_path = os.path.join(tmp_image_dir, "color_preserved_5_band_segmentation.png")
 
         # Simulate daemon not present (no socket) and subprocess returning non-zero
         with patch("subprocess.Popen") as mock_popen:
@@ -620,7 +620,7 @@ class TestFullPipelineSmoke:
         from PIL import Image
         arr = np.zeros((32, 32), dtype=np.uint8)
         arr[8:24, 8:24] = 255
-        seg_png_path = os.path.join(dirname, "final_5_band_segmentation.png")
+        seg_png_path = os.path.join(dirname, "color_preserved_5_band_segmentation.png")
         Image.fromarray(arr, mode="L").save(seg_png_path)
         seg_result = seg_png_path
 

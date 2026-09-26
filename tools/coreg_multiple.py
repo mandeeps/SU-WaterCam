@@ -65,7 +65,34 @@ class CoregistrationConfig:
     INFERENCE_HEIGHT = 512
     INFERENCE_WIDTH = 512
 
+    #: The one five-band format every consumer reads. Written by
+    #: save_color_preserved_tiff().
+    MODEL_INPUT_TIFF = "color_preserved_5_band.tiff"
+    #: What segment_tiff_5band.py writes for that input — it names its output
+    #: `<input stem>_segmentation.png` and takes no output argument, so this
+    #: name follows from MODEL_INPUT_TIFF and cannot be chosen independently.
+    #: segformer_5band/batch_segformer.sh already expects this name.
+    SEGMENTATION_PNG = "color_preserved_5_band_segmentation.png"
+    #: Superseded names. Still written (the TIFF) and still read (the mask), so
+    #: captures made before the standardisation stay usable.
+    LEGACY_TIFF = "final_5_band.tiff"
+    LEGACY_SEGMENTATION_PNG = "final_5_band_segmentation.png"
+
 config = CoregistrationConfig()
+
+
+def segmentation_path(directory: str) -> str:
+    """The segmentation mask in `directory`, preferring the standard name.
+
+    Falls back to the superseded name so a directory segmented before the
+    standardisation is still readable. Returns the standard path when neither
+    exists, so callers report the name they should have been given.
+    """
+    std = os.path.join(directory, config.SEGMENTATION_PNG)
+    if os.path.exists(std):
+        return std
+    legacy = os.path.join(directory, config.LEGACY_SEGMENTATION_PNG)
+    return legacy if os.path.exists(legacy) else std
 
 
 def _default_calibration_path() -> str:

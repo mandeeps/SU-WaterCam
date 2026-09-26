@@ -9,8 +9,8 @@ segment_tiff_5band.py is spawned as a fresh subprocess each wake cycle.
 Protocol
 --------
 Client → server (newline-terminated JSON):
-    {"tiff_path": "/abs/path/final_5_band.tiff",
-     "output_path": "/abs/path/final_5_band_segmentation.png"}
+    {"tiff_path": "/abs/path/color_preserved_5_band.tiff",
+     "output_path": "/abs/path/color_preserved_5_band_segmentation.png"}
 
 Server → client (newline-terminated JSON):
     {"status": "ok",   "inference_ms": 1234}

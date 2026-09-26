@@ -750,16 +750,24 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
     import os
     import subprocess
 
+    from tools.coreg_multiple import config as coreg_config
+
     # Serve color_preserved_5_band.tiff, not final_5_band.tiff. The two files
     # are not the same image: co-registration writes final_5_band in OpenCV's
     # native BGR at a squashed 512x512, while color_preserved reverses the
     # optical channels to true RGB and keeps the native 4:3 frame. The annotator
     # trains on color_preserved (see photo_processing/export_dataset.py), so
     # serving final_5_band fed the model swapped red and blue at a distorted
-    # aspect ratio. The output keeps its historical name because
-    # tools/watercam.py reads it by that name.
-    tiff_path = filepath + "/color_preserved_5_band.tiff"
-    output_path = filepath + "/final_5_band_segmentation.png"
+    # aspect ratio.
+    #
+    # The mask is named after the input. It has to be: the subprocess fallback
+    # below passes only the TIFF, and segment_tiff_5band.py names its output
+    # `<input stem>_segmentation.png`. While this said final_5_band_segmentation
+    # the daemon path wrote that name and the fallback wrote
+    # color_preserved_5_band_segmentation, then returned the name it had not
+    # written.
+    tiff_path = filepath + "/" + coreg_config.MODEL_INPUT_TIFF
+    output_path = filepath + "/" + coreg_config.SEGMENTATION_PNG
     socket_path = "/run/segformer/segformer.sock"
 
     try:
