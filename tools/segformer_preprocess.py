@@ -144,6 +144,22 @@ def band_order_problem(session, descriptions, tags=None) -> str:
     return ""
 
 
+def water_class_index(session) -> int:
+    """Which logit channel is water, from the graph's `classes` metadata.
+
+    Returns -1 when the model does not declare its taxonomy, which means every
+    model exported before 2026-09-27. Those are binary and their index 1 is
+    water by construction, so the caller keeps its existing behaviour rather
+    than guessing from an absent declaration.
+    """
+    try:
+        meta = session.get_modelmeta().custom_metadata_map or {}
+    except Exception:                      # noqa: BLE001 - never break inference
+        return -1
+    names = [c.strip().lower() for c in (meta.get("classes") or "").split(",") if c.strip()]
+    return names.index("water") if "water" in names else -1
+
+
 def normalization_mode(session) -> tuple[bool, str]:
     """(does this module normalise, human description) -- convenience wrapper."""
     spec = normalization_spec(session)

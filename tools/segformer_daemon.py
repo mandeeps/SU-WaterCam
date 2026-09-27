@@ -52,7 +52,8 @@ import time
 import numpy as np
 
 from segformer_preprocess import (band_order_problem, normalization_mode,
-                                  normalization_spec, preprocess_bands)
+                                  normalization_spec, preprocess_bands,
+                                  water_class_index)
 
 SOCKET_PATH = "/run/segformer/segformer.sock"
 LOG_FORMAT = "%(asctime)s [segformer_daemon] %(levelname)s: %(message)s"
@@ -198,11 +199,22 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
 
     pred = np.argmax(logits[0], axis=0).astype(np.uint8)
 
-    # Scale class indices to full 0–255 range so the PNG is human-readable.
-    # Float division ensures the highest index maps exactly to 255
-    # (integer division, e.g. 255//4=63, would cap at 252 for 5 classes).
+    # What a node transmits is binary: water or not. The extra classes of the
+    # four-class taxonomy (snow_ice, wet_ground) are training signal that makes
+    # the water boundary sharper, not output — see photo_processing/training/
+    # classes.py. Collapsing here rather than downstream matters because
+    # tools/compress_segmented.py Otsu-thresholds this PNG into a 1-bit LoRa
+    # bitmap: hand it {0, 85, 170, 255} and the threshold lands somewhere
+    # arbitrary between two non-water classes.
     n_classes = logits.shape[1]
-    if n_classes > 1:
+    water = water_class_index(session)
+    if water >= 0:
+        pred_vis = np.where(pred == water, 255, 0).astype(np.uint8)
+    elif n_classes > 1:
+        # No declared taxonomy: every such model is binary, so scaling indices
+        # to 0-255 is the same thing and preserves the historical output.
+        # Float division so the highest index maps exactly to 255 (integer
+        # division, e.g. 255//4=63, would cap at 252 for 5 classes).
         pred_vis = np.round(pred.astype(np.float32) * (255.0 / (n_classes - 1))).astype(np.uint8)
     else:
         pred_vis = pred

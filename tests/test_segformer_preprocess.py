@@ -19,6 +19,7 @@ from segformer_preprocess import (  # noqa: E402
     normalization_spec,
     preprocess_bands,
     tiff_band_order,
+    water_class_index,
 )
 
 #: The band descriptions `tools/coreg_multiple.py` writes into the five-band TIFF.
@@ -212,3 +213,32 @@ def test_a_legacy_bgr_tag_is_caught_against_an_rgb_model():
 def test_tag_agreeing_with_the_model_is_silent():
     assert band_order_problem(_FakeSession({"bands": MODEL_BANDS}), (),
                               {"BAND_ORDER": MODEL_BANDS}) == ""
+
+
+# --- class taxonomy ----------------------------------------------------------
+
+def test_water_index_is_read_from_the_graph():
+    assert water_class_index(_FakeSession(
+        {"classes": "background,water,snow_ice,wet_ground"})) == 1
+
+
+def test_water_index_is_not_assumed_to_be_one():
+    """If the taxonomy ever reorders, the node must follow the graph, not habit."""
+    assert water_class_index(_FakeSession(
+        {"classes": "background,snow_ice,wet_ground,water"})) == 3
+
+
+def test_binary_model_declaring_its_taxonomy_still_resolves():
+    assert water_class_index(_FakeSession({"classes": "background,water"})) == 1
+
+
+@pytest.mark.parametrize("session", [
+    _FakeSession({}),                       # exported before the taxonomy existed
+    _FakeSession({"classes": ""}),
+    _FakeSession({"classes": "background,foreground"}),   # no water by that name
+    _FakeSession(None),
+    _FakeSession(raises=True),
+])
+def test_no_declared_water_class_returns_minus_one(session):
+    """-1 keeps the caller on its historical index-scaling path."""
+    assert water_class_index(session) == -1
