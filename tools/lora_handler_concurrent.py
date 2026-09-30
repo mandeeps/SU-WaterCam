@@ -215,6 +215,14 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
             print(f"DEBUG: Processing wittypi_internal_voltage: {data['wittypi_internal_voltage']}")
             add_f32(0x0A, 0x03, data['wittypi_internal_voltage'])
 
+        # Pi throttled/under-voltage flags (tools/pi_power.py), packed to one byte.
+        # Deliberately encoded LAST: decoders that predate this channel stop at the
+        # first unknown pair, so every field before it still decodes.
+        if data.get('pi_throttled') is not None:
+            from tools.pi_power import pack_throttled_u8
+            print(f"DEBUG: Processing pi_throttled: {data['pi_throttled']:#x}")
+            add_u8(0x01, 0x07, pack_throttled_u8(data['pi_throttled']))
+
         print(f"DEBUG: Final packet size: {len(packet)} bytes")
         return bytes(packet)
     except Exception as e:

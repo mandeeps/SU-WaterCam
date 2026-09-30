@@ -6,6 +6,7 @@
  * Channel 01 Type 04: Emergency status (0/1)
  * Channel 01 Type 05: Health status (0/1) 
  * Channel 01 Type 06: Movement threshold (0/1)
+ * Channel 01 Type 07: Pi throttled flags (u8: low nibble = now, high nibble = since boot; bit 0 = under-voltage)
  * Channel 02 Type 01: Battery percent
  * Channel 03 Type 01: Tilt/roll/yaw (3x float32)
  * Channel 04 Type 01: Lat/lon/z coordinates (3x float32)
@@ -57,6 +58,13 @@ function decodeUplink(input) {
       case '1-6':
         result.movement_threshold = view.getUint8(offset++);
         break;
+      case '1-7': {
+        // Unpack to the raw vcgencmd get_throttled layout (bits 0-3 now, 16-19 since boot)
+        const packed = view.getUint8(offset++);
+        result.pi_throttled = (packed & 0x0f) | ((packed >> 4) << 16);
+        result.pi_undervoltage = (packed & 0x11) ? 1 : 0;
+        break;
+      }
       case '2-1':
         result.battery_percent = view.getUint8(offset++);
         break;

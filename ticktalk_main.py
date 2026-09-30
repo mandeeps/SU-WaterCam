@@ -234,6 +234,15 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         data['battery_percent'] = None
         data['battery_source'] = 'unavailable'
 
+    # Pi-side under-voltage/throttle flags -- the only supply reading taken on the
+    # Pi side of the WittyPi and GPIO extension header (see tools/pi_power.py)
+    from tools.pi_power import get_throttled
+    data['pi_throttled'] = get_throttled()
+    if data['pi_throttled'] is not None:
+        print(f"Pi throttled: {data['pi_throttled']:#x}")
+    else:
+        print("⚠️ Pi throttled flags unavailable")
+
     # Add runtime parameters to sensor data
     emergency_mode = get_parameter('emergency_mode', False)
     area_threshold = get_parameter('area_threshold', 10)
@@ -965,6 +974,15 @@ def lora_token(bitmap):
         data['battery_percent'] = None
         data['battery_source'] = 'unavailable'
 
+    # Pi-side under-voltage/throttle flags -- the only supply reading taken on the
+    # Pi side of the WittyPi and GPIO extension header (see tools/pi_power.py)
+    from tools.pi_power import get_throttled
+    data['pi_throttled'] = get_throttled()
+    if data['pi_throttled'] is not None:
+        print(f"Pi throttled: {data['pi_throttled']:#x}")
+    else:
+        print("⚠️ Pi throttled flags unavailable")
+
     # Add runtime parameters to sensor data
     emergency_mode = get_parameter('emergency_mode', False)
     area_threshold = get_parameter('area_threshold', 10)
@@ -1682,7 +1700,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
 
     Encodes the following channels as channel-coded hex blocks and POSTs to
     /ip/uplink: device_ts, battery_pct (from battery_manager; source varies by
-    available hardware — ADS1115 D+, INA260, or WittyPi output), GPS lat/lon, temperature,
+    available hardware — ADS1115 D+, INA260, or WittyPi output), Pi throttled flags, GPS lat/lon, temperature,
     humidity, flood_detect (inferred from bitmap), flood_bitmap, and the five
     status-report parameters.  IMU data is not included.
 
@@ -1741,6 +1759,9 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
             data['battery_percent'] = None
             data['battery_source'] = 'unavailable'
 
+        from tools.pi_power import get_throttled
+        data['pi_throttled'] = get_throttled()
+
         data['area_threshold']                    = get_parameter('area_threshold', 10)
         data['stage_threshold']                   = get_parameter('stage_threshold', 50)
         data['monitoring_frequency']              = get_parameter('monitoring_frequency', 60)
@@ -1758,6 +1779,11 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
         batt_pct = data.get('battery_percent')
         if batt_pct is not None:
             channels.append({"code": "02 01", "payload_hex": struct.pack(">I", batt_pct).hex()})
+
+        # 01 07 — raw Pi throttled register (uint32, vcgencmd layout); omitted when unreadable
+        pi_throttled = data.get('pi_throttled')
+        if pi_throttled is not None:
+            channels.append({"code": "01 07", "payload_hex": struct.pack(">I", pi_throttled).hex()})
 
         # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
         lat = data.get('gps_lat')
