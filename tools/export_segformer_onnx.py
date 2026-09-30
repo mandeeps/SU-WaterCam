@@ -27,11 +27,13 @@ from __future__ import annotations
 
 import argparse
 import glob
+import json
 import os
 
 import numpy as np
 
-from segformer_preprocess import normalization_spec, preprocess_bands
+from segformer_preprocess import (EMBEDDED_PREFIX, SUPPORTED_EXTERNAL,
+                                  normalization_spec, preprocess_bands)
 
 
 # ---------------------------------------------------------------------------
@@ -157,9 +159,74 @@ def export_to_onnx(model, output_path: str, framework: str,
 MMSEG_NORM_VERSIONS = "min-max, mean/std over 5 bands, or mean/std over 3 bands"
 
 
+#: Statistics each external mode needs in the graph metadata, as read by
+#: normalization_spec(). A mode stamped without them is unusable there and
+#: degrades to min-max -- a wrong mask, not an error.
+_MODE_STATS = {
+    "minmax": (),
+    "meanstd": (("norm_mean", "--norm-mean"), ("norm_std", "--norm-std")),
+    "percentile": (("norm_p_lo", "--norm-p-lo"), ("norm_p_hi", "--norm-p-hi")),
+}
+
+
+def _parse_band_values(text: str, flag: str, n_bands: int) -> list[float]:
+    try:
+        values = [float(v) for v in text.split(",")]
+    except ValueError:
+        raise ValueError(f"{flag} must be comma-separated numbers, got '{text}'") from None
+    if len(values) != n_bands:
+        raise ValueError(f"{flag} needs one value per band ({n_bands}), got {len(values)}")
+    return values
+
+
+def normalization_metadata(normalization: str, n_bands: int,
+                           stats: dict[str, str | None]) -> list[tuple[str, str]]:
+    """Validate a --normalization declaration; return the extra metadata it needs.
+
+    `stats` maps metadata key (norm_mean, norm_std, norm_p_lo, norm_p_hi) to the
+    raw comma-separated CLI value, or None. Raises ValueError for an unknown
+    declaration, a mode missing its statistics, or statistics the mode would
+    ignore -- all of which would otherwise be stamped and silently served as
+    min-max.
+    """
+    given = {k: v for k, v in stats.items() if v is not None}
+    if normalization.startswith(EMBEDDED_PREFIX):
+        if not normalization[len(EMBEDDED_PREFIX):]:
+            raise ValueError(f"'{normalization}' must name what the graph applies, "
+                             f"e.g. {EMBEDDED_PREFIX}meanstd")
+        required = ()
+    else:
+        prefix, _, method = normalization.partition(":")
+        if prefix != "external" or method not in SUPPORTED_EXTERNAL:
+            raise ValueError(
+                f"unknown normalization '{normalization}'; expected "
+                + ", ".join(f"external:{m}" for m in SUPPORTED_EXTERNAL)
+                + f" or {EMBEDDED_PREFIX}<method>")
+        required = _MODE_STATS[method]
+
+    missing = [flag for key, flag in required if key not in given]
+    if missing:
+        raise ValueError(f"'{normalization}' requires " + " and ".join(missing))
+    unused = sorted(set(given) - {key for key, _ in required})
+    if unused:
+        raise ValueError(f"'{normalization}' does not use "
+                         + ", ".join("--" + k.replace("_", "-") for k in unused))
+
+    pairs = []
+    values = {}
+    for key, flag in required:
+        values[key] = _parse_band_values(given[key], flag, n_bands)
+        pairs.append((key, json.dumps(values[key])))
+    if "norm_p_lo" in values and not all(
+            hi > lo for lo, hi in zip(values["norm_p_lo"], values["norm_p_hi"])):
+        raise ValueError("--norm-p-hi must be greater than --norm-p-lo for every band")
+    return pairs
+
+
 def stamp_normalization(onnx_path: str, normalization: str,
                         input_range: str = "raw_0_255",
-                        source: str | None = None) -> None:
+                        source: str | None = None,
+                        stats: list[tuple[str, str]] | None = None) -> None:
     """Record in the graph what preprocessing it expects.
 
     Metadata only — the graph itself is untouched. Without this a consumer has
@@ -172,6 +239,7 @@ def stamp_normalization(onnx_path: str, normalization: str,
     model = onnx.load(onnx_path)
     existing = {p.key for p in model.metadata_props}
     pairs = [("normalization", normalization), ("input_range", input_range)]
+    pairs += stats or []             # from normalization_metadata()
     if source:
         pairs.append(("normalization_source", source))
     added = []
@@ -389,17 +457,37 @@ def parse_args():
     p.add_argument("--normalization", default=None,
                    help="Normalization the exported graph expects, recorded in its "
                         "metadata (e.g. external:minmax, external:meanstd, "
-                        "embedded:meanstd). No default: Normalize_5band has shipped "
+                        "embedded:meanstd). external:meanstd also needs --norm-mean and "
+                        "--norm-std; external:percentile needs --norm-p-lo and --norm-p-hi. "
+                        "No default: Normalize_5band has shipped "
                         "in incompatible versions, so the correct value depends on "
                         "which one was live when the checkpoint was trained.")
     p.add_argument("--normalization-source", default=None,
                    help="Free-text note recorded alongside --normalization, e.g. which "
                         "Normalize_5band version the checkpoint was trained under.")
+    for flag, needed_by in (("--norm-mean", "external:meanstd"), ("--norm-std", "external:meanstd"),
+                            ("--norm-p-lo", "external:percentile"), ("--norm-p-hi", "external:percentile")):
+        p.add_argument(flag, default=None,
+                       help=f"Comma-separated per-band values, one per band; required by {needed_by}")
     p.add_argument("--skip-quantization", action="store_true",
                    help="Export FP32 only, skip INT8 quantization")
     p.add_argument("--benchmark", action="store_true",
                    help="Benchmark FP32 and INT8 models after export")
-    return p.parse_args()
+    args = p.parse_args()
+
+    # Validate before the (slow) export, not after it has produced a graph that
+    # would declare a mode normalization_spec() cannot use.
+    stats = {"norm_mean": args.norm_mean, "norm_std": args.norm_std,
+             "norm_p_lo": args.norm_p_lo, "norm_p_hi": args.norm_p_hi}
+    args.norm_stats = []
+    if args.normalization:
+        try:
+            args.norm_stats = normalization_metadata(args.normalization, args.bands, stats)
+        except ValueError as e:
+            p.error(f"--normalization: {e}")
+    elif any(v is not None for v in stats.values()):
+        p.error("--norm-mean/--norm-std/--norm-p-lo/--norm-p-hi need --normalization")
+    return args
 
 
 def main():
@@ -424,7 +512,7 @@ def main():
     normalization = args.normalization
     source = args.normalization_source
     if normalization:
-        stamp_normalization(fp32_path, normalization, source=source)
+        stamp_normalization(fp32_path, normalization, source=source, stats=args.norm_stats)
     elif framework == "mmseg":
         print("WARNING: no --normalization given. This graph will declare nothing, so "
               "consumers fall back to per-image min-max.\n"
@@ -463,7 +551,7 @@ def main():
         # quant_pre_process does not necessarily carry metadata_props across, and
         # the INT8 file is the one that gets deployed, so stamp it too.
         if normalization:
-            stamp_normalization(int8_path, normalization, source=source)
+            stamp_normalization(int8_path, normalization, source=source, stats=args.norm_stats)
 
     # 5. Optional benchmark
     if args.benchmark:
