@@ -234,6 +234,15 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         data['battery_percent'] = None
         data['battery_source'] = 'unavailable'
 
+    # Pi-side under-voltage/throttle flags -- the only supply reading taken on the
+    # Pi side of the WittyPi and GPIO extension header (see tools/pi_power.py)
+    from tools.pi_power import get_throttled
+    data['pi_throttled'] = get_throttled()
+    if data['pi_throttled'] is not None:
+        print(f"Pi throttled: {data['pi_throttled']:#x}")
+    else:
+        print("⚠️ Pi throttled flags unavailable")
+
     # Add runtime parameters to sensor data
     emergency_mode = get_parameter('emergency_mode', False)
     area_threshold = get_parameter('area_threshold', 10)
@@ -750,8 +759,24 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
     import os
     import subprocess
 
-    tiff_path = filepath + "/final_5_band.tiff"
-    output_path = filepath + "/final_5_band_segmentation.png"
+    from tools.coreg_multiple import config as coreg_config
+
+    # Serve color_preserved_5_band.tiff, not final_5_band.tiff. The two files
+    # are not the same image: co-registration writes final_5_band in OpenCV's
+    # native BGR at a squashed 512x512, while color_preserved reverses the
+    # optical channels to true RGB and keeps the native 4:3 frame. The annotator
+    # trains on color_preserved (see photo_processing/export_dataset.py), so
+    # serving final_5_band fed the model swapped red and blue at a distorted
+    # aspect ratio.
+    #
+    # The mask is named after the input. It has to be: the subprocess fallback
+    # below passes only the TIFF, and segment_tiff_5band.py names its output
+    # `<input stem>_segmentation.png`. While this said final_5_band_segmentation
+    # the daemon path wrote that name and the fallback wrote
+    # color_preserved_5_band_segmentation, then returned the name it had not
+    # written.
+    tiff_path = filepath + "/" + coreg_config.MODEL_INPUT_TIFF
+    output_path = filepath + "/" + coreg_config.SEGMENTATION_PNG
     socket_path = "/run/segformer/segformer.sock"
 
     try:
@@ -948,6 +973,15 @@ def lora_token(bitmap):
         print(f"⚠️ Failed to get battery status: {e}")
         data['battery_percent'] = None
         data['battery_source'] = 'unavailable'
+
+    # Pi-side under-voltage/throttle flags -- the only supply reading taken on the
+    # Pi side of the WittyPi and GPIO extension header (see tools/pi_power.py)
+    from tools.pi_power import get_throttled
+    data['pi_throttled'] = get_throttled()
+    if data['pi_throttled'] is not None:
+        print(f"Pi throttled: {data['pi_throttled']:#x}")
+    else:
+        print("⚠️ Pi throttled flags unavailable")
 
     # Add runtime parameters to sensor data
     emergency_mode = get_parameter('emergency_mode', False)
@@ -1666,7 +1700,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
 
     Encodes the following channels as channel-coded hex blocks and POSTs to
     /ip/uplink: device_ts, battery_pct (from battery_manager; source varies by
-    available hardware — ADS1115 D+, INA260, or WittyPi output), GPS lat/lon, temperature,
+    available hardware — ADS1115 D+, INA260, or WittyPi output), Pi throttled flags, GPS lat/lon, temperature,
     humidity, flood_detect (inferred from bitmap), flood_bitmap, and the five
     status-report parameters.  IMU data is not included.
 
@@ -1725,6 +1759,9 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
             data['battery_percent'] = None
             data['battery_source'] = 'unavailable'
 
+        from tools.pi_power import get_throttled
+        data['pi_throttled'] = get_throttled()
+
         data['area_threshold']                    = get_parameter('area_threshold', 10)
         data['stage_threshold']                   = get_parameter('stage_threshold', 50)
         data['monitoring_frequency']              = get_parameter('monitoring_frequency', 60)
@@ -1742,6 +1779,11 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
         batt_pct = data.get('battery_percent')
         if batt_pct is not None:
             channels.append({"code": "02 01", "payload_hex": struct.pack(">I", batt_pct).hex()})
+
+        # 01 07 — raw Pi throttled register (uint32, vcgencmd layout); omitted when unreadable
+        pi_throttled = data.get('pi_throttled')
+        if pi_throttled is not None:
+            channels.append({"code": "01 07", "payload_hex": struct.pack(">I", pi_throttled).hex()})
 
         # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
         lat = data.get('gps_lat')

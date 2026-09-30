@@ -9,8 +9,8 @@ segment_tiff_5band.py is spawned as a fresh subprocess each wake cycle.
 Protocol
 --------
 Client → server (newline-terminated JSON):
-    {"tiff_path": "/abs/path/final_5_band.tiff",
-     "output_path": "/abs/path/final_5_band_segmentation.png"}
+    {"tiff_path": "/abs/path/color_preserved_5_band.tiff",
+     "output_path": "/abs/path/color_preserved_5_band_segmentation.png"}
 
 Server → client (newline-terminated JSON):
     {"status": "ok",   "inference_ms": 1234}
@@ -35,6 +35,10 @@ ticktalk_main.py's segformer() function connects to this socket if it
 exists, and falls back to the legacy subprocess call otherwise.
 """
 
+# PEP 604 unions (`dict | None`) are evaluated at def time, and the node runs
+# Python 3.9, so annotations are deferred to keep this importable there.
+from __future__ import annotations
+
 import argparse
 import json
 import logging
@@ -47,8 +51,9 @@ import time
 
 import numpy as np
 
-from segformer_preprocess import (normalization_mode, normalization_spec,
-                                  preprocess_bands)
+from segformer_preprocess import (band_order_problem, normalization_mode,
+                                  normalization_spec, preprocess_bands,
+                                  water_class_index)
 
 SOCKET_PATH = "/run/segformer/segformer.sock"
 LOG_FORMAT = "%(asctime)s [segformer_daemon] %(levelname)s: %(message)s"
@@ -105,32 +110,111 @@ def load_and_preprocess(tiff_path: str, expected_h: int, expected_w: int,
     return preprocess_bands(img, expected_h, expected_w, spec=spec)
 
 
+#: The deployed mmseg test pipeline resizes with `img_scale=(1024, 512)` and
+#: `keep_ratio=True` (local_configs/.../flood_5band_2cls.65k.test.py). A dynamic
+#: graph carries no size of its own, so we reproduce that here rather than
+#: inventing one.
+DEFAULT_IMG_SCALE = (1024, 512)
+
+#: SegFormer's encoder downsamples by 32, and the export substitutes a
+#: scale_factor for an explicit output size, which is only exact when both
+#: input dimensions divide by 32.
+SIZE_DIVISOR = 32
+
+
+def keep_ratio_size(oh: int, ow: int, img_scale=DEFAULT_IMG_SCALE) -> tuple[int, int]:
+    """`mmcv.imrescale` semantics: fit inside img_scale without distorting aspect.
+
+    `img_scale` is (long_edge, short_edge). Returns the (h, w) to resize to.
+    For this deployment's 1296x972 capture that gives 512x683, which is what the
+    torch path runs at.
+    """
+    long_edge, short_edge = max(img_scale), min(img_scale)
+    scale = min(long_edge / max(oh, ow), short_edge / min(oh, ow))
+    return int(oh * scale + 0.5), int(ow * scale + 0.5)
+
+
+#: The last band-order complaint, so a per-frame check does not fill the log
+#: with the same line every wake cycle.
+_band_warning = [""]
+
+
 def run_inference(session, tiff_path: str, output_path: str) -> float:
+    import cv2
+    import rasterio
     from PIL import Image
 
     input_name = session.get_inputs()[0].name
     input_shape = session.get_inputs()[0].shape  # [batch, bands, H, W]
 
-    # Shape may be symbolic (strings) for dynamic axes; fall back to 512.
-    expected_h = input_shape[2] if isinstance(input_shape[2], int) else 512
-    expected_w = input_shape[3] if isinstance(input_shape[3], int) else 512
+    with rasterio.open(tiff_path) as src:
+        ori_h, ori_w = src.height, src.width
+        descriptions = src.descriptions
+        tiff_tags = src.tags()
+
+    # Band order is the one mismatch that still produces a plausible mask, so
+    # say so loudly and keep going — a metadata disagreement should not take a
+    # field node offline.
+    problem = band_order_problem(session, descriptions, tiff_tags)
+    if problem and problem != _band_warning[0]:
+        _band_warning[0] = problem
+        logging.warning("band order mismatch: %s", problem)
+
+    # A static graph fixes its own input size. A dynamic one does not, and
+    # squashing the capture into a square would destroy its aspect ratio —
+    # this mask is georeferenced downstream from IMU pose, so a distorted mask
+    # distorts the georeferencing, silently and without error.
+    static_h = input_shape[2] if isinstance(input_shape[2], int) else None
+    static_w = input_shape[3] if isinstance(input_shape[3], int) else None
+    if static_h and static_w:
+        expected_h, expected_w = static_h, static_w
+    else:
+        expected_h, expected_w = keep_ratio_size(ori_h, ori_w)
 
     # The model states how it was normalised; anything else hands it a
     # distribution it never saw in training, silently and without error.
     arr = load_and_preprocess(tiff_path, expected_h, expected_w,
                               spec=normalization_spec(session))
 
+    # Pad up to SIZE_DIVISOR so the graph's scale_factor upsample is exact.
+    # Zeros are the post-Normalize mean, matching what the torch path pads with.
+    pad_h = (-expected_h) % SIZE_DIVISOR
+    pad_w = (-expected_w) % SIZE_DIVISOR
+    if pad_h or pad_w:
+        arr = np.pad(arr, ((0, 0), (0, 0), (0, pad_h), (0, pad_w)))
+
     t0 = time.perf_counter()
     logits = session.run(None, {input_name: arr})[0]  # (1, classes, h, w)
     elapsed_ms = (time.perf_counter() - t0) * 1000
 
+    # Crop the pad back off, then finish the job mmseg would have done:
+    # resize the logits to the source resolution before taking the argmax.
+    logits = logits[:, :, :expected_h, :expected_w]
+    if (expected_h, expected_w) != (ori_h, ori_w):
+        logits = np.stack(
+            [cv2.resize(logits[0, c], (ori_w, ori_h), interpolation=cv2.INTER_LINEAR)
+             for c in range(logits.shape[1])],
+            axis=0,
+        )[np.newaxis]
+
     pred = np.argmax(logits[0], axis=0).astype(np.uint8)
 
-    # Scale class indices to full 0–255 range so the PNG is human-readable.
-    # Float division ensures the highest index maps exactly to 255
-    # (integer division, e.g. 255//4=63, would cap at 252 for 5 classes).
+    # What a node transmits is binary: water or not. The extra classes of the
+    # four-class taxonomy (snow_ice, wet_ground) are training signal that makes
+    # the water boundary sharper, not output — see photo_processing/training/
+    # classes.py. Collapsing here rather than downstream matters because
+    # tools/compress_segmented.py Otsu-thresholds this PNG into a 1-bit LoRa
+    # bitmap: hand it {0, 85, 170, 255} and the threshold lands somewhere
+    # arbitrary between two non-water classes.
     n_classes = logits.shape[1]
-    if n_classes > 1:
+    water = water_class_index(session)
+    if water >= 0:
+        pred_vis = np.where(pred == water, 255, 0).astype(np.uint8)
+    elif n_classes > 1:
+        # No declared taxonomy: every such model is binary, so scaling indices
+        # to 0-255 is the same thing and preserves the historical output.
+        # Float division so the highest index maps exactly to 255 (integer
+        # division, e.g. 255//4=63, would cap at 252 for 5 classes).
         pred_vis = np.round(pred.astype(np.float32) * (255.0 / (n_classes - 1))).astype(np.uint8)
     else:
         pred_vis = pred

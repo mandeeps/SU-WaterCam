@@ -169,8 +169,8 @@ def flow_result():
     return {
         "temperature_celsius": 22.5,
         "relative_humidity": 55,
-        "gps_lat": 43.158,
-        "gps_lon": -76.138,
+        "gps_lat": 40.7128,
+        "gps_lon": -74.0060,
         "gps_alt": 130.0,
         "battery_percent": 75,
         "emergency_status": 0,
@@ -286,7 +286,7 @@ def synthetic_png(tmp_path):
     arr = np.zeros((16, 16), dtype=np.uint8)
     arr[4:12, 4:12] = 255  # white square = flooded region
     img = Image.fromarray(arr, mode="L")
-    p = tmp_path / "final_5_band_segmentation.png"
+    p = tmp_path / "color_preserved_5_band_segmentation.png"
     img.save(str(p))
     return str(p)
 

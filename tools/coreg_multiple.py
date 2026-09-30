@@ -34,6 +34,11 @@ class CoregistrationConfig:
     INVERT_THERMAL = False
     SAVE_TRANSFORM_PARAMETERS = True
     TRANSFORM_CACHE_FILENAME = "registration_transform.json"
+    #: sitk serialisation of the same transform. JSON carries only
+    #: GetParameters(), which for a CompositeTransform is just its active
+    #: component, so the JSON alone cannot round-trip what registration
+    #: actually returns.
+    TRANSFORM_FILE_FILENAME = "registration_transform.tfm"
     CALIBRATION_FILE = "camera_calibration.json"
     FORCE_RECALCULATE_TRANSFORM = False
     ENABLE_MULTIPLE_STRATEGIES = False
@@ -41,12 +46,61 @@ class CoregistrationConfig:
     PARALLEL_PROCESSING = False
     ENABLE_MEMORY_OPTIMIZATION = True
     CHUNK_SIZE = 512
-    # Resolution written to final_5_band.tiff for SegFormer inference.
-    # color_preserved_5_band.tiff is kept at full co-registration resolution.
+    # Resolution written to final_5_band.tiff.
+    #
+    # The two five-band TIFFs are NOT the same image, and the difference is easy
+    # to miss because only one of them is ever looked at:
+    #
+    #   final_5_band.tiff           B, G, R, thermal, NIR   512x512, aspect squashed
+    #   color_preserved_5_band.tiff R, G, B, thermal, NIR   native 972x1296
+    #
+    # final_5_band carries OpenCV's native channel order straight from
+    # cv2.imread; save_color_preserved_tiff() is the one that reverses the
+    # optical channels, which is what "color preserved" refers to.
+    #
+    # **Inference and training both use color_preserved_5_band.tiff.**
+    # ticktalk_main.segformer() serves it and photo_processing/export_dataset.py
+    # trains on it. final_5_band is kept for backward compatibility with older
+    # captures and tooling; do not feed it to a model.
     INFERENCE_HEIGHT = 512
     INFERENCE_WIDTH = 512
 
+    #: The one five-band format every consumer reads. Written by
+    #: save_color_preserved_tiff().
+    MODEL_INPUT_TIFF = "color_preserved_5_band.tiff"
+    #: What segment_tiff_5band.py writes for that input — it names its output
+    #: `<input stem>_segmentation.png` and takes no output argument, so this
+    #: name follows from MODEL_INPUT_TIFF and cannot be chosen independently.
+    #: segformer_5band/batch_segformer.sh already expects this name.
+    SEGMENTATION_PNG = "color_preserved_5_band_segmentation.png"
+    #: Superseded names. Still written (the TIFF) and still read (the mask), so
+    #: captures made before the standardisation stay usable.
+    LEGACY_TIFF = "final_5_band.tiff"
+    LEGACY_SEGMENTATION_PNG = "final_5_band_segmentation.png"
+
+    #: Band order, written into every TIFF as the BAND_ORDER tag. The format is
+    #: the same comma-separated canonical names the exported .onnx carries in
+    #: its `bands` metadata (photo_processing/training/models/segformer.py), so
+    #: a runtime can compare the two directly instead of parsing prose band
+    #: descriptions and guessing.
+    BAND_ORDER = ("red", "green", "blue", "thermal", "nir")
+    LEGACY_BAND_ORDER = ("blue", "green", "red", "thermal", "nir")
+
 config = CoregistrationConfig()
+
+
+def segmentation_path(directory: str) -> str:
+    """The segmentation mask in `directory`, preferring the standard name.
+
+    Falls back to the superseded name so a directory segmented before the
+    standardisation is still readable. Returns the standard path when neither
+    exists, so callers report the name they should have been given.
+    """
+    std = os.path.join(directory, config.SEGMENTATION_PNG)
+    if os.path.exists(std):
+        return std
+    legacy = os.path.join(directory, config.LEGACY_SEGMENTATION_PNG)
+    return legacy if os.path.exists(legacy) else std
 
 
 def _default_calibration_path() -> str:
@@ -69,6 +123,23 @@ def _undistort_if_calibrated(image: np.ndarray, calib_path: str) -> np.ndarray:
         mtx = np.array(cal["K"], dtype=np.float64)
         dist = np.array(cal["D"], dtype=np.float64).reshape(-1, 1)
         h, w = image.shape[:2]
+
+        # K is only valid at the resolution it was calibrated at: fx, fy, cx and
+        # cy are all in pixels. Applied to a differently sized frame it silently
+        # mis-centres and mis-scales the correction rather than failing. The
+        # distortion coefficients are in normalised coordinates and do not scale.
+        cal_w, cal_h = (cal.get("img_size") or [w, h])[:2]
+        if (cal_w, cal_h) != (w, h):
+            sx, sy = w / float(cal_w), h / float(cal_h)
+            if abs(sx - sy) > 1e-3:
+                print(f"Warning: calibration {cal_w}x{cal_h} has a different aspect ratio "
+                      f"than the {w}x{h} frame; skipping undistort")
+                return image
+            print(f"Scaling calibration from {cal_w}x{cal_h} to {w}x{h} (factor {sx:.3f})")
+            mtx = mtx.copy()
+            mtx[0, 0] *= sx; mtx[0, 2] *= sx
+            mtx[1, 1] *= sy; mtx[1, 2] *= sy
+
         new_mtx, _ = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
         return cv2.undistort(image, mtx, dist, None, new_mtx)
     except Exception as e:
@@ -185,6 +256,12 @@ def save_transform_parameters(transform: sitk.Transform, directory: str, metadat
         normed = os.path.normpath(directory)
         parent_directory = os.path.dirname(normed) or normed
         transform_path = os.path.join(parent_directory, config.TRANSFORM_CACHE_FILENAME)
+        tfm_path = os.path.join(parent_directory, config.TRANSFORM_FILE_FILENAME)
+        try:
+            sitk.WriteTransform(transform, tfm_path)
+            transform_data["transform_file"] = os.path.basename(tfm_path)
+        except Exception as e:                      # noqa: BLE001
+            print(f"Could not serialise transform to {tfm_path}: {e}")
         with open(transform_path, "w") as f:
             json.dump(transform_data, f, indent=2)
         return True
@@ -210,6 +287,17 @@ def load_transform_parameters(directory: str) -> Optional[tuple[sitk.Transform, 
         parameters = transform_data["parameters"]
         fixed_parameters = transform_data["fixed_parameters"]
         saved_image_size = transform_data.get("metadata", {}).get("image_size")
+        #: the TRANSFORM_TYPE config that produced this, not the concrete sitk
+        #: class, which is what should be compared against the current config
+        saved_config_type = transform_data.get("metadata", {}).get("transform_type")
+
+        tfm_name = transform_data.get("transform_file")
+        if tfm_name:
+            tfm_path = os.path.join(os.path.dirname(transform_path), tfm_name)
+            if os.path.exists(tfm_path):
+                return (sitk.ReadTransform(tfm_path), transform_path,
+                        saved_image_size, saved_config_type)
+
         transform_map = {
             "Euler2DTransform": sitk.Euler2DTransform,
             "AffineTransform": lambda: sitk.AffineTransform(2),
@@ -219,10 +307,17 @@ def load_transform_parameters(directory: str) -> Optional[tuple[sitk.Transform, 
         if transform_type not in transform_map:
             print(f"Unknown transform type: {transform_type}")
             return None
+        if transform_type == "CompositeTransform":
+            # GetParameters() held only the active component, so this file
+            # predates the .tfm companion and cannot be restored faithfully.
+            print(f"{transform_path} stores a CompositeTransform without a "
+                  f"{config.TRANSFORM_FILE_FILENAME} companion; re-registering once "
+                  f"to regenerate it.")
+            return None
         transform = transform_map[transform_type]()
         transform.SetParameters(parameters)
         transform.SetFixedParameters(fixed_parameters)
-        return (transform, transform_path, saved_image_size)
+        return (transform, transform_path, saved_image_size, saved_config_type)
     except Exception as e:
         print(f"Failed to load transform parameters: {e}")
         return None
@@ -403,12 +498,14 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
     if directory and not position_changed:
         cached = load_transform_parameters(directory)
         if cached is not None:
-            cached_transform, loaded_path, saved_size = cached
-            # Check transform type and parameter length
-            expected_transform = create_transform(config.TRANSFORM_TYPE)
+            cached_transform, loaded_path, saved_size, saved_config_type = cached
+            # Compare against the TRANSFORM_TYPE that produced the cache, not the
+            # concrete sitk class: registration returns a CompositeTransform even
+            # when TRANSFORM_TYPE is "affine", so comparing classes rejected every
+            # cache entry and the transform was re-solved on every capture.
             if (
-                type(cached_transform) == type(expected_transform)
-                and len(cached_transform.GetParameters()) == len(expected_transform.GetParameters())
+                (saved_config_type is None or saved_config_type == config.TRANSFORM_TYPE)
+                and cached_transform.GetDimension() == 2
                 and validate_transform_compatibility(cached_transform, fixed_image_path, moving_image_path, saved_size)
             ):
                 print(f"Using cached transform parameters from {loaded_path}")
@@ -511,10 +608,40 @@ def extract_nir_band(nir_on_path: str, nir_off_path: str, target_size: Tuple[int
     return nir_band_resized
 
 
+#: Human-readable band descriptions, keyed by the canonical name used in
+#: BAND_ORDER. Both TIFF writers use these so the prose and the machine-readable
+#: tag can never drift apart.
+_BAND_DESCRIPTIONS = {
+    "red": "Red Channel (Optical)",
+    "green": "Green Channel (Optical)",
+    "blue": "Blue Channel (Optical)",
+    "thermal": "Thermal Data (Normalized 0-255)",
+    "nir": "NIR Band (NIR-ON minus NIR-OFF)",
+}
+
+
 def save_multiband_tiff(image_data: np.ndarray, output_path: str, transform_params: Tuple = config.DEFAULT_TRANSFORM_ORIGIN + config.DEFAULT_TRANSFORM_SCALE) -> None:
+    """Write final_5_band.tiff — **legacy output, no longer read by anything.**
+
+    Kept so older captures and external tooling keep working. It is B,G,R at a
+    squashed 512x512; `save_color_preserved_tiff` writes the file the model and
+    the annotator actually use. Until now this wrote no band descriptions and no
+    tags at all, which is exactly how a file this easy to confuse should not be
+    written, so it now states its own band order.
+    """
     transform = from_origin(*transform_params)
     with rasterio.open(output_path, "w", driver="GTiff", height=image_data.shape[1], width=image_data.shape[2], count=image_data.shape[0], dtype=image_data.dtype, transform=transform) as dst:
         dst.write(image_data)
+        if image_data.shape[0] == len(config.LEGACY_BAND_ORDER):
+            for i, name in enumerate(config.LEGACY_BAND_ORDER, 1):
+                dst.set_band_description(i, _BAND_DESCRIPTIONS[name])
+            dst.update_tags(
+                BAND_ORDER=",".join(config.LEGACY_BAND_ORDER),
+                BAND_ORDER_NOTE="Legacy output, no longer read by any UFONet software. "
+                                "B,G,R at a squashed 512x512 — OpenCV's native channel "
+                                "order. Use color_preserved_5_band.tiff instead.",
+                CREATOR="Coregistration Script",
+            )
     print(f"Saved multiband TIFF: {output_path}")
 
 
@@ -523,13 +650,24 @@ def save_color_preserved_tiff(rgb_data: np.ndarray, thermal_data: np.ndarray, ni
     rgb_uint8 = np.clip(rgb_data, 0, 255).astype(np.uint8)
     thermal_uint8 = np.clip(thermal_data, 0, 255).astype(np.uint8)
     nir_uint8 = np.clip(nir_data, 0, 255).astype(np.uint8)
+    # rgb_data arrives BGR from cv2.imread; [2],[1],[0] is what makes this file
+    # R,G,B — the "color preserved" in the name. Must stay in step with
+    # config.BAND_ORDER.
     stacked_data = np.stack([rgb_uint8[:, :, 2], rgb_uint8[:, :, 1], rgb_uint8[:, :, 0], thermal_uint8, nir_uint8], axis=0)
     with rasterio.open(output_path, "w", driver="GTiff", height=stacked_data.shape[1], width=stacked_data.shape[2], count=stacked_data.shape[0], dtype=stacked_data.dtype, transform=transform, photometric="rgb", compress="lzw") as dst:
         dst.write(stacked_data)
-        band_descriptions = ["Red Channel (Optical)", "Green Channel (Optical)", "Blue Channel (Optical)", "Thermal Data (Normalized 0-255)", "NIR Band (NIR-ON minus NIR-OFF)"]
-        for i, description in enumerate(band_descriptions, 1):
-            dst.set_band_description(i, description)
-        dst.update_tags(CREATOR="Coregistration Script", DESCRIPTION="Color-preserved multispectral data with RGB, Thermal, and NIR bands", BAND_COUNT=str(stacked_data.shape[0]), DATA_SOURCES="Optical (RGB), Thermal (LWIR), NIR (NIR-ON/NIR-OFF difference)")
+        for i, name in enumerate(config.BAND_ORDER, 1):
+            dst.set_band_description(i, _BAND_DESCRIPTIONS[name])
+        # BAND_ORDER is the machine-readable one. The descriptions above are
+        # prose a reader has to keyword-match; this is the same string format
+        # the exported .onnx declares in its `bands` metadata, so a runtime can
+        # compare the file against the model directly.
+        dst.update_tags(
+            BAND_ORDER=",".join(config.BAND_ORDER),
+            CREATOR="Coregistration Script",
+            DESCRIPTION="Color-preserved multispectral data with RGB, Thermal, and NIR bands",
+            BAND_COUNT=str(stacked_data.shape[0]),
+            DATA_SOURCES="Optical (RGB), Thermal (LWIR), NIR (NIR-ON/NIR-OFF difference)")
     print(f"Saved color-preserved TIFF: {output_path}")
 
 

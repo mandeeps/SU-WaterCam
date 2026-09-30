@@ -14,9 +14,19 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 from segformer_preprocess import (  # noqa: E402
+    band_order_problem,
+    canonical_bands,
     normalization_spec,
     preprocess_bands,
+    tiff_band_order,
+    water_class_index,
 )
+
+#: The band descriptions `tools/coreg_multiple.py` writes into the five-band TIFF.
+TIFF_BANDS = ("Red Channel (Optical)", "Green Channel (Optical)",
+              "Blue Channel (Optical)", "Thermal Data (Normalized 0-255)",
+              "NIR Band (NIR-ON minus NIR-OFF)")
+MODEL_BANDS = "red,green,blue,thermal,nir"
 
 
 class _FakeMeta:
@@ -129,3 +139,106 @@ def test_caller_buffer_is_never_modified():
 def test_output_is_float32_batched(mode):
     out = preprocess_bands(_img(), 8, 8, spec={"mode": mode})
     assert out.dtype == np.float32 and out.ndim == 4 and out.shape[0] == 1
+
+
+# --- band order --------------------------------------------------------------
+
+def test_tiff_descriptions_read_as_the_bands_they_name():
+    assert canonical_bands(TIFF_BANDS) == ["red", "green", "blue", "thermal", "nir"]
+
+
+def test_nir_is_not_read_as_red():
+    """"NIR" contains "r"... and the naive keyword order would call it red."""
+    assert canonical_bands(("NIR Band (NIR-ON minus NIR-OFF)",)) == ["nir"]
+
+
+def test_matching_order_is_silent():
+    assert band_order_problem(_FakeSession({"bands": MODEL_BANDS}), TIFF_BANDS) == ""
+
+
+def test_bgr_tiff_against_an_rgb_model_is_reported():
+    """The exact mismatch that final_5_band.tiff had: R and B transposed."""
+    bgr = (TIFF_BANDS[2], TIFF_BANDS[1], TIFF_BANDS[0]) + TIFF_BANDS[3:]
+    problem = band_order_problem(_FakeSession({"bands": MODEL_BANDS}), bgr)
+    assert "blue,green,red" in problem
+
+
+def test_band_count_disagreement_is_reported():
+    problem = band_order_problem(_FakeSession({"bands": "red,green,blue"}), TIFF_BANDS)
+    assert "3 bands" in problem and "has 5" in problem
+
+
+@pytest.mark.parametrize("session", [
+    _FakeSession({}),                      # exported before the metadata existed
+    _FakeSession({"bands": ""}),
+    _FakeSession(None),
+    _FakeSession(raises=True),
+])
+def test_a_model_that_declares_nothing_is_not_accused(session):
+    assert band_order_problem(session, TIFF_BANDS) == ""
+
+
+@pytest.mark.parametrize("descriptions", [None, (), (None,) * 5, ("",) * 5])
+def test_a_tiff_that_names_nothing_is_not_accused(descriptions):
+    assert band_order_problem(_FakeSession({"bands": MODEL_BANDS}), descriptions) == ""
+
+
+# --- the BAND_ORDER tag ------------------------------------------------------
+
+def test_band_order_tag_is_preferred_over_prose():
+    """A tag needs no interpretation, so it wins over keyword-matched prose."""
+    assert tiff_band_order(TIFF_BANDS, {"BAND_ORDER": MODEL_BANDS}) == \
+        ["red", "green", "blue", "thermal", "nir"]
+
+
+def test_prose_is_used_when_there_is_no_tag():
+    """Captures written before the tag existed still have to be read."""
+    for tags in (None, {}, {"BAND_ORDER": ""}, {"BAND_ORDER": "   "}):
+        assert tiff_band_order(TIFF_BANDS, tags) == \
+            ["red", "green", "blue", "thermal", "nir"]
+
+
+def test_tag_whitespace_and_case_are_tolerated():
+    assert tiff_band_order((), {"BAND_ORDER": " Red , GREEN ,blue, Thermal ,NIR "}) == \
+        ["red", "green", "blue", "thermal", "nir"]
+
+
+def test_a_legacy_bgr_tag_is_caught_against_an_rgb_model():
+    """final_5_band.tiff now tags itself BGR — the check must act on that."""
+    problem = band_order_problem(_FakeSession({"bands": MODEL_BANDS}), (),
+                                 {"BAND_ORDER": "blue,green,red,thermal,nir"})
+    assert "blue,green,red" in problem
+
+
+def test_tag_agreeing_with_the_model_is_silent():
+    assert band_order_problem(_FakeSession({"bands": MODEL_BANDS}), (),
+                              {"BAND_ORDER": MODEL_BANDS}) == ""
+
+
+# --- class taxonomy ----------------------------------------------------------
+
+def test_water_index_is_read_from_the_graph():
+    assert water_class_index(_FakeSession(
+        {"classes": "background,water,snow_ice,wet_ground"})) == 1
+
+
+def test_water_index_is_not_assumed_to_be_one():
+    """If the taxonomy ever reorders, the node must follow the graph, not habit."""
+    assert water_class_index(_FakeSession(
+        {"classes": "background,snow_ice,wet_ground,water"})) == 3
+
+
+def test_binary_model_declaring_its_taxonomy_still_resolves():
+    assert water_class_index(_FakeSession({"classes": "background,water"})) == 1
+
+
+@pytest.mark.parametrize("session", [
+    _FakeSession({}),                       # exported before the taxonomy existed
+    _FakeSession({"classes": ""}),
+    _FakeSession({"classes": "background,foreground"}),   # no water by that name
+    _FakeSession(None),
+    _FakeSession(raises=True),
+])
+def test_no_declared_water_class_returns_minus_one(session):
+    """-1 keeps the caller on its historical index-scaling path."""
+    assert water_class_index(session) == -1

@@ -107,8 +107,8 @@ Compute the true bearing from the camera's position toward one of the surveyed p
 
 ```python
 import math
-lat1, lon1 = 43.15814, -76.13810   # camera position (RTK-surveyed)
-lat2, lon2 = 43.15800, -76.13750   # reference point (RTK-surveyed)
+lat1, lon1 = 40.71280, -74.00600   # camera position (RTK-surveyed; placeholder)
+lat2, lon2 = 40.71266, -74.00540   # reference point (RTK-surveyed; placeholder)
 
 dlat = math.radians(lat2 - lat1)
 dlon = math.radians(lon2 - lon1)

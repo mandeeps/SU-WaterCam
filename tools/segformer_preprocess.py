@@ -16,12 +16,27 @@ Models exported before this metadata existed declare nothing, and are handled
 exactly as before: per-band min-max, computed per image.
 """
 
+# PEP 604 unions (`dict | None`) are evaluated at def time, and the node runs
+# Python 3.9, so annotations are deferred to keep this importable there.
+from __future__ import annotations
+
 import numpy as np
 
 #: prefix a graph uses to say it normalises its own input
 EMBEDDED_PREFIX = "embedded:"
 #: what this module can reproduce itself, from values stamped in the graph
 SUPPORTED_EXTERNAL = ("minmax", "meanstd", "percentile")
+
+#: Keyword -> canonical band name, for reading the band descriptions
+#: `tools/coreg_multiple.py` writes into the five-band TIFF ("Red Channel
+#: (Optical)", "Thermal Data (Normalized 0-255)", "NIR Band (NIR-ON minus
+#: NIR-OFF)", ...). Checked in this order, so "nir" is matched before "red"
+#: can match inside it.
+BAND_KEYWORDS = (
+    ("nir", "nir"),
+    ("thermal", "thermal"), ("lwir", "thermal"),
+    ("red", "red"), ("green", "green"), ("blue", "blue"),
+)
 
 
 def normalization_spec(session) -> dict:
@@ -47,23 +62,102 @@ def normalization_spec(session) -> dict:
     if declared.startswith(EMBEDDED_PREFIX):
         return {"mode": "embedded",
                 "desc": f"none here; graph applies {declared[len(EMBEDDED_PREFIX):]}"}
-    method = declared.split(":", 1)[-1] if declared else "minmax"
-    if method == "minmax" or not declared:
-        return {"mode": "minmax", "desc": "min-max per image"}
+
+    # A model that declares nothing is *assumed* to want min-max, which is the
+    # historical default. Say so, so a log line cannot be read as the model
+    # having asked for it. Silently treating a default as a contract is how the
+    # normalisation mismatch this metadata exists to prevent went unnoticed.
+    if not declared:
+        return {"mode": "minmax",
+                "desc": "min-max per image (DEFAULT — model declares nothing)"}
+
+    method = declared.split(":", 1)[-1]
+    if method == "minmax":
+        return {"mode": "minmax", "desc": "min-max per image (declared)"}
     if method not in SUPPORTED_EXTERNAL:
         return {"mode": "minmax",
-                "desc": f"min-max (WARNING: model declares unknown '{declared}')"}
+                "desc": f"min-max FALLBACK (WARNING: model declares unknown '{declared}')"}
     try:
         if method == "meanstd":
-            return {"mode": "meanstd", "desc": "mean/std from model metadata",
+            return {"mode": "meanstd", "desc": "mean/std from model metadata (declared)",
                     "mean": np.asarray(json.loads(meta["norm_mean"]), np.float32),
                     "std": np.asarray(json.loads(meta["norm_std"]), np.float32)}
-        return {"mode": "percentile", "desc": "percentile from model metadata",
+        return {"mode": "percentile", "desc": "percentile from model metadata (declared)",
                 "lo": np.asarray(json.loads(meta["norm_p_lo"]), np.float32),
                 "hi": np.asarray(json.loads(meta["norm_p_hi"]), np.float32)}
     except (KeyError, ValueError) as e:
         return {"mode": "minmax",
                 "desc": f"min-max (WARNING: '{declared}' declared but unusable: {e})"}
+
+
+def canonical_bands(descriptions) -> list:
+    """Band descriptions from the TIFF -> canonical names, `None` where unknown."""
+    out = []
+    for d in descriptions or ():
+        low = (d or "").lower()
+        out.append(next((name for kw, name in BAND_KEYWORDS if kw in low), None))
+    return out
+
+
+def tiff_band_order(descriptions, tags=None) -> list:
+    """The TIFF's band order, preferring its BAND_ORDER tag over prose.
+
+    `tools/coreg_multiple.py` writes BAND_ORDER as the same comma-separated
+    canonical names the .onnx declares, so when it is present no interpretation
+    is needed. Captures written before that tag existed carry only the prose
+    band descriptions, which still have to be keyword-matched.
+    """
+    declared = ((tags or {}).get("BAND_ORDER") or "").strip()
+    if declared:
+        return [b.strip().lower() or None for b in declared.split(",")]
+    return canonical_bands(descriptions)
+
+
+def band_order_problem(session, descriptions, tags=None) -> str:
+    """Does the TIFF's band order match what the model was trained on?
+
+    The model stamps its band order at export (`training/models/segformer.py`).
+    Feeding the bands in a different order is the one mistake that produces a
+    plausible-looking mask from the wrong data: every channel is a valid image,
+    so nothing raises and nothing looks wrong until the water is in the wrong
+    place. Returns "" when the orders agree or when there is nothing to compare.
+    """
+    try:
+        meta = session.get_modelmeta().custom_metadata_map or {}
+    except Exception:                      # noqa: BLE001 - never break inference
+        return ""
+    want = [b.strip().lower() for b in (meta.get("bands") or "").split(",") if b.strip()]
+    if not want:
+        return ""                          # exported before this metadata existed
+    got = tiff_band_order(descriptions, tags)
+    if not got or all(g is None for g in got):
+        return ""                          # TIFF carries no readable descriptions
+    if len(got) != len(want):
+        return (f"model expects {len(want)} bands ({','.join(want)}) but the TIFF "
+                f"has {len(got)}")
+    named = [g for g in got if g is not None]
+    if [g for g, w in zip(got, want) if g is not None and g != w]:
+        return (f"model expects bands {','.join(want)} but the TIFF is "
+                f"{','.join(g or '?' for g in got)}")
+    if len(named) < len(want):
+        return ""                          # partial match, nothing contradicts
+    return ""
+
+
+def water_class_index(session) -> int:
+    """Which logit channel is water, from the graph's `classes` metadata.
+
+    Returns -1 when the model does not declare its taxonomy, which means every
+    model exported before 2026-09-27. Those are binary and their index 1 is
+    water by construction, so the caller keeps its existing behaviour rather
+    than guessing from an absent declaration.
+    """
+    try:
+        meta = session.get_modelmeta().custom_metadata_map or {}
+    except Exception:                      # noqa: BLE001 - never break inference
+        return -1
+    names = [c.strip().lower() for c in (meta.get("classes") or "").split(",") if c.strip()]
+    return names.index("water") if "water" in names else -1
 
 
 def normalization_mode(session) -> tuple[bool, str]:

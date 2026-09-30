@@ -197,8 +197,8 @@ struct.pack(">h", int(22.50 * 100)).hex()
 # humidity_pct — 1 byte
 struct.pack(">B", 61).hex()          # → "3d"
 
-# gps_block — 8 bytes (43.0389°N, -76.1322°W)
-struct.pack(">ii", int(43.0389 * 1e6), int(-76.1322 * 1e6)).hex()
+# gps_block — 8 bytes (40.7128°N, -74.0060°W — placeholder)
+struct.pack(">ii", int(40.7128 * 1e6), int(-74.0060 * 1e6)).hex()
 
 # flood bitmap — variable
 bitmap_bytes = b'\xff\x00\xff\x00'   # 8 pixels, alternating

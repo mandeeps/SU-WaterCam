@@ -66,10 +66,14 @@ def main(autostart:bool = True):
         print("Run coreg")
         coreg_multiple.coreg(directory)
         # run 5 band SegFormer on coreg photos
-        tiff = directory + "/final_5_band.tiff"
+        # color_preserved_5_band.tiff, not final_5_band.tiff: the latter is
+        # B,G,R at a squashed 512x512 and the model trains on RGB at the native
+        # frame. segment_tiff_5band.py names its output after the input, so the
+        # mask name follows from the TIFF name and is not a free choice.
+        tiff = os.path.join(directory, coreg_multiple.config.MODEL_INPUT_TIFF)
         Popen([segformer_python, segformer_coreg, tiff], cwd=segformer_location).wait()
 
-        bitmap_dict = compress_image(directory + "/final_5_band_segmentation.png")
+        bitmap_dict = compress_image(coreg_multiple.segmentation_path(directory))
         print(bitmap_dict['compressed_data'])
         bit_bytes = bitmap_dict['compressed_data'].hex()
         print(bit_bytes)
