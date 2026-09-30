@@ -87,6 +87,20 @@ def mapped(transform, pts: np.ndarray) -> np.ndarray:
     return np.array([transform.TransformPoint((float(x), float(y))) for x, y in pts])
 
 
+def resolve_out_dir(out: str | None, first_scene: str) -> str:
+    """Absolute directory to seed the cache into, created if missing.
+
+    Defaults to the parent of the first scene, which is where coreg() looks.
+    Absolute so a bare relative scene ("20260914-210100", whose dirname is "")
+    still resolves to the current directory: save_transform_parameters() writes
+    to the parent of the path it is given, and an empty base would collapse its
+    child path to a directory named "_seed" instead.
+    """
+    target = os.path.abspath(out) if out else os.path.dirname(os.path.abspath(first_scene))
+    os.makedirs(target, exist_ok=True)
+    return target
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -152,18 +166,25 @@ def main() -> int:
         print("\n--dry-run: nothing written")
         return 0
 
-    out = a.out or os.path.dirname(os.path.normpath(a.scene[0]))
+    out = resolve_out_dir(a.out, a.scene[0])
     # save_transform_parameters writes to the PARENT of what it is given, which is
     # where coreg() then looks, so hand it a child path of the target directory.
-    save_transform_parameters(
+    ok = save_transform_parameters(
         transforms[k], os.path.join(out, "_seed"),
         metadata={"transform_type": config.TRANSFORM_TYPE,
                   "metric": config.REGISTRATION_METRIC,
                   "seeded_from": labels[k],
                   "seed_runs": n,
                   "seed_median_disagreement_px": round(float(np.median(off)), 3)})
+    if not ok:
+        # It returns False both on a write error (already printed) and when
+        # saving is switched off in config; either way nothing was seeded.
+        print(f"ERROR: transform NOT written to {out}"
+              + ("" if config.SAVE_TRANSFORM_PARAMETERS
+                 else " (config.SAVE_TRANSFORM_PARAMETERS is False)"))
+        return 1
     print(f"wrote {os.path.join(out, config.TRANSFORM_CACHE_FILENAME)} "
-          f"and {config.TRANSFORM_FILE_FILENAME}")
+          f"and {os.path.join(out, config.TRANSFORM_FILE_FILENAME)}")
     return 0
 
 
