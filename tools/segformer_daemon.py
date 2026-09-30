@@ -134,6 +134,30 @@ def keep_ratio_size(oh: int, ow: int, img_scale=DEFAULT_IMG_SCALE) -> tuple[int,
     return int(oh * scale + 0.5), int(ow * scale + 0.5)
 
 
+def input_geometry(input_shape, ori_h: int, ori_w: int) -> tuple[int, int, int, int]:
+    """(resize_h, resize_w, pad_h, pad_w) for a graph's [batch, bands, H, W] input.
+
+    Each spatial axis is handled on its own. A static axis is the graph's
+    contract: resize to exactly that and never pad it, or ORT rejects the input.
+    A symbolic axis is derived from the capture -- keep-ratio when both are
+    symbolic, otherwise from the static axis so the aspect ratio survives --
+    and padded up to SIZE_DIVISOR so the graph's scale_factor upsample is exact.
+    """
+    static_h = input_shape[2] if isinstance(input_shape[2], int) else None
+    static_w = input_shape[3] if isinstance(input_shape[3], int) else None
+    if static_h and static_w:
+        h, w = static_h, static_w
+    elif static_h:
+        h, w = static_h, max(1, int(ori_w * static_h / ori_h + 0.5))
+    elif static_w:
+        h, w = max(1, int(ori_h * static_w / ori_w + 0.5)), static_w
+    else:
+        h, w = keep_ratio_size(ori_h, ori_w)
+    pad_h = 0 if static_h else (-h) % SIZE_DIVISOR
+    pad_w = 0 if static_w else (-w) % SIZE_DIVISOR
+    return h, w, pad_h, pad_w
+
+
 #: The last band-order complaint, so a per-frame check does not fill the log
 #: with the same line every wake cycle.
 _band_warning = [""]
@@ -164,22 +188,15 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
     # squashing the capture into a square would destroy its aspect ratio —
     # this mask is georeferenced downstream from IMU pose, so a distorted mask
     # distorts the georeferencing, silently and without error.
-    static_h = input_shape[2] if isinstance(input_shape[2], int) else None
-    static_w = input_shape[3] if isinstance(input_shape[3], int) else None
-    if static_h and static_w:
-        expected_h, expected_w = static_h, static_w
-    else:
-        expected_h, expected_w = keep_ratio_size(ori_h, ori_w)
+    expected_h, expected_w, pad_h, pad_w = input_geometry(input_shape, ori_h, ori_w)
 
     # The model states how it was normalised; anything else hands it a
     # distribution it never saw in training, silently and without error.
     arr = load_and_preprocess(tiff_path, expected_h, expected_w,
                               spec=normalization_spec(session))
 
-    # Pad up to SIZE_DIVISOR so the graph's scale_factor upsample is exact.
-    # Zeros are the post-Normalize mean, matching what the torch path pads with.
-    pad_h = (-expected_h) % SIZE_DIVISOR
-    pad_w = (-expected_w) % SIZE_DIVISOR
+    # Pad symbolic axes up to SIZE_DIVISOR so the graph's scale_factor upsample
+    # is exact. Zeros are the post-Normalize mean, matching what the torch path pads with.
     if pad_h or pad_w:
         arr = np.pad(arr, ((0, 0), (0, 0), (0, pad_h), (0, pad_w)))
 
