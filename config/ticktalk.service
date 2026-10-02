@@ -1,6 +1,6 @@
 [Unit]
 Description=Run main Watercam Python script (TTPython variant)
-After=multi-user.target wittypi.service
+After=multi-user.target wittypi.service wittypi-recovery.service
 # Cap restart attempts so a persistently broken deploy doesn't loop forever:
 # at most 3 restarts within any 5-minute window.
 StartLimitIntervalSec=300

@@ -1,0 +1,17 @@
+[Unit]
+Description=After a power outage, sleep until the battery has recharged
+# Runs once the WittyPi daemon has started (it reads the start-up reason the
+# daemon logs around) and before ticktalk, so a recovery boot shuts down
+# before the cameras, modem and inference ever start.
+After=wittypi.service
+Before=ticktalk.service
+
+[Service]
+Type=oneshot
+# Root: it arms the WittyPi alarm, appends to wittyPi.log and powers off.
+ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/tools/recovery_boot.py
+# Covers waiting up to 120 s for the daemon's own alarms before arming ours.
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target
