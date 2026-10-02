@@ -1,6 +1,6 @@
 [Unit]
 Description=Run main Watercam Python script (TTPython variant)
-After=multi-user.target
+After=multi-user.target wittypi.service
 # Cap restart attempts so a persistently broken deploy doesn't loop forever:
 # at most 3 restarts within any 5-minute window.
 StartLimitIntervalSec=300
@@ -11,6 +11,12 @@ User=pi
 Group=pi
 Type=simple
 WorkingDirectory=/home/pi/SU-WaterCam
+# Don't start the cameras, modem and inference until the WittyPi daemon has
+# armed the next wake: a brownout before that leaves no startup alarm, and the
+# unit never wakes again on its own. The wait gives up after 120 s and always
+# lets the service start; TimeoutStartSec covers it with room to spare.
+ExecStartPre=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/tools/wait_for_wittypi_schedule.py
+TimeoutStartSec=180
 ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/runrtm.py -d 50 -s 0 --timeout=0 /home/pi/SU-WaterCam/output/ticktalk_main.pickle 8080
 # An uncaught exception anywhere in the TTPython graph (e.g. the flir()
 # max()-on-empty-list bug) kills this process entirely; without a restart
