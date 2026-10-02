@@ -28,9 +28,12 @@ TAIL_BYTES = 64 * 1024
 # from /proc/uptime, so allow a little slack when comparing the two.
 BOOT_SLACK_S = 5
 
-# runScript.sh logs one of these once it has finished with the alarms.
-_SCHEDULED = re.compile(r"^\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\] Schedule next startup at:\s+(.+)$")
-_NO_SCHEDULE = re.compile(r'^\[(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)\] File "schedule\.wpi" not found')
+# runScript.sh logs one of these once it has finished with the alarms. The
+# daemon stamps lines [like this] normally and <like this> when it isn't sure
+# the system time is right.
+_STAMP = r"^[\[<](\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)[\]>] "
+_SCHEDULED = re.compile(_STAMP + r"Schedule next startup at:\s+(.+)$")
+_NO_SCHEDULE = re.compile(_STAMP + r'File "schedule\.wpi" not found')
 
 
 def boot_time() -> float:

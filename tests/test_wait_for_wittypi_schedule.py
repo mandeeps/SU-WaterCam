@@ -44,6 +44,11 @@ def test_tolerates_null_bytes_from_an_earlier_power_cut():
     assert ws.find_schedule_result(log, BOOT) == "next startup armed for 2026-10-02 20:00:00"
 
 
+def test_accepts_lines_stamped_when_time_is_uncertain():
+    log = THIS_BOOT_STARTED + "<2026-10-02 18:05:24> Schedule next startup at:  2026-10-02 20:00:00\n"
+    assert ws.find_schedule_result(log, BOOT) == "next startup armed for 2026-10-02 20:00:00"
+
+
 def test_wait_returns_as_soon_as_the_alarm_is_logged(tmp_path, monkeypatch):
     log = tmp_path / "wittyPi.log"
     log.write_text(THIS_BOOT_STARTED)
