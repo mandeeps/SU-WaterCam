@@ -1,9 +1,11 @@
 [Unit]
 Description=After a power outage, sleep until the battery has recharged
-# Runs once the WittyPi daemon has started (it reads the start-up reason the
-# daemon logs around) and before ticktalk, so a recovery boot shuts down
-# before the cameras, modem and inference ever start.
-After=wittypi.service
+# Runs alongside the WittyPi daemon (it powers off only once the daemon has
+# sent SYS_UP and armed its alarms) and before ticktalk, so a recovery boot
+# shuts down before the cameras, modem and inference ever start. The boot
+# mark tells it which wittyPi.log lines are this boot's.
+Wants=wittypi-boot-mark.service
+After=wittypi.service wittypi-boot-mark.service
 Before=ticktalk.service
 
 [Service]

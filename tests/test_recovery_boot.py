@@ -92,11 +92,10 @@ def test_disabled_in_config_runs_normally():
     assert "disabled" in why
 
 
-def test_ignores_alarms_logged_by_this_boot():
-    log = LOG_BEFORE_OUTAGE + (
-        "[2026-09-20 20:10:18] System starts up because power supply is newly connected.\n"
-        "[2026-09-20 20:10:24] Schedule next startup at:  2026-09-20 22:00:00\n")
-    assert rb.previously_armed_startup(log, ts("2026-09-20 20:10:05")) == ts("2026-09-14 23:00:00")
+def test_takes_the_armed_wake_from_earlier_boots_only():
+    # decide() is handed only the lines before this boot's mark, so the last
+    # armed line there is the previous boot's, whatever the clocks said.
+    assert rb.previously_armed_startup(LOG_BEFORE_OUTAGE) == ts("2026-09-14 23:00:00")
 
 
 def test_a_recovery_alarm_counts_as_the_armed_wake():
@@ -109,7 +108,7 @@ def test_a_recovery_alarm_counts_as_the_armed_wake():
 
 def test_reads_lines_stamped_when_time_is_uncertain():
     log = "<2026-09-14 21:01:14> Schedule next startup at:  2026-09-14 23:00:00\n"
-    assert rb.previously_armed_startup(log, ts("2026-09-20 20:10:00")) == ts("2026-09-14 23:00:00")
+    assert rb.previously_armed_startup(log) == ts("2026-09-14 23:00:00")
 
 
 # ── choosing the next wake ─────────────────────────────────────────────────
@@ -165,17 +164,6 @@ def test_rtc_now_decodes_the_wittypi_clock(monkeypatch):
     assert rb.rtc_now() == ts("2026-10-02 20:06:00")
 
 
-def test_unreadable_rtc_runs_normally(monkeypatch, capsys):
-    monkeypatch.setattr(rb, "i2c_get", lambda reg: POWER)
-    monkeypatch.setattr(rb, "load_settings", lambda: dict(SETTINGS))
-
-    def no_rtc():
-        raise OSError("bus error")
-    monkeypatch.setattr(rb, "boot_time_from_rtc", no_rtc)
-    assert rb.main([]) == 0
-    assert "normal cycle" in capsys.readouterr().out
-
-
 def test_bcd():
     assert [rb._bcd(n) for n in (0, 9, 10, 23, 31, 59)] == [0x00, 0x09, 0x10, 0x23, 0x31, 0x59]
 
@@ -190,7 +178,86 @@ def test_settings_merge_with_defaults(tmp_path):
 
 # ── main(): never strand the node ──────────────────────────────────────────
 
-def test_unreadable_reason_runs_normally(monkeypatch, capsys):
+DAEMON_STARTING = """\
+[xxxx-xx-xx xx:xx:xx] Witty Pi daemon (v4.21) is started.
+[xxxx-xx-xx xx:xx:xx] Seems RTC has good time, write RTC time into system
+[2026-09-20 20:10:18] System starts up because power supply is newly connected.
+"""
+DAEMON_READY = DAEMON_STARTING + """\
+[2026-09-20 20:10:23] Send out the SYS_UP signal via GPIO-17 pin.
+[2026-09-20 20:10:23] Pending for incoming shutdown command...
+[2026-09-20 20:10:24] File "schedule.wpi" not found, skip running schedule script.
+"""
+
+
+@pytest.fixture
+def node(tmp_path, monkeypatch):
+    """A fake node: wittyPi.log, the boot mark, a WittyPi that reports a power restore."""
+    monkeypatch.setattr(rb, "WITTYPI_DIR", str(tmp_path))
+    mark = tmp_path / "wittypi-log-offset"
+    monkeypatch.setattr(rb.ws, "BOOT_OFFSET_FILE", str(mark))
+    monkeypatch.setattr(rb.ws.boot_offset, "__defaults__", (str(mark),))
+    monkeypatch.setattr(rb, "load_settings", lambda: dict(SETTINGS))
+    monkeypatch.setattr(rb, "i2c_get", lambda reg: POWER)
+    monkeypatch.setattr(rb, "boot_time_from_rtc", lambda: ts("2026-09-20 20:10:08"))
+    monkeypatch.setattr(rb, "rtc_now", lambda: ts("2026-09-20 20:10:30"))
+    commands = []
+    monkeypatch.setattr(rb.subprocess, "run", lambda *a, **k: commands.append(a[0]))
+    monkeypatch.setattr(rb.time, "sleep", lambda s: None)
+    armed = []
+    monkeypatch.setattr(rb, "arm_startup", armed.append)
+
+    def boot(this_boot_lines, mark_written=True):
+        (tmp_path / "wittyPi.log").write_text(LOG_BEFORE_OUTAGE + this_boot_lines)
+        if mark_written:
+            mark.write_text(str(len(LOG_BEFORE_OUTAGE.encode())))
+        return armed, commands
+    return boot
+
+
+def test_recovery_arms_a_wake_and_powers_off(node, tmp_path, capsys):
+    armed, commands = node(DAEMON_READY)
+    assert rb.main([]) == 0
+    assert armed == [ts("2026-09-20 20:10:30") + 120 * 60]
+    assert commands == [["systemctl", "poweroff"]]
+    log = (tmp_path / "wittyPi.log").read_text()
+    # Stamped from the RTC, and worded so the next boot finds the alarm.
+    assert "[2026-09-20 20:10:30] Schedule next startup at:  2026-09-20 22:10:30" in log
+
+
+def test_never_powers_off_before_the_daemon_sends_sys_up(node, monkeypatch, capsys):
+    # 006 on 2026-10-02 20:29: powered off before SYS_UP, the WittyPi never cut
+    # the power, and the node sat halted through its alarm.
+    monkeypatch.setattr(rb.ws, "TIMEOUT_S", 0)
+    monkeypatch.setattr(rb.wait_until_daemon_ready, "__defaults__", (0, 0))
+    armed, commands = node(DAEMON_STARTING)
+    assert rb.main([]) == 0
+    assert armed == [] and commands == []
+    assert "never reported ready" in capsys.readouterr().out
+
+
+def test_a_previous_boots_ready_lines_do_not_count(node, monkeypatch, tmp_path):
+    # 006 on 2026-10-02 20:29: with a stale clock, the previous boot's lines
+    # looked like this boot's. Lines before the mark must never count.
+    monkeypatch.setattr(rb.wait_until_daemon_ready, "__defaults__", (0, 0))
+    armed, commands = node(DAEMON_STARTING)
+    earlier = LOG_BEFORE_OUTAGE + DAEMON_READY.replace("2026-09-20", "2026-09-14")
+    (tmp_path / "wittyPi.log").write_text(earlier + DAEMON_STARTING)
+    (tmp_path / "wittypi-log-offset").write_text(str(len(earlier.encode())))
+    assert rb.main([]) == 0
+    assert armed == [] and commands == []
+
+
+def test_without_the_boot_mark_runs_normally(node, capsys):
+    armed, commands = node(DAEMON_READY, mark_written=False)
+    assert rb.main([]) == 0
+    assert armed == [] and commands == []
+    assert "wittypi-boot-mark" in capsys.readouterr().out
+
+
+def test_unreadable_reason_runs_normally(node, monkeypatch, capsys):
+    node(DAEMON_READY)
+
     def boom(_):
         raise OSError("bus error")
     monkeypatch.setattr(rb, "i2c_get", boom)
@@ -198,34 +265,29 @@ def test_unreadable_reason_runs_normally(monkeypatch, capsys):
     assert "normal cycle" in capsys.readouterr().out
 
 
-def test_failed_alarm_write_does_not_shut_down(monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(rb, "i2c_get", lambda reg: POWER)
-    monkeypatch.setattr(rb, "load_settings", lambda: dict(SETTINGS))
-    monkeypatch.setattr(rb.ws, "read_tail", lambda path: LOG_BEFORE_OUTAGE)
-    monkeypatch.setattr(rb, "boot_time_from_rtc", lambda: ts("2026-09-20 20:10:00"))
-    monkeypatch.setattr(rb, "rtc_now", lambda: ts("2026-09-20 20:10:30"))
-    monkeypatch.setattr(rb.ws, "wait_for_schedule", lambda path: None)
-    monkeypatch.setattr(rb, "WITTYPI_DIR", str(tmp_path))
+def test_unreadable_rtc_runs_normally(node, monkeypatch, capsys):
+    armed, commands = node(DAEMON_READY)
+
+    def no_rtc():
+        raise OSError("bus error")
+    monkeypatch.setattr(rb, "boot_time_from_rtc", no_rtc)
+    assert rb.main([]) == 0
+    assert armed == [] and commands == []
+
+
+def test_failed_alarm_write_does_not_shut_down(node, monkeypatch, capsys):
+    _, commands = node(DAEMON_READY)
 
     def fail(_):
         raise RuntimeError("readback mismatch")
     monkeypatch.setattr(rb, "arm_startup", fail)
-    calls = []
-    monkeypatch.setattr(rb.subprocess, "run", lambda *a, **k: calls.append(a))
     assert rb.main([]) == 0
-    assert calls == []
+    assert commands == []
     assert "normal cycle instead" in capsys.readouterr().out
 
 
-def test_dry_run_changes_nothing(monkeypatch, tmp_path, capsys):
-    monkeypatch.setattr(rb, "i2c_get", lambda reg: POWER)
-    monkeypatch.setattr(rb, "load_settings", lambda: dict(SETTINGS))
-    monkeypatch.setattr(rb.ws, "read_tail", lambda path: LOG_BEFORE_OUTAGE)
-    monkeypatch.setattr(rb, "boot_time_from_rtc", lambda: ts("2026-09-20 20:10:00"))
-    monkeypatch.setattr(rb, "rtc_now", lambda: ts("2026-09-20 20:10:30"))
-    monkeypatch.setattr(rb.ws, "wait_for_schedule", lambda path: None)
-    monkeypatch.setattr(rb, "WITTYPI_DIR", str(tmp_path))
-    monkeypatch.setattr(rb, "arm_startup", lambda wake: pytest.fail("armed in dry run"))
-    monkeypatch.setattr(rb.subprocess, "run", lambda *a, **k: pytest.fail("ran a command in dry run"))
+def test_dry_run_changes_nothing(node, capsys):
+    armed, commands = node(DAEMON_READY)
     assert rb.main(["--dry-run"]) == 0
+    assert armed == [] and commands == []
     assert "Dry run" in capsys.readouterr().out

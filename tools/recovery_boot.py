@@ -63,6 +63,11 @@ ALARM1_REGS = (27, 28, 29, 30)  # second, minute, hour, day (BCD)
 ALARM2_REGS = (32, 33, 34, 35)
 
 _ARMED = re.compile(ws.STAMP + r"Schedule next startup at:\s+(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)")
+# daemon.sh logs this right after sending SYS_UP on GPIO-17. The WittyPi only
+# cuts power when the Pi halts once it has seen SYS_UP: powering off before it
+# leaves the Pi halted with the power still on, deaf to its next alarm (006,
+# 2026-10-02 20:29).
+_DAEMON_READY = re.compile(ws.STAMP + r"Pending for incoming shutdown command")
 _DURATION = re.compile(r"([DHMS])(\d+)")
 _UNIT_S = {"D": 86400, "H": 3600, "M": 60, "S": 1}
 
@@ -81,11 +86,14 @@ def _parse_stamp(text: str) -> float:
     return datetime.strptime(text, "%Y-%m-%d %H:%M:%S").timestamp()
 
 
-def previously_armed_startup(log_text: str, boot: float) -> Optional[float]:
-    """The startup alarm armed by the last boot before this one, if it was logged."""
-    for line in reversed(log_text.splitlines()):
+def previously_armed_startup(earlier_log: str) -> Optional[float]:
+    """The startup alarm the last boot before this one armed, if it was logged.
+
+    `earlier_log` holds only lines from before this boot (see ws.split_log).
+    """
+    for line in reversed(earlier_log.splitlines()):
         m = _ARMED.match(line)
-        if m and _parse_stamp(m.group(1)) < boot - ws.BOOT_SLACK_S:
+        if m:
             return _parse_stamp(m.group(2))
     return None
 
@@ -205,22 +213,40 @@ def arm_startup(wake: float) -> None:
         raise RuntimeError(f"startup alarm read back as {readback}")
 
 
-def log_to_wittypi(message: str) -> None:
+def log_to_wittypi(message: str, now: float) -> None:
     """Append to wittyPi.log in the daemon's own format, so field forensics see it."""
-    line = f"{datetime.now():[%Y-%m-%d %H:%M:%S]} {message}\n"
+    line = f"{datetime.fromtimestamp(now):[%Y-%m-%d %H:%M:%S]} {message}\n"
     with open(os.path.join(WITTYPI_DIR, "wittyPi.log"), "a") as f:
         f.write(line)
         f.flush()
         os.fsync(f.fileno())
 
 
-def decide(reason: Optional[int], boot: float, log_text: str, settings: dict) -> Tuple[bool, str]:
+def daemon_ready(this_boot_log: str) -> bool:
+    """The daemon has sent SYS_UP and finished arming its own alarms this boot."""
+    lines = this_boot_log.splitlines()
+    return (any(_DAEMON_READY.match(line) for line in lines)
+            and ws.find_schedule_result(this_boot_log, None) is not None)
+
+
+def wait_until_daemon_ready(log_path: str, offset: int, timeout_s: float = ws.TIMEOUT_S,
+                            poll_s: float = ws.POLL_S) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while True:
+        if daemon_ready(ws.split_log(log_path, offset)[1]):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll_s)
+
+
+def decide(reason: Optional[int], boot: float, earlier_log: str, settings: dict) -> Tuple[bool, str]:
     """(defer, why) for this boot."""
     if not settings["enabled"]:
         return False, "recovery boot disabled in runtime_config.json"
     if reason not in POWER_RESTORE_REASONS:
         return False, f"start-up reason {reason if reason is None else hex(reason)} is not a power restore"
-    armed = previously_armed_startup(log_text, boot)
+    armed = previously_armed_startup(earlier_log)
     if is_scheduled_wake(boot, armed, settings["scheduled_wake_window_minutes"] * 60):
         return False, (f"{POWER_RESTORE_REASONS[reason]}, but within the window after the wake armed for "
                        f"{datetime.fromtimestamp(armed):%Y-%m-%d %H:%M:%S}: a scheduled wake that browned out")
@@ -241,25 +267,36 @@ def main(argv=None) -> int:
         return 0
 
     log_path = os.path.join(WITTYPI_DIR, "wittyPi.log")
+    offset = ws.boot_offset()
+    if offset is None:
+        # Without the mark there's no telling this boot's log lines from
+        # earlier ones, so no safe way to know the daemon has sent SYS_UP.
+        print(f"No {ws.BOOT_OFFSET_FILE} (is wittypi-boot-mark.service enabled?); running the normal cycle")
+        return 0
     try:
         boot = boot_time_from_rtc()
     except (OSError, subprocess.SubprocessError, ValueError) as e:
         print(f"Can't read the WittyPi RTC ({e}); running the normal cycle")
         return 0
-    defer, why = decide(reason, boot, ws.read_tail(log_path), settings)
+    defer, why = decide(reason, boot, ws.split_log(log_path, offset)[0], settings)
     if not defer:
         print(f"Normal cycle: {why}")
         return 0
 
-    # Let the daemon finish arming its own alarms first, or it would overwrite ours.
-    ws.wait_for_schedule(log_path)
+    # Wait for the daemon to send SYS_UP (or the WittyPi won't cut the power
+    # when we halt) and to arm its own alarms (or it would overwrite ours).
+    if not wait_until_daemon_ready(log_path, offset):
+        print(f"Recovery boot ({why}), but the WittyPi daemon never reported ready; "
+              "running the normal cycle rather than risk halting with the power on")
+        return 0
     schedule_text = None
     try:
         with open(os.path.join(WITTYPI_DIR, "schedule.wpi")) as f:
             schedule_text = f.read()
     except OSError:
         pass
-    wake, source = choose_wake(rtc_now(), settings, schedule_text)
+    now = rtc_now()
+    wake, source = choose_wake(now, settings, schedule_text)
     wake_text = f"{datetime.fromtimestamp(wake):%Y-%m-%d %H:%M:%S}"
     print(f"Recovery boot: {why}. Next wake {wake_text} ({source}).")
     if args.dry_run:
@@ -272,10 +309,10 @@ def main(argv=None) -> int:
         # Without a confirmed alarm, shutting down could strand the node.
         print(f"Could not arm the startup alarm ({e}); running the normal cycle instead")
         return 0
-    log_to_wittypi(f"Recovery boot: {why}; shutting down until the battery has recharged.")
+    log_to_wittypi(f"Recovery boot: {why}; shutting down until the battery has recharged.", now)
     # Same wording as runScript.sh, so the next boot's previously_armed_startup()
     # finds this alarm and treats a brownout at it as a scheduled wake.
-    log_to_wittypi(f"Schedule next startup at:  {wake_text}")
+    log_to_wittypi(f"Schedule next startup at:  {wake_text}", now)
     subprocess.run(["systemctl", "poweroff"], check=False)
     # Hold this oneshot until shutdown kills it, so ticktalk.service (ordered
     # after us) never starts.

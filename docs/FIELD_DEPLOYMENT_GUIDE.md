@@ -171,10 +171,10 @@ The production application is `ticktalk_main.py`, run via `ticktalk.service`
 one of these is enabled to avoid both fighting over the camera and radio).
 
 ```bash
-sudo cp config/ticktalk.service config/wittypi-recovery.service /etc/systemd/system/
+sudo cp config/ticktalk.service config/wittypi-recovery.service config/wittypi-boot-mark.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl disable watercam.service 2>/dev/null   # if it was ever enabled
-sudo systemctl enable ticktalk.service wittypi-recovery.service
+sudo systemctl enable ticktalk.service wittypi-recovery.service wittypi-boot-mark.service
 ```
 
 `wittypi-recovery.service` handles recovery after a power outage. Leave the
