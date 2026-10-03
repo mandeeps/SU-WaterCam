@@ -240,6 +240,7 @@ uploads to the production server.
 | Power restored with no wake due | Waited for "system is up", set a wake, powered off (red LED off), woke on the alarm, normal cycle |
 | Power restored just after a scheduled wake | Counted as a wake that browned out; normal cycle, stayed on |
 | Button press and reboot | Normal cycle |
+| Power cut during full load at a scheduled wake (load: segmentation loop, camera, 4-core stress, cellular pings; 1.6–1.8 A) | Next wake (22:56) set before the load started. After replug: power restore before that wake, so recovery waited for "system is up", re-set 22:56 and powered off 7 s after boot. Woke at 22:56 on the alarm and ran the full load again |
 
 ## Recommendations for field units
 
