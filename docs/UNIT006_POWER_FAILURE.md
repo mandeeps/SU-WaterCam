@@ -161,6 +161,10 @@ output fell to about 4.3 V at the 1.2 A of a capture cycle.
   - **Why:** fast spikes from the camera and modem transmit bursts, which the
     Witty Pi's averaged readings can't see, plus the drop across the GPIO
     extension header.
+- **Repeated on the field supply.** *Confirmed.* On the V50 with the
+  Y-adapter (the field wiring), the full-load test on 2026-10-02 again flagged
+  under-voltage early in the load (`0x50005`). The Witty Pi output read 4.64 V
+  at 1.82 A, and the CPU reached 58–62 °C at 2000 MHz.
 - **Both units are overclocked.** *Confirmed.*
   - **Clock:** both have `arm_freq=2000` with `arm_boost=1` (stock is 1800).
     006 was set back to 2000 on 2026-10-01 at 21:26.
@@ -240,7 +244,7 @@ uploads to the production server.
 | Power restored with no wake due | Waited for "system is up", set a wake, powered off (red LED off), woke on the alarm, normal cycle |
 | Power restored just after a scheduled wake | Counted as a wake that browned out; normal cycle, stayed on |
 | Button press and reboot | Normal cycle |
-| Power cut during full load at a scheduled wake (load: segmentation loop, camera, 4-core stress, cellular pings; 1.6–1.8 A) | Next wake (22:56) set before the load started. After replug: power restore before that wake, so recovery waited for "system is up", re-set 22:56 and powered off 7 s after boot. Woke at 22:56 on the alarm and ran the full load again |
+| Power cut during full load at a scheduled wake, on the V50 with the Y-adapter (load: segmentation loop, camera, 4-core stress, cellular pings; 1.6–1.8 A) | Next wake (22:56) set before the load started. After replug: power restore before that wake, so recovery waited for "system is up", re-set 22:56 and powered off 7 s after boot. Woke at 22:56 on the alarm and ran the full load again |
 
 ## Recommendations for field units
 
