@@ -174,6 +174,25 @@ def i2c_set(reg: int, value: int) -> None:
                    timeout=5, check=True)
 
 
+def rtc_now() -> float:
+    """The WittyPi RTC's time, which is right from power-on.
+
+    The system clock is not: until the WittyPi daemon copies the RTC into it,
+    it still reads whenever the Pi last saved it, often the last shutdown, hours
+    before this boot. Deciding on it made a brownout at a scheduled wake look
+    like an outage recovery.
+    """
+    regs = [i2c_get(r) for r in range(58, 65)]  # sec, min, hour, day, weekday, month, year (BCD)
+    regs[0] &= 0x7F  # top bit of the seconds register is a status flag
+    sec, mi, hr, day, _, mon, yr = ((v >> 4) * 10 + (v & 0x0F) for v in regs)
+    return datetime(2000 + yr, mon, day, hr, mi, sec).timestamp()
+
+
+def boot_time_from_rtc() -> float:
+    with open("/proc/uptime") as f:
+        return rtc_now() - float(f.read().split()[0])
+
+
 def arm_startup(wake: float) -> None:
     t = datetime.fromtimestamp(wake)
     for reg, value in zip(ALARM1_REGS, (t.second, t.minute, t.hour, t.day)):
@@ -222,7 +241,12 @@ def main(argv=None) -> int:
         return 0
 
     log_path = os.path.join(WITTYPI_DIR, "wittyPi.log")
-    defer, why = decide(reason, ws.boot_time(), ws.read_tail(log_path), settings)
+    try:
+        boot = boot_time_from_rtc()
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        print(f"Can't read the WittyPi RTC ({e}); running the normal cycle")
+        return 0
+    defer, why = decide(reason, boot, ws.read_tail(log_path), settings)
     if not defer:
         print(f"Normal cycle: {why}")
         return 0
@@ -235,8 +259,7 @@ def main(argv=None) -> int:
             schedule_text = f.read()
     except OSError:
         pass
-    now = time.time()
-    wake, source = choose_wake(now, settings, schedule_text)
+    wake, source = choose_wake(rtc_now(), settings, schedule_text)
     wake_text = f"{datetime.fromtimestamp(wake):%Y-%m-%d %H:%M:%S}"
     print(f"Recovery boot: {why}. Next wake {wake_text} ({source}).")
     if args.dry_run:

@@ -158,6 +158,24 @@ def test_schedule_comments_and_future_begin():
     assert datetime.fromtimestamp(wake) == datetime(2026, 10, 5, 7, 0, 0)
 
 
+def test_rtc_now_decodes_the_wittypi_clock(monkeypatch):
+    # 2026-10-02 20:06:00, with the seconds register's status bit set.
+    regs = {58: 0x80, 59: 0x06, 60: 0x20, 61: 0x02, 62: 0x05, 63: 0x10, 64: 0x26}
+    monkeypatch.setattr(rb, "i2c_get", lambda reg: regs[reg])
+    assert rb.rtc_now() == ts("2026-10-02 20:06:00")
+
+
+def test_unreadable_rtc_runs_normally(monkeypatch, capsys):
+    monkeypatch.setattr(rb, "i2c_get", lambda reg: POWER)
+    monkeypatch.setattr(rb, "load_settings", lambda: dict(SETTINGS))
+
+    def no_rtc():
+        raise OSError("bus error")
+    monkeypatch.setattr(rb, "boot_time_from_rtc", no_rtc)
+    assert rb.main([]) == 0
+    assert "normal cycle" in capsys.readouterr().out
+
+
 def test_bcd():
     assert [rb._bcd(n) for n in (0, 9, 10, 23, 31, 59)] == [0x00, 0x09, 0x10, 0x23, 0x31, 0x59]
 
@@ -184,7 +202,8 @@ def test_failed_alarm_write_does_not_shut_down(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(rb, "i2c_get", lambda reg: POWER)
     monkeypatch.setattr(rb, "load_settings", lambda: dict(SETTINGS))
     monkeypatch.setattr(rb.ws, "read_tail", lambda path: LOG_BEFORE_OUTAGE)
-    monkeypatch.setattr(rb.ws, "boot_time", lambda: ts("2026-09-20 20:10:00"))
+    monkeypatch.setattr(rb, "boot_time_from_rtc", lambda: ts("2026-09-20 20:10:00"))
+    monkeypatch.setattr(rb, "rtc_now", lambda: ts("2026-09-20 20:10:30"))
     monkeypatch.setattr(rb.ws, "wait_for_schedule", lambda path: None)
     monkeypatch.setattr(rb, "WITTYPI_DIR", str(tmp_path))
 
@@ -202,7 +221,8 @@ def test_dry_run_changes_nothing(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(rb, "i2c_get", lambda reg: POWER)
     monkeypatch.setattr(rb, "load_settings", lambda: dict(SETTINGS))
     monkeypatch.setattr(rb.ws, "read_tail", lambda path: LOG_BEFORE_OUTAGE)
-    monkeypatch.setattr(rb.ws, "boot_time", lambda: ts("2026-09-20 20:10:00"))
+    monkeypatch.setattr(rb, "boot_time_from_rtc", lambda: ts("2026-09-20 20:10:00"))
+    monkeypatch.setattr(rb, "rtc_now", lambda: ts("2026-09-20 20:10:30"))
     monkeypatch.setattr(rb.ws, "wait_for_schedule", lambda path: None)
     monkeypatch.setattr(rb, "WITTYPI_DIR", str(tmp_path))
     monkeypatch.setattr(rb, "arm_startup", lambda wake: pytest.fail("armed in dry run"))
