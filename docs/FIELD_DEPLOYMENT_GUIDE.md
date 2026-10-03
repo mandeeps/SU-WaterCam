@@ -171,11 +171,23 @@ The production application is `ticktalk_main.py`, run via `ticktalk.service`
 one of these is enabled to avoid both fighting over the camera and radio).
 
 ```bash
-sudo cp config/ticktalk.service /etc/systemd/system/
+sudo cp config/ticktalk.service config/wittypi-recovery.service config/wittypi-boot-mark.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl disable watercam.service 2>/dev/null   # if it was ever enabled
-sudo systemctl enable ticktalk.service
+sudo systemctl enable ticktalk.service wittypi-recovery.service wittypi-boot-mark.service
 ```
+
+`wittypi-recovery.service` handles recovery after a power outage. Leave the
+WittyPi on "Default ON", so it boots the Pi whenever power returns. When a
+boot comes from power returning rather than from the schedule, the service
+arms the next `schedule.wpi` slot at least 2 hours away and shuts down before
+the cameras and modem start, giving the battery time to recharge. Settings are
+under `recovery_boot` in `runtime_config.json`.
+
+This also applies when you first connect power, so a freshly connected unit
+goes straight back to sleep. **Press the WittyPi button** to start a normal
+cycle on the bench or at deployment. On the bench you can also set
+`"recovery_boot": {"enabled": false}`.
 
 Also confirm the button service is installed if the unit has a physical
 capture button:

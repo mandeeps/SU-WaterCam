@@ -50,6 +50,7 @@ jobs:
             tests/test_lora_param_validation.py \
             tests/test_ip_command_handling.py \
             tests/test_wait_for_wittypi_schedule.py \
+            tests/test_recovery_boot.py \
             -v --tb=short \
             -k "not TestLoRaPacketEncoding"
 
