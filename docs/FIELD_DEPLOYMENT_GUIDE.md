@@ -83,6 +83,12 @@ The WittyPi controls when the Pi is powered on/off and needs to be told what sch
 
 If you need to customize the schedule you can write a `.wpi` file for this deployment: (https://github.com/uugear/Witty-Pi-4/tree/main/Software/wittypi/schedules)
 
+Then install this repo's `beforeScript.sh`, which lets the WittyPi arm the next wake about 15 s after boot instead of about 55 s:
+
+```bash
+cp /home/pi/SU-WaterCam/config/wittypi/beforeScript.sh /home/pi/wittypi/beforeScript.sh
+```
+
 ### 1.6 Configure `runtime_config.json`
 
 This is the unit's operating settings. The file `/home/pi/SU-WaterCam/runtime_config.json` should be edited to have the name of the specific unit and other settings.
