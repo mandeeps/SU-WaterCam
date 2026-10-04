@@ -21,7 +21,12 @@ Restart=on-failure
 RestartSec=5
 TimeoutStartSec=60
 # Wait up to 30 s (60 x 0.5 s) for the socket to appear; fail cleanly if it doesn't.
-ExecStartPost=/bin/bash -c 'retries=0; until [ -S /run/lora/lora.sock ]; do sleep 0.5; retries=$((retries+1)); [ $retries -ge 60 ] && exit 1; done'
+# Succeeds as soon as the socket exists, fails after 30 s. (The previous
+# `until ...; do ...; [ $retries -ge 60 ] && exit 1; done` exited 1 whenever the
+# socket appeared after the first check: the loop's status is that of its last
+# body command, the false `[ ... ] && exit 1`. The daemon takes about 1 s, so
+# systemd killed a healthy daemon on every start.)
+ExecStartPost=/bin/bash -c 'for i in $(seq 1 60); do [ -S /run/lora/lora.sock ] && exit 0; sleep 0.5; done; exit 1'
 
 [Install]
 WantedBy=multi-user.target
