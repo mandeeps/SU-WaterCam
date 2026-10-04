@@ -214,8 +214,16 @@ class LoRaRuntimeManager:
             self.save_parameters(default_params)
             return default_params
     
-    def save_parameters(self, params: Dict[str, Any]) -> bool:
-        """Save runtime parameters to file. Returns True on success, False on failure."""
+    def save_parameters(self, params: Dict[str, Any], merge: bool = False) -> bool:
+        """Save runtime parameters to file. Returns True on success, False on failure.
+
+        merge=True writes only the given keys onto what is on disk now, read
+        and written under one exclusive lock, and refreshes the in-memory copy
+        from the result. Several processes (lora_daemon, each ticktalk SQ
+        process) keep their own LoRaRuntimeManager; writing a whole in-memory
+        copy instead reverts every change another process (or a person) made
+        since this one last read the file.
+        """
         try:
             # os.open with O_CREAT|O_RDWR opens or creates the file without
             # truncating it, so the lock is acquired before any data is lost.
@@ -225,11 +233,22 @@ class LoRaRuntimeManager:
             with os.fdopen(fd, 'r+') as f:
                 fcntl.flock(f, fcntl.LOCK_EX)
                 try:
+                    if merge:
+                        content = f.read()
+                        try:
+                            on_disk = json.loads(content) if content.strip() else {}
+                        except ValueError:
+                            # unreadable file: rebuild it from what we know
+                            on_disk = dict(self.parameters)
+                        on_disk.update(params)
+                        params = on_disk
                     f.seek(0)
                     json.dump(params, f, indent=2)
                     f.truncate()
                 finally:
                     fcntl.flock(f, fcntl.LOCK_UN)
+            if merge:
+                self.parameters.update(params)
             return True
         except Exception as e:
             print(f"Error saving runtime config: {e}")
@@ -385,17 +404,14 @@ class LoRaRuntimeManager:
         if not self._validate_param(key, value):
             return False
         coerced = self._coerce_param(key, value)
-        _MISSING = object()
-        old_value = self.parameters.get(key, _MISSING)
-        prior = None if old_value is _MISSING else old_value
-        self.parameters[key] = coerced
-        if not self.save_parameters(self.parameters):
-            if old_value is _MISSING:
-                del self.parameters[key]
-            else:
-                self.parameters[key] = old_value
-            print(f"Warning: failed to persist '{key}', change rolled back")
+        # Pick up changes other processes made, so `prior` and their
+        # callbacks are right; the write below merges onto the file anyway.
+        self._reload_if_changed()
+        prior = self.parameters.get(key)
+        if not self.save_parameters({key: coerced}, merge=True):
+            print(f"Warning: failed to persist '{key}', change not applied")
             return False
+        self.parameters[key] = coerced
 
         # Refresh our own mtime baseline immediately: without this, the next
         # get_parameter() call would see the file we just wrote as an
@@ -658,7 +674,7 @@ class LoRaRuntimeManager:
                         print(f"  Warning: skipped out-of-range value for '{key}': {value!r}")
 
             if changes:
-                if not self.save_parameters(self.parameters):
+                if not self.save_parameters({k: self.parameters[k] for k in prior_values}, merge=True):
                     for key, old_value in prior_values.items():
                         self.parameters[key] = old_value
                     print(f"Warning: failed to persist {len(changes)} synced parameter(s) to disk")
@@ -789,8 +805,11 @@ def integrate_with_ticktalk():
     manager.register_update_callback('photo_interval', on_photo_interval_changed)
     manager.register_update_callback('monitoring_frequency', on_monitoring_frequency_changed)
     
-    # Perform initial sync with LoRa config
-    manager.sync_with_lora_config()
+    # No sync from lora_config.json here. It ran on every wake and copied the
+    # LoRa handler's copy of each shared key over runtime_config.json, which
+    # reverted IP downlink and hand-made changes (only LoRa commands update
+    # both files). LoRa commands already reach runtime_config.json through
+    # the daemon's runtime callback (_adopt_daemon_owned_handler).
     
     print("✓ LoRa runtime integration set up for ticktalk_main.py")
 
