@@ -5,6 +5,17 @@ LoRa Debug Integration
 Answers the remote debug-status downlink (channel 50, command 01), which
 LoRaHandler.decode() in tools/lora_handler_concurrent.py routes here. The
 report itself is built by tools/debug_status_command.py (needs psutil).
+
+Sending the request
+-------------------
+Send the downlink as the ASCII digits "5001" (any trailing digit works, e.g.
+"50011"). The hex/TLV form "500100" does NOT work: decode() tries the TLV
+parser first, reads it as channel 0x50 = 80, finds no handler and drops it.
+
+The reply goes out as one uplink, about 156 bytes. It fits the 242-byte limit
+at the default data rate but not at the lowest US915 rates (DR1/DR2), where
+it is rejected as too large. It also waits in the LoRa daemon's queue until
+the next transmit, so a node that powers off first never sends it.
 """
 
 from datetime import datetime
