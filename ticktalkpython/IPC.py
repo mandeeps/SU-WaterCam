@@ -56,6 +56,7 @@ class SyncMsg(Enum):
     InstantiateSQ = 100
     RemoveSQ = 101
     UpdateFiringRule = 102
+    UpdatePeriodicity = 103
     AddClocks = 110
     RemoveClocks = 111
     UpdateClocks = 112
@@ -140,6 +141,7 @@ class RuntimeMsg(Enum):
     InstantiateAndMapGraph = 100
     # PropagateNewRoutingEntry = 101
     ExecuteGraphOnInputs = 102
+    UpdatePeriodicity = 104
     # ensemble joining the system would send this to the runtime manager
     # ensemble with its address and name
     JoinTickTalkSystem = 103

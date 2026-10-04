@@ -338,6 +338,24 @@ class TTInputTokenProcess():
         elif msg_type == SyncMsg.UpdateFiringRule:
             raise NotImplementedError
 
+        elif msg_type == SyncMsg.UpdatePeriodicity:
+            # payload format: (sq_name, new_period_root_ticks, new_phase_root_ticks)
+            payload = msg.payload
+            try:
+                sq_name, new_period, new_phase = payload
+            except Exception:
+                self.logger.error('UpdatePeriodicity payload must be (sq_name, period, phase)')
+                return
+
+            sqsync = self.sqs.get(sq_name)
+            if sqsync is None:
+                self.logger.error('No SQ named %s found for periodicity update', sq_name)
+                return
+
+            sqsync.update_periodicity(new_period, new_phase)
+            self.logger.info('Updated periodicity for %s to period=%s phase=%s (root ticks)',
+                             sq_name, new_period, new_phase)
+
         elif msg_type == SyncMsg.RemoveSQ:
             raise NotImplementedError
             # del self.sqs[msg.payload]

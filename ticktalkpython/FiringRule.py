@@ -92,6 +92,31 @@ class TTFiringRule():
         if rule_type == TTFiringRuleType.Deadline:
             self.set_deadline_triggering(firing_rule_args)
 
+    def set_period_phase(self, period=None, phase=None):
+        """
+        Update the period and/or phase for TimedRetrigger at runtime.
+
+        The values are expected to be in ROOT clock ticks, consistent with how
+        set_timed_retriggering stores them internally.
+
+        :param period: Optional new period (int, root ticks)
+        :param phase: Optional new phase (int, root ticks)
+        """
+        if self.rule_type != TTFiringRuleType.TimedRetrigger:
+            return
+
+        if period is not None:
+            assert isinstance(period, int) and 0 < period, 'period must be a positive integer (root ticks)'
+            self.period = period
+
+        if phase is not None:
+            assert isinstance(phase, int) and 0 <= phase, 'phase must be a non-negative integer (root ticks)'
+            # phase should be within [0, period)
+            if hasattr(self, 'period') and self.period is not None and 0 < self.period:
+                self.phase = phase % self.period
+            else:
+                self.phase = phase
+
     def set_timed_retriggering(self, firing_rule_args_dict):
         # self.clock = TTClockSpec('root', None, 1, 0) #by default, the root
         # clock will be used
