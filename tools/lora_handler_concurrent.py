@@ -2259,6 +2259,24 @@ def get_lora_handler(socket_path: str = LORA_DAEMON_SOCKET_PATH) -> Optional["Lo
     return LoRaHandlerClient(socket_path)
 
 
+def lora_unavailable_reason(socket_path: str = LORA_DAEMON_SOCKET_PATH) -> str:
+    """Why get_lora_handler() returned None, in words an operator can act on.
+
+    get_lora_handler() returns None only when the daemon's socket is missing or
+    is not a socket. A serial-port conflict is handled inside the daemon and
+    never surfaces here, so "serial port busy" is the wrong diagnosis.
+    """
+    if not os.path.exists(socket_path):
+        return (f"LoRa daemon not running: no socket at {socket_path} "
+                "-- is lora_daemon.service installed and started?")
+    try:
+        if not stat.S_ISSOCK(os.lstat(socket_path).st_mode):
+            return f"{socket_path} exists but is not a socket -- LoRa daemon unavailable"
+    except OSError as e:
+        return f"cannot stat {socket_path}: {e}"
+    return "LoRa daemon socket present but no handler was returned"
+
+
 def transmit_data(data: Dict[str, Any]) -> bool:
     """Convenience function to transmit sensor data"""
     handler = get_lora_handler()
