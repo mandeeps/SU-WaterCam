@@ -643,6 +643,16 @@ class LoRaHandler:
             print(f"Error queuing file transmission: {e}")
             return False
     
+    def _send_debug_reply(self, hex_payload: str) -> None:
+        """Transmit a debug-status reply (runs on its own thread; see decode())."""
+        try:
+            if self.transmit(hex_payload):
+                print('✅ Debug status reply sent')
+            else:
+                print('❌ Debug status reply failed to send')
+        except Exception as e:
+            print(f"⚠️ Debug status reply failed: {e}")
+
     def queue_binary_transmit(self, binary_data) -> bool:
         """Queue arbitrary binary data for transmission (thread-safe)"""
         try:
@@ -1061,16 +1071,22 @@ class LoRaHandler:
                         print('🔍 Debug status requested via LoRa command')
                         try:
                             from tools.lora_debug_integration import handle_debug_status_request
-                            debug_response = handle_debug_status_request()
+                            debug_response = handle_debug_status_request(
+                                size_limit=self.current_size_limit,
+                                emergency_mode=self.get_config('emergency_mode', False),
+                            )
                             
                             if debug_response['status'] == 'success':
-                                # Queue the debug response for transmission
+                                # Send from a helper thread rather than the transmit queue:
+                                # nothing in the LoRa daemon drains that queue, so the reply
+                                # waited for ticktalk's next process_transmit_queue() and was
+                                # lost if the node powered off first. decode() runs in the
+                                # listener while it holds transmit_lock, so transmit() can't
+                                # be called here directly; the thread waits for the lock.
                                 debug_data = debug_response['data']
-                                print(f"📤 Queuing debug response: {len(debug_data)} bytes")
-                                
-                                # Transmit the debug response
-                                self.queue_binary_transmit(debug_data)
-                                print('✅ Debug status response queued for transmission')
+                                print(f"📤 Sending debug reply: {debug_response['size_bytes']} bytes")
+                                threading.Thread(target=self._send_debug_reply, args=(debug_data,),
+                                                 name='debug-reply', daemon=True).start()
                             else:
                                 print(f"❌ Debug status failed: {debug_response.get('error', 'Unknown error')}")
                                 
