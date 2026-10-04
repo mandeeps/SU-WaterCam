@@ -1,5 +1,7 @@
 # Bitmap SF-Adaptive Compression — Device-Side Changes
 
+The bitmap byte format itself (header, bitpacking and RLE payloads, decoding) is specified in [BITMAP_DECODING_SPEC.md](BITMAP_DECODING_SPEC.md).
+
 **Date:** May 2026  
 **Related repo:** WaterCam API (`fix/bitmap-sf-adaptive-raw-mode`)  
 **Affected files:** `ticktalk_main.py`
