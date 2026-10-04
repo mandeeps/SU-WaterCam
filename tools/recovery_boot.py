@@ -1,0 +1,324 @@
+#!/usr/bin/env python3
+"""
+After a power outage, put the node back to sleep until the battery has recharged.
+
+The WittyPi is left on "default ON", so it boots the Pi as soon as the V50
+restores its output. That is the only way a node gets back on schedule after
+an outage: a WittyPi with no power when its alarm comes round never starts the
+Pi later, and never sets a later alarm by itself. But the V50 restores its
+output as soon as it has a little charge, and a full capture cycle on a nearly
+empty pack browns out again (006, 2026-09-14 to 2026-09-29).
+
+So when this boot came from power returning, rather than from an alarm or the
+button, this arms the next schedule slot at least `min_delay_minutes` away and
+shuts down before ticktalk starts the cameras, modem and inference.
+
+A scheduled wake whose boot surge browned out the WittyPi itself also reports
+"power newly connected" (most of 006's wakes in Aug-Sep 2026). Those are told
+apart by time: they boot within a few minutes after the startup alarm the
+previous boot armed, and they run the normal cycle.
+
+Runs as root from wittypi-recovery.service, ordered before ticktalk.service.
+Settings live under "recovery_boot" in runtime_config.json.
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from datetime import datetime
+from typing import List, Optional, Tuple
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import wait_for_wittypi_schedule as ws  # noqa: E402
+
+WITTYPI_DIR = "/home/pi/wittypi"
+RUNTIME_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "runtime_config.json")
+WITTYPI_ADDR = "0x08"
+
+DEFAULTS = {
+    "enabled": True,
+    # Charging time the next wake must leave before it.
+    "min_delay_minutes": 120,
+    # Used when schedule.wpi is missing, has ended, or uses WAIT states.
+    "fallback_delay_minutes": 120,
+    # How long after the previously armed startup a boot still counts as that
+    # scheduled wake (006 has restarted up to 13 minutes late).
+    "scheduled_wake_window_minutes": 20,
+}
+
+# I2C_ACTION_REASON values that mean the WittyPi itself has just regained power.
+I2C_ACTION_REASON = 11
+POWER_RESTORE_REASONS = {
+    0x05: "input voltage reached the restore voltage",
+    0x09: "USB 5V connected",
+    0x0A: "power supply newly connected",
+}
+
+# Startup alarm (I2C_CONF_*_ALARM1) and shutdown alarm (*_ALARM2) registers.
+ALARM1_REGS = (27, 28, 29, 30)  # second, minute, hour, day (BCD)
+ALARM2_REGS = (32, 33, 34, 35)
+
+_ARMED = re.compile(ws.STAMP + r"Schedule next startup at:\s+(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)")
+# daemon.sh logs this right after sending SYS_UP on GPIO-17. The WittyPi only
+# cuts power when the Pi halts once it has seen SYS_UP: powering off before it
+# leaves the Pi halted with the power still on, deaf to its next alarm (006,
+# 2026-10-02 20:29).
+_DAEMON_READY = re.compile(ws.STAMP + r"Pending for incoming shutdown command")
+_DURATION = re.compile(r"([DHMS])(\d+)")
+_UNIT_S = {"D": 86400, "H": 3600, "M": 60, "S": 1}
+
+
+def load_settings(path: str = RUNTIME_CONFIG) -> dict:
+    settings = dict(DEFAULTS)
+    try:
+        with open(path) as f:
+            settings.update(json.load(f).get("recovery_boot", {}))
+    except (OSError, ValueError):
+        pass
+    return settings
+
+
+def _parse_stamp(text: str) -> float:
+    return datetime.strptime(text, "%Y-%m-%d %H:%M:%S").timestamp()
+
+
+def previously_armed_startup(earlier_log: str) -> Optional[float]:
+    """The startup alarm the last boot before this one armed, if it was logged.
+
+    `earlier_log` holds only lines from before this boot (see ws.split_log).
+    """
+    for line in reversed(earlier_log.splitlines()):
+        m = _ARMED.match(line)
+        if m:
+            return _parse_stamp(m.group(2))
+    return None
+
+
+def is_scheduled_wake(boot: float, armed: Optional[float], window_s: float) -> bool:
+    """True when this boot is the armed wake, even if the WittyPi browned out at it."""
+    # Allow a little early too: the RTC and the system clock can differ slightly.
+    return armed is not None and armed - 120 <= boot <= armed + window_s
+
+
+def parse_schedule(text: str) -> Optional[Tuple[float, float, List[Tuple[str, int]]]]:
+    """(begin, end, [(state, seconds)]) from a schedule.wpi, or None if it can't be used.
+
+    Mirrors runScript.sh. WAIT states hand the timing to something else, so a
+    schedule using them is reported as unusable.
+    """
+    begin = end = None
+    states = []
+    for raw in text.splitlines():
+        line = raw.split("#", 1)[0].strip()
+        if not line:
+            continue
+        word, _, rest = line.partition(" ")
+        try:
+            if word == "BEGIN":
+                begin = _parse_stamp(rest.strip())
+            elif word == "END":
+                end = _parse_stamp(rest.strip())
+            elif word in ("ON", "OFF"):
+                if "WAIT" in rest:
+                    return None
+                seconds = sum(int(n) * _UNIT_S[u] for u, n in _DURATION.findall(rest))
+                if seconds <= 0:
+                    return None
+                states.append((word, seconds))
+            else:
+                return None
+        except ValueError:
+            return None
+    if begin is None or end is None or not states:
+        return None
+    if not any(s == "ON" for s, _ in states) or not any(s == "OFF" for s, _ in states):
+        return None
+    return begin, end, states
+
+
+def next_on_start(schedule, not_before: float) -> Optional[float]:
+    """Start of the first ON state at or after `not_before`, or None if the schedule ends first."""
+    begin, end, states = schedule
+    period = sum(seconds for _, seconds in states)
+    t = begin
+    if not_before > begin:
+        t += (not_before - begin) // period * period
+    for _ in range(2 * len(states) + 1):
+        for state, seconds in states:
+            if t >= end:
+                return None
+            if state == "ON" and t >= not_before:
+                return t
+            t += seconds
+    return None
+
+
+def choose_wake(now: float, settings: dict, schedule_text: Optional[str]) -> Tuple[float, str]:
+    not_before = now + settings["min_delay_minutes"] * 60
+    schedule = parse_schedule(schedule_text) if schedule_text else None
+    if schedule:
+        wake = next_on_start(schedule, not_before)
+        if wake is not None:
+            return wake, "next schedule.wpi slot"
+    return now + settings["fallback_delay_minutes"] * 60, "fixed delay (no usable schedule.wpi)"
+
+
+def _bcd(n: int) -> int:
+    return (n // 10) << 4 | (n % 10)
+
+
+def i2c_get(reg: int) -> int:
+    out = subprocess.run(["/usr/sbin/i2cget", "-y", "1", WITTYPI_ADDR, str(reg)],
+                         capture_output=True, text=True, timeout=5, check=True).stdout
+    return int(out.strip(), 16)
+
+
+def i2c_set(reg: int, value: int) -> None:
+    subprocess.run(["/usr/sbin/i2cset", "-y", "1", WITTYPI_ADDR, str(reg), str(value)],
+                   timeout=5, check=True)
+
+
+def rtc_now() -> float:
+    """The WittyPi RTC's time, which is right from power-on.
+
+    The system clock is not: until the WittyPi daemon copies the RTC into it,
+    it still reads whenever the Pi last saved it, often the last shutdown, hours
+    before this boot. Deciding on it made a brownout at a scheduled wake look
+    like an outage recovery.
+    """
+    regs = [i2c_get(r) for r in range(58, 65)]  # sec, min, hour, day, weekday, month, year (BCD)
+    regs[0] &= 0x7F  # top bit of the seconds register is a status flag
+    sec, mi, hr, day, _, mon, yr = ((v >> 4) * 10 + (v & 0x0F) for v in regs)
+    return datetime(2000 + yr, mon, day, hr, mi, sec).timestamp()
+
+
+def boot_time_from_rtc() -> float:
+    with open("/proc/uptime") as f:
+        return rtc_now() - float(f.read().split()[0])
+
+
+def arm_startup(wake: float) -> None:
+    t = datetime.fromtimestamp(wake)
+    for reg, value in zip(ALARM1_REGS, (t.second, t.minute, t.hour, t.day)):
+        i2c_set(reg, _bcd(value))
+    # The daemon armed a shutdown for the end of this ON slot; it is moot now.
+    for reg in ALARM2_REGS:
+        i2c_set(reg, 0)
+    readback = [i2c_get(reg) for reg in ALARM1_REGS]
+    if readback != [_bcd(v) for v in (t.second, t.minute, t.hour, t.day)]:
+        raise RuntimeError(f"startup alarm read back as {readback}")
+
+
+def log_to_wittypi(message: str, now: float) -> None:
+    """Append to wittyPi.log in the daemon's own format, so field forensics see it."""
+    line = f"{datetime.fromtimestamp(now):[%Y-%m-%d %H:%M:%S]} {message}\n"
+    with open(os.path.join(WITTYPI_DIR, "wittyPi.log"), "a") as f:
+        f.write(line)
+        f.flush()
+        os.fsync(f.fileno())
+
+
+def daemon_ready(this_boot_log: str) -> bool:
+    """The daemon has sent SYS_UP and finished arming its own alarms this boot."""
+    lines = this_boot_log.splitlines()
+    return (any(_DAEMON_READY.match(line) for line in lines)
+            and ws.find_schedule_result(this_boot_log, None) is not None)
+
+
+def wait_until_daemon_ready(log_path: str, offset: int, timeout_s: float = ws.TIMEOUT_S,
+                            poll_s: float = ws.POLL_S) -> bool:
+    deadline = time.monotonic() + timeout_s
+    while True:
+        if daemon_ready(ws.split_log(log_path, offset)[1]):
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(poll_s)
+
+
+def decide(reason: Optional[int], boot: float, earlier_log: str, settings: dict) -> Tuple[bool, str]:
+    """(defer, why) for this boot."""
+    if not settings["enabled"]:
+        return False, "recovery boot disabled in runtime_config.json"
+    if reason not in POWER_RESTORE_REASONS:
+        return False, f"start-up reason {reason if reason is None else hex(reason)} is not a power restore"
+    armed = previously_armed_startup(earlier_log)
+    if is_scheduled_wake(boot, armed, settings["scheduled_wake_window_minutes"] * 60):
+        return False, (f"{POWER_RESTORE_REASONS[reason]}, but within the window after the wake armed for "
+                       f"{datetime.fromtimestamp(armed):%Y-%m-%d %H:%M:%S}: a scheduled wake that browned out")
+    armed_text = "none logged" if armed is None else f"{datetime.fromtimestamp(armed):%Y-%m-%d %H:%M:%S}"
+    return True, f"{POWER_RESTORE_REASONS[reason]}, previously armed wake {armed_text}"
+
+
+def main(argv=None) -> int:
+    p = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
+    p.add_argument("--dry-run", action="store_true", help="report the decision, change nothing")
+    args = p.parse_args(argv)
+
+    settings = load_settings()
+    try:
+        reason = i2c_get(I2C_ACTION_REASON)
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        print(f"Can't read the WittyPi start-up reason ({e}); running the normal cycle")
+        return 0
+
+    log_path = os.path.join(WITTYPI_DIR, "wittyPi.log")
+    offset = ws.boot_offset()
+    if offset is None:
+        # Without the mark there's no telling this boot's log lines from
+        # earlier ones, so no safe way to know the daemon has sent SYS_UP.
+        print(f"No {ws.BOOT_OFFSET_FILE} (is wittypi-boot-mark.service enabled?); running the normal cycle")
+        return 0
+    try:
+        boot = boot_time_from_rtc()
+    except (OSError, subprocess.SubprocessError, ValueError) as e:
+        print(f"Can't read the WittyPi RTC ({e}); running the normal cycle")
+        return 0
+    defer, why = decide(reason, boot, ws.split_log(log_path, offset)[0], settings)
+    if not defer:
+        print(f"Normal cycle: {why}")
+        return 0
+
+    # Wait for the daemon to send SYS_UP (or the WittyPi won't cut the power
+    # when we halt) and to arm its own alarms (or it would overwrite ours).
+    if not wait_until_daemon_ready(log_path, offset):
+        print(f"Recovery boot ({why}), but the WittyPi daemon never reported ready; "
+              "running the normal cycle rather than risk halting with the power on")
+        return 0
+    schedule_text = None
+    try:
+        with open(os.path.join(WITTYPI_DIR, "schedule.wpi")) as f:
+            schedule_text = f.read()
+    except OSError:
+        pass
+    now = rtc_now()
+    wake, source = choose_wake(now, settings, schedule_text)
+    wake_text = f"{datetime.fromtimestamp(wake):%Y-%m-%d %H:%M:%S}"
+    print(f"Recovery boot: {why}. Next wake {wake_text} ({source}).")
+    if args.dry_run:
+        print("Dry run: alarm not armed, not shutting down")
+        return 0
+
+    try:
+        arm_startup(wake)
+    except (OSError, subprocess.SubprocessError, ValueError, RuntimeError) as e:
+        # Without a confirmed alarm, shutting down could strand the node.
+        print(f"Could not arm the startup alarm ({e}); running the normal cycle instead")
+        return 0
+    log_to_wittypi(f"Recovery boot: {why}; shutting down until the battery has recharged.", now)
+    # Same wording as runScript.sh, so the next boot's previously_armed_startup()
+    # finds this alarm and treats a brownout at it as a scheduled wake.
+    log_to_wittypi(f"Schedule next startup at:  {wake_text}", now)
+    subprocess.run(["systemctl", "poweroff"], check=False)
+    # Hold this oneshot until shutdown kills it, so ticktalk.service (ordered
+    # after us) never starts.
+    time.sleep(300)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

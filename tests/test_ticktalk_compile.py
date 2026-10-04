@@ -8,7 +8,15 @@ inside the typechecker or compiler-rules visitor).
 Each test compiles a single TT source file via compile.py and asserts that
 the process exits 0.  A failing test means someone broke the file's TT
 syntax and the issue must be fixed before merging.
+
+Compiles go to a temporary directory: writing to output/ overwrote the
+committed pickle every time the suite ran. Nodes run that committed pickle
+(config/ticktalk.service), not the .py source, so a further test checks it is
+what the current source compiles to. Compilation is deterministic, so any
+difference means a source change was merged without rebuilding the pickle,
+and the nodes are still running the old graph.
 """
+import hashlib
 import subprocess
 import sys
 from pathlib import Path
@@ -17,7 +25,7 @@ import pytest
 
 _REPO_ROOT = Path(__file__).parent.parent
 _COMPILE_SCRIPT = str(_REPO_ROOT / "compile.py")
-_OUTPUT_DIR = str(_REPO_ROOT / "output")
+_COMMITTED_DIR = _REPO_ROOT / "output"
 
 # Files with a @GRAPHify entry point that must compile as standalone TT programs.
 # Helper modules (tt_take_photos.py) are @SQify-only and compiled indirectly
@@ -27,9 +35,14 @@ _TT_SOURCES = [
 ]
 
 
-def _run_compile(source_file: str) -> subprocess.CompletedProcess:
+@pytest.fixture(scope="module")
+def compile_out(tmp_path_factory):
+    return tmp_path_factory.mktemp("tt_compile")
+
+
+def _run_compile(source_file: str, out_dir: Path) -> subprocess.CompletedProcess:
     return subprocess.run(
-        [sys.executable, _COMPILE_SCRIPT, source_file, "--out", _OUTPUT_DIR],
+        [sys.executable, _COMPILE_SCRIPT, source_file, "--out", str(out_dir)],
         capture_output=True,
         text=True,
         cwd=str(_REPO_ROOT),
@@ -56,18 +69,18 @@ def _format_failure(source_file: str, result: subprocess.CompletedProcess) -> st
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("source_file", _TT_SOURCES)
-def test_tt_compile_exits_zero(source_file):
+def test_tt_compile_exits_zero(source_file, compile_out):
     """compile.py must exit 0 — any TTSyntaxError or crash is a failure."""
     pytest.importorskip("astor", reason="astor not installed; TT compiler unavailable")
-    result = _run_compile(source_file)
+    result = _run_compile(source_file, compile_out)
     assert result.returncode == 0, _format_failure(source_file, result)
 
 
 @pytest.mark.parametrize("source_file", _TT_SOURCES)
-def test_tt_compile_no_traceback(source_file):
+def test_tt_compile_no_traceback(source_file, compile_out):
     """compile.py must not produce a Python traceback (crash ≠ TTSyntaxError)."""
     pytest.importorskip("astor", reason="astor not installed; TT compiler unavailable")
-    result = _run_compile(source_file)
+    result = _run_compile(source_file, compile_out)
     combined = result.stdout + result.stderr
     has_traceback = "Traceback (most recent call last)" in combined
     assert not has_traceback, (
@@ -77,10 +90,10 @@ def test_tt_compile_no_traceback(source_file):
 
 
 @pytest.mark.parametrize("source_file", _TT_SOURCES)
-def test_tt_compile_no_syntax_error(source_file):
+def test_tt_compile_no_syntax_error(source_file, compile_out):
     """compile.py must not emit a TTSyntaxError."""
     pytest.importorskip("astor", reason="astor not installed; TT compiler unavailable")
-    result = _run_compile(source_file)
+    result = _run_compile(source_file, compile_out)
     combined = result.stdout + result.stderr
     assert "TTSyntaxError" not in combined, (
         f"compile.py {source_file} raised TTSyntaxError "
@@ -189,3 +202,22 @@ def main(trigger):
             self._compile_snippet(code)
         except TTSyntaxError:
             pass
+
+
+@pytest.mark.parametrize("source_file", _TT_SOURCES)
+def test_committed_pickle_matches_source(source_file, compile_out):
+    """output/<name>.pickle must be what the current source compiles to."""
+    pytest.importorskip("astor", reason="astor not installed; TT compiler unavailable")
+    result = _run_compile(source_file, compile_out)
+    assert result.returncode == 0, _format_failure(source_file, result)
+    name = Path(source_file).stem + ".pickle"
+    fresh = hashlib.sha256((compile_out / name).read_bytes()).hexdigest()
+    committed = hashlib.sha256((_COMMITTED_DIR / name).read_bytes()).hexdigest()
+    recorded = (_COMMITTED_DIR / (name + ".sha256")).read_text().split()[0]
+    assert committed == recorded, (
+        f"output/{name}.sha256 doesn't match output/{name}; commit both files together.")
+    assert fresh == committed, (
+        f"output/{name} is stale: {source_file} compiles to something else, so nodes "
+        f"would run old code. Rebuild and commit both files:\n"
+        f"    python compile.py {source_file} --out output\n"
+        f"    git add output/{name} output/{name}.sha256")

@@ -22,15 +22,15 @@ try:
     from ticktalkpython.Tag import TTTag
     print("✅ Successfully imported TickTalkPython modules")
 except ImportError as e:
-    print(f"❌ Failed to import TickTalkPython modules: {e}")
-    sys.exit(1)
+    # sys.exit() here aborted collection of the whole test run, not just this file.
+    pytest.skip(f"TickTalkPython modules unavailable: {e}", allow_module_level=True)
 
 try:
     from tools.decode_tttoken import TTTokenDecoder
     print("✅ Successfully imported TTToken decoder")
 except ImportError as e:
-    print(f"❌ Failed to import TTToken decoder: {e}")
-    sys.exit(1)
+    pytest.skip(f"tools/decode_tttoken.py unavailable (not committed to the repo): {e}",
+                allow_module_level=True)
 
 
 def mock_compressed_encoding(data):
