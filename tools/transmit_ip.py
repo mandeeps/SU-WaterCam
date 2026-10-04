@@ -552,6 +552,8 @@ def apply_downlink_command(
         "13 93": 1,
         "14 94": 1,
         "16 96": 1,
+        "21": 0,       # emergency on: the same one-byte message as over LoRa
+        "99 99": 0,    # emergency off: the same 0x99 0x99 as over LoRa
     }
 
     parts_raw = cmd.get("parts")
@@ -664,6 +666,16 @@ def apply_downlink_command(
             set_param_fn("audio_recording_enabled", val)
             logger.info("Applied: audio_recording_enabled = %s", val)
             applied.append(f"audio_recording_enabled={val}")
+
+        elif code == "21":  # emergency mode on (the only emergency message)
+            set_param_fn("emergency_mode", True)
+            logger.info("Applied: emergency_mode = True")
+            applied.append("emergency_mode=True")
+
+        elif code == "99 99":  # emergency mode off
+            set_param_fn("emergency_mode", False)
+            logger.info("Applied: emergency_mode = False")
+            applied.append("emergency_mode=False")
 
         else:
             logger.warning("apply_downlink_command: unrecognised code '%s' — ignoring", code)

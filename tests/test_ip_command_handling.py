@@ -276,6 +276,38 @@ class TestMalformedInput(unittest.TestCase):
         self.assertEqual(calls[1], ("emergency_frequency", 5))
 
 
+class TestEmergencyMode(unittest.TestCase):
+    """The API queues these from POST /devices/{id}/emergency for IP units."""
+
+    def test_code_21_turns_emergency_on(self):
+        store, setp = _accumulator()
+        result = apply_downlink_command(_cmd(("21", b"")), setp)
+        self.assertEqual(store, {"emergency_mode": True})
+        self.assertEqual(result["applied"], ["emergency_mode=True"])
+
+    def test_code_9999_turns_emergency_off(self):
+        store, setp = _accumulator()
+        apply_downlink_command(_cmd(("99 99", b"")), setp)
+        self.assertEqual(store, {"emergency_mode": False})
+
+    def test_emergency_codes_take_no_payload(self):
+        store, setp = _accumulator()
+        result = apply_downlink_command(_cmd(("21", b"\x01"), ("99 99", b"\x00")), setp)
+        self.assertEqual(store, {})
+        self.assertEqual(result["skipped"], ["21", "99 99"])
+
+    def test_old_api_part_without_a_code_is_skipped(self):
+        # What the API queued before: {"name": "emergency_mode", "enable": True}
+        store, setp = _accumulator()
+        apply_downlink_command({"parts": [{"name": "emergency_mode", "enable": True}]}, setp)
+        self.assertEqual(store, {})
+
+    def test_tlv_21_00_is_not_an_emergency(self):
+        store, setp = _accumulator()
+        apply_downlink_command(_cmd(("21 00", b"")), setp)
+        self.assertEqual(store, {})
+
+
 # ---------------------------------------------------------------------------
 # Runner
 # ---------------------------------------------------------------------------
