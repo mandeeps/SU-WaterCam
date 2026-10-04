@@ -189,6 +189,18 @@ goes straight back to sleep. **Press the WittyPi button** to start a normal
 cycle on the bench or at deployment. On the bench you can also set
 `"recovery_boot": {"enabled": false}`.
 
+Optionally, install the power logger. It writes one line a minute to
+`~/powerlog/powerlog.csv`, synced to disk so the last reading before a
+brownout survives, with a marker line for every boot. When a unit fails in
+the field, this log shows when the power dropped and how each boot started.
+`tools/power_test_report.py ~/powerlog/powerlog.csv` summarises it.
+
+```bash
+sudo cp config/powerlog.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now powerlog.service
+```
+
 Also confirm the button service is installed if the unit has a physical
 capture button:
 
