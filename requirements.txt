@@ -5,8 +5,14 @@
 #
 #      sudo apt install python3-picamera2 python3-opencv python3-numpy \
 #          python3-pandas python3-scipy python3-gpiozero python3-piexif \
-#          python3-pil python3-pytz python3-rasterio python3-gdal
+#          python3-pil python3-pytz python3-rasterio python3-gdal \
+#          python3-pygraphviz python3-venv python3-wheel python3-dev \
+#          exempi libgpiod-dev gpsd
 #      python3 -m venv --system-site-packages /home/pi/SU-WaterCam/venv
+#
+#    exempi is the library python-xmp-toolkit (libxmp) loads; python3-dev is
+#    needed to build RPi.GPIO, which ships only as source; gpsd serves the
+#    GPS that py-gpsd2 talks to.
 #
 #    Verified on ufo-01-01-005 and ufo-01-01-006 (Debian 13 trixie), where these
 #    provide cv2, numpy, pandas, scipy, picamera2, gpiozero, piexif, PIL, pytz,

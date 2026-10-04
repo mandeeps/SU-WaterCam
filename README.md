@@ -250,13 +250,10 @@ Compile lepton.c and capture.c for the device. Install build-essential if not al
 
 Copy to the root of the SU-WaterCam directory: From tools directory, run `cp lepton ../.` and `cp capture ../.`
 
-Use apt to install these packages: `sudo apt install libgpiod-dev python3-pandas python3-dev python3-venv exempi python3-wheel python3-picamera2 python3-rasterio python3-gdal python3-pygraphviz python3-opencv`
-
-Make sure picamera2 is installed as system package, not through pip
-
-Create a virtual environment with `python -m venv --system-site-packages /home/pi/SU-WaterCam/venv`, (we use system-site-packages to copy over pandas and other installed modules)
-activate with `source /home/pi/SU-WaterCam/venv/bin/activate`, and then install modules with `pip install -r /home/pi/SU-WaterCam/requirements.txt`
-or manually with `pip install compress_pickle adafruit-blinka gpiozero piexif py-gpsd2 python-xmp-toolkit` and other contents of requirements.txt
+Install the system packages, create the venv and install the Python packages exactly as the header of
+[`requirements.txt`](requirements.txt) describes. It is the single, complete recipe: the apt packages
+(picamera2 and the camera stack must come from apt, not pip), a venv created with
+`--system-site-packages` so it can see them, then `pip install -r requirements.txt` into that venv.
 
 Set default Python to the venv by adding 'source /home/pi/SU-WaterCam/venv/bin/activate' to the end of your .bashrc file.
 
