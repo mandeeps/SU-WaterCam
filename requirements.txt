@@ -1,7 +1,29 @@
-# First make sure you are using system-installed picamera2, wheel, pandas, numpy,
-# opencv, etc.,
-# The packages below are the minimum needed in the venv as of 20250710
-# for both the watercam-specific code and TickTalkPython on Debian 12 Bookworm
+# Node venv for ticktalk (runrtm.py / ticktalk_main.py) and lora_daemon.service.
+#
+# 1. System packages. These come from apt, not pip (picamera2 and the camera
+#    stack are only packaged for Debian), and the venv must see them:
+#
+#      sudo apt install python3-picamera2 python3-opencv python3-numpy \
+#          python3-pandas python3-scipy python3-gpiozero python3-piexif \
+#          python3-pil python3-pytz python3-rasterio python3-gdal \
+#          python3-pygraphviz python3-venv python3-wheel python3-dev \
+#          exempi libgpiod-dev gpsd
+#      python3 -m venv --system-site-packages /home/pi/SU-WaterCam/venv
+#
+#    exempi is the library python-xmp-toolkit (libxmp) loads; python3-dev is
+#    needed to build RPi.GPIO, which ships only as source; gpsd serves the
+#    GPS that py-gpsd2 talks to.
+#
+#    Verified on ufo-01-01-005 and ufo-01-01-006 (Debian 13 trixie), where these
+#    provide cv2, numpy, pandas, scipy, picamera2, gpiozero, piexif, PIL, pytz,
+#    rasterio and osgeo to the venv.
+#
+# 2. The pip packages below, into that venv:
+#
+#      /home/pi/SU-WaterCam/venv/bin/pip install -r requirements.txt
+#
+# segformer_daemon.service does NOT use this venv: it runs in the 5band conda
+# env defined by segformer_5band/5band_environment.yml.
 
 Adafruit-Blinka==8.62.0
 adafruit-circuitpython-ahtx0==1.0.27
@@ -31,6 +53,7 @@ psutil==7.2.2
 pyserial==3.5
 python-xmp-toolkit==2.0.2
 pyusb==1.3.1
+RPi.GPIO==0.7.1
 requests==2.33.0
 setuptools==83.0.0
 simpleitk==2.5.2
@@ -40,3 +63,12 @@ sysv-ipc==1.1.0
 timedinput==0.1.1
 typing_extensions==4.14.1
 urllib3==2.8.0
+
+# Optional -- only for the hardware or feature named; the runtime imports them
+# lazily or behind a guard, so a node without them still runs:
+#   adafruit-circuitpython-bno08x    BNO085 IMU units (tools/bno08x_imu.py)
+#   adafruit-circuitpython-ads1x15   battery SOC via ADS1115 (tools/battery_manager.py)
+#   adafruit-circuitpython-ina260    battery SOC via INA260 (tools/battery_manager.py)
+#   pyproj                           CRS transforms in tools/geo_core.py
+#   simpy                            TickTalk simulation mode (simulate.py)
+#   networkx matplotlib              TickTalk graph drawing (ticktalkpython/Compiler.py)
