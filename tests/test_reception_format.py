@@ -44,7 +44,7 @@ def test_reception_format():
         "4260",    # Channel 42, Command 00, Value 60 (Data retention 60 days)
         "4300",    # Channel 43, Command 00, Value 0 (Backup disabled)
         "4301",    # Channel 43, Command 00, Value 1 (Backup enabled)
-        "2100",    # Channel 21, Command 00, Value 0 (Emergency mode activated)
+        "21",      # Emergency mode activated (the only emergency message)
         "9900",    # Channel 99, Command 00, Value 0 (Emergency mode deactivated)
     ]
     
