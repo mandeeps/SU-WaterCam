@@ -189,7 +189,7 @@ it over a Unix domain socket instead of touching the resource directly.**
 
 3. **Client side**: `tools/lora_handler_concurrent.py`'s `get_lora_handler()`
    now returns a `LoRaHandlerClient` (connects to the socket fresh per call,
-   mirroring `_segformer_via_daemon()`'s style) or `None` if the socket is
+   mirroring `segformer_via_daemon()`'s style) or `None` if the socket is
    missing — preserving the existing "callers must check for `None`"
    contract every call site already implements. `compressed_encoding()`,
    `get_config_value()`/`.config`, are computed/read locally rather than
