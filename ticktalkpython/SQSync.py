@@ -122,6 +122,19 @@ class TTSQSync:
                                                  is_singleton=is_singleton,
                                                  use_deadline=use_deadline)
 
+    def update_periodicity(self, period_root_ticks=None, phase_root_ticks=None):
+        '''
+        Update the periodicity parameters for TimedRetrigger firing rule at runtime.
+
+        :param period_root_ticks: Optional new period in ROOT ticks
+        :param phase_root_ticks: Optional new phase in ROOT ticks
+        '''
+        from .FiringRule import TTFiringRuleType
+        if self.firing_rule.rule_type != TTFiringRuleType.TimedRetrigger:
+            return
+        # Delegate to firing rule setter which handles normalization
+        self.firing_rule.set_period_phase(period_root_ticks, phase_root_ticks)
+
     # TODO: lacks new experimental fr_types
     @staticmethod
     def from_json(json_in):

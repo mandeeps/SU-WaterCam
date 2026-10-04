@@ -126,6 +126,20 @@ class TTRuntimeManager(ABC):
             Recipient.ProcessRuntimeManager)
         self.send_to_runtime(graph_msg)
 
+    def update_periodicity(self, graph_name: str, sq_name: str, period_root_ticks: int, phase_root_ticks: int):
+        '''
+        Public API to update an SQ's periodicity at runtime.
+
+        :param graph_name: The instantiated graph's name (TTGraph.graph_name)
+        :param sq_name: The SQ name to update
+        :param period_root_ticks: New period in ROOT ticks
+        :param phase_root_ticks: New phase in ROOT ticks
+        '''
+        msg = Message(RuntimeMsg.UpdatePeriodicity,
+                      (graph_name, sq_name, period_root_ticks, phase_root_ticks),
+                      Recipient.ProcessRuntimeManager)
+        self.send_to_runtime(msg)
+
 
 
 class TTRuntimeManagerSim(TTRuntimeManager):
@@ -492,6 +506,34 @@ class TTRuntimeManagerProcess():
 
             self.instantiated_graphs[graph.graph_name] = (graph, mapped_sqs)
 
+
+        elif msg_type == RuntimeMsg.UpdatePeriodicity:
+            # payload: (graph_name, sq_name, period_root_ticks, phase_root_ticks)
+            try:
+                graph_name, sq_name, period, phase = msg.payload
+            except Exception:
+                self.logger.error('UpdatePeriodicity expects (graph_name, sq_name, period, phase)')
+                return
+
+            if graph_name not in self.instantiated_graphs:
+                self.logger.error('Graph %s not instantiated', graph_name)
+                return
+
+            _, mapping = self.instantiated_graphs.get(graph_name)
+
+            if sq_name not in mapping:
+                self.logger.error('SQ %s not found in mapping for graph %s', sq_name, graph_name)
+                return
+
+            ensemble_name = mapping[sq_name]
+            update_msg = Message(SyncMsg.UpdatePeriodicity,
+                                 (sq_name, period, phase),
+                                 Recipient.ProcessInputTokens)
+            network_payload = (ensemble_name, update_msg)
+            network_msg = Message(NetMsg.ForwardNetworkMessage,
+                                  network_payload,
+                                  Recipient.ProcessNetwork)
+            self.input_network_func(network_msg)
 
         elif msg_type == RuntimeMsg.ExecuteGraphOnInputs:
             # Start execution of the graph by sending the set of provided inputs
