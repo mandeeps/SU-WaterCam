@@ -217,7 +217,7 @@ Outdated (Bullseye specific): If there are issues with taking high-resolution im
 
 Can also add nohdmi to the vc4-kms-v3d line to disable HDMI ports and save ~30mA
 
-Limit the size of the journal by setting SystemMaxUse in /etc/systmed/journald.conf
+Keep the systemd journal in RAM to spare the microSD card: install `config/journald-volatile.conf` as described at the top of that file. Logs then last until the next shutdown or power cut.
 
 ### Power Management
 

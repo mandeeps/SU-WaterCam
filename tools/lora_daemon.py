@@ -269,7 +269,21 @@ def parse_args():
     return p.parse_args()
 
 
+def _line_buffer_stdout():
+    """Send each print() line to the journal as it happens.
+
+    The handler reports with print(), and under systemd stdout is a pipe, so
+    Python block-buffers it: received downlinks and debug replies sat in an
+    8 KB buffer and never showed up in `journalctl -u lora_daemon`.
+    """
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except AttributeError:      # replaced by something that isn't a TextIOWrapper
+        pass
+
+
 def main():
+    _line_buffer_stdout()
     args = parse_args()
 
     handler = create_lora_handler_with_retry()

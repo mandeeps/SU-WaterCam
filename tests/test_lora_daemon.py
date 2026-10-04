@@ -290,3 +290,23 @@ class TestParameterReloadOnChange:
         mgr_a.get_parameter('area_threshold')
 
         assert seen == [(10, 33)]  # exactly once, not twice
+
+
+# ---------------------------------------------------------------------------
+# Handler print() output reaches the journal promptly
+# ---------------------------------------------------------------------------
+
+class TestStdoutLineBuffering:
+    def test_stdout_is_line_buffered_like_under_systemd(self, monkeypatch, tmp_path):
+        import io
+        raw = open(tmp_path / "out", "wb", buffering=0)     # a pipe-like, non-tty stream
+        out = io.TextIOWrapper(io.BufferedWriter(raw), encoding="utf-8")
+        monkeypatch.setattr(daemon_mod.sys, "stdout", out)
+        daemon_mod._line_buffer_stdout()
+        print("Debug status command received")
+        assert (tmp_path / "out").read_text() == "Debug status command received\n"
+        out.close()
+
+    def test_tolerates_a_stdout_without_reconfigure(self, monkeypatch):
+        monkeypatch.setattr(daemon_mod.sys, "stdout", object())
+        daemon_mod._line_buffer_stdout()
