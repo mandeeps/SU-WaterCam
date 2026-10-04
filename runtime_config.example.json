@@ -27,5 +27,12 @@
     "downlink_poll_interval_s": 60,
     "max_queue_depth": 48,
     "max_queue_age_days": 7
+  },
+
+  "recovery_boot": {
+    "enabled": true,
+    "min_delay_minutes": 120,
+    "fallback_delay_minutes": 120,
+    "scheduled_wake_window_minutes": 20
   }
 }

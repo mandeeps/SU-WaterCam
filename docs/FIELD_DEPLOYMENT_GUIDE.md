@@ -83,6 +83,12 @@ The WittyPi controls when the Pi is powered on/off and needs to be told what sch
 
 If you need to customize the schedule you can write a `.wpi` file for this deployment: (https://github.com/uugear/Witty-Pi-4/tree/main/Software/wittypi/schedules)
 
+Then install this repo's `beforeScript.sh`, which lets the WittyPi arm the next wake about 15 s after boot instead of about 55 s:
+
+```bash
+cp /home/pi/SU-WaterCam/config/wittypi/beforeScript.sh /home/pi/wittypi/beforeScript.sh
+```
+
 ### 1.6 Configure `runtime_config.json`
 
 This is the unit's operating settings. The file `/home/pi/SU-WaterCam/runtime_config.json` should be edited to have the name of the specific unit and other settings.
@@ -165,11 +171,23 @@ The production application is `ticktalk_main.py`, run via `ticktalk.service`
 one of these is enabled to avoid both fighting over the camera and radio).
 
 ```bash
-sudo cp config/ticktalk.service /etc/systemd/system/
+sudo cp config/ticktalk.service config/wittypi-recovery.service config/wittypi-boot-mark.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl disable watercam.service 2>/dev/null   # if it was ever enabled
-sudo systemctl enable ticktalk.service
+sudo systemctl enable ticktalk.service wittypi-recovery.service wittypi-boot-mark.service
 ```
+
+`wittypi-recovery.service` handles recovery after a power outage. Leave the
+WittyPi on "Default ON", so it boots the Pi whenever power returns. When a
+boot comes from power returning rather than from the schedule, the service
+arms the next `schedule.wpi` slot at least 2 hours away and shuts down before
+the cameras and modem start, giving the battery time to recharge. Settings are
+under `recovery_boot` in `runtime_config.json`.
+
+This also applies when you first connect power, so a freshly connected unit
+goes straight back to sleep. **Press the WittyPi button** to start a normal
+cycle on the bench or at deployment. On the bench you can also set
+`"recovery_boot": {"enabled": false}`.
 
 Also confirm the button service is installed if the unit has a physical
 capture button:
