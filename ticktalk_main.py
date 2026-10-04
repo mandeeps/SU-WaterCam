@@ -295,10 +295,11 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         return bitmap
 
     if handler is None:
-        # Another OS process already owns the serial port (LoRaSerialPortConflict).
-        # get_lora_handler()'s contract requires callers to check for None before
-        # dereferencing; skip this cycle instead of crashing on handler.is_joined().
-        print("⚠️ LoRa handler unavailable (serial port busy) — skipping transmission this cycle")
+        # get_lora_handler() returns None when the LoRa daemon's socket is missing,
+        # i.e. the daemon is not running; its contract requires callers to check
+        # before dereferencing. Skip this cycle instead of crashing on handler.is_joined().
+        from tools.lora_handler_concurrent import lora_unavailable_reason
+        print(f"⚠️ LoRa unavailable ({lora_unavailable_reason()}) — skipping transmission this cycle")
         return bitmap
 
     # Store-and-forward: if the mDot is not joined, queue the payloads and skip
@@ -1002,6 +1003,11 @@ def lora_token(bitmap):
         handler = get_lora_handler()
     except Exception as e:
         print(f"⚠️ Failed to get LoRa handler: {e}")
+        return bitmap
+
+    if handler is None:
+        from tools.lora_handler_concurrent import lora_unavailable_reason
+        print(f"⚠️ LoRa unavailable ({lora_unavailable_reason()}) — skipping transmission this cycle")
         return bitmap
 
     # check transmission without TT token
