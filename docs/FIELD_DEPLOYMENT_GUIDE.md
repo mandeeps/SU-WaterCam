@@ -51,6 +51,28 @@ cat /etc/hosts
 
 If it does not match, use `sudoedit /etc/hosts` to change it. Log out and back in to check the changes applied.
 
+Every unit flashed from the same SD image starts with the same machine ID and
+network keys. Give this unit its own, then reboot:
+
+```bash
+sudo rm /etc/machine-id && sudo systemd-machine-id-setup
+sudo rm -f /var/lib/NetworkManager/secret_key /var/lib/dhcpcd/duid
+sudo reboot
+```
+
+systemd, journald and NetworkManager all treat the machine ID as unique, and
+the NetworkManager key sets the unit's IPv6 address, so two clones on the same
+network would otherwise share it. Check with `cat /etc/machine-id` that it no
+longer matches another unit's.
+
+When making a new SD image, empty the machine ID and delete those two files
+before capturing it, so each unit generates its own on first boot:
+
+```bash
+sudo truncate -s 0 /etc/machine-id
+sudo rm -f /var/lib/NetworkManager/secret_key /var/lib/dhcpcd/duid
+```
+
 ### 1.3 Confirm remote access (Tailscale)
 
 Run the command provided by Tailscale to install
