@@ -119,7 +119,7 @@ The other top-level fields control monitoring behavior. From
 | `stage_threshold`                  | cm      | 0–65535 | Water stage (level) threshold                                                                     |
 | `monitoring_frequency`             | minutes | 1–10080 | How often the unit checks/reports under normal conditions                                         |
 | `emergency_frequency`              | minutes | 1–1440  | How often it reports once a threshold is exceeded (should be shorter than `monitoring_frequency`) |
-| `photo_interval`                   | minutes | 1–1440  | How often it captures a photo                                                                     |
+| `photo_interval`                   | seconds | 30–1440 | Time between captures while the unit is awake (default 60); applied to the running program        |
 | `neighborhood_emergency_frequency` | minutes | 1–1440  | Reporting frequency once a *neighboring* unit signals emergency                                   |
 
 Also confirm before deploying:

@@ -79,7 +79,7 @@ class LoRaRuntimeManager:
         'stage_threshold':                  (0, 65535),
         'monitoring_frequency':             (1, 10080),
         'emergency_frequency':              (1, 1440),
-        'photo_interval':                   (1, 1440),
+        'photo_interval':                   (30, 1440),   # seconds
         'neighborhood_emergency_frequency': (1, 1440),
         'max_retransmissions':              (0, 10),
         'shutdown_iteration_limit':         (1, 100),
@@ -176,7 +176,7 @@ class LoRaRuntimeManager:
             # Timing parameters
             'monitoring_frequency': 60,     # Monitoring frequency (minutes)
             'emergency_frequency': 30,       # Emergency transmission frequency (minutes)
-            'photo_interval': 30,           # Photo capture interval (minutes)
+            'photo_interval': 60,           # Capture period within a wake (seconds)
             'neighborhood_emergency_frequency': 30,  # Neighborhood emergency frequency
             
             # System control parameters
@@ -433,7 +433,7 @@ class LoRaRuntimeManager:
             # Timing commands
             '12': lambda v: self.set_parameter('monitoring_frequency', v), # Monitoring frequency (minutes)
             '13': lambda v: self.set_parameter('emergency_frequency', v),  # Emergency frequency (minutes)
-            '14': lambda v: self.set_parameter('photo_interval', v),       # Photo interval (minutes)
+            '14': lambda v: self.set_parameter('photo_interval', v),       # Capture period (seconds)
             '15': lambda v: self.set_parameter('neighborhood_emergency_frequency', v), # Neighborhood frequency
             
             # System control commands
@@ -688,7 +688,7 @@ class LoRaRuntimeManager:
         print("\nTiming:")
         print(f"  Monitoring Frequency: {params['monitoring_frequency']} min")
         print(f"  Emergency Frequency: {params['emergency_frequency']} min")
-        print(f"  Photo Interval: {params['photo_interval']} min")
+        print(f"  Photo Interval: {params['photo_interval']} s")
         
         print("\nSystem Control:")
         print(f"  Emergency Mode: {params['emergency_mode']}")
@@ -778,7 +778,7 @@ def integrate_with_ticktalk():
             print("🐛 Debug mode disabled - Normal logging")
     
     def on_photo_interval_changed(value, old_value):
-        print(f"📸 Photo interval changed: {old_value} → {value} minutes")
+        print(f"📸 Photo interval changed: {old_value} → {value} s")
     
     def on_monitoring_frequency_changed(value, old_value):
         print(f"⏰ Monitoring frequency changed: {old_value} → {value} minutes")
