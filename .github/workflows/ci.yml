@@ -3,8 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+  # Every PR, whatever its base: a PR stacked on another branch still gets tested.
   pull_request:
-    branches: [main]
 
 permissions:
   contents: read
@@ -22,6 +22,8 @@ jobs:
           python-version: '3.13'
           cache: 'pip'
 
+      # Everything the test suite imports. Hardware modules (smbus, RPi.GPIO,
+      # picamera2, board, ...) are stubbed in tests/conftest.py instead.
       - name: Install CI test dependencies
         run: |
           pip install \
@@ -33,33 +35,40 @@ jobs:
             pympler \
             sortedcontainers intervaltree \
             dill multiprocess \
-            astor astunparse
+            astor astunparse \
+            psutil py-gpsd2 \
+            opencv-python-headless SimpleITK pandas rasterio
 
-      - name: Run TickTalkPython compile tests
-        run: |
-          python -m pytest tests/test_ticktalk_compile.py -v --tb=short
+      # Discovers every tests/test_*.py, so a new test file is run without
+      # touching this workflow. -rs lists every skip and its reason, so a
+      # test that silently stops running shows up in the log.
+      #
+      # Skips that are expected: mDot hardware integration tests, and the live
+      # API tests in test_ip_upload.py, which only run with WATERCAM_SERVER_URL
+      # set (never against the production server).
+      - name: Run all tests
+        run: python -m pytest tests -v --tb=short -rs
 
-      - name: Run workflow integration tests
-        run: |
-          python -m pytest tests/test_workflow_integration.py -v --tb=short
+  requirements:
+    # CI doesn't install requirements.txt (the node venv needs Pi hardware
+    # libraries), so check it still resolves for the nodes: Raspberry Pi
+    # OS, aarch64, Python 3.13. Catches conflicting pins, e.g. from a
+    # Dependabot bump, before they reach a node.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
 
-      - name: Run unit tests
-        run: |
-          python -m pytest \
-            tests/test_battery_manager.py \
-            tests/test_lora_param_validation.py \
-            tests/test_ip_command_handling.py \
-            tests/test_wait_for_wittypi_schedule.py \
-            tests/test_recovery_boot.py \
-            tests/test_powerlog.py \
-            tests/test_power_test_report.py \
-            tests/test_power_load_test_sh.py \
-            -v --tb=short \
-            -k "not TestLoRaPacketEncoding"
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Run IMU and metadata tests
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Resolve requirements.txt for the nodes
         run: |
-          python -m pytest \
-            tests/test_bno055_imu.py \
-            tests/test_add_metadata.py \
-            -v --tb=short
+          pip install uv
+          uv pip compile requirements.txt \
+            --python-version 3.13 \
+            --python-platform aarch64-unknown-linux-gnu \
+            -o resolved-aarch64.txt
+          echo "Resolved $(grep -c '==' resolved-aarch64.txt) packages for aarch64 / Python 3.13"
