@@ -1,16 +1,15 @@
 #!/usr/bin/env python3
 """
-Test script for the debug status command functionality.
+Tests for the remote debug-status command (LoRa downlink 50/01).
 
-This script demonstrates how to use the debug status command
-and shows the comprehensive system information it provides.
+Run directly to print a full report for this machine.
 """
 
 import json
-import sys
-from datetime import datetime
 
 import pytest
+
+MDOT_MAX_PAYLOAD = 242   # bytes, at the default data rate
 
 
 class TestGetLoraStatusSharesSingleton:
@@ -49,69 +48,38 @@ class TestGetLoraStatusSharesSingleton:
         assert status["lora_handler_available"] is True
 
 def test_debug_status_command():
-    """Test the debug status command functionality."""
-    print("🧪 Testing Debug Status Command")
-    print("=" * 50)
-    
-    try:
-        from debug_status_command import handle_debug_status_command, generate_debug_status
-        
-        # Test 1: Generate debug status
-        print("\n📊 Test 1: Generating debug status...")
-        debug_status = generate_debug_status()
-        
-        print(f"✅ Debug status generated successfully")
-        print(f"📅 Timestamp: {debug_status['timestamp']}")
-        print(f"🖥️  Hostname: {debug_status['system_info'].get('hostname', 'unknown')}")
-        print(f"⏰ Uptime: {debug_status['uptime']['uptime_formatted']}")
-        print(f"🌡️  CPU Temperature: {debug_status['cpu_temperature']}°C")
-        print(f"💻 CPU Usage: {debug_status['cpu_info'].get('cpu_percent', 0)}%")
-        print(f"🧠 Memory Usage: {debug_status['memory_info'].get('percent_used', 0)}%")
-        print(f"💾 Disk Usage: {debug_status['disk_info'].get('percent_used', 0)}%")
-        print(f"📈 Load Average (1min): {debug_status['system_load']['1min']}")
-        
-        # Test 2: Handle debug status command
-        print("\n📊 Test 2: Handling debug status command...")
-        result = handle_debug_status_command()
-        
-        if result['status'] == 'debug_status_generated':
-            print(f"✅ Command handled successfully")
-            print(f"📦 LoRa formatted size: {result['lora_size_bytes']} bytes")
-            print(f"📋 LoRa formatted data: {result['lora_formatted']}")
-        else:
-            print(f"❌ Command failed: {result.get('error', 'Unknown error')}")
-        
-        # Test 3: Test LoRa integration
-        print("\n📊 Test 3: Testing LoRa integration...")
-        from tools.lora_debug_integration import process_debug_command, format_debug_response_for_transmission
-        
-        # Test debug command processing
-        debug_commands = ['50011', '50010', '50012']
-        for cmd in debug_commands:
-            response = process_debug_command(cmd)
-            if response:
-                print(f"✅ Command {cmd} processed: {response['status']}")
-                
-                # Format for transmission
-                formatted = format_debug_response_for_transmission(response)
-                print(f"📤 Formatted for transmission: {formatted}")
-                print(f"📏 Transmission size: {len(formatted)} bytes")
-            else:
-                print(f"❌ Command {cmd} not processed")
-        
-        # Test 4: Show detailed system information
-        print("\n📊 Test 4: Detailed system information...")
-        print_system_details(debug_status)
-        
-        return True
-        
-    except ImportError as e:
-        print(f"❌ Import error: {e}")
-        print("   Make sure all required modules are available")
-        return False
-    except Exception as e:
-        print(f"❌ Test failed: {e}")
-        return False
+    """The report is generated, and its compact LoRa form fits one uplink."""
+    pytest.importorskip("psutil")
+    from tools.debug_status_command import generate_debug_status, handle_debug_status_command
+
+    debug_status = generate_debug_status()
+    for key in ("timestamp", "system_info", "uptime", "cpu_info",
+                "memory_info", "disk_info", "system_load", "sensor_status"):
+        assert key in debug_status, key
+
+    result = handle_debug_status_command()
+    assert result["status"] == "debug_status_generated", result.get("error")
+    assert result["lora_size_bytes"] <= MDOT_MAX_PAYLOAD
+
+
+@pytest.mark.parametrize("command", ["5001", "50011", "50010", "50012"])
+def test_digit_form_downlink_gets_a_hex_encoded_reply(command):
+    """A '5001...' downlink returns the report hex-encoded, as the mDot path needs."""
+    pytest.importorskip("psutil")
+    from tools.lora_debug_integration import process_debug_command
+
+    response = process_debug_command(command)
+    assert response is not None and response["status"] == "success", response
+    payload = bytes.fromhex(response["data"])        # every character must be hex
+    assert len(payload) == response["size_bytes"] <= MDOT_MAX_PAYLOAD
+    json.loads(payload.decode("utf-8"))               # and it decodes back to the report
+
+
+@pytest.mark.parametrize("command", ["2001", "500", "", "6001"])
+def test_other_commands_are_not_debug_requests(command):
+    from tools.lora_debug_integration import process_debug_command
+    assert process_debug_command(command) is None
+
 
 def print_system_details(debug_status):
     """Print detailed system information."""
@@ -164,57 +132,6 @@ def print_system_details(debug_status):
         available = status.get('available', False)
         print(f"   {sensor}: {'Available' if available else 'Unavailable'}")
 
-def test_lora_command_format():
-    """Test the LoRa command format for debug status."""
-    print("\n📡 Testing LoRa Command Format")
-    print("=" * 50)
-    
-    # Test command format
-    debug_commands = [
-        ('50011', 'Debug status request (any value)'),
-        ('50010', 'Debug status request (zero value)'),
-        ('50012', 'Debug status request (different value)')
-    ]
-    
-    print("🔧 Debug Status Commands:")
-    for cmd, description in debug_commands:
-        print(f"   {cmd} - {description}")
-    
-    print("\n📋 Command Format: [Type][Command][Value]")
-    print("   Type: 50 (Debug and Status Commands)")
-    print("   Command: 01 (Request comprehensive debug status)")
-    print("   Value: Any value triggers debug status")
-    
-    print("\n💡 Usage Examples:")
-    print("   echo '50011' | send_to_lora")
-    print("   python3 test_chirpstack_parameter_update.py <DEV_EUI> output.log")
-    print("   # Then send: {\"type\": \"debug_status\", \"enabled\": true}")
-
-def main():
-    """Main test function."""
-    print("🔍 Debug Status Command Test Suite")
-    print("=" * 60)
-    print(f"⏰ Test started at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    
-    # Test debug status command
-    success = test_debug_status_command()
-    
-    # Test LoRa command format
-    test_lora_command_format()
-    
-    print(f"\n{'='*60}")
-    if success:
-        print("🎉 All tests completed successfully!")
-        print("✅ Debug status command is ready for use")
-        print("\n💡 Next steps:")
-        print("   1. Integrate with LoRa handler")
-        print("   2. Test via ChirpStack downlink")
-        print("   3. Use command '50011' to request debug status")
-    else:
-        print("❌ Some tests failed")
-        print("   Check the error messages above")
-    
-    print(f"⏰ Test completed at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-
 if __name__ == "__main__":
-    main()
+    from tools.debug_status_command import generate_debug_status
+    print_system_details(generate_debug_status())
