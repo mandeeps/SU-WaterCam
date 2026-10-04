@@ -22,6 +22,7 @@ system python3. Summarise a log with tools/power_test_report.py.
 import argparse
 import os
 import subprocess
+import sys
 import time
 from datetime import datetime
 from typing import List, Optional
@@ -48,9 +49,19 @@ def i2c(reg: int) -> Optional[int]:
 
 
 def reading(int_reg: int) -> str:
-    """A WittyPi voltage or current as text ('4.86'), or '' if unreadable."""
-    i, d = i2c(int_reg), i2c(int_reg + 1)
-    return "" if i is None or d is None else f"{i}.{d:02d}"
+    """A WittyPi voltage or current as text ('4.86'), or '' if unreadable.
+
+    The integer and hundredths are separate registers, so the WittyPi can
+    update between the two reads (4.99 -> 5.00 read as 4.00). Read the integer
+    again afterwards and retry the pair if it moved.
+    """
+    for _ in range(3):
+        i, d, again = i2c(int_reg), i2c(int_reg + 1), i2c(int_reg)
+        if None in (i, d, again):
+            return ""
+        if i == again:
+            return f"{i}.{d:02d}"
+    return ""
 
 
 def decode_rtc(regs: List[Optional[int]]) -> str:
@@ -77,11 +88,22 @@ def vcgencmd(*args: str) -> str:
 
 
 def write(path: str, line: str) -> None:
-    """Append a line and fsync it; write the header first if the file is new."""
-    new = not os.path.exists(path)
-    fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o644)
+    """Append a line and fsync it, keeping the file parseable after a power cut.
+
+    - The header goes in whenever the file is empty, not only when it is new:
+      a cut before the first fsync can leave a zero-length file behind.
+    - If a cut tore the last line (no trailing newline), finish it first, or
+      this line, often the next boot's '#' marker, would be glued onto it.
+    """
+    fd = os.open(path, os.O_RDWR | os.O_APPEND | os.O_CREAT, 0o644)
     try:
-        os.write(fd, ((HEADER if new else "") + line).encode())
+        size = os.fstat(fd).st_size
+        prefix = ""
+        if size == 0:
+            prefix = HEADER
+        elif os.pread(fd, 1, size - 1) != b"\n":
+            prefix = "\n"
+        os.write(fd, (prefix + line).encode())
         os.fsync(fd)
     finally:
         os.close(fd)
@@ -106,6 +128,8 @@ def main() -> None:
     p.add_argument("--log", default=DEFAULT_LOG, help=f"CSV to append to (default {DEFAULT_LOG})")
     p.add_argument("--interval", type=float, default=INTERVAL_S, help="seconds between readings")
     args = p.parse_args()
+    if args.interval <= 0:
+        p.error("--interval must be greater than 0")
 
     os.makedirs(os.path.dirname(os.path.abspath(args.log)), exist_ok=True)
     with open("/proc/sys/kernel/random/boot_id") as f:
@@ -115,7 +139,13 @@ def main() -> None:
                     f"logger start, boot {boot_id}, wittypi action reason "
                     f"{'' if reason is None else hex(reason)}\n")
     while True:
-        write(args.log, sample_line(boot_id))
+        try:
+            write(args.log, sample_line(boot_id))
+        except OSError as e:
+            # Disk full, read-only after fsck, card hiccup: keep sampling rather
+            # than exit, since each systemd restart writes a marker that would
+            # look like a reboot in the log.
+            print(f"powerlog: could not write {args.log}: {e}", file=sys.stderr)
         time.sleep(args.interval - time.time() % args.interval)
 
 

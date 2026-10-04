@@ -99,6 +99,9 @@ def report(rows: List[dict]) -> str:
         lines.append(f"{phase:8} {s['n']:>4} {s['i_med']:>6.2f} {s['i_max']:>6.2f} "
                      f"{s['vin_min']:>8.2f} {s['vout_min']:>9.2f} {mhz:>8} "
                      f"{s['uv']:>4}/{s['n']:<3}")
+    if not any(r.get("phase") for r in rows):
+        lines.append("note: no phases (a powerlog CSV). This fit spans every supply, charge level "
+                     "and boot in the file, so it isn't comparable to a load-test run.")
     current = [r["iout"] for r in rows]
     for key in ("vin", "vout"):
         f = fit(current, [r[key] for r in rows])

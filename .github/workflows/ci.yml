@@ -53,6 +53,7 @@ jobs:
             tests/test_recovery_boot.py \
             tests/test_powerlog.py \
             tests/test_power_test_report.py \
+            tests/test_power_load_test_sh.py \
             -v --tb=short \
             -k "not TestLoRaPacketEncoding"
 

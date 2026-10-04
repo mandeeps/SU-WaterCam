@@ -67,3 +67,9 @@ def test_report_prints_the_slope_in_mv_per_amp(tmp_path):
 def test_main_fails_cleanly_on_an_empty_file(tmp_path, capsys):
     assert ptr.main([_csv(tmp_path, "t,phase,throttled,arm_hz,vin,vout,iout,temp_c\n")]) == 1
     assert "No readings" in capsys.readouterr().err
+
+
+def test_powerlog_fit_carries_a_caveat(tmp_path):
+    text = ptr.report(ptr.read_rows(_csv(tmp_path, POWERLOG)))
+    assert "isn't comparable to a load-test run" in text
+    assert "isn't comparable" not in ptr.report(ptr.read_rows(_csv(tmp_path, LOAD_TEST, "lt.csv")))
