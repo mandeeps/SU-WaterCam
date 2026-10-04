@@ -712,48 +712,6 @@ def coregistration(dirname, lepton_state, photo_state):
         print(f"⚠️ Failed to run coregistration: {e}")
         return False
 
-def _segformer_via_daemon(tiff_path: str, output_path: str,
-                          socket_path: str = "/run/segformer/segformer.sock") -> bool:
-    """Send an inference request to the persistent SegFormer daemon.
-
-    Returns True on success. The daemon keeps the ONNX model resident in
-    memory, cutting the per-cycle cold-start cost of ~10–20 s.
-    """
-    import json
-    import os as _os
-    import socket as _socket
-    import stat as _stat
-
-    req = json.dumps({"tiff_path": tiff_path, "output_path": output_path}) + "\n"
-    try:
-        if not _stat.S_ISSOCK(_os.lstat(socket_path).st_mode):
-            print(f"⚠️ {socket_path} is not a Unix socket — skipping daemon")
-            return False
-        with _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM) as sock:
-            sock.settimeout(10)   # connect: fail fast if daemon isn't ready
-            sock.connect(socket_path)
-            sock.settimeout(120)  # read: generous budget for ONNX inference on Pi
-            sock.sendall(req.encode())
-            sock.shutdown(_socket.SHUT_WR)
-
-            data = bytearray()
-            while True:
-                chunk = sock.recv(4096)
-                if not chunk:
-                    break
-                data.extend(chunk)
-
-        resp = json.loads(data.strip())
-        if resp.get("status") == "ok":
-            print(f"\n SegFormer daemon: {resp.get('inference_ms', '?')} ms\n")
-            return True
-        print(f"⚠️ SegFormer daemon error: {resp.get('message')}")
-        return False
-    except Exception as e:
-        print(f"⚠️ Could not reach SegFormer daemon: {e}")
-        return False
-
-
 @SQify
 def segformer(filepath, coreg_state): # operate on coregistered image file
     import fcntl
@@ -761,6 +719,7 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
     import subprocess
 
     from tools.coreg_multiple import config as coreg_config
+    from tools.segformer_client import segformer_via_daemon
 
     # Serve color_preserved_5_band.tiff, not final_5_band.tiff. The two files
     # are not the same image: co-registration writes final_5_band in OpenCV's
@@ -783,7 +742,7 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
     try:
         # Prefer the persistent daemon — no cold-start, model stays loaded.
         if os.path.exists(socket_path):
-            if _segformer_via_daemon(tiff_path, output_path, socket_path):
+            if segformer_via_daemon(tiff_path, output_path, socket_path):
                 return output_path
             print("⚠️ Daemon call failed, falling back to subprocess")
 

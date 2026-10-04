@@ -2129,7 +2129,7 @@ class LoRaHandlerClient:
     what the daemon does with the exact same code.
 
     Connects fresh per call (mirroring ticktalk_main.py's
-    _segformer_via_daemon() style) rather than holding a persistent
+    segformer_via_daemon() style) rather than holding a persistent
     connection, since calls here are infrequent (once per wake cycle, not a
     tight loop).
     """

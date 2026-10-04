@@ -221,3 +221,51 @@ def test_committed_pickle_matches_source(source_file, compile_out):
         f"would run old code. Rebuild and commit both files:\n"
         f"    python compile.py {source_file} --out output\n"
         f"    git add output/{name} output/{name}.sha256")
+
+
+# ── SQ bodies must be self-contained ────────────────────────────────────────
+
+# Files whose @SQify/@STREAMify functions end up in the compiled graph.
+_SQ_SOURCES = ["ticktalk_main.py", "tt_take_photos.py"]
+
+
+def _module_level_names_used(path: Path):
+    """(function, decorators, names) for each SQ that reads a module-level name.
+
+    TickTalk runs each @SQify/@STREAMify function in its own process from that
+    function's body alone, so a helper defined at module level is a NameError
+    at run time, even though the file imports and compiles fine.
+    """
+    import ast
+    import builtins
+    import symtable
+
+    src = path.read_text()
+    tables = {t.get_name(): t for t in
+              symtable.symtable(src, str(path), "exec").get_children()}
+
+    def globals_read(table):
+        names = {s.get_name() for s in table.get_symbols()
+                 if s.is_global() and s.is_referenced()}
+        for child in table.get_children():
+            names |= globals_read(child)
+        return names
+
+    for node in ast.parse(src).body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        decorators = {d.id for d in node.decorator_list if isinstance(d, ast.Name)}
+        if not decorators & {"SQify", "STREAMify"}:
+            continue
+        names = sorted(globals_read(tables[node.name]) - set(dir(builtins)))
+        if names:
+            yield node.name, names
+
+
+@pytest.mark.parametrize("source_file", _SQ_SOURCES)
+def test_sq_bodies_use_no_module_level_names(source_file):
+    offenders = list(_module_level_names_used(_REPO_ROOT / source_file))
+    assert not offenders, (
+        f"{source_file}: these SQs read names that only exist at module level, "
+        f"which are undefined when TickTalk runs them; import them inside the "
+        f"function instead: {offenders}")
