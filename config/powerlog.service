@@ -1,0 +1,17 @@
+[Unit]
+Description=WittyPi power logger (one fsynced line a minute)
+# Starts early so the log covers as much of each boot as possible, including
+# boots that brown out before the rest of the system is up.
+After=local-fs.target
+
+[Service]
+User=pi
+Group=pi
+Type=simple
+# Standard library only, so the system python3 is enough.
+ExecStart=/usr/bin/python3 /home/pi/SU-WaterCam/tools/powerlog.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

@@ -51,6 +51,8 @@ jobs:
             tests/test_ip_command_handling.py \
             tests/test_wait_for_wittypi_schedule.py \
             tests/test_recovery_boot.py \
+            tests/test_powerlog.py \
+            tests/test_power_test_report.py \
             -v --tb=short \
             -k "not TestLoRaPacketEncoding"
 

@@ -227,7 +227,7 @@ may have been higher.
 | [#97](https://github.com/mandeeps/SU-WaterCam/pull/97) (`early-wittypi-alarm`) | `config/wittypi/beforeScript.sh` syncs network time in the background unless the daemon reported a bad clock, so the next wake is set 15–17 s after boot (was 46–55 s). `ticktalk.service` waits up to 120 s (`tools/wait_for_wittypi_schedule.py`) for "Schedule next startup", then starts regardless. | Tested on 006; open |
 | [#98](https://github.com/mandeeps/SU-WaterCam/pull/98) (`recovery-boot`, stacked on #97) | After a power cut, `wittypi-recovery.service` (`tools/recovery_boot.py`) sets the next schedule slot at least 2 h ahead and powers off before the main program starts. A boot within 20 min after the previous wake counts as a scheduled wake that browned out, and runs normally. It powers off only after the daemon's "system is up" signal, takes times from the Witty Pi clock, and uses `wittypi-boot-mark.service` to tell this boot's log lines apart. Any failure runs the normal cycle. Settings are under `recovery_boot` in `runtime_config.json`. | Tested on 006; open |
 | Witty Pi on 006 | "Default ON" kept; default-on delay set to 10 s. | Applied |
-| Power logger on 006 | `~/powerlog/powerlog.py` run by `powerlog.service`. Once a minute it records Witty Pi voltages and current, throttle flags and the Witty Pi clock, forced to disk so the last reading survives a power cut, plus a marker line per boot. Not in this repo. | Running |
+| Power logger on 006 | `tools/powerlog.py` run by `config/powerlog.service` (in this repo since the power-tools PR; 006 still runs its earlier copy from `~/powerlog/`). Once a minute it records Witty Pi voltages and current, throttle flags and the Witty Pi clock, forced to disk so the last reading survives a power cut, plus a marker line per boot. | Running |
 | Bench charger | The faulty charger on 006 was replaced. | Done |
 
 ### Tests run on 006
@@ -295,23 +295,30 @@ uploads to the production server.
   `ticktalk.service.pre-pr97`. "Default ON" with the 10 s delay, no alarms set,
   no `schedule.wpi`.
 - **Power logger:** running.
-- **Test scripts:** `~/loadtest.sh` and `~/modemtest.sh` are in the home
-  directory.
+- **Test scripts:** the earlier `~/loadtest.sh` and `~/modemtest.sh`, now
+  `tools/power_load_test.sh` in this repo.
 
 **005:** unchanged. Its usual charger, `arm_freq=2000`, packaged kernel
 6.18.29; no resets or under-voltage during testing.
 
 ### Reusable test tools
 
-- **`~/loadtest.sh`** runs 5 segmentations and 4-core stress, sampling the
-  Witty Pi every 0.4 s, and prints per-phase voltage, current and throttling.
-  Fitting voltage against current from its CSV gives the mV/A figures above.
-- **`~/modemtest.sh`** adds the camera and tiny cellular pings over `wwan0`,
-  using about 11 KB of data per run.
+- **`tools/power_load_test.sh`** loads the node in phases (idle, 5
+  segmentations, 4-core stress, cool-down), sampling the Witty Pi and the Pi's
+  throttle flags every 0.3 s. `--modem` adds a ping phase and a full phase
+  (segmentation, camera, stress and tiny pings over `wwan0`, about 10 KB of
+  data, counted at the end). It replaces the `loadtest.sh` and `modemtest.sh`
+  used during this investigation.
+- **`tools/power_test_report.py`** prints the per-phase summary and fits
+  voltage against current, giving the mV/A figures above. It also reads the
+  power logger's CSV.
+- **`tools/powerlog.py`** with **`config/powerlog.service`** logs once a
+  minute, fsynced, with a marker line per boot.
 
 ```bash
-tailscale ssh pi@ufo-01-01-006.taild7822.ts.net 'bash ~/loadtest.sh'
-tail -f ~/powerlog/powerlog.csv     # on the node
+tools/power_load_test.sh                  # on the node, on the supply under test
+tools/power_load_test.sh --modem          # add the cellular phases
+python3 tools/power_test_report.py ~/powerlog/powerlog.csv
 ```
 
 Related earlier work: segformer_5band PR #1 (merged), SU-WaterCam PR #96
