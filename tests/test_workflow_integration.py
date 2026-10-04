@@ -91,7 +91,7 @@ class TestConfigManagement:
             "area_threshold":      lri.get_parameter("area_threshold", 10),
             "stage_threshold":     lri.get_parameter("stage_threshold", 50),
             "monitoring_frequency": lri.get_parameter("monitoring_frequency", 60),
-            "photo_interval":      lri.get_parameter("photo_interval", 30),
+            "photo_interval":      lri.get_parameter("photo_interval", 60),
         }
         assert set(params.keys()) == {
             "emergency_mode", "area_threshold", "stage_threshold",

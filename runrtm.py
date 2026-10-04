@@ -159,6 +159,16 @@ def run_application_rtm(name,
  #       time.sleep(2)
         send_input_tokens(graph, logger, rtm)
 
+        # photo_interval (seconds) in runtime_config.json drives the capture
+        # loop's period while the graph runs.
+        try:
+            from tools.photo_interval_watcher import start_photo_interval_watcher
+            start_photo_interval_watcher(
+                rtm, graph,
+                os.path.join(os.path.dirname(os.path.abspath(__file__)), "runtime_config.json"))
+        except Exception as e:
+            print(f"Warning: photo_interval watcher not started: {e}")
+
         if timeout <= 0:
             rtm.manager_ensemble.enter_steady_state()
         else:
