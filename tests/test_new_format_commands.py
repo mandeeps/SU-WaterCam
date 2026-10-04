@@ -49,7 +49,7 @@ def test_new_format_commands():
         ('1191', 'Stage threshold 1 cm', 'stage_threshold', 1),   # Channel 11, Command 9, Value 1
         ('1292', 'Monitoring frequency 2 min', 'monitoring_frequency', 2),  # Channel 12, Command 9, Value 2
         ('1393', 'Emergency frequency 3 min', 'emergency_frequency', 3),    # Channel 13, Command 9, Value 3
-        ('2100', 'Emergency mode on', 'emergency_mode', True),              # Channel 21, Command 0, Value 0
+        ('21', 'Emergency mode on', 'emergency_mode', True),                # the only emergency message
         ('9900', 'Emergency mode off', 'emergency_mode', False),            # Channel 99, Command 0, Value 0
     ]
     

@@ -552,8 +552,6 @@ class LoRaRuntimeManager:
                     return _set('data_retention_days', val_int)
                 elif channel == '43' and command == '00':
                     return _set('backup_enabled', bool(val_int))
-                elif channel == '21' and command == '00':
-                    return _set('emergency_mode', True)
                 elif channel == '99' and command == '00':
                     return _set('emergency_mode', False)
                 else:
@@ -616,8 +614,6 @@ class LoRaRuntimeManager:
                         return self.set_parameter('data_retention_days', int(value))
                     elif channel == '43' and command == '00':
                         return self.set_parameter('backup_enabled', bool(int(value)))
-                    elif channel == '21' and command == '00':
-                        return self.set_parameter('emergency_mode', True)
                     elif channel == '99' and command == '00':
                         return self.set_parameter('emergency_mode', False)
                     else:

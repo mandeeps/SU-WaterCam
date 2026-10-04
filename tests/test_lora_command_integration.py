@@ -89,7 +89,7 @@ def test_lora_command_processing():
     print(f"Initial emergency mode: {get_parameter('emergency_mode')}")
     
     # Simulate emergency command
-    test_handler.decode('2100')  # Activate emergency mode (Channel 21, Command 0, Value 0)
+    test_handler.decode('21')  # Activate emergency mode (the only emergency message)
     
     # Verify emergency mode
     emergency_active = get_parameter('emergency_mode')
@@ -231,7 +231,7 @@ def test_main_application_integration():
     
     # Step 3: Simulate emergency activation
     print("\n3️⃣ Simulating emergency mode activation...")
-    test_handler.decode('2100')  # Activate emergency mode (Channel 21, Command 0, Value 0)
+    test_handler.decode('21')  # Activate emergency mode (the only emergency message)
     
     emergency_active = get_parameter('emergency_mode')
     print(f"   Emergency mode active: {emergency_active}")

@@ -10,6 +10,7 @@ import serial
 import threading
 import queue
 import json
+import re
 import os
 from typing import Dict, Any, Optional
 
@@ -453,12 +454,12 @@ class LoRaHandler:
                             print(f"⚠️ Skipping corrupted/invalid message: '{res}'")
                             continue
                         
-                        # Check for emergency messages FIRST (highest priority) - ANY message with "EMERGENCY" triggers emergency mode
+                        # Check for the firmware's emergency line FIRST (highest priority)
                         if self._is_emergency_message(res):
                             emergency_status = self._extract_emergency_status(res)
                             if emergency_status:
                                 print(f"🚨 EMERGENCY TRIGGERED: '{res}'")
-                                # Always activate emergency mode for any EMERGENCY message
+                                # The emergency downlink '!' reached the mDot
                                 try:
                                     from tools.lora_runtime_integration import set_parameter
                                     set_parameter('emergency_mode', True)
@@ -466,7 +467,14 @@ class LoRaHandler:
                                 except Exception as e:
                                     print(f"⚠️ Failed to set emergency mode: {e}")
                             continue  # Emergency messages are handled, don't process further
-                        
+
+                        # The firmware's other "EMERGENCY: ..." lines (switch
+                        # activation progress) are logged, not acted on, and
+                        # must not reach the AT-response handling below.
+                        elif res.strip().startswith('EMERGENCY:'):
+                            print(f"ℹ️ mDot: {res.strip()}")
+                            continue
+
                         # Check for emergency clear messages SECOND (high priority) - only "9999" turns off emergency mode  
                         elif self._is_emergency_clear_message(res):
                             print(f"✅ Emergency clear message received: '{res}'")
@@ -880,9 +888,6 @@ class LoRaHandler:
                 elif channel == '44' and command == '00':
                     self.update_config('audio_recording_enabled', bool(val_int))
                     print(f'Audio recording {"enabled" if bool(val_int) else "disabled"}')
-                elif channel == '21' and command == '00':
-                    self.update_config('emergency_mode', True)
-                    print('🚨 Emergency mode activated!')
                 elif channel == '99' and command == '00':
                     self.update_config('emergency_mode', False)
                     print('✅ Emergency mode deactivated')
@@ -1056,11 +1061,6 @@ class LoRaHandler:
                         except ValueError:
                             print(f'Invalid audio recording value: {value}')
 
-                    elif channel == '21' and command == '0':
-                        # Emergency status: system enters emergency mode and stops scheduled shutdowns
-                        self.update_config('emergency_mode', True)
-                        print('🚨 Emergency mode activated!')
-                        
                     elif channel == '99' and command == '0':
                         # Deactivate emergency mode
                         self.update_config('emergency_mode', False)
@@ -1416,17 +1416,20 @@ class LoRaHandler:
             print(f"Error extracting LoRa data from '{message}': {e}")
             return None
     
+    # The first line the mDot firmware prints when it handles the emergency
+    # downlink '!' (CmdClassCPacketProcessor::handleEmergencyPacket). Its later
+    # "EMERGENCY: ..." lines are progress messages and must not re-trigger.
+    _EMERGENCY_LINE_RE = re.compile(r'^EMERGENCY: PA_6 pin state: [01]$')
+
     def _is_emergency_message(self, message: str) -> bool:
-        """Check if a message is an emergency message from the mDot"""
-        message_upper = message.upper()
-        # Any message containing "EMERGENCY" triggers emergency mode
-        return 'EMERGENCY' in message_upper
+        """True only for the firmware's emergency line, matched exactly."""
+        return bool(self._EMERGENCY_LINE_RE.match(message.strip()))
     
     def _extract_emergency_status(self, message: str) -> dict:
         """Extract emergency status information from an EMERGENCY message"""
         try:
             # Only return emergency status for messages containing "EMERGENCY"
-            if 'EMERGENCY' in message.upper():
+            if self._is_emergency_message(message):
                 return {
                     'emergency_triggered': True,  # Always True for any EMERGENCY message
                     'message': message,
