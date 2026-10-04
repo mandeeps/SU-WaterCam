@@ -1,14 +1,17 @@
 """Integration tests for IP uplink/downlink transport.
 
-Runs against a live WaterCam FastAPI server.  The server URL and device ID
-are read from runtime_config.json (ip_upload section) and can be overridden
-via environment variables:
+Runs against a live WaterCam FastAPI server, and only when you name one:
 
     WATERCAM_SERVER_URL=http://localhost:8000
-    WATERCAM_DEVICE_ID=watercam-test-001
+    WATERCAM_DEVICE_ID=watercam-test-001     # optional
+
+Without WATERCAM_SERVER_URL the live tests skip. They never fall back to the
+server in runtime_config.json, which on a node or a configured dev machine is
+the production server: a plain `pytest tests/` would otherwise post test
+uplinks into real field data.
 
 These tests are NOT unit tests — they require the API to be running.
-They will skip cleanly if the server is unreachable rather than failing.
+They also skip cleanly if the named server is unreachable.
 
 Run with:
     python tests/test_ip_upload.py
@@ -39,6 +42,12 @@ from tools.transmit_ip import IPTransmitter, _DEFAULT_CONFIG_PATH
 
 _SERVER_URL = os.environ.get("WATERCAM_SERVER_URL") or None
 _DEVICE_ID = os.environ.get("WATERCAM_DEVICE_ID") or None
+
+requires_named_server = unittest.skipUnless(
+    _SERVER_URL,
+    "live API test: set WATERCAM_SERVER_URL to a test server to run it "
+    "(never runs against the server in runtime_config.json)",
+)
 
 
 def _make_transmitter() -> IPTransmitter:
@@ -96,6 +105,7 @@ def encode_flood_bitmap(bitmap_bytes: bytes) -> dict:
 # Test cases
 # ---------------------------------------------------------------------------
 
+@requires_named_server
 class TestIPUplink(unittest.TestCase):
     """Tests for POST /ip/uplink."""
 
@@ -228,6 +238,7 @@ class TestIPUplink(unittest.TestCase):
         self.assertTrue(r2["success"], f"Second upload failed: {r2.get('error')}")
 
 
+@requires_named_server
 class TestIPDownlink(unittest.TestCase):
     """Tests for GET /ip/downlink/{device_id}."""
 
@@ -284,6 +295,7 @@ class TestIPDownlink(unittest.TestCase):
 class TestIPReachability(unittest.TestCase):
     """Basic connectivity checks."""
 
+    @requires_named_server
     def test_is_reachable_live_server(self):
         """is_reachable() should return True when server is up."""
         tx = _make_transmitter()
