@@ -1,0 +1,15 @@
+[Unit]
+Description=Mark where this boot's lines start in wittyPi.log
+# Runs just before the WittyPi daemon writes anything this boot. /run is
+# cleared at every boot, so the offset always belongs to the current boot,
+# and tools can find this boot's daemon output without trusting the system
+# clock, which is stale until the daemon sets it from the RTC.
+After=local-fs.target
+Before=wittypi.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'stat -c %%s /home/pi/wittypi/wittyPi.log > /run/wittypi-log-offset 2>/dev/null || echo 0 > /run/wittypi-log-offset'
+
+[Install]
+WantedBy=multi-user.target

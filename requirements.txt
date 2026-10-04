@@ -56,7 +56,7 @@ sortedcontainers==2.4.0
 sysv-ipc==1.1.0
 timedinput==0.1.1
 typing_extensions==4.14.1
-urllib3==2.7.0
+urllib3==2.8.0
 
 # Optional -- only for the hardware or feature named; the runtime imports them
 # lazily or behind a guard, so a node without them still runs:
