@@ -1154,7 +1154,7 @@ def adaptive_monitoring():
             'area_threshold': area_threshold,
             'stage_threshold': stage_threshold,
             'monitoring_frequency': get_parameter('monitoring_frequency', 60),
-            'photo_interval': get_parameter('photo_interval', 30)
+            'photo_interval': get_parameter('photo_interval', 60)
         }
     except Exception as e:
         print(f"⚠️ Failed to get adaptive monitoring parameters: {e}")
@@ -1164,7 +1164,7 @@ def adaptive_monitoring():
             'area_threshold': 10,
             'stage_threshold': 50,
             'monitoring_frequency': 60,
-            'photo_interval': 30
+            'photo_interval': 60
         }
 
 @SQify
@@ -1321,7 +1321,7 @@ def lora_parameter_monitor(trigger):
             'emergency_frequency': get_parameter('emergency_frequency', 5),
             'debug_mode': get_parameter('debug_mode', False),
             
-            'photo_interval': get_parameter('photo_interval', 30),
+            'photo_interval': get_parameter('photo_interval', 60),
             'timestamp': datetime.now().isoformat()
         }
     except Exception as e:
@@ -1335,7 +1335,7 @@ def lora_parameter_monitor(trigger):
             'emergency_frequency': 5,
             'debug_mode': False,
             
-            'photo_interval': 30,
+            'photo_interval': 60,
             'timestamp': datetime.now().isoformat()
         }
     
