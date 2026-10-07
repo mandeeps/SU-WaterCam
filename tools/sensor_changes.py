@@ -71,6 +71,8 @@ def changed_fields(data: Dict[str, Any], threshold: float = 0.05,
     for name, cur in data.items():
         if name in SKIP:
             continue
+        if cur is None:
+            continue    # no reading (e.g. no battery sensor): nothing to send
         prev = last.get(name)
         if everything:
             out[name] = {"current_value": cur, "previous_value": prev, "change_percent": None,

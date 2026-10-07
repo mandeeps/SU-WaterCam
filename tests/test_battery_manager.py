@@ -198,22 +198,10 @@ class TestWittyPiOutputPath(unittest.TestCase):
     def test_source_tag(self):
         self.assertEqual(self._status(5.05)["battery_source"], "wittypi_output")
 
-    def test_full_voltage_returns_100(self):
-        self.assertEqual(self._status(bm.WITTYPI_OUTPUT_V_FULL)["battery_pct"], 100)
-
-    def test_empty_voltage_returns_0(self):
-        self.assertEqual(self._status(bm.WITTYPI_OUTPUT_V_EMPTY)["battery_pct"], 0)
-
-    def test_midpoint(self):
-        mid_v = (bm.WITTYPI_OUTPUT_V_FULL + bm.WITTYPI_OUTPUT_V_EMPTY) / 2
-        pct = self._status(mid_v)["battery_pct"]
-        self.assertEqual(pct, 50)
-
-    def test_above_full_clamps_to_100(self):
-        self.assertEqual(self._status(6.0)["battery_pct"], 100)
-
-    def test_below_empty_clamps_to_0(self):
-        self.assertEqual(self._status(3.0)["battery_pct"], 0)
+    def test_no_state_of_charge_from_regulated_output(self):
+        # The V50's 5 V output is regulated: its voltage says nothing about charge
+        for v in (4.75, 4.9, 5.1, 6.0, 3.0):
+            self.assertIsNone(self._status(v)["battery_pct"])
 
     def test_output_voltage_returned(self):
         result = self._status(5.02)
