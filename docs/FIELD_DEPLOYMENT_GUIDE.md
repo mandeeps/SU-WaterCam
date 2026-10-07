@@ -242,6 +242,12 @@ sudo cp config/journald-volatile.conf /etc/systemd/journald.conf.d/
 sudo systemctl restart systemd-journald
 ```
 
+To diagnose a unit in the field (for example power problems at a new site),
+keep the journal on the card instead, so every wake's log survives a power cut:
+install `config/journald-persistent.conf` in place of the volatile one (the
+commands are in the file). It writes to disk every 5 s, keeps up to 200 MB,
+and can be switched back once the unit has proved itself.
+
 ### 1.10 Run the startup health check
 
 `tools/initial_health_check.py` checks CPU temperature, WittyPi voltages, GPS fix, and IMU availability in one shot, and sends a LoRa alert on failure.
