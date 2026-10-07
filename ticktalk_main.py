@@ -268,7 +268,8 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
             if full_send:
                 print("📡 Periodic full send: all sensor fields this capture")
             sensors_to_transmit = changed_fields(
-                data, threshold=sensor_tracker.get('change_threshold', 0.05), everything=full_send)
+                data, threshold=sensor_tracker.get('change_threshold', 0.05), everything=full_send,
+                angle_threshold_deg=get_parameter('lora_imu_threshold_deg', 2.0))
             print(f"📊 Sensor change check: {len(sensors_to_transmit)} sensors qualify for transmission")
         except Exception as e:
             print(f"⚠️ Failed to check sensor changes: {e}")
