@@ -17,8 +17,9 @@ Constraints:
 - RTK equipment is part of the standard installation kit, but will not always
   be on hand. Setup must still work without it, and must say clearly when the
   result is weaker.
-- Wi-Fi is for setup and debugging. Normal reporting stays on LoRa or cellular;
-  Wi-Fi is the transport only when nothing else is available.
+- Wi-Fi has two jobs: configuring and debugging nodes, and reporting. For
+  reporting it is the second transport: LoRa first, then Wi-Fi, then cellular as
+  the last resort (`docs/IP_TRANSMISSION.md`, #120).
 - Power is tight (see `docs/POWER_ANALYSIS.md`, `docs/UNIT006_POWER_FAILURE.md`).
   Anything that keeps the Pi awake must end on its own.
 
@@ -101,7 +102,9 @@ A new runtime state, separate from emergency mode.
 - battery voltage falls below a threshold, or the Pi reports under-voltage
   (the flags added for the Unit 006 investigation).
 
-On exit Wi-Fi goes down, normal capture resumes and the normal shutdown logic
+On exit the hotspot (or the session's client network) goes down and Wi-Fi goes
+back to its normal role as a reporting transport, joining the networks the node
+knows during each wake. Normal capture resumes and the normal shutdown logic
 applies again.
 
 ## 5. Command and status message
@@ -201,5 +204,8 @@ only do the on-pole steps.
   one-byte downlink?
 - Is the hotspot's extra draw acceptable for a 30-120 min session at the
   battery levels seen in the field? Measure on a bench unit.
-- Should client mode be allowed outside setup, for nodes with no LoRa or
-  cellular coverage at all? If so, it needs its own duty cycle.
+- Client Wi-Fi outside setup is settled: it is the second reporting transport,
+  joined during each wake, so it follows the wake schedule and needs no duty
+  cycle of its own. Still open: whether the setup session's client network (for
+  example a team phone hotspot) should stay among the networks used for
+  reporting afterwards.
