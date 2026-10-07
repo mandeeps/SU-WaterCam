@@ -48,7 +48,7 @@ class TestChangedFields:
         assert "a" in sc.changed_fields({"a": 1}, state_path=str(path))
 
 
-def _run_capture(tmp_path, temperature, joined=True, bitmap=b"\x01\x00\x40\x00\x30\x00"):
+def _run_capture(tmp_path, temperature, joined=True, bitmap=b"\x01\x00\x40\x00\x30\x00", orientation=None):
     """Run lora_token_with_tracker once; return the handler mock."""
     import ticktalk_main
     handler = MagicMock()
@@ -61,7 +61,8 @@ def _run_capture(tmp_path, temperature, joined=True, bitmap=b"\x01\x00\x40\x00\x
         st.enter_context(patch("tools.lora_handler_concurrent.get_lora_handler", return_value=handler))
         st.enter_context(patch("tools.lora_handler_concurrent.get_config_value", side_effect=lambda k, d=None: d))
         st.enter_context(patch("tools.lora_runtime_integration.get_parameter", side_effect=lambda k, d=None: d))
-        st.enter_context(patch("tools.bno055_imu.get_orientation", return_value={}))
+        st.enter_context(patch("tools.bno055_imu.get_orientation",
+                               return_value={"tilt_roll_yaw": orientation} if orientation else {}))
         st.enter_context(patch("tools.aht20_temperature.get_aht20",
                                return_value={"temperature_celsius": temperature, "relative_humidity": 50}))
         st.enter_context(patch("tools.get_gps.get_location_with_retry", return_value=(None, None)))
@@ -143,3 +144,44 @@ class TestPeriodicFullSend:
         assert len(pkts) == 1
         assert {"timestamp", "temperature_celsius", "relative_humidity"} <= set(pkts[0])
         assert _sensor_packets(_run_capture(tmp_path, 20.0)) == []   # and not again until the next period
+
+
+class TestOrientationThreshold:
+    """BNO055 Euler angles (heading, roll, pitch): an absolute threshold in degrees."""
+
+    def test_tuple_matches_what_json_stored(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"tilt_roll_yaw": (359.9, 7.06, 85.0)}, state_path=path)   # stored as a list
+        assert sc.changed_fields({"tilt_roll_yaw": (359.9, 7.06, 85.0)}, state_path=path) == {}
+
+    def test_jitter_below_threshold_not_sent(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"tilt_roll_yaw": (120.0, 7.0, 85.0)}, state_path=path)
+        assert sc.changed_fields({"tilt_roll_yaw": (121.5, 6.2, 85.9)}, state_path=path) == {}
+        assert "tilt_roll_yaw" in sc.changed_fields({"tilt_roll_yaw": (122.0, 7.0, 85.0)}, state_path=path)
+
+    def test_heading_wraps_at_360(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"tilt_roll_yaw": (359.5, 0.0, 0.0)}, state_path=path)
+        assert sc.changed_fields({"tilt_roll_yaw": (0.5, 0.0, 0.0)}, state_path=path) == {}      # 1 degree
+        out = sc.changed_fields({"tilt_roll_yaw": (3.0, 0.0, 0.0)}, state_path=path)              # 3.5 degrees
+        assert out["tilt_roll_yaw"]["change_degrees"] == 3.5
+
+    def test_threshold_is_configurable(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"tilt_roll_yaw": (10.0, 0.0, 0.0)}, state_path=path)
+        assert sc.changed_fields({"tilt_roll_yaw": (11.0, 0.0, 0.0)}, state_path=path,
+                                 angle_threshold_deg=0.5)
+
+    def test_missing_angle_counts_as_changed(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"tilt_roll_yaw": (10.0, 0.0, 0.0)}, state_path=path)
+        assert sc.changed_fields({"tilt_roll_yaw": (None, 0.0, 0.0)}, state_path=path)
+
+    def test_lora_capture_with_steady_orientation_sends_nothing(self, tmp_path):
+        first = _run_capture(tmp_path, 20.0, orientation=(359.9, 7.06, 85.0))
+        assert "tilt_roll_yaw" in _sensor_packets(first)[0]
+        # heading across 0, roll and pitch jitter: all under 2 degrees
+        assert _sensor_packets(_run_capture(tmp_path, 20.0, orientation=(0.4, 7.3, 84.6))) == []
+        moved = _sensor_packets(_run_capture(tmp_path, 20.0, orientation=(5.0, 7.0, 85.0)))
+        assert len(moved) == 1 and set(moved[0]) == {"timestamp", "tilt_roll_yaw"}

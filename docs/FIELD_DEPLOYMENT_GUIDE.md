@@ -128,6 +128,8 @@ Also confirm before deploying:
 - `ip_upload.enabled` — `true` if this site will use cellular/IP upload in addition to (or instead of) LoRa; if so, fill in `server_url` and  `api_key` for the WaterCam API server this unit reports to. This is already set for our tailnet.
 - **LoRa sensor packet:** each capture sends the capture time plus only the fields
   that changed by 5% or more since they were last sent (`data/lora_last_sent.json`).
+  Orientation (the IMU's heading, roll, pitch) uses an absolute threshold instead,
+  `lora_imu_threshold_deg` (default 2°), allowing for the heading wrapping at 360°.
   Every `lora_full_send_hours` (default 24) all fields go out, since LoRa uplinks are
   unconfirmed and a lost packet would otherwise leave an old value on the server.
   `always_transmit_sensors: true` sends every field every capture.

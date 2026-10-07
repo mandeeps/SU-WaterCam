@@ -9,6 +9,7 @@
   "debug_mode": false,
   "always_transmit_sensors": false,
   "lora_full_send_hours": 24,
+  "lora_imu_threshold_deg": 2.0,
 
   "max_retransmissions": 3,
   "auto_shutdown_enabled": true,
