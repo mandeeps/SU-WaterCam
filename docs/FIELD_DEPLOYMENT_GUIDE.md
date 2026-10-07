@@ -93,6 +93,19 @@ This should have been done automatically, but check the system time is correct.
 sudo /home/pi/wittypi/syncTime.sh
 ```
 
+How the unit keeps time (NTP is off; `timedatectl` reports "not synchronized", which is expected):
+
+1. **At boot,** the Witty Pi daemon copies its RTC into the system clock, or
+   the other way round if the RTC's time looks bad.
+2. **About 30 s later,** `beforeScript.sh` runs `syncTime.sh`. It reads the
+   `Date:` header of an HTTP request to `http://google.com`, accurate to about
+   1 s, and writes it to the system clock and the RTC. This only works when the
+   unit has internet at boot (WiFi or cellular).
+3. **The RTC holds local time.** After a daylight-saving change, the first boot
+   runs an hour off until step 2 corrects it. A unit that never has internet
+   isn't corrected for either the change or drift, so check its clock at each
+   visit.
+
 ### 1.5 Configure `runtime_config.json`
 
 This is the unit's operating settings. The file `/home/pi/SU-WaterCam/runtime_config.json` should be edited to have the name of the specific unit and other settings.
@@ -262,7 +275,15 @@ Once everything above passes, follow `README.md`'s sealing steps (silicone seala
 
 ### 1.13 Set the power schedule (WittyPi)
 
-The WittyPi controls when the Pi is powered on/off and needs to be told what schedule to use. If you want to use one of the default schedules run `./wittypi/wittyPi.sh`
+The WittyPi controls when the Pi is powered on/off and needs to be told what schedule to use. For a normal deployment use this repo's daylight schedule. It wakes for up to 15 min every 2 h while the camera can see: 08:00–16:00 EST, which is 09:00–17:00 during daylight saving, since the Witty Pi counts seconds from `BEGIN`.
+
+```bash
+cp /home/pi/SU-WaterCam/config/wittypi/watercam_daylight_2h.wpi /home/pi/wittypi/schedule.wpi
+```
+
+It was checked against sunrise and sunset for Syracuse (43° N) all year. At a site far from that latitude, check the first and last wake times. Don't run `runScript.sh` on the bench, because it arms the schedule and the unit then shuts down at the end of the window. The daemon arms it at the next boot, which is when you press the button at deployment.
+
+If you want to use one of the default schedules run `./wittypi/wittyPi.sh`
 
 If you need to customize the schedule you can write a `.wpi` file for this deployment: (https://github.com/uugear/Witty-Pi-4/tree/main/Software/wittypi/schedules)
 

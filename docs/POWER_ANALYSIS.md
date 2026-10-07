@@ -107,6 +107,7 @@ its own, so it matters as much as the wakes do.
 |---|---|---|---|---|
 | `watercam_on15_off1h45_offnight.wpi` (every 2 h, 06:00–22:00) | 9 | 1.1 Wh | 1.2–2.4 Wh | **about 2.5–3.5 Wh/day** |
 | `watercam_10minutes_per_hour.wpi` | 24 | 2.9 Wh | 1.2–2.4 Wh | **about 4–5.5 Wh/day** |
+| `watercam_daylight_2h.wpi` (every 2 h, 08:00–16:00 EST, daylight only) | 5 | 0.6 Wh | 1.2–2.4 Wh | **about 2–3 Wh/day** |
 
 **These are best cases.** The schedules assume every wake ends with a clean
 shutdown.
