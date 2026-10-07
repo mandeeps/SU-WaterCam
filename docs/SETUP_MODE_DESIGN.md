@@ -186,12 +186,13 @@ only do the on-pole steps.
 ## 9. Implementation order
 
 1. Maintenance mode with a local trigger, the hotspot, and the time and
-   battery limits (node only). Usable immediately for installation.
-2. Agree on `14 94`; add `17 97`, the status message and the dashboard control.
-   Works within today's wake latency.
-3. Maintenance wake and downlink replay in the mDot firmware.
+   battery limits (node only). Usable immediately for installation. (#117)
+2. Agree on `14 94` (#116); add `17 97` and the status message (#118) and the
+   dashboard control (WaterCam-Team/API#109). Works within today's wake latency.
+3. Maintenance wake and downlink replay in the mDot firmware
+   (WaterCam-Team/mDot-AT-firmware#3).
 4. Wizard pages, starting with the live view (step 2) and the IMU wizard
-   (step 3), then markers and pose (steps 4-5).
+   (step 3), then markers and pose (steps 4-5). (#119)
 
 ## 10. Open questions
 
