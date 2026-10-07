@@ -31,10 +31,11 @@ Constraints:
 | Camera capture | `tools/take_photo.py`, `tools/picam_fast.py` (Picamera2) | No live preview |
 | Lens calibration | `tools/camera_calibration.py` | Uses `cv2.VideoCapture`, cannot drive the CSI camera; bench task |
 | Pose from markers | Georeferencing repo (`gcp.py` `refine_pose_from_gcps`, `label_gcp.py`) | Desktop only, run days after installation |
-| IP commands | `tools/transmit_ip.py` `poll_downlink()` / `apply_downlink_command()` | Node polls once per wake, so a command waits for the next scheduled wake (1-72 h) |
+| IP commands | `tools/transmit_ip.py` `poll_downlink()` / `apply_downlink_command()` | Node polls once per wake, so a command waits for the next scheduled wake. With the daylight schedule (`config/wittypi/watercam_daylight_2h.wpi`, #123) that is up to 2 h by day and about 16 h overnight |
 | LoRa commands | `tools/lora_runtime_integration.py` | Parsed only while the Pi is awake |
 | Wake from sleep | mDot-AT-firmware `CmdClassCPacketProcessor` | The mDot is Class C on the Witty Pi's always-on rail. Only the exact one-byte `!` (0x21) wakes the Pi, by pulsing the Witty Pi switch; that packet is not passed on to the Pi |
-| Staying awake | `ticktalk_main.py` `call_shutdown()` | Shuts down after `shutdown_iteration_limit` wakes; emergency mode bypasses this and clears the Witty Pi schedule |
+| Staying awake | `ticktalk_main.py` `call_shutdown()`, Witty Pi schedule | Two separate limits: `call_shutdown()` requests shutdown after `shutdown_iteration_limit` captures, and the Witty Pi schedule's ON window (10-15 min) ends the wake regardless. Emergency mode bypasses the first and clears the Witty Pi shutdown time (`tools/wittypi_control.py`); `tools/witty_pi_4.py` can clear a shutdown time but not set one |
+| Battery level | none | Units have no state-of-charge sensor. The Witty Pi's 5 V reading is regulated and says nothing about charge, so `battery_pct` is no longer reported (#122). A real reading is planned (`docs/POWER_ANALYSIS.md`, *Battery state of charge*) |
 | Network control | NetworkManager via `nmcli` | User `pi` has NetworkManager network-control for all interfaces. This is intentional and this design does not narrow it |
 
 Two consequences shape the design:
@@ -79,8 +80,13 @@ A new runtime state, separate from emergency mode.
 
 **While active:**
 
-- `call_shutdown()` is skipped, without touching the emergency flags or the
-  Witty Pi schedule.
+- `call_shutdown()` is skipped, without touching the emergency flags.
+- The Witty Pi's shutdown time is moved to the maintenance deadline. Skipping
+  `call_shutdown()` alone is not enough: the schedule's ON window would still end
+  the wake after 10-15 min. Setting the shutdown time, rather than clearing it
+  as emergency mode does, means the Witty Pi itself enforces the limit even if
+  the Pi hangs. This needs a `set_shutdown_time()` in `tools/witty_pi_4.py`.
+  On exit the normal schedule is restored.
 - Wi-Fi comes up in one of two modes:
   - **hotspot:** the node runs an access point; the collaborator's phone joins
     it. Used for installation and the wizard. Each node has its own WPA2
@@ -92,6 +98,9 @@ A new runtime state, separate from emergency mode.
     and kept out of the repository.
 - The capture pipeline pauses so the setup page can use the camera.
 - The setup web page (section 8) is served on the Wi-Fi interface only.
+- In hotspot mode the radio is busy as an access point, so Wi-Fi is not
+  available for reporting; uplinks fall through to LoRa or cellular in the
+  usual order (#120).
 
 **Leaving it**, whichever happens first:
 
@@ -99,8 +108,10 @@ A new runtime state, separate from emergency mode.
   suggested 120 min);
 - setup is marked complete in the wizard;
 - an explicit "maintenance off" command;
-- battery voltage falls below a threshold, or the Pi reports under-voltage
-  (the flags added for the Unit 006 investigation).
+- the Pi reports under-voltage (the flags added for the Unit 006
+  investigation). A battery threshold is added once units have a real
+  state-of-charge reading (#122); until then under-voltage and the time limit
+  are the only protection.
 
 On exit the hotspot (or the session's client network) goes down and Wi-Fi goes
 back to its normal role as a reporting transport, joining the networks the node
@@ -125,7 +136,8 @@ Needs adding in three places: `API/app/encoders.py`,
 the node fetches it, and there is no acknowledgement, so the dashboard cannot
 tell whether a command took effect. On entering and leaving maintenance mode
 the node sends a status uplink: mode, Wi-Fi mode, SSID, IP address on the Wi-Fi
-interface, minutes remaining, battery voltage, and the reason it left.
+interface, minutes remaining, the Pi's under-voltage flags (and battery level
+once a real reading exists), and the reason it left.
 
 **Fix first:** `14 94` means something different on each transport. The IP
 path and the API encoder treat it as the flood-code frequency (an index into
@@ -202,6 +214,8 @@ only do the on-pole steps.
 - Can the Pi tell whether the Witty Pi button or the schedule woke it?
 - Which wake byte is free for maintenance, given what else is ever sent as a
   one-byte downlink?
+- Until units have a state-of-charge reading, should maintenance mode refuse
+  to start, or shorten itself, after a run of under-voltage flags?
 - Is the hotspot's extra draw acceptable for a 30-120 min session at the
   battery levels seen in the field? Measure on a bench unit.
 - Client Wi-Fi outside setup is settled: it is the second reporting transport,
