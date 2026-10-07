@@ -1,0 +1,19 @@
+# WaterCam: on for 15 min every 2 h, daylight only (the camera can't see at night).
+# Wakes at 08:00, 10:00, 12:00, 14:00, 16:00 EST; the Witty Pi counts seconds
+# from BEGIN, so during daylight saving they land an hour later (09:00-17:00 EDT).
+# Checked for Syracuse (43 N) all year: first wake >= 24 min after sunrise, last
+# window ends >= 16 min before sunset (late December). Pick new times for a site
+# far from this latitude. The Pi shuts itself down when its cycle ends, so 15 min
+# is only the maximum on-time.
+BEGIN 2026-01-01 08:00:00
+END   2035-01-01 23:59:59
+ON    M15
+OFF   H1 M45
+ON    M15
+OFF   H1 M45
+ON    M15
+OFF   H1 M45
+ON    M15
+OFF   H1 M45
+ON    M15
+OFF   H15 M45
