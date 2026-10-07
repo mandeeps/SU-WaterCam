@@ -159,7 +159,7 @@ The fixes are #97 (arm the next wake before the load starts) and #98 (after a po
 | Cap emergency mode (e.g. 6–8 h), then fall back to frequent scheduled wakes | Protects the battery during long events |
 | Measure the off-state draw; if the mDot dominates, consider whether it must listen overnight | Up to about 1–2 Wh/day |
 | Cache the camera's AWB gains across boots | About 5 s per wake |
-| Battery-aware scheduling | Needs a real battery measurement first: `battery_pct` comes from the Witty Pi's Vout, which mostly shows supply sag |
+| Battery-aware scheduling | Needs a real battery measurement first (see [Battery state of charge](#battery-state-of-charge)) |
 
 No longer relevant:
 - **Bigger panel:** the V50's 10 W input cap makes it pointless.
@@ -169,6 +169,54 @@ No longer relevant:
 - **Trimming the ON window:** the Pi already shuts down when its cycle ends.
 
 ---
+
+## Battery state of charge
+
+**Today the units have no way to measure it.** Units 005 and 006 have neither
+of the sensors `tools/battery_manager.py` supports (ADS1115 at 0x48, INA260 at
+0x40). Until 2026-10-07 `battery_pct` was the Witty Pi's output voltage mapped
+from 4.75 V (0 %) to 5.10 V (100 %). But the V50's 5 V output is regulated, so
+the voltage moves with load and cabling, not charge: a wall-powered unit read
+37–54 % within minutes, and the noise set off LoRa sends. Since then no
+battery percentage is sent; the Witty Pi voltage is kept for diagnostics only.
+
+### Planned: read the V50's own charge signal through the mDot
+
+The V25, V50 and V75 put about half the cell voltage on the **USB-C D+ pin**
+([Voltaic](https://blog.voltaicsystems.com/reading-charge-level-of-voltaic-usb-battery-packs/)):
+roughly 1.85–2.1 V full, and about 1.73 V when the pack turns its USB output
+off. The mDot can read it with no new chips:
+
+- **ADC pin:** `PB_0` is unconnected on the main-branch HAT and unused in
+  mDot-AT-firmware. In use: `PB_1` (Witty Pi switch, heartbeat, emergency out),
+  `PA_5` (boot), `PC_1` (Pi state), `PA_6` (emergency in), `PC_4`/`PC_5` (ID).
+  Spare ADC alternatives: `PA_1`, `PA_4`, `PA_0` (wake pin), `PA_7`.
+- **Always readable:** the mDot runs from the Witty Pi's always-on 3.3 V rail,
+  so it can read the pack while the Pi is off (a resting voltage, more accurate
+  than one under load). Its ADC reference is about 3.0 V.
+- **Wiring:** a USB-C breakout in the V50's top port with **only D+ and GND**
+  connected (never VBUS; that port is the one that sagged when charging through
+  it). D+ to `PB_0` through about 10 kΩ, with 100 nF from the pin to GND, and
+  the V50's ground shared with the HAT.
+- **Firmware:** a new AT command in mDot-AT-firmware that reads `AnalogIn(PB_0)`
+  and returns the voltage (built in Mbed Studio).
+- **Node software:** a new first path in `battery_manager.py` that asks the
+  mDot through the LoRa daemon, with the D+ to cell-voltage scale (about 2×)
+  calibrated per pack.
+- **Calibration:** run the full drain test (below) with D+ logged once a
+  minute, to map D+ to charge and set the empty point. Fix `CELL_V_MIN` while
+  doing it: 3.0 V now, but the V50 cuts out at about 3.45 V per cell.
+- **Accuracy to expect:** about ±10–15 % of charge mid-range, where a Li-ion
+  cell's voltage is flat. Better near empty, which is when it matters.
+- **v6 HAT:** add a connector for the D+ lead. The KiCad mDot symbol's pin
+  numbers don't match MultiTech's guide (PB0/PB1 are swapped, as are PA0/PA7),
+  so lay out by pin name and check the footprint.
+- **To confirm first:** that the field V50s are the "Always On" model the
+  feature is documented for.
+
+Also in `battery_manager.py`: the INA260 path ignores charging and charges the
+whole off period at the current measured at boot. Fix it before anyone fits an
+INA260.
 
 ## Still to measure
 

@@ -185,3 +185,11 @@ class TestOrientationThreshold:
         assert _sensor_packets(_run_capture(tmp_path, 20.0, orientation=(0.4, 7.3, 84.6))) == []
         moved = _sensor_packets(_run_capture(tmp_path, 20.0, orientation=(5.0, 7.0, 85.0)))
         assert len(moved) == 1 and set(moved[0]) == {"timestamp", "tilt_roll_yaw"}
+
+
+class TestMissingReadings:
+    def test_none_is_never_sent_or_stored(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"battery_percent": 39}, state_path=path)
+        assert sc.changed_fields({"battery_percent": None}, state_path=path) == {}
+        assert sc.changed_fields({"battery_percent": None}, state_path=path, everything=True) == {}

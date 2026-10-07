@@ -19,14 +19,13 @@ Three measurement paths are supported, tried in priority order:
      Requires initial calibration after a known full charge.
      BOM: INA260 #4226 + STEMMA QT cable.
 
-  3. WittyPi output voltage (rough estimate — no extra hardware required)
-     The WittyPi 4 reports the voltage it delivers to the Raspberry Pi via
-     its 5V GPIO rail. This voltage droops slowly as the Voltaic V50 depletes
-     and rises when solar charging restores the pack. The relationship is
-     non-linear and load-dependent, so the estimate is coarse but useful for
-     detecting critically low charge without additional hardware.
-     Calibrate WITTYPI_OUTPUT_V_FULL / WITTYPI_OUTPUT_V_EMPTY against
-     observed readings at known charge levels.
+  3. WittyPi output voltage (diagnostics only — no state of charge)
+     The V50's 5 V output is regulated, so the voltage the WittyPi delivers
+     moves with load and cabling, not with charge: a wall-powered unit read
+     37-54 % within minutes under the old linear mapping. The voltage and
+     current are still returned for diagnostics, but battery_pct is None, so
+     callers omit the battery channel. See docs/POWER_ANALYSIS.md for the
+     planned real signal (the V50's USB-C D+ pin read by the mDot's ADC).
 
   4. Unavailable
      No usable reading available. Returns battery_pct=None; callers omit the
@@ -60,12 +59,6 @@ CELL_V_MAX = 4.2   # cell voltage at 100% SOC
 INA260_I2C_ADDRESS = 0x40
 VOLTAIC_V50_MAH = 13500.0
 
-# ── WittyPi output-voltage constants ──────────────────────────────────────
-# The WittyPi 5V output rail droops as the Voltaic V50 depletes. These
-# bounds must be calibrated against observed readings at known charge levels.
-# The defaults below are conservative starting points; refine after deployment.
-WITTYPI_OUTPUT_V_FULL = 5.10   # output voltage (V) when battery is fully charged
-WITTYPI_OUTPUT_V_EMPTY = 4.75  # output voltage (V) when battery is nearly depleted
 # Stored in the project root so it stays within the home directory on all deployments.
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 STATE_FILE = os.path.join(_PROJECT_ROOT, "battery_state.json")
@@ -146,17 +139,17 @@ def get_battery_status(wittypi_data: Optional[dict] = None) -> dict:
             "output_current_a": None,
         }
 
-    # ── Path 3: WittyPi output voltage (rough estimate) ───────────────────
+    # ── Path 3: WittyPi output voltage (diagnostics only) ─────────────────
+    # The regulated 5 V says nothing about charge, so no battery_pct.
     wittypi_reading = _read_wittypi_output(wittypi_data)
     if wittypi_reading is not None:
         output_v, output_a = wittypi_reading
-        battery_pct = _wittypi_output_to_pct(output_v)
         logging.info(
-            "Battery (WittyPi output, rough): %d%% — %.3fV, %.3fA",
-            battery_pct, output_v, output_a,
+            "Battery: no state-of-charge sensor; WittyPi output %.3fV, %.3fA",
+            output_v, output_a,
         )
         return {
-            "battery_pct": battery_pct,
+            "battery_pct": None,
             "battery_source": "wittypi_output",
             "cell_voltage_v": None,
             "d_plus_v": None,
@@ -327,15 +320,3 @@ def _read_wittypi_output(prefetched: Optional[dict] = None) -> Optional[tuple[fl
     except Exception as e:
         logging.debug("WittyPi output read failed: %s", e)
         return None
-
-
-def _wittypi_output_to_pct(output_v: float) -> int:
-    """Estimate SOC from WittyPi output voltage, clamped [0, 100].
-
-    The mapping is linear between WITTYPI_OUTPUT_V_EMPTY and
-    WITTYPI_OUTPUT_V_FULL. Accuracy is limited because the output voltage
-    also varies with load current. Treat results as a rough indicator only.
-    Calibrate the constants against observed voltages at known charge levels.
-    """
-    pct = (output_v - WITTYPI_OUTPUT_V_EMPTY) / (WITTYPI_OUTPUT_V_FULL - WITTYPI_OUTPUT_V_EMPTY) * 100
-    return max(0, min(100, int(pct)))
