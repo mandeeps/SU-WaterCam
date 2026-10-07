@@ -80,10 +80,10 @@ A new runtime state, separate from emergency mode.
 
 **While active:**
 
-- `call_shutdown()` is skipped, without touching the emergency flags.
-- The Witty Pi's shutdown time is moved to the maintenance deadline. Skipping
-  `call_shutdown()` alone is not enough: the schedule's ON window would still end
-  the wake after 10-15 min. Setting the shutdown time, rather than clearing it
+- The emergency flags are not touched.
+- The Witty Pi's shutdown time is moved to the maintenance deadline. Stopping
+  ticktalk (and with it `call_shutdown()`) is not enough: the schedule's ON
+  window would still end the wake after 10-15 min. Setting the shutdown time, rather than clearing it
   as emergency mode does, means the Witty Pi itself enforces the limit even if
   the Pi hangs. This needs a `set_shutdown_time()` in `tools/witty_pi_4.py`.
   On exit the normal schedule is restored.
@@ -96,11 +96,27 @@ A new runtime state, separate from emergency mode.
     hotspot, and comes up on Tailscale so someone remote can use
     `tailscale ssh`. Network credentials are provisioned per node at the bench
     and kept out of the repository.
-- The capture pipeline pauses so the setup page can use the camera.
+- **The capture and segmentation workflow does not run.** While the node is
+  being configured over the hotspot, nothing captures, segments, compresses or
+  transmits flood data: `ticktalk.service` (and the legacy `watercam.service`)
+  are stopped, `segformer_daemon.service` is stopped to free memory and CPU,
+  and `button.service` is stopped because it also drives the camera. The only
+  camera use is the setup page's own preview and stills. Photos taken during
+  setup are not flood observations and are never sent as captures. Client mode
+  (remote debugging) starts with the workflow stopped too; whoever is
+  debugging can start it by hand if that is what they are testing.
 - The setup web page (section 8) is served on the Wi-Fi interface only.
-- In hotspot mode the radio is busy as an access point, so Wi-Fi is not
-  available for reporting; uplinks fall through to LoRa or cellular in the
-  usual order (#120).
+- Because ticktalk is stopped, maintenance mode runs as its own service
+  (`maintenance.service`, with `Conflicts=` on the workflow services). It keeps
+  `lora_daemon.service` running, so it can still receive a maintenance-off
+  command over LoRa and send the status uplink, and it does its own IP
+  downlink polling. If the node boots straight into maintenance mode (local
+  trigger or first boot), a runtime flag stops `ticktalk.service` from starting
+  at all.
+- With the workflow stopped, the only uplink is the maintenance status
+  message. In hotspot mode the radio is busy as an access point, so it goes
+  over LoRa, or cellular if LoRa is not joined (the order from #120 minus
+  Wi-Fi).
 
 **Leaving it**, whichever happens first:
 
@@ -115,8 +131,10 @@ A new runtime state, separate from emergency mode.
 
 On exit the hotspot (or the session's client network) goes down and Wi-Fi goes
 back to its normal role as a reporting transport, joining the networks the node
-knows during each wake. Normal capture resumes and the normal shutdown logic
-applies again.
+knows during each wake. The maintenance service starts `segformer_daemon` and
+`ticktalk` again, so capture resumes and the normal shutdown logic applies; if
+the deadline was reached, the Witty Pi shutdown ends the wake instead and the
+next scheduled wake starts normally.
 
 ## 5. Command and status message
 
