@@ -126,6 +126,17 @@ Also confirm before deploying:
 
 - `emergency_mode: false` and `debug_mode: false` — both should be off for a normal deployment
 - `ip_upload.enabled` — `true` if this site will use cellular/IP upload in addition to (or instead of) LoRa; if so, fill in `server_url` and  `api_key` for the WaterCam API server this unit reports to. This is already set for our tailnet.
+- **LoRa sensor packet:** each capture sends the capture time plus only the fields
+  that changed by 5% or more since they were last sent (`data/lora_last_sent.json`).
+  Every `lora_full_send_hours` (default 24) all fields go out, since LoRa uplinks are
+  unconfirmed and a lost packet would otherwise leave an old value on the server.
+  `always_transmit_sensors: true` sends every field every capture.
+- **Transport order** (on by default): the unit uses LoRa, WiFi if LoRa isn't
+  joined, and cellular only if neither works. For the modem to be used only on
+  demand, run `sudo nmcli connection modify Quectel connection.autoconnect no` and install
+  `config/polkit/50-watercam-networkmanager.rules` to `/etc/polkit-1/rules.d/`. Until then
+  cellular stays up all the time, as before. See
+  [IP_TRANSMISSION.md](IP_TRANSMISSION.md#transport-order-lora-wifi-cellular).
 
 ### 1.6 LoRa registration
 

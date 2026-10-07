@@ -125,6 +125,9 @@ class TTFiringRule():
         self.phase = 0
         # TODO: need to fix why the names don't match up with TT kwargs??
         self.first_delay = 0
+        # Fire the first instance as soon as its inputs arrive instead of at
+        # the next phase boundary; later instances keep the period from there.
+        self.start_on_arrival = False
 
         for key in firing_rule_args_dict.keys():
             if key == 'streaming_clock':
@@ -139,6 +142,8 @@ class TTFiringRule():
                 self.phase = firing_rule_args_dict[key]
             elif key == 'TTFirstInstanceDelay':
                 self.first_delay = firing_rule_args_dict[key]
+            elif key == 'TTStartOnArrival':
+                self.start_on_arrival = bool(firing_rule_args_dict[key])
 
 
         if self.clock is None:

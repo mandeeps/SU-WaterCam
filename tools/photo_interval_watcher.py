@@ -80,8 +80,10 @@ class PhotoIntervalWatcher:
         value = read_photo_interval(self.cfg_path)
         if value is None or value == self.applied_s:
             return None
+        # Phase None keeps the current one: the capture loop starts on arrival
+        # (TTStartOnArrival), not on a period boundary.
         self.rtm.update_periodicity(self.graph_name, self.sq_name,
-                                    value * ROOT_TICKS_PER_S, 0)
+                                    value * ROOT_TICKS_PER_S, None)
         print(f"📸 Capture period {self.applied_s}s → {value}s (photo_interval)", flush=True)
         self.applied_s = value
         return value

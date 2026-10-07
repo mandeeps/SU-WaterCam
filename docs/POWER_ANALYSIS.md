@@ -1,7 +1,8 @@
 # WaterCam Power Budget
 
-**Updated:** 2026-10-04, from bench measurements on units 005 and 006 running
-current `main`, and the field investigation in
+**Updated:** 2026-10-06, from bench measurements on units 005 and 006 running
+current `main` (006 at stock clocks on the packaged kernel since 2026-10-06),
+and the field investigation in
 [UNIT006_POWER_FAILURE.md](UNIT006_POWER_FAILURE.md).
 
 Every figure below is marked **measured** or **estimate**. The estimates are
@@ -33,13 +34,39 @@ All figures are the Witty Pi's output (Vout × Iout), from the power logger
 | State | Power | Source |
 |---|---|---|
 | Idle, booted, no work | **2.0 W** (0.40 A at 4.90 V) | measured: 005, median of 1,076 samples, no modem |
-| Idle with the LTE modem attached | **2.6 W** (0.53 A at 4.89 V) | measured: 006, median of 2,792 samples |
-| During a capture cycle | **3.0–5.2 W** | measured: seven one-minute samples taken during test cycles on 005 and 006 |
-| Brief peaks (camera, inference, modem transmit) | **8–10 W** (1.8–2.2 A) | measured: 006 load tests |
+| Idle, 006 (has the LTE modem) | **2.6 W** (0.53 A at 4.89 V) | measured: 006, median of 2,792 samples. This is a difference between units, not the modem's draw: see [The LTE modem](#the-lte-modem) |
+| Two captures, from the first photo to the shutdown request | **3.3–3.8 W** mean, **75–87 mWh** in 73–87 s | measured: five real ticktalk wakes on 006, 2026-10-06, sampled at 5 Hz |
+| Peaks during a real wake | **7.5–8 W** (1.50–1.67 A) | measured: same five wakes, stock clocks |
+| Brief peaks under synthetic load (camera, inference, 4-core stress, modem) | **8–10 W** (1.8–2.2 A) | measured: 006 load tests at 2000 MHz |
 | Off: Witty Pi standby plus the mDot listening | **about 0.05–0.1 W** | estimate: not yet measured |
 
-The one-minute logger is too coarse to integrate a two-minute wake accurately,
-so the per-wake energy below is an estimate built from these figures.
+The one-minute logger is too coarse to integrate a wake, so the 2026-10-06
+figures come from a 5 Hz sampler of the same Witty Pi registers. The sampler
+itself adds some load, which is in every one of those figures equally.
+
+### The LTE modem
+
+*Measured* on 006, 2026-10-06: five real ticktalk wakes (shutdown intercepted,
+so the unit stayed on) with the modem attached or in low power (`AT+CFUN=4`
+through ModemManager), uploading over WiFi or cellular.
+
+| Run | Two captures | Mean | Peak |
+|---|---|---|---|
+| Modem attached, WiFi upload (×2) | 78–79 mWh | 3.7–3.8 W | 1.59–1.67 A |
+| Modem in low power, WiFi upload (×2) | 76–87 mWh | 3.6–3.7 W | 1.50–1.63 A |
+| Modem attached, cellular upload | 75 mWh | 3.3 W | 1.59 A |
+| Cellular on its own: attach, reach the server, back to low power (×2) | 9–53 mWh | 2.8–3.9 W | 1.0 A |
+
+- **An attached, idle modem draws less than the Witty Pi resolves** (about
+  0.05 W). Idle was 3.22 W with it attached or in low power, and low power
+  didn't lower the peaks either. GPS kept working in low power.
+- **Re-attaching took 3 s once and 51 s the next time.**
+- **WiFi may cost more than the modem:** with WiFi disconnected, idle fell to
+  about 2.6–2.9 W. That comes from a single session and needs confirming.
+- **Cellular costs data, not power:** 126–474 KB for a wake over cellular, of
+  which our own traffic is about 10 KB; the rest is Tailscale
+  ([CELLULAR_DATA.md](CELLULAR_DATA.md)). This is why cellular is the last resort
+  ([IP_TRANSMISSION.md](IP_TRANSMISSION.md#transport-order-lora-wifi-cellular)).
 
 ---
 
@@ -49,13 +76,16 @@ so the per-wake energy below is an estimate built from these figures.
 |---|---|---|
 | Boot (kernel and userspace) | 11 s | measured: `systemd-analyze` on 005 and 006 |
 | Next-wake alarm armed, `ticktalk` starts | about 15 s after boot | measured on 006 when testing #97 |
-| Wait for the first capture (captures fall on `photo_interval` boundaries, 60 s by default) | 0–60 s, 30 s on average | from the code |
+| Wait for the first capture | none since 2026-10-07: it starts as soon as the sensors are up (`TTStartOnArrival`, `tools/wait_for_sensors.py`); before, it waited for the next minute boundary, 0–60 s, 30 s on average | from the code |
 | Two captures 60 s apart (`shutdown_iteration_limit` 2). Each runs photo, co-registration, segmentation (1.6 s via the daemon), compression and transmit, and finishes within about 15 s. | about 75 s | measured: 005 and 006 |
 | Shutdown request after the last capture | `ticktalk` start to shutdown request: **1 min 48 s** | measured: 005 and 006, 2026-10-04 |
 | Shutdown | about 10 s | estimate |
 
-**A wake lasts about 2.5 minutes (2–3 min).** At an average of about 4 W, that
-is **about 0.17 Wh per wake** (0.12–0.25 Wh). *Estimate.*
+**A wake lasts about 2 minutes, about 0.12 Wh** (0.11–0.13 Wh).
+*Partly measured:* the two captures are 75–87 mWh (above). Boot and shutdown
+are estimated at about 35 mWh, as they weren't sampled. Until 2026-10-07 the
+first capture also waited for the next minute boundary, at about 3.3 W: about
+28 mWh on average, which made a wake about 0.14 Wh.
 
 The Witty Pi schedule's ON window (10 or 15 min) is only a maximum: the Pi
 shuts itself down when the cycle ends. Energy depends on the number of wakes,
@@ -75,8 +105,8 @@ its own, so it matters as much as the wakes do.
 
 | Schedule | Wakes/day | Wakes | Off-state | Total |
 |---|---|---|---|---|
-| `watercam_on15_off1h45_offnight.wpi` (every 2 h, 06:00–22:00) | 9 | 1.5 Wh | 1.2–2.4 Wh | **about 3–4 Wh/day** |
-| `watercam_10minutes_per_hour.wpi` | 24 | 4.1 Wh | 1.2–2.4 Wh | **about 5–6.5 Wh/day** |
+| `watercam_on15_off1h45_offnight.wpi` (every 2 h, 06:00–22:00) | 9 | 1.1 Wh | 1.2–2.4 Wh | **about 2.5–3.5 Wh/day** |
+| `watercam_10minutes_per_hour.wpi` | 24 | 2.9 Wh | 1.2–2.4 Wh | **about 4–5.5 Wh/day** |
 
 **These are best cases.** The schedules assume every wake ends with a clean
 shutdown.
@@ -118,7 +148,7 @@ The fixes are #97 (arm the next wake before the load starts) and #98 (after a po
 
 - **Clocks:** stock clocks (`arm_freq=1800`) lower the peak current. On 006, 2000 MHz plus the modem browned out the Pi even on a healthy supply. The old advice that overclocking saves energy by finishing sooner no longer holds: inference takes 1.6 s.
 - **Wiring:** keep the Y-adapter, so the load is spread across both V50 A ports. Never charge through the V50's top USB-C port while it powers a unit.
-- **Overlap:** keep modem uploads from overlapping capture and inference.
+- **Overlap:** the IP upload runs after LoRa, once segmentation is done. On 006 the wake's peaks were the same with the modem attached or in low power, so the modem isn't what drives them at stock clocks.
 
 ---
 
@@ -135,6 +165,7 @@ No longer relevant:
 - **Bigger panel:** the V50's 10 W input cap makes it pointless.
 - **INT8 or ONNX for speed:** done.
 - **Powering the modem down between cycles:** the Pi and modem are fully off between wakes, and only on for about 2.5 minutes.
+- **Keeping the modem in low power during a wake:** measured, no saving (see [The LTE modem](#the-lte-modem)).
 - **Trimming the ON window:** the Pi already shuts down when its cycle ends.
 
 ---
@@ -142,6 +173,7 @@ No longer relevant:
 ## Still to measure
 
 1. **Off-state draw:** the Witty Pi plus the mDot listening in Class C, with the Pi off.
-2. **Energy per wake:** with a logger sampling at least once a second, to replace the 0.17 Wh estimate.
-3. **Solar charging through the V50's side port:** a load test while it charges from the real panel in sun.
-4. **Winter yield** at the 10 W input cap.
+2. **Energy per wake, boot and shutdown included:** the captures were sampled at 5 Hz on 2026-10-06; boot and shutdown weren't.
+3. **WiFi's draw:** idle looked about 0.3–0.6 W lower with WiFi disconnected, in one session.
+4. **Solar charging through the V50's side port:** a load test while it charges from the real panel in sun.
+5. **Winter yield** at the 10 W input cap.

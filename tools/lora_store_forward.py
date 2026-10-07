@@ -145,6 +145,39 @@ def drain(
     return result
 
 
+def remove_delivered(
+    delivered_ts,
+    *,
+    queue_dir: str = DEFAULT_QUEUE_DIR,
+) -> int:
+    """Drop entries whose capture was already delivered over IP.
+
+    Entries are named by their capture time (tools/capture_time.py), which is
+    also the IP reading's device_ts, so a match is exact.  Returns the number
+    removed (never raises).
+    """
+    wanted = {int(ts) for ts in delivered_ts}
+    try:
+        entries = sorted(f for f in os.listdir(queue_dir) if f.endswith(".json"))
+    except FileNotFoundError:
+        return 0
+    removed = 0
+    for fname in entries:
+        try:
+            captured = int(fname.split("_", 1)[0])
+        except ValueError:
+            continue
+        if captured not in wanted:
+            continue
+        try:
+            os.unlink(os.path.join(queue_dir, fname))
+            removed += 1
+            logger.info("LoRa S&F: %s already delivered over IP, removed", fname)
+        except OSError:
+            pass
+    return removed
+
+
 def queue_depth(queue_dir: str = DEFAULT_QUEUE_DIR) -> int:
     """Return the number of pending queue files."""
     try:

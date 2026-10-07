@@ -8,6 +8,7 @@
   "emergency_mode": false,
   "debug_mode": false,
   "always_transmit_sensors": false,
+  "lora_full_send_hours": 24,
 
   "max_retransmissions": 3,
   "auto_shutdown_enabled": true,
@@ -24,6 +25,9 @@
     "retry_attempts": 3,
     "retry_backoff_s": 2,
     "fallback_to_lora": true,
+    "only_if_lora_unavailable": true,
+    "cellular_connection": "Quectel",
+    "cellular_connect_timeout_s": 90,
     "downlink_poll_interval_s": 60,
     "max_queue_depth": 48,
     "max_queue_age_days": 7

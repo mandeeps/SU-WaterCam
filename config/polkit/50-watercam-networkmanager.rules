@@ -1,0 +1,9 @@
+// ticktalk runs as pi with no login session, so polkit would refuse it.
+// It brings the LTE connection up and down itself when WiFi can't reach the
+// server (ip_upload.cellular_connection). Install to /etc/polkit-1/rules.d/.
+polkit.addRule(function (action, subject) {
+    if (action.id == "org.freedesktop.NetworkManager.network-control" &&
+        subject.user == "pi") {
+        return polkit.Result.YES;
+    }
+});

@@ -157,21 +157,16 @@ def update_sensor_tracker(tracker, sensor_data, transmission_result):
     return tracker
 
 @SQify
-def lora_token_with_tracker(bitmap, sensor_tracker):
+def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     """
-    Enhanced LoRa transmission function that uses sensor tracker to only transmit changed values
+    Send this capture over LoRa: one sensor packet with the capture time and the
+    fields that changed past the threshold since they were last sent, then the
+    bitmap. If the mDot isn't joined, both are queued for store-and-forward.
     """
-    import time as _time
-    from ticktalkpython.Clock import TTClock
-    from ticktalkpython.TTToken import TTToken
-    from ticktalkpython.Time import TTTime
-    import pickle
 
-    from tools.lora_handler_concurrent import get_lora_handler, get_config_value, transmit_data, transmit_binary, compressed_encoding
+    from tools.lora_handler_concurrent import get_lora_handler, get_config_value
     from tools import lora_store_forward as _lsf
 
-    from ticktalkpython.Tag import TTTag
-    from ticktalkpython import NetworkInterfaceLoRa
     from tools.bno055_imu import get_orientation
     from tools.aht20_temperature import get_aht20
     from tools.get_gps import get_location_with_retry
@@ -179,14 +174,9 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     # Helper functions are now imported at module level
 
     # LoRa transmission is always enabled
-    captured_at = _time.time()
-
-    root_clock = TTClock.root()
-    # Create a time-tagged token using that interval and the derived clock
-    time_1 = TTTime(root_clock, 2, 1024)
-    recipient_device = 0xFF
-    context = 1
-    sq_name = 4
+    # The capture time is the capture's ID on every transport (tools/capture_time.py).
+    from tools.capture_time import capture_time
+    captured_at = capture_time(dirname)
 
     # Get sensor data
     try:
@@ -267,22 +257,18 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
     if always_transmit_sensors:
         print(f"📡 always_transmit_sensors=True: bypassing sensor change check")
     sensors_to_transmit = {}
+    full_send = False
     if sensor_tracker and not always_transmit_sensors:
         try:
-            for _sname, _cur in data.items():
-                if not isinstance(_cur, (int, float)) or _sname in ['timestamp', 'error']:
-                    continue
-                _prev = sensor_tracker['previous_values'].get(_sname)
-                if _prev is None:
-                    sensors_to_transmit[_sname] = {'current_value': _cur, 'previous_value': None,
-                                                    'change_percent': 100.0, 'reason': 'first_reading'}
-                    sensor_tracker['previous_values'][_sname] = _cur
-                else:
-                    _pct = abs((_cur - _prev) / _prev) if _prev != 0 else (100.0 if _cur != 0 else 0.0)
-                    if _pct >= sensor_tracker['change_threshold']:
-                        sensors_to_transmit[_sname] = {'current_value': _cur, 'previous_value': _prev,
-                                                        'change_percent': _pct * 100, 'reason': 'threshold_exceeded'}
-                    sensor_tracker['previous_values'][_sname] = _cur
+            # Compared with the values last sent, kept on disk: the tracker token
+            # is a fresh copy every capture, and the Pi powers off between wakes.
+            # Every lora_full_send_hours, all fields go out (LoRa is unconfirmed).
+            from tools.sensor_changes import changed_fields, full_send_due
+            full_send = full_send_due(get_parameter('lora_full_send_hours', 24))
+            if full_send:
+                print("📡 Periodic full send: all sensor fields this capture")
+            sensors_to_transmit = changed_fields(
+                data, threshold=sensor_tracker.get('change_threshold', 0.05), everything=full_send)
             print(f"📊 Sensor change check: {len(sensors_to_transmit)} sensors qualify for transmission")
         except Exception as e:
             print(f"⚠️ Failed to check sensor changes: {e}")
@@ -325,11 +311,13 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
                 _bitmap_hex = handler.compressed_encoding({'flood_bitmap_compressed': bitmap}).hex()
         except Exception as _e:
             print(f"⚠️ S&F: bitmap encode failed: {_e}")
-        _lsf.enqueue(
+        if _lsf.enqueue(
             _sensor_hex, _bitmap_hex, captured_at,
             max_depth=get_config_value('lora_sf_max_depth', 96),
             max_age_days=get_config_value('lora_sf_max_age_days', 7),
-        )
+        ) and _sensor_hex:
+            from tools.sensor_changes import mark_sent
+            mark_sent(_sf_data, full=full_send)
         print(f"📦 LoRa not joined — data queued (depth: {_lsf.queue_depth()})")
         return bitmap
 
@@ -340,7 +328,9 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
         try:
             # Filter data to only include sensors that changed significantly
             if sensor_tracker and sensors_to_transmit:
-                filtered_data = {k: v for k, v in data.items() if k in sensors_to_transmit}
+                # The capture time goes in every sensor packet: it is the capture's ID.
+                filtered_data = {k: v for k, v in data.items()
+                                 if k in sensors_to_transmit or k == 'timestamp'}
                 transmission_result['transmitted_sensors'] = list(sensors_to_transmit.keys())
                 transmission_result['change_percent'] = {k: v.get('change_percent', 0) for k, v in sensors_to_transmit.items()}
                 print(f"📡 Transmitting {len(filtered_data)} sensors with significant changes")
@@ -351,63 +341,13 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
             
             handler.queue_transmit(filtered_data)
             handler.process_transmit_queue()
+            from tools.sensor_changes import mark_sent
+            mark_sent(filtered_data, full=full_send)
             
         except Exception as e:
             print(f"⚠️ Failed to transmit sensor data: {e}")
     else:
         print(f"📊 No sensor changes detected - skipping sensor data transmission")
-
-    # Transmit TTToken with full encoded sensor data embedded (preserve headers)
-    try:
-        enc_data = compressed_encoding(data)
-        print(f"🔧 Encoded sensor data: {len(enc_data)} bytes")
-        
-        # Create TTToken with full encoded sensor data (not compressed)
-        token_1 = TTToken(enc_data, time_1, False,
-        TTTag(context, sq_name, 4, recipient_device))
-        
-        # Create LoRa message to preserve headers, but modify it to keep full data
-        lora_msg = NetworkInterfaceLoRa.TTLoRaMessage(token_1, recipient_device)
-        
-        # Instead of calling encode_token() which compresses, we'll manually construct
-        # the packet with headers + full sensor data
-        try:
-            # Get the header information from the LoRa message
-            header_data = lora_msg.generate_header_values()
-            
-            # Combine headers with the full encoded sensor data
-            from bitstring import BitArray
-            byte_payload = BitArray()
-            
-            # Add headers (this preserves routing information)
-            header_entries = ['sq', 'port', 'context', 'device', 'start_tick', 'stop_tick']
-            for header_entry_name in header_entries:
-                if header_entry_name in header_data:
-                    byte_payload += header_data[header_entry_name]
-            
-            # Add the full encoded sensor data (not compressed)
-            byte_payload += BitArray(enc_data)
-            
-            # Convert to bytes and transmit
-            full_packet = byte_payload.tobytes()
-            packet = full_packet.hex()
-            handler.queue_binary_transmit(packet)
-            handler.process_transmit_queue()
-            
-            print(f"✅ TTToken transmitted with {len(enc_data)} bytes of sensor data + headers")
-            print(f"📊 Total packet size: {len(full_packet)} bytes (headers + sensor data)")
-            
-        except Exception as header_error:
-            print(f"⚠️ Header preservation failed, falling back to direct transmission: {header_error}")
-            # Fallback: transmit just the sensor data directly
-            token_bytes = enc_data
-            packet = token_bytes.hex()
-            handler.queue_binary_transmit(packet)
-            handler.process_transmit_queue()
-            print(f"✅ TTToken transmitted with {len(enc_data)} bytes of sensor data (fallback)")
-            
-    except Exception as e:
-        print(f"⚠️ Failed to transmit TTToken with sensor data: {e}")
 
     if not bitmap:
         print("[lora_token_with_tracker] No bitmap data to transmit")
@@ -416,6 +356,9 @@ def lora_token_with_tracker(bitmap, sensor_tracker):
             # TLV-wrap as channel 0x08 type 0x18 so ChirpStack codec can decode it.
             # compressed_encoding({'flood_bitmap_compressed': bitmap}) produces:
             #   08 18 [len 2B BE] [bitmap bytes]
+            # No capture time, to keep every byte for the bitmap: it goes out right
+            # after the sensor packet (which carries the capture time), and the
+            # API pairs the two by LoRaWAN frame counter.
             handler.queue_transmit({'flood_bitmap_compressed': bitmap})
             print(f"[lora_token_with_tracker] Bitmap queued: {len(bitmap)}B → TLV 08 18")
             handler.process_transmit_queue()
@@ -668,10 +611,12 @@ def get_time(trigger):
     from os import path, makedirs, environ
     repo_root = environ.get("WATERCAM_REPO", "/home/pi/SU-WaterCam")
     try:
-        date = datetime.now().strftime('%Y%m%d-%H%M%S')
-        directory = path.join(repo_root, "images", date)
+        from tools.capture_time import write_capture_time
+        now = datetime.now()
+        directory = path.join(repo_root, "images", now.strftime('%Y%m%d-%H%M%S'))
         if not path.exists(directory):
             makedirs(directory)
+        write_capture_time(directory, now.timestamp())
         return directory
     except Exception as e:
         print(f"Failed to create directory: {e}")
@@ -1660,7 +1605,7 @@ def log_sensor_tracking_stats(sensor_tracker):
         return {'status': 'error', 'error': str(e)}
 
 @SQify
-def ip_uplink_transmit(bitmap, _sensor_tracker):
+def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     """Send a subset of sensor readings and the flood bitmap to the FastAPI server over IP.
 
     Encodes the following channels as channel-coded hex blocks and POSTs to
@@ -1674,16 +1619,27 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
     entries are drained oldest-first before the live reading is sent.
 
     Disabled by default — set ip_upload.enabled=true in runtime_config.json to
-    activate.  Runs after the LoRa path in the wake cycle; both paths share the
-    same sensor snapshot but neither affects the other's outcome.
+    activate.  Runs after the LoRa path in the wake cycle, and the shutdown
+    waits for it.  Transport order LoRa -> WiFi -> cellular:
+    - ip_upload.only_if_lora_unavailable (default true) skips IP while the
+      mDot is joined.
+    - ip_upload.cellular_connection (default "Quectel") is the NetworkManager
+      connection brought up when the server can't be reached otherwise.  Once
+      up it stays up for the session, but is taken down as soon as LoRa joins
+      or WiFi reconnects.  Only a connection with autoconnect off is managed;
+      one that autoconnects is left alone.
+    Readings delivered over IP are removed from the LoRa store-and-forward
+    queue, so they aren't sent twice once LoRa joins.
 
     Returns a status dict (never raises) so a failure here never stops the main
     workflow.
     """
     import struct
     import time as _time
-    from tools.transmit_ip import IPTransmitter
-    from tools.lora_runtime_integration import get_parameter
+    from tools.transmit_ip import (IPTransmitter, apply_downlink_command, cellular_status,
+                                   cellular_up, cellular_down, wifi_connected)
+    from tools import lora_store_forward as _lsf
+    from tools.lora_runtime_integration import get_parameter, set_parameter
 
     tx = IPTransmitter()
 
@@ -1692,13 +1648,38 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
         tx.close()
         return {"status": "disabled", "success": False}
 
+    cell = tx.cellular_connection
+    cell_status = cellular_status(cell) if cell else {"exists": False, "active": False, "autoconnect": False}
+    on_demand = cell_status["exists"] and not cell_status["autoconnect"]
+    cellular_active = on_demand and cell_status["active"]
+
+    if tx.only_if_lora_unavailable:
+        try:
+            from tools.lora_handler_concurrent import get_lora_handler
+            handler = get_lora_handler()
+            lora_joined = handler is not None and handler.is_joined()
+        except Exception as e:
+            print(f"⚠️ IP uplink: LoRa join state unknown ({e}) — sending over IP")
+            lora_joined = False
+        if lora_joined:
+            if cellular_active:
+                cellular_down(cell)
+                print(f"📶 LoRa is back — {cell} taken down")
+            print("📡 LoRa is joined — IP uplink not needed this cycle")
+            tx.close()
+            return {"status": "skipped_lora_joined", "success": False}
+
+    cellular_started = False
     try:
         # ── Collect sensor data ────────────────────────────────────────────────
         # Sensor collection is done BEFORE the reachability check so that a
         # reading can be queued to disk when the server is temporarily down.
         # IMU orientation is not transmitted (no 03 01 channel encoded below).
         data = {}
-        ts_now = int(_time.time())
+        # The capture time, same as the LoRa packet's: the server drops
+        # whichever copy of a capture arrives second.
+        from tools.capture_time import capture_time
+        ts_now = capture_time(dirname)
 
         try:
             from tools.aht20_temperature import get_aht20
@@ -1807,16 +1788,34 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
                              _u32(data['audio_recording_enabled'])).hex()})
 
         # ── Reachability check (after data is ready so we can queue on failure) ─
-        if not tx.is_reachable(timeout_s=5):
+        # WiFi first; cellular only as the last resort.  A cellular session
+        # left up by an earlier cycle gives way as soon as WiFi is back.
+        if cellular_active and wifi_connected():
+            cellular_down(cell)
+            cellular_active = False
+            print(f"📶 WiFi is back — {cell} taken down")
+        reachable = tx.is_reachable(timeout_s=5)
+        if not reachable and on_demand and not cellular_active:
+            print(f"📶 IP uplink: server unreachable — bringing up {cell}")
+            cellular_started = cellular_up(cell, tx.cellular_connect_timeout_s)
+            # Tailscale needs a few seconds to find a path over the new link.
+            reachable = cellular_started and tx.wait_reachable(30)
+            if cellular_started and not reachable:
+                cellular_down(cell)   # no use to us, and Tailscale would keep using data
+                cellular_started = False
+        if not reachable:
             print(f"⚠️ IP uplink: server unreachable at {tx.server_url} — queuing reading")
             tx._enqueue(channels, ts_now)
             return {"status": "queued", "success": False, "channels_queued": len(channels)}
 
         # ── Drain any previously queued readings ───────────────────────────────
         drain = tx._drain_queue()
+        delivered_ts = list(drain.get("drained_ts", []))
         if drain["drained"]:
             print(f"✅ IP uplink: drained {drain['drained']} queued reading(s)")
         if drain["failed"]:
+            if delivered_ts:
+                _lsf.remove_delivered(delivered_ts)
             print(f"⚠️ IP uplink: drain failed on {drain['failed_file']} — queuing live reading")
             tx._enqueue(channels, ts_now)
             return {
@@ -1832,7 +1831,13 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
         if result["success"]:
             print(f"✅ IP uplink OK: {len(channels)} channels sent "
                   f"(attempt {result.get('attempts', '?')})")
-        else:
+            delivered_ts.append(ts_now)
+        if delivered_ts:
+            # Delivered over IP: don't send the same captures again over LoRa.
+            removed = _lsf.remove_delivered(delivered_ts)
+            if removed:
+                print(f"📦 S&F: removed {removed} LoRa entr{'y' if removed == 1 else 'ies'} already delivered over IP")
+        if not result["success"]:
             print(f"⚠️ IP uplink failed after {result.get('attempts', '?')} attempt(s): "
                   f"{result.get('error', 'unknown error')} — queuing reading")
             tx._enqueue(channels, ts_now)
@@ -1850,6 +1855,17 @@ def ip_uplink_transmit(bitmap, _sensor_tracker):
         print(f"⚠️ IP uplink: unexpected error: {exc}")
         return {"status": "error", "success": False, "error": str(exc)}
     finally:
+        if cellular_started:
+            # The wake-start downlink poll had no route; collect any command now.
+            # The connection stays up for the session (see the docstring).
+            try:
+                reply = tx.poll_downlink()
+                if reply["success"] and reply.get("command"):
+                    dispatch = apply_downlink_command(reply["command"], set_param_fn=set_parameter)
+                    print(f"📬 IP downlink over cellular: applied {dispatch['applied']}, "
+                          f"skipped {dispatch['skipped']}")
+            except Exception as exc:
+                print(f"⚠️ IP downlink over cellular failed: {exc}")
         tx.close()
 
 
@@ -1938,7 +1954,7 @@ def ttmain(trigger):
         monitoring_params = adaptive_monitoring()
         
         # Call get_time as STREAM function to get directory name
-        token, dirname = get_time(trigger, TTClock=root_clock, TTPeriod=60_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000)
+        token, dirname = get_time(trigger, TTClock=root_clock, TTPeriod=60_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000, TTStartOnArrival=True)
 
         # Start this iteration's audio segment (USB microphone), if enabled
         audio_status = record_audio(trigger, dirname)
@@ -1969,15 +1985,16 @@ def ttmain(trigger):
         sensor_tracker = create_sensor_tracker()
         
         # Use sensor tracker for intelligent LoRa transmission
-        lora_return = lora_token_with_tracker(bitmap, sensor_tracker)
+        lora_return = lora_token_with_tracker(bitmap, sensor_tracker, dirname)
 
         # IP uplink — sends the same sensor snapshot + bitmap to the FastAPI
-        # server over WiFi/cellular.  Runs sequentially after lora_return.
+        # server over WiFi/cellular.  Takes lora_return (the bitmap) so it runs
+        # after LoRa, and the shutdown waits for it so an upload is never cut off.
         # No-ops silently when disabled; a failure here does not affect LoRa.
-        ip_return = ip_uplink_transmit(bitmap, sensor_tracker)
+        ip_return = ip_uplink_transmit(lora_return, sensor_tracker, dirname)
 
         # Shutdown check at GRAPH level
-        shutdown_result = call_shutdown(lora_return)
+        shutdown_result = call_shutdown(ip_return)
         
         # Create workflow data structure
         workflow_data = create_workflow_data(monitoring_params, dirname, photo, lepton_file, coreg_state, seg_result, bitmap, lora_return, shutdown_result)

@@ -68,7 +68,7 @@ def test_applies_a_change_once_in_root_ticks(tmp_path):
     assert w.check_once() is None            # 60 s is what the graph was compiled with
     _write(cfg, photo_interval=120)
     assert w.check_once() == 120
-    assert rtm.calls == [("ttmain", "get_time-4", 120_000_000, 0)]
+    assert rtm.calls == [("ttmain", "get_time-4", 120_000_000, None)]
     assert w.check_once() is None            # unchanged file: no second update
     _write(cfg, photo_interval=120, area_threshold=40)
     assert w.check_once() is None            # file changed, period didn't
