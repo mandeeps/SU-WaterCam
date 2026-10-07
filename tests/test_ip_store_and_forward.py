@@ -125,13 +125,13 @@ class TestDrainEmpty:
     def test_missing_dir_returns_zero(self, tmp_path):
         tx = _make_tx(tmp_path)
         result = tx._drain_queue()
-        assert result == {"drained": 0, "failed": False, "failed_file": None}
+        assert result == {"drained": 0, "failed": False, "failed_file": None, "drained_ts": []}
 
     def test_empty_dir_returns_zero(self, tmp_path):
         tx = _make_tx(tmp_path)
         os.makedirs(tx._queue_dir)
         result = tx._drain_queue()
-        assert result == {"drained": 0, "failed": False, "failed_file": None}
+        assert result == {"drained": 0, "failed": False, "failed_file": None, "drained_ts": []}
 
 
 # ── drain: age eviction ────────────────────────────────────────────────────────
@@ -331,7 +331,7 @@ class TestIPUplinkTransmitIntegration:
         ctx = [p.__enter__() for p in patches.values()]
         try:
             result = ticktalk_main.ip_uplink_transmit.__wrapped__(
-                bitmap=bitmap or [], _sensor_tracker=None
+                bitmap=bitmap or [], _sensor_tracker=None, dirname=None
             )
         finally:
             for i, p in enumerate(patches.values()):
@@ -344,6 +344,8 @@ class TestIPUplinkTransmitIntegration:
         with patch("tools.transmit_ip.IPTransmitter") as MockTx:
             instance = MockTx.return_value
             instance.enabled = True
+            instance.only_if_lora_unavailable = False
+            instance.cellular_connection = ""
             instance.is_reachable.return_value = False
             instance._enqueue.return_value = True
             instance._queue_dir = qdir
@@ -354,7 +356,7 @@ class TestIPUplinkTransmitIntegration:
                 p.__enter__()
             try:
                 result = ticktalk_main.ip_uplink_transmit.__wrapped__(
-                    bitmap=[], _sensor_tracker=None
+                    bitmap=[], _sensor_tracker=None, dirname=None
                 )
             finally:
                 for p in patches.values():
@@ -369,6 +371,8 @@ class TestIPUplinkTransmitIntegration:
         with patch("tools.transmit_ip.IPTransmitter") as MockTx:
             instance = MockTx.return_value
             instance.enabled = True
+            instance.only_if_lora_unavailable = False
+            instance.cellular_connection = ""
             instance.is_reachable.return_value = True
             instance._drain_queue.return_value = {"drained": 0, "failed": False, "failed_file": None}
             instance.send_uplink.return_value = _failure()
@@ -380,7 +384,7 @@ class TestIPUplinkTransmitIntegration:
                 p.__enter__()
             try:
                 result = ticktalk_main.ip_uplink_transmit.__wrapped__(
-                    bitmap=[], _sensor_tracker=None
+                    bitmap=[], _sensor_tracker=None, dirname=None
                 )
             finally:
                 for p in patches.values():
@@ -394,6 +398,8 @@ class TestIPUplinkTransmitIntegration:
         with patch("tools.transmit_ip.IPTransmitter") as MockTx:
             instance = MockTx.return_value
             instance.enabled = True
+            instance.only_if_lora_unavailable = False
+            instance.cellular_connection = ""
             instance.is_reachable.return_value = True
             instance._drain_queue.return_value = {
                 "drained": 0, "failed": True, "failed_file": "0000001000_000000.json"
@@ -405,7 +411,7 @@ class TestIPUplinkTransmitIntegration:
                 p.__enter__()
             try:
                 result = ticktalk_main.ip_uplink_transmit.__wrapped__(
-                    bitmap=[], _sensor_tracker=None
+                    bitmap=[], _sensor_tracker=None, dirname=None
                 )
             finally:
                 for p in patches.values():
@@ -420,6 +426,8 @@ class TestIPUplinkTransmitIntegration:
         with patch("tools.transmit_ip.IPTransmitter") as MockTx:
             instance = MockTx.return_value
             instance.enabled = True
+            instance.only_if_lora_unavailable = False
+            instance.cellular_connection = ""
             instance.is_reachable.return_value = True
             instance._drain_queue.return_value = {"drained": 2, "failed": False, "failed_file": None}
             instance.send_uplink.return_value = _success()
@@ -430,7 +438,7 @@ class TestIPUplinkTransmitIntegration:
                 p.__enter__()
             try:
                 result = ticktalk_main.ip_uplink_transmit.__wrapped__(
-                    bitmap=[], _sensor_tracker=None
+                    bitmap=[], _sensor_tracker=None, dirname=None
                 )
             finally:
                 for p in patches.values():
@@ -448,7 +456,7 @@ class TestIPUplinkTransmitIntegration:
             instance.enabled = False
 
             result = ticktalk_main.ip_uplink_transmit.__wrapped__(
-                bitmap=[], _sensor_tracker=None
+                bitmap=[], _sensor_tracker=None, dirname=None
             )
 
         assert result["status"] == "disabled"

@@ -57,6 +57,9 @@ from .Constants import get_readable_time
 
 logger = DebugLogger.get_logger('SQSync')
 
+# TTStartOnArrival: how far after a stream's first input it fires (10 ms).
+START_ON_ARRIVAL_LEAD_TICKS = 10_000
+
 
 class TTSQSync:
     '''
@@ -410,6 +413,14 @@ class TTSQSync:
                     assert clock.is_root(
                     ), 'We should only be using the root clock for the stream-generators.'
 
+                    if getattr(self.firing_rule, 'start_on_arrival', False):
+                        # Move the phase to just after now, so the first
+                        # instance runs immediately and the rest follow it
+                        # every period. (A phase of exactly now would wait a
+                        # whole period; see calculate_next_trigger_time.)
+                        self.firing_rule.phase = (
+                            clock.now() + START_ON_ARRIVAL_LEAD_TICKS
+                        ) % self.firing_rule.period
                     next_trigger_time = self.calculate_next_trigger_time()
 
                     logger.debug(

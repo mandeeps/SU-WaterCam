@@ -49,7 +49,10 @@ Add or edit the `ip_upload` block:
   "timeout_s": 15,
   "retry_attempts": 3,
   "retry_backoff_s": 2,
-  "fallback_to_lora": true
+  "fallback_to_lora": true,
+  "only_if_lora_unavailable": true,
+  "cellular_connection": "Quectel",
+  "cellular_connect_timeout_s": 90
 }
 ```
 
@@ -63,6 +66,9 @@ Add or edit the `ip_upload` block:
 | `retry_attempts` | int | Max POST attempts before giving up (backoff between attempts). |
 | `retry_backoff_s` | float | Base sleep between retries. Before attempt N, waits `retry_backoff_s * 2^(N-1)` seconds (exponential backoff). |
 | `fallback_to_lora` | bool | Intent flag for the TickTalkPython integration layer: if IP fails, fall back to LoRa. Not enforced by `transmit_ip.py` itself. |
+| `only_if_lora_unavailable` | bool | Default `true`: skip the IP uplink while the mDot is joined (LoRa first). `false` sends over both. |
+| `cellular_connection` | str | Default `"Quectel"`: the LTE modem's NetworkManager connection, brought up only when the server can't be reached over WiFi. Managed only if its autoconnect is off. `""` leaves the modem alone. See [Transport order](#transport-order-lora-wifi-cellular). |
+| `cellular_connect_timeout_s` | int | How long `nmcli` may take to bring the connection up (default 90; re-attaching took 3–51 s on 006). |
 
 ---
 
@@ -333,12 +339,68 @@ is intentionally omitted (no `03 01` channel).  Called from `ttmain` immediately
 after `lora_return`:
 
 ```python
-lora_return = lora_token_with_tracker(bitmap, sensor_tracker)  # existing
-ip_return   = ip_uplink_transmit(bitmap, sensor_tracker)       # NEW — parallel
+lora_return = lora_token_with_tracker(bitmap, sensor_tracker)
+ip_return   = ip_uplink_transmit(lora_return, sensor_tracker)  # lora_return is the bitmap
+shutdown_result = call_shutdown(ip_return)
 ```
 
-Both branches receive the same `bitmap` and `sensor_tracker` inputs and run
-independently.  A failure in IP never affects LoRa and vice versa.
+The IP uplink runs after LoRa, and the shutdown waits for it, so an upload
+(or a cellular bring-up) is never cut off.  A failure in IP never affects LoRa
+and vice versa.
+
+### Transport order: LoRa, WiFi, cellular
+
+On by default. Each capture's IP uplink:
+
+1. **LoRa.** While the mDot is joined (`AT+NJS?` through the LoRa daemon), the
+   IP uplink is skipped, and a cellular session left up is taken down.
+2. **WiFi.** Otherwise the server is tried over WiFi. NetworkManager prefers
+   WiFi's route (metric 600) to the modem's (700). If a cellular session is up
+   and WiFi has reconnected, the session is taken down first.
+3. **Cellular.** If the server is still unreachable, `nmcli connection up`
+   brings the modem's data connection up, the reading and queued backlog are
+   sent, and any downlink command is collected (the wake-start poll had no
+   route). The connection then stays up for the session, until LoRa or WiFi
+   returns or the Pi powers off. If the server can't be reached over it either,
+   it is taken down straight away.
+
+Only a connection with autoconnect **off** is managed. A unit whose `Quectel`
+connection still autoconnects keeps cellular up as before, so a field unit
+reached over cellular doesn't lose its link until it is set up for this.
+
+**Capture ID.** The capture time, the moment `get_time` fired for that capture
+(`tools/capture_time.py`), identifies it on every transport: `device_ts` in the
+IP uplink, and channel `00 01` in the LoRa sensor packets. The LoRa bitmap
+packet carries no ID, so that every byte goes to the bitmap. It is sent straight
+after the full sensor packet, and the API gives it that packet's capture time
+when the LoRaWAN frame counters are consecutive. Captures are at least 30 s
+apart, so the capture time is unique per unit.
+
+- **On the node:** while LoRa isn't joined, each capture is also queued for LoRa
+  store-and-forward. When IP delivers a reading (live or from its own queue),
+  the LoRa entry with the same capture time is removed.
+- **On the server:** the API keeps the first arrival of each part of a capture
+  (sensors, bitmap) and drops later ones, whichever transport they came by
+  (API `app/capture_dedup.py`). This also covers what the node can't know: LoRa
+  uplinks are unconfirmed, and an HTTP retry can post twice.
+
+Set up on the unit:
+
+```bash
+sudo nmcli connection modify Quectel connection.autoconnect no   # no data at boot
+sudo install -m 644 config/polkit/50-watercam-networkmanager.rules /etc/polkit-1/rules.d/
+```
+
+The polkit rule lets `pi` (ticktalk has no login session) control NetworkManager
+connections. The modem stays registered on the network without a data
+connection: that costs no measurable power (see
+[POWER_ANALYSIS.md](POWER_ANALYSIS.md)) and keeps GPS working. Cellular is
+kept as the last resort for **data**, not power: a wake over cellular used
+126–474 KB on 006, of which our own traffic was about 10 KB; the rest was
+Tailscale ([CELLULAR_DATA.md](CELLULAR_DATA.md)).
+
+**Effect on the other units:** with the defaults, units with `ip_upload.enabled`
+stop sending over IP while their LoRa is joined.
 
 **Sensor data collected:**
 - AHT20: `temperature_celsius` → channel `05 01`, `relative_humidity` → `06 01`

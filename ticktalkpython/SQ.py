@@ -120,6 +120,7 @@ class TTSQArgument(Enum):
     TTDataIntervalWidth = 3
     TTFirstInstanceDelay = 4
     TTPersistent = 5
+    TTStartOnArrival = 6
     Unknown = 99
 
 
@@ -129,7 +130,8 @@ SQParameter_LOOKUP = {
     'TTPhase': TTSQArgument.TTPhase,
     'TTDataIntervalWidth': TTSQArgument.TTDataIntervalWidth,
     'TTFirstInstanceDelay': TTSQArgument.TTFirstInstanceDelay,
-    'TTPersistent': TTSQArgument.TTPersistent
+    'TTPersistent': TTSQArgument.TTPersistent,
+    'TTStartOnArrival': TTSQArgument.TTStartOnArrival
 }
 
 
@@ -584,6 +586,12 @@ class TTSQ:
                 self.firing_rule_kwargs[
                     'TTPersistent'] = get_value_from_ast_keyword(kwargs[key])
                 self.is_persistent = True
+            elif key == 'TTStartOnArrival':
+                assert isinstance(
+                    kwargs[key].value,
+                    bool), 'TTStartOnArrival keyword must be a boolean value'
+                self.firing_rule_kwargs[
+                    'TTStartOnArrival'] = get_value_from_ast_keyword(kwargs[key])
 
         # handle missing arguments that are known to be necessary
         if self.firing_rule_kwargs.get(

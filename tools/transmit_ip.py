@@ -48,6 +48,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import subprocess
 import time
 from typing import Any, Callable, Dict, List, Optional
 
@@ -149,6 +150,13 @@ class IPTransmitter:
         self.fallback_to_lora: bool = cfg.get("fallback_to_lora", True)
         self.max_queue_depth: int = max(1, _coerce_int(cfg.get("max_queue_depth"), 48))
         self.max_queue_age_days: float = max(0.0, _coerce_float(cfg.get("max_queue_age_days"), 7.0))
+        # Transport order LoRa -> WiFi -> cellular: skip the IP uplink while
+        # the mDot is joined, and use the named NetworkManager connection only
+        # when the server can't be reached without it.
+        self.only_if_lora_unavailable: bool = cfg.get("only_if_lora_unavailable", True) is not False
+        cell = cfg.get("cellular_connection", "Quectel")
+        self.cellular_connection: str = cell if isinstance(cell, str) else ""
+        self.cellular_connect_timeout_s: int = max(5, _coerce_int(cfg.get("cellular_connect_timeout_s"), 90))
         self._queue_dir: str = os.path.abspath(queue_dir or _DEFAULT_QUEUE_DIR)
 
         self._session = requests.Session()
@@ -281,6 +289,16 @@ class IPTransmitter:
         except requests.exceptions.RequestException:
             return False
 
+    def wait_reachable(self, deadline_s: float, probe_timeout_s: float = 5) -> bool:
+        """Probe /health until it answers or ``deadline_s`` seconds have passed."""
+        end = time.monotonic() + deadline_s
+        while True:
+            if self.is_reachable(timeout_s=probe_timeout_s):
+                return True
+            if time.monotonic() >= end:
+                return False
+            time.sleep(2)
+
     def close(self) -> None:
         """Close the underlying requests.Session and release pooled connections."""
         self._session.close()
@@ -330,8 +348,9 @@ class IPTransmitter:
             "drained"    : int            — number of entries successfully sent
             "failed"     : bool           — True if a send failed mid-drain
             "failed_file": Optional[str]  — filename of the entry that failed
+            "drained_ts" : List[int]      — device_ts of each entry sent
         """
-        result: Dict[str, Any] = {"drained": 0, "failed": False, "failed_file": None}
+        result: Dict[str, Any] = {"drained": 0, "failed": False, "failed_file": None, "drained_ts": []}
         try:
             entries = sorted(
                 f for f in os.listdir(self._queue_dir) if f.endswith(".json")
@@ -371,6 +390,8 @@ class IPTransmitter:
                 except OSError:
                     pass
                 result["drained"] += 1
+                if record.get("device_ts") is not None:
+                    result["drained_ts"].append(record["device_ts"])
             else:
                 logger.warning("Drain failed on %s: %s", fname, send_result.get("error"))
                 result["failed"] = True
@@ -691,6 +712,68 @@ def apply_downlink_command(
 # ------------------------------------------------------------------ #
 # Internal util                                                        #
 # ------------------------------------------------------------------ #
+
+def cellular_status(connection: str) -> Dict[str, bool]:
+    """Whether the NetworkManager connection exists, is active, and autoconnects.
+
+    Only a connection with autoconnect off is managed on demand; one that
+    autoconnects is meant to stay up and is left alone.
+    """
+    status = {"exists": False, "active": False, "autoconnect": False}
+    try:
+        r = subprocess.run(
+            ["nmcli", "-g", "connection.autoconnect,GENERAL.STATE", "connection", "show", connection],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("nmcli connection show %s failed: %s", connection, exc)
+        return status
+    if r.returncode != 0:
+        return status
+    lines = r.stdout.splitlines()
+    status["exists"] = True
+    status["autoconnect"] = bool(lines) and lines[0].strip() == "yes"
+    status["active"] = len(lines) > 1 and lines[1].strip() == "activated"
+    return status
+
+
+def wifi_connected() -> bool:
+    """True if a WiFi device is connected (NetworkManager prefers its route)."""
+    try:
+        r = subprocess.run(["nmcli", "-t", "-f", "TYPE,STATE", "device"],
+                           capture_output=True, text=True, timeout=15)
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return any(line == "wifi:connected" for line in r.stdout.splitlines())
+
+
+def cellular_up(connection: str, timeout_s: int = 90) -> bool:
+    """Activate a NetworkManager connection (the LTE modem's); True once it is up.
+
+    The connection should have autoconnect off, so the modem stays registered
+    but carries no data until a wake has no other route to the server.
+    """
+    try:
+        r = subprocess.run(
+            ["nmcli", "--wait", str(timeout_s), "connection", "up", connection],
+            capture_output=True, text=True, timeout=timeout_s + 10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("nmcli connection up %s failed: %s", connection, exc)
+        return False
+    if r.returncode != 0:
+        logger.warning("nmcli connection up %s: %s", connection, (r.stderr or r.stdout).strip())
+    return r.returncode == 0
+
+
+def cellular_down(connection: str) -> None:
+    """Deactivate the connection again; never raises."""
+    try:
+        subprocess.run(["nmcli", "connection", "down", connection],
+                       capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        logger.warning("nmcli connection down %s failed: %s", connection, exc)
+
 
 def _err_result(
     message: str,

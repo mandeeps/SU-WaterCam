@@ -157,6 +157,19 @@ def run_application_rtm(name,
         rtm.send_to_runtime(instantiate_graph_msg)
 
  #       time.sleep(2)
+        # Start capturing as soon as the sensors are up (get_time fires on
+        # arrival, TTStartOnArrival) rather than at the next minute boundary.
+        try:
+            from tools.wait_for_sensors import wait_for_sensors
+            _ready = wait_for_sensors()
+            if _ready["ready"]:
+                print(f"Sensors ready after {_ready['waited_s']} s")
+            else:
+                print(f"Warning: not ready after {_ready['waited_s']} s: "
+                      f"{', '.join(_ready['missing'])}; capturing anyway")
+        except Exception as e:
+            print(f"Warning: sensor wait failed: {e}")
+
         send_input_tokens(graph, logger, rtm)
 
         # photo_interval (seconds) in runtime_config.json drives the capture
