@@ -384,7 +384,8 @@ apart, so the capture time is unique per unit.
   (API `app/capture_dedup.py`). This also covers what the node can't know: LoRa
   uplinks are unconfirmed, and an HTTP retry can post twice.
 
-Set up on the unit:
+Set up on the unit (checks and remote-access caveats are in
+[FIELD_DEPLOYMENT_GUIDE.md](FIELD_DEPLOYMENT_GUIDE.md#151-keep-the-cellular-modem-off-unless-lora-and-wifi-fail)):
 
 ```bash
 sudo nmcli connection modify Quectel connection.autoconnect no   # no data at boot

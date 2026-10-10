@@ -12,12 +12,19 @@ Runs once at startup to validate:
 On any failure, sends a LoRa packet describing the failed checks.
 
 This script is intended to be invoked manually or from a systemd unit/boot script
-before the main application loop. It exits 0 on success, 1 on failure (after
-attempting to send the LoRa alert).
+before the main application loop. It prints each check and any failure reasons,
+and exits 0 on success, 1 on failure (after attempting to send the LoRa alert,
+unless --no-alert is given).
 """
 
 from typing import Dict, Any, List
 import math
+import os
+import sys
+
+# Run as `python tools/initial_health_check.py`, Python puts tools/ on sys.path, not the
+# repo root, so every `from tools.x import` below would fail and read as "unavailable".
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
 def read_cpu_temperature_c() -> float:
@@ -94,7 +101,8 @@ def evaluate_health(
         failures.append(f'cpu_temp_high_{cpu_temp_c:.1f}C')
 
     # WittyPi voltages
-    if not wittypi:
+    # witty_pi_4 returns -273.15 C and 0 V when it can't read the board, not an error
+    if not wittypi or wittypi.get('wittypi_temperature_c') == -273.15:
         failures.append('wittypi_unavailable')
     else:
         bv = wittypi.get('wittypi_battery_voltage_v', math.nan)
@@ -157,22 +165,39 @@ def send_lora_alert() -> bool:
         return False
 
 
-def main() -> int:
+def format_report(result: Dict[str, Any]) -> str:
+    """Human-readable summary: status, each failure, then every reading."""
+    lines = [f"Health check: {result['status'].upper()}"]
+    lines += [f"  FAIL  {f}" for f in result['failures']]
+    for key, value in result['readings'].items():
+        lines.append(f"  {key:28s} {value}")
+    return "\n".join(lines)
+
+
+def main(argv=None) -> int:
+    import argparse
+    parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
+    parser.add_argument('--no-alert', action='store_true',
+                        help="don't send the LoRa alert on failure (bench runs)")
+    args = parser.parse_args(argv)
+
     cpu_temp_c = read_cpu_temperature_c()
     wittypi = read_wittypi_voltages()
     gps = read_gps_location()
     imu = read_imu_orientation()
 
     result = evaluate_health(cpu_temp_c, wittypi, gps, imu)
+    print(format_report(result), flush=True)
 
     if result['status'] == 'fail':
-        send_lora_alert()
+        if not args.no_alert:
+            sent = send_lora_alert()
+            print(f"LoRa alert {'queued' if sent else 'could not be sent'}")
         return 1
     return 0
 
 
 if __name__ == '__main__':
-    import sys
     sys.exit(main())
 
 

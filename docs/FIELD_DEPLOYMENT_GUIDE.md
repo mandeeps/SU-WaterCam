@@ -146,12 +146,48 @@ Also confirm before deploying:
   Every `lora_full_send_hours` (default 24) all fields go out, since LoRa uplinks are
   unconfirmed and a lost packet would otherwise leave an old value on the server.
   `always_transmit_sensors: true` sends every field every capture.
-- **Transport order** (on by default): the unit uses LoRa, WiFi if LoRa isn't
-  joined, and cellular only if neither works. For the modem to be used only on
-  demand, run `sudo nmcli connection modify Quectel connection.autoconnect no` and install
-  `config/polkit/50-watercam-networkmanager.rules` to `/etc/polkit-1/rules.d/`. Until then
-  cellular stays up all the time, as before. See
-  [IP_TRANSMISSION.md](IP_TRANSMISSION.md#transport-order-lora-wifi-cellular).
+- **Transport order** (on by default): LoRa first, then WiFi, then cellular only if
+  neither works. The modem is only kept off until needed once it is set up as in
+  1.5.1 below.
+
+### 1.5.1 Keep the cellular modem off unless LoRa and WiFi fail
+
+The SIM's data is limited (500 MB for its lifetime), and a wake that uses cellular
+costs 126–474 KB, almost all of it Tailscale overhead
+([CELLULAR_DATA.md](CELLULAR_DATA.md)). So the modem's data connection should stay
+down and only come up when the reading can't be sent any other way. The software
+already does this ([IP_TRANSMISSION.md](IP_TRANSMISSION.md#transport-order-lora-wifi-cellular)),
+but **only for a connection whose autoconnect is off**. Out of the box, `Quectel`
+autoconnects and cellular is up on every wake.
+
+Enable it on the unit (run from `/home/pi/SU-WaterCam`):
+
+```bash
+sudo nmcli connection modify Quectel connection.autoconnect no
+sudo install -m 644 config/polkit/50-watercam-networkmanager.rules /etc/polkit-1/rules.d/
+nmcli connection down Quectel      # takes effect now rather than at the next boot
+```
+
+The polkit rule lets `pi` (which runs ticktalk with no login session) bring the
+connection up and down. Changing the connection's settings still needs `sudo`.
+
+Check it, as `pi` and without `sudo`:
+
+```bash
+nmcli -g connection.autoconnect connection show Quectel    # prints: no
+nmcli connection up Quectel && nmcli connection down Quectel   # both succeed
+ip route | grep default                                     # no wwan0 route once it's down
+```
+
+If `nmcli connection up` says "Insufficient privileges", the polkit rule is missing.
+The modem stays registered on the network while its data connection is down. That
+costs no measurable power and keeps GPS working.
+
+**Remote access:** with this on, the unit is only reachable over cellular
+(Tailscale) during a wake in which LoRa and WiFi both failed. Set it up while you
+can still reach the unit another way. Don't turn it on remotely for a unit whose only link is
+cellular unless you accept that. To undo it:
+`sudo nmcli connection modify Quectel connection.autoconnect yes`.
 
 ### 1.6 LoRa registration
 
@@ -248,8 +284,11 @@ sudo systemctl restart systemd-journald
 
 ```bash
 cd /home/pi/SU-WaterCam
-python tools/initial_health_check.py; echo "exit code: $?"
+venv/bin/python tools/initial_health_check.py --no-alert; echo "exit code: $?"
 ```
+
+It prints `Health check: OK` or `FAIL` with each reason, then every reading.
+Without `--no-alert`, a failure also queues a LoRa alert.
 
 Exit code `0` means everything passed. If it fails, read the printed failure reasons (`gps_unavailable`, `imu_unavailable`, `wittypi_input_voltage_low_*V`,
 etc.) and resolve them before moving on. GPS will very likely fail indoors, re-check it outdoors in Phase 2.

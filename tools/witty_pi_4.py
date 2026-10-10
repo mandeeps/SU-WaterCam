@@ -4,7 +4,7 @@
 
 '''A python module for interacting with the Witty Pi 4 board'''
 from subprocess import check_output, STDOUT
-from os import path
+from os import environ, path
 import logging
 
 WITTYPI_DIRECTORY = "/home/pi/wittypi"
@@ -21,7 +21,11 @@ class WittyPi4:
         '''Run a Witty Pi 4 command'''
         try:
             command = f"cd {WITTYPI_DIRECTORY} && . ./utilities.sh && {command}"
-            output = check_output(command, shell=True, executable="/bin/bash", stderr=STDOUT, universal_newlines=True, timeout=3)
+            # utilities.sh calls i2cget/i2cset from /usr/sbin, which isn't on pi's PATH in
+            # an ssh shell (systemd services have it), so readings fail without this.
+            env = dict(environ, PATH=environ.get("PATH", "/usr/bin:/bin") + ":/usr/sbin:/sbin")
+            output = check_output(command, shell=True, executable="/bin/bash", stderr=STDOUT,
+                                  universal_newlines=True, timeout=3, env=env)
             return output.strip()
         except Exception as e:
             logging.error("Could not run Witty Pi 4 command: %s", str(e))
