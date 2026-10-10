@@ -186,3 +186,14 @@ def test_lora_decode_routes_remote_debug(payload, value):
     LoRaHandler.decode(h, payload)
     h._start_remote_debug.assert_called_once()
     assert rd.minutes_from_code(h._start_remote_debug.call_args.args[0]) == rd.minutes_from_code(value)
+
+
+def test_start_answers_before_tailscale_and_resends_are_cheap(node):
+    rd.start(30)
+    first, final = [c.args[0] for c in node.status.call_args_list]
+    assert first["active"] and not first["tailscale"]      # immediate: stop resending
+    assert final["tailscale"]
+    node.status.reset_mock()
+    rd.start(30)                                            # an API resend
+    assert node.status.call_count == 1
+    assert node.systemctl.call_count == 1 and node.up.call_count == 1   # not re-established

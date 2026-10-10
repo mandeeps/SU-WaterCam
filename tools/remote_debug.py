@@ -260,8 +260,16 @@ def start(minutes=DEFAULT_MINUTES, source="cli", handler=None):
             was_up, _ = cellular_state(conn)
             state = {"active": True, "started": time.time(), "source": source,
                      "connection": conn, "cellular_was_up": was_up}
+        extending = bool(state.get("tailscale")) and state.get("boot_id") == _boot_id()
         state["until"] = time.time() + minutes * 60
         log(f"session until {time.strftime('%H:%M', time.localtime(state['until']))} ({minutes} min, from {source})")
+        _write_json(STATE_FILE, state)
+        if extending:
+            # already up: the API resends the command until it hears from the node
+            send_status(state, handler)
+            return state
+        # answer at once, so the API stops resending; the full status follows
+        send_status(dict(state, tailscale=False, cellular=cellular_state(state["connection"])[0]), handler)
         _establish(state)
     send_status(state, handler)
     return state
