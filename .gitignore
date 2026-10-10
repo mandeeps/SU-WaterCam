@@ -45,6 +45,9 @@ build/
 # Runtime config files
 lora_config.json
 runtime_config.json
+# config_io.py's lock, backup, temp and set-aside files
+lora_config.json.*
+runtime_config.json.*
 battery_state.json
 battery_state.json.tmp
 

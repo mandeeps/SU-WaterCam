@@ -713,10 +713,14 @@ def call_shutdown(state):
     from subprocess import call
     from tools.lora_runtime_integration import get_runtime_manager
 
+    import time
+
     new_count = 1
     auto_shutdown_enabled = True
     shutdown_limit = 3
     emergency_mode = False
+    emergency_since = None
+    emergency_max_hours = 24
 
     try:
         result = get_runtime_manager().atomic_increment_iteration_count()
@@ -724,9 +728,33 @@ def call_shutdown(state):
         auto_shutdown_enabled = result['auto_shutdown_enabled']
         shutdown_limit = result['shutdown_iteration_limit']
         emergency_mode = result['emergency_mode']
+        emergency_since = result.get('emergency_since')
+        emergency_max_hours = result.get('emergency_max_hours', emergency_max_hours)
         print(f"\n Iteration: {new_count} \n")
     except Exception as e:
         print(f"⚠️ Failed to update iteration count: {e}")
+
+    # Emergency mode keeps the unit awake and clears the Witty Pi shutdown
+    # alarm, so nothing else would ever end it: a stray or forgotten command
+    # would run the battery flat. End it after emergency_max_hours (0 = never).
+    try:
+        expired = (emergency_mode and emergency_since and float(emergency_max_hours) > 0
+                   and time.time() - float(emergency_since) > float(emergency_max_hours) * 3600)
+    except (TypeError, ValueError):
+        expired = False
+    if expired:
+        print(f"⏱️ Emergency mode has run {emergency_max_hours} h: ending it and restoring the schedule")
+        try:
+            get_runtime_manager().set_parameter('emergency_mode', False)
+        except Exception as e:
+            print(f"⚠️ Failed to clear emergency_mode: {e}")
+        try:
+            # directly, not through the update callback, which only prints in this process
+            from tools.wittypi_control import apply_emergency_schedule
+            apply_emergency_schedule(False)
+        except Exception as e:
+            print(f"⚠️ Failed to restore the Witty Pi schedule: {e}")
+        emergency_mode = False
 
     if emergency_mode:
         print("🚨 EMERGENCY MODE ACTIVE - Ignoring shutdown limit, continuing data collection")
