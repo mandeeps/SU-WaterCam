@@ -99,12 +99,24 @@ How the unit keeps time (NTP is off; `timedatectl` reports "not synchronized", w
    the other way round if the RTC's time looks bad.
 2. **About 30 s later,** `beforeScript.sh` runs `syncTime.sh`. It reads the
    `Date:` header of an HTTP request to `http://google.com`, accurate to about
-   1 s, and writes it to the system clock and the RTC. This only works when the
-   unit has internet at boot (WiFi or cellular).
-3. **The RTC holds local time.** After a daylight-saving change, the first boot
-   runs an hour off until step 2 corrects it. A unit that never has internet
-   isn't corrected for either the change or drift, so check its clock at each
-   visit.
+   1 s, and writes it to the system clock and the RTC. That needs internet at
+   boot: WiFi, or cellular if the modem autoconnects. A unit whose modem is kept
+   off until needed has no internet at boot without WiFi.
+3. **Without internet,** `syncTime.sh` takes the time from GPS instead (gpsd,
+   through `gps_time.py`), waiting up to 90 s for a fix. The GPS is the
+   modem's, and works with its data connection down. With neither, the clock
+   and RTC are left alone.
+4. **The RTC holds local time.** After a daylight-saving change, the first boot
+   runs an hour off until step 2 or 3 corrects it. A unit with neither internet
+   nor a GPS fix isn't corrected for the change or for drift, so check its
+   clock at each visit.
+
+Install this repo's time sync into the Witty Pi folder (the stock `syncTime.sh`
+has no GPS fallback):
+
+```bash
+cp /home/pi/SU-WaterCam/config/wittypi/syncTime.sh /home/pi/SU-WaterCam/config/wittypi/gps_time.py /home/pi/wittypi/
+```
 
 ### 1.5 Configure `runtime_config.json`
 
