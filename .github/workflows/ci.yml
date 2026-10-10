@@ -37,7 +37,8 @@ jobs:
             dill multiprocess \
             astor astunparse \
             psutil py-gpsd2 \
-            opencv-python-headless SimpleITK pandas rasterio
+            opencv-python-headless SimpleITK pandas rasterio \
+            onnx onnxruntime
 
       # Discovers every tests/test_*.py, so a new test file is run without
       # touching this workflow. -rs lists every skip and its reason, so a
