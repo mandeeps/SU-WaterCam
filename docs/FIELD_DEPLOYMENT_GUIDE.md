@@ -183,6 +183,22 @@ If `nmcli connection up` says "Insufficient privileges", the polkit rule is miss
 The modem stays registered on the network while its data connection is down. That
 costs no measurable power and keeps GPS working.
 
+**What else changes with the modem off.** Anything that needed internet at boot
+or at the start of a wake now only has it over WiFi, or later in a wake once
+cellular is brought up for an upload:
+
+- **Clock:** the boot-time network time sync (1.4) fails without WiFi. Install
+  this repo's `syncTime.sh` and `gps_time.py`, so the clock is set from GPS
+  instead (#130).
+- **Commands sent over IP** (the dashboard's IP downlink) are normally collected
+  at the start of a wake, which skips cellular. On a unit with only cellular,
+  they arrive after that wake's upload. On a unit whose LoRa is joined, IP isn't
+  used at all, so commands must go by LoRa.
+- **The IP upload backlog** is only sent when WiFi or cellular is used.
+- **Over-the-air model updates** (planned) also need an IP link: WiFi, or a wake
+  that used cellular.
+- **GPS is unaffected:** the modem stays registered and its GNSS keeps working.
+
 **Remote access:** with this on, the unit is only reachable over cellular
 (Tailscale) during a wake in which LoRa and WiFi both failed. Set it up while you
 can still reach the unit another way. Don't turn it on remotely for a unit whose only link is
