@@ -133,9 +133,13 @@ def run_application_rtm(name,
         #        f'wait for {subscription_time} secs for devices '
         #        'to connect... hit enter\n\n', subscription_time, ' ')
 
-        # Reset iteration_count at the start of every run so a fresh power-on
-        # (or manual restart) always begins at cycle 0.  All other parameters
-        # in runtime_config.json are permanent operator config and are left as-is.
+        # Reset iteration_count once per boot, so a fresh power-on begins at
+        # cycle 0. A restart within the same boot (Restart=on-failure after a
+        # crash, or after a shutdown that failed) keeps the count: resetting it
+        # there made the unit run extra cycles, or loop, until the Witty Pi cut
+        # power. To start over by hand within one boot, set iteration_count to 0.
+        # All other parameters in runtime_config.json are permanent operator
+        # config and are left as-is.
         # Boot is when brownouts hit, so this write must be power-cut-safe
         # (tools/config_io.py), and it takes the same lock as the daemons.
         try:
@@ -144,12 +148,7 @@ def run_application_rtm(name,
             _cfg_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)),
                                       "runtime_config.json")
             if _os.path.exists(_cfg_path) or _os.path.exists(_cfg_path + ".bak"):
-                with _config_io.locked(_cfg_path):
-                    _cfg = _config_io.read_json(_cfg_path)
-                    if _cfg.get("iteration_count", 0) != 0:
-                        _cfg["iteration_count"] = 0
-                        _config_io.write_json(_cfg_path, _cfg)
-                        print("iteration_count reset to 0")
+                _config_io.reset_iteration_count_once_per_boot(_cfg_path)
         except Exception as _e:
             print(f"Warning: could not reset iteration_count: {_e}")
 
