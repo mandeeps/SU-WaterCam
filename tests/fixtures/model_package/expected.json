@@ -1,0 +1,11 @@
+{
+ "test_key_id": "test-rfc8032-1",
+ "test_public_key": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+ "base_sha256": "d77743130c6d04e17f7e3e142ea7d849bb6fdd714c1f55828c0f93d99a4a5426",
+ "result_sha256": "8bbac6f5ad0a7c9016b95ae3d692bcc0267ac37cf0af8560aa555926181cc017",
+ "result_weights": "ffc86921bb652ce01a1f587b044b3a3e4c17fbe27435fb1384d120bb107e3085",
+ "generated_with": {
+  "numpy": "1.24.1",
+  "onnx": "1.19.1"
+ }
+}
