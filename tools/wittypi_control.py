@@ -40,12 +40,28 @@ def clear_shutdown_time():
     _require_wittypi()
     witty_pi_4.clear_shutdown_time()
 
+def installed_schedule_exists():
+    """True if a schedule.wpi is installed in the Witty Pi folder."""
+    import os
+    try:
+        from tools.witty_pi_4 import SCHEDULE_FILE_PATH
+    except ImportError:
+        from witty_pi_4 import SCHEDULE_FILE_PATH
+    return os.path.exists(SCHEDULE_FILE_PATH)
+
+def rearm_schedule():
+    """Re-arm the Witty Pi's alarms from the installed schedule.wpi (runScript.sh),
+    without rewriting the file. Returns the next startup time, or "-"."""
+    _require_wittypi()
+    return witty_pi_4.apply_schedule()
+
 def apply_emergency_schedule(emergency_mode: bool) -> dict:
     """Clear or restore the WittyPi hardware shutdown schedule for emergency mode.
 
     Emergency ON: clear the shutdown schedule so the device stays powered on
-    (flood emergency in progress). Emergency OFF: regenerate and reapply the
-    normal wake schedule from the current runtime_config.json values.
+    (flood emergency in progress). Emergency OFF: re-arm the installed
+    schedule.wpi, or generate one from runtime_config.json only if none is
+    installed.
 
     Plain-bool, not @SQify-decorated, so it can be called directly from any
     process (this repo's ticktalk_main.py graph node, or the LoRa daemon's
@@ -63,13 +79,25 @@ def apply_emergency_schedule(emergency_mode: bool) -> dict:
                 'message': 'WittyPi shutdown schedule cleared for emergency mode'
             }
         else:
-            print("✅ EMERGENCY CLEARED: Regenerating WittyPi normal schedule")
+            # Re-arm the schedule the unit was deployed with. This used to
+            # regenerate schedule.wpi from the wittypi_* config values (default
+            # 08:00, eight 30-minute slots), silently replacing an installed
+            # schedule such as config/wittypi/watercam_daylight_2h.wpi.
+            if installed_schedule_exists():
+                print("✅ EMERGENCY CLEARED: Re-arming the installed WittyPi schedule")
+                next_startup_time = rearm_schedule()
+                return {
+                    'status': 'wittypi_normal_schedule_restored',
+                    'action': 'schedule_rearmed',
+                    'next_startup': next_startup_time,
+                    'message': f'WittyPi schedule re-armed, next startup: {next_startup_time}'
+                }
 
-            # Read schedule parameters via local import — do not rely on a
-            # module-level cache; module globals are not available when
-            # TTPython executes compiled pickles, and a fresh read here keeps
-            # this correct whether called from ticktalk_main.py or the
-            # standalone LoRa daemon process.
+            # No schedule installed: without one the unit would never wake
+            # again, so generate one from config. Read the parameters via a
+            # local import -- module globals are not available when TTPython
+            # executes compiled pickles.
+            print("✅ EMERGENCY CLEARED: no schedule.wpi installed, generating one")
             from tools.lora_runtime_integration import get_parameter
             start_hour = get_parameter('wittypi_start_hour', 8)
             start_minute = get_parameter('wittypi_start_minute', 0)
@@ -88,7 +116,7 @@ def apply_emergency_schedule(emergency_mode: bool) -> dict:
                     'interval_minutes': interval_length_minutes,
                     'repetitions_per_day': num_repetitions_per_day
                 },
-                'message': f'WittyPi normal schedule restored, next startup: {next_startup_time}'
+                'message': f'No schedule installed; generated one, next startup: {next_startup_time}'
             }
 
     except ImportError as e:
