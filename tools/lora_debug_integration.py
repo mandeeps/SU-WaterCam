@@ -116,10 +116,12 @@ def collect_compact_status(emergency_mode: Optional[bool] = None) -> List[Field]
     """The reply's fields, in priority order, leaving out any that can't be read."""
     candidates: List[Field] = [
         ("dbg", FORMAT_VERSION),
+        # second: the server confirms emergency on/off from it, so it must survive
+        # trimming to a small payload limit ({"dbg":1,"em":1} is 16 B)
+        ("em", None if emergency_mode is None else int(bool(emergency_mode))),
         ("up", _uptime_hours()),
         ("ct", _cpu_temp_c()),
         ("th", _throttled()),
-        ("em", None if emergency_mode is None else int(bool(emergency_mode))),
         ("vi", _wittypi_volts(1)),
         ("vo", _wittypi_volts(3)),
         ("mp", _memory_used_pct()),

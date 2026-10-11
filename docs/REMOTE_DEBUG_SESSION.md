@@ -90,6 +90,10 @@ boots caused by power returning, not switch presses.
 - **Restarting a node mid-session doesn't strand it:** at boot, `tick` sees the
   session is still running and keeps ticktalk stopped. A session that expired
   while the Pi was off is ended on the first tick.
+- **Data rate:** the status uplink is trimmed to the mDot's payload limit, keeping
+  `{"dbg":1,"rd":N}` (about 17 B), which is what the API confirms with. That fits at
+  SF9 or faster. At SF10 (11 B) nothing useful fits, so the node sends no status
+  and the API can't confirm; the session still starts.
 - **Cost:** a session uses roughly 1–5 MB of the 500 MB SIM (Tailscale overhead
   plus the SSH traffic) and keeps the Pi on at about 2–2.6 W. Use short sessions
   on units with marginal power.

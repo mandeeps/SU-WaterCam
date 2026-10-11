@@ -199,14 +199,29 @@ def rearm_schedule():
         return False
 
 
+def _size_limit(handler):
+    """The mDot's current payload limit: the real handler's, or the daemon's over RPC."""
+    limit = getattr(handler, "current_size_limit", None)
+    if not isinstance(limit, int):
+        try:
+            limit = int(handler.get_size_limit())
+        except Exception:
+            limit = 242
+    return limit
+
+
 def send_status(state, handler=None):
-    """LoRa uplink {"dbg":1,"rd":<min left>,"tn":0/1,"cl":0/1,"ts":<epoch>}; best effort."""
+    """LoRa uplink {"dbg":1,"rd":<min left>,"tn":0/1,"cl":0/1,"ts":<epoch>}; best effort.
+
+    Trimmed to the mDot's payload limit like the 5001 reply, dropping fields from
+    the end. {"dbg":1,"rd":N} (about 17 B) is the least the server needs to confirm
+    the request; below that (SF10, 11 B) nothing useful fits and nothing is sent.
+    """
     left = 0
     if state and state.get("active"):
         left = max(0, int((state["until"] - time.time()) // 60))
-    msg = {"dbg": 1, "rd": left, "tn": int(bool(state and state.get("tailscale"))),
-           "cl": int(bool(state and state.get("cellular"))), "ts": int(time.time())}
-    payload = json.dumps(msg, separators=(",", ":")).encode().hex()
+    fields = [("dbg", 1), ("rd", left), ("tn", int(bool(state and state.get("tailscale")))),
+              ("cl", int(bool(state and state.get("cellular")))), ("ts", int(time.time()))]
     try:
         if handler is None:
             from tools.lora_handler_concurrent import get_lora_handler
@@ -214,8 +229,14 @@ def send_status(state, handler=None):
         if handler is None:
             log("no LoRa handler: status not sent")
             return False
-        ok = bool(handler.transmit(payload))
-        log(f"status uplink {'sent' if ok else 'failed'}: {msg}")
+        from tools.lora_debug_integration import encode_for_limit
+        limit = _size_limit(handler)
+        payload, dropped = encode_for_limit(fields, limit)
+        if "rd" in dropped:
+            log(f"payload limit {limit} B is too small for a status uplink: not sent")
+            return False
+        ok = bool(handler.transmit(payload.hex()))
+        log(f"status uplink {'sent' if ok else 'failed'}: {payload.decode()}")
         return ok
     except Exception as e:
         log(f"status uplink failed: {e}")
