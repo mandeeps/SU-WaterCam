@@ -761,6 +761,49 @@ def apply_downlink_command(
     }
 
 
+def handle_downlink_reply(
+    poll_result: Dict[str, Any],
+    set_param_fn: Callable[[str, Any], None] | None = None,
+    label: str = "IP downlink",
+) -> Dict[str, Any]:
+    """Apply the command in a poll_downlink() reply, if any, and print what happened.
+
+    Shared by the wake-start poll and the poll after each IP uplink in
+    ``ticktalk_main.py``, so both report the same way. A poll marks the command
+    delivered on the server, so polling twice in one wake can't apply it twice.
+    """
+    if not poll_result.get("success"):
+        print(f"⚠️ {label} poll failed: {poll_result.get('error')}")
+        return {"status": "poll_failed", "error": poll_result.get("error")}
+
+    cmd = poll_result.get("command")
+    if not cmd:
+        print(f"📬 {label}: no pending commands")
+        return {"status": "no_command"}
+
+    print(f"📬 {label}: received command (queue_id={cmd.get('queue_id')})")
+
+    dispatch = apply_downlink_command(cmd, set_param_fn=set_param_fn)
+
+    applied = dispatch["applied"]
+    skipped = dispatch["skipped"]
+    if applied:
+        print(f"✅ {label}: applied {len(applied)} parameter(s): {', '.join(applied)}")
+    else:
+        print(f"⚠️ {label}: no recognised parameters in command "
+              f"(hex={cmd.get('hex_payload', '')})")
+    if skipped:
+        print(f"⚠️ {label}: skipped {len(skipped)} part(s): {', '.join(skipped)}")
+
+    return {
+        "status": "applied" if applied else "no_match",
+        "queue_id": dispatch["queue_id"],
+        "applied_params": applied,
+        "skipped_parts": skipped,
+        "hex_payload": cmd.get("hex_payload"),
+    }
+
+
 # ------------------------------------------------------------------ #
 # Internal util                                                        #
 # ------------------------------------------------------------------ #

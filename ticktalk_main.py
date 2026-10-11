@@ -1700,13 +1700,18 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     Readings delivered over IP are removed from the LoRa store-and-forward
     queue, so they aren't sent twice once LoRa joins.
 
+    After a reading is delivered, /ip/downlink is polled again. The wake-start
+    poll (ip_downlink_poll_and_apply) runs before the uplink and never brings
+    up cellular, so on a unit without WiFi it has no route; this is where such
+    a unit gets its commands. It also picks up commands queued during the wake.
+
     Returns a status dict (never raises) so a failure here never stops the main
     workflow.
     """
     import struct
     import time as _time
-    from tools.transmit_ip import (IPTransmitter, apply_downlink_command, cellular_status,
-                                   cellular_up, cellular_down, wifi_connected)
+    from tools.transmit_ip import (IPTransmitter, cellular_status, cellular_up,
+                                   cellular_down, handle_downlink_reply, wifi_connected)
     from tools import lora_store_forward as _lsf
     from tools.lora_runtime_integration import get_parameter, set_parameter
 
@@ -1739,6 +1744,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             return {"status": "skipped_lora_joined", "success": False}
 
     cellular_started = False
+    delivered = False
     try:
         # ── Collect sensor data ────────────────────────────────────────────────
         # Sensor collection is done BEFORE the reachability check so that a
@@ -1902,6 +1908,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
 
         # ── Transmit live reading ──────────────────────────────────────────────
         result = tx.send_uplink(channels, device_ts=ts_now)
+        delivered = result["success"]
 
         if result["success"]:
             print(f"✅ IP uplink OK: {len(channels)} channels sent "
@@ -1930,17 +1937,14 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         print(f"⚠️ IP uplink: unexpected error: {exc}")
         return {"status": "error", "success": False, "error": str(exc)}
     finally:
-        if cellular_started:
-            # The wake-start downlink poll had no route; collect any command now.
-            # The connection stays up for the session (see the docstring).
+        if delivered:
+            # The server is reachable now; collect any command the wake-start
+            # poll missed (see the docstring).
             try:
-                reply = tx.poll_downlink()
-                if reply["success"] and reply.get("command"):
-                    dispatch = apply_downlink_command(reply["command"], set_param_fn=set_parameter)
-                    print(f"📬 IP downlink over cellular: applied {dispatch['applied']}, "
-                          f"skipped {dispatch['skipped']}")
+                handle_downlink_reply(tx.poll_downlink(), set_param_fn=set_parameter,
+                                      label="IP downlink after uplink")
             except Exception as exc:
-                print(f"⚠️ IP downlink over cellular failed: {exc}")
+                print(f"⚠️ IP downlink after uplink failed: {exc}")
         tx.close()
 
 
@@ -1954,11 +1958,12 @@ def ip_downlink_poll_and_apply(_lora_init):
     parameter change to the runtime config via set_parameter().
 
     Runs once at the start of each wake cycle (after LoRa init) so the device
-    picks up any commands that arrived while it was sleeping.
+    picks up any commands that arrived while it was sleeping. It doesn't bring
+    up cellular; ip_uplink_transmit polls again once a reading is delivered.
 
     Disabled by default — requires ip_upload.enabled=true in runtime_config.json.
     """
-    from tools.transmit_ip import IPTransmitter, apply_downlink_command
+    from tools.transmit_ip import IPTransmitter, handle_downlink_reply
     from tools.lora_runtime_integration import set_parameter
 
     tx = IPTransmitter()
@@ -1969,42 +1974,13 @@ def ip_downlink_poll_and_apply(_lora_init):
 
     if not tx.is_reachable(timeout_s=2):
         tx.close()
-        print("⚠️ IP downlink poll skipped: server unreachable")
+        print("⚠️ IP downlink poll skipped: server unreachable — polling again after the IP uplink")
         return {"status": "unreachable"}
 
     poll_result = tx.poll_downlink()
     tx.close()
 
-    if not poll_result["success"]:
-        print(f"⚠️ IP downlink poll failed: {poll_result.get('error')}")
-        return {"status": "poll_failed", "error": poll_result.get("error")}
-
-    cmd = poll_result.get("command")
-    if not cmd:
-        print("📬 IP downlink: no pending commands")
-        return {"status": "no_command"}
-
-    print(f"📬 IP downlink: received command (queue_id={cmd.get('queue_id')})")
-
-    dispatch = apply_downlink_command(cmd, set_param_fn=set_parameter)
-
-    applied = dispatch["applied"]
-    skipped = dispatch["skipped"]
-    if applied:
-        print(f"✅ IP downlink: applied {len(applied)} parameter(s): {', '.join(applied)}")
-    else:
-        print(f"⚠️ IP downlink: no recognised parameters in command "
-              f"(hex={cmd.get('hex_payload', '')})")
-    if skipped:
-        print(f"⚠️ IP downlink: skipped {len(skipped)} part(s): {', '.join(skipped)}")
-
-    return {
-        "status": "applied" if applied else "no_match",
-        "queue_id": dispatch["queue_id"],
-        "applied_params": applied,
-        "skipped_parts": skipped,
-        "hex_payload": cmd.get("hex_payload"),
-    }
+    return handle_downlink_reply(poll_result, set_param_fn=set_parameter)
 
 
 @GRAPHify
