@@ -110,6 +110,19 @@ Captures written before the tag existed carry only the prose descriptions, and
 invalidated. An audit of all 6489 `color_preserved_5_band.tiff` in the archive found **zero** files
 with the bands in the wrong order.
 
+### Models that want fewer bands, or another resize
+
+A model that declares fewer `bands` than the TIFF has gets those bands, picked by name in the
+model's order (`segformer_preprocess.model_band_indices()`). An RGB model that declares
+`bands=red,green,blue` therefore runs on `color_preserved_5_band.tiff` unchanged. If the TIFF doesn't
+name each wanted band exactly once, every band is fed as before and the band-order check warns.
+
+Input bands are resized with `INTER_AREA` unless the model declares `resize_interpolation=bilinear`.
+mmcv's `Resize`, used by the training repos' test pipelines, is bilinear. For the RGB
+`segformer_type_pool` model, `INTER_AREA` changed 0.4–2.6% of pixels and found up to 1.6× the water;
+with `bilinear` declared, the daemon matches that model's pipeline on every pixel of six 006
+captures (2026-10-11). The 5-band `iter_100` model declares nothing and keeps `INTER_AREA`.
+
 ### Mask name
 
 The segmentation mask is `color_preserved_5_band_segmentation.png`. It is named after its input and

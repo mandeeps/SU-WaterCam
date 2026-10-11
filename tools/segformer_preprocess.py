@@ -113,6 +113,31 @@ def tiff_band_order(descriptions, tags=None) -> list:
     return canonical_bands(descriptions)
 
 
+def _declared_bands(session) -> list:
+    try:
+        meta = session.get_modelmeta().custom_metadata_map or {}
+    except Exception:                      # noqa: BLE001 - never break inference
+        return []
+    return [b.strip().lower() for b in (meta.get("bands") or "").split(",") if b.strip()]
+
+
+def model_band_indices(session, descriptions, tags=None) -> list | None:
+    """0-based TIFF bands to feed a model that wants fewer bands than the TIFF has.
+
+    The five-band TIFF also carries what an RGB model needs: an RGB model that
+    declares `bands=red,green,blue` gets those three, picked by name. Returns
+    None (feed every band, as before) unless the model declares fewer bands
+    than the TIFF and the TIFF names each of them exactly once.
+    """
+    want = _declared_bands(session)
+    got = tiff_band_order(descriptions, tags)
+    if not want or len(want) >= len(got):
+        return None
+    if any(got.count(w) != 1 for w in want):
+        return None
+    return [got.index(w) for w in want]
+
+
 def band_order_problem(session, descriptions, tags=None) -> str:
     """Does the TIFF's band order match what the model was trained on?
 
@@ -132,6 +157,8 @@ def band_order_problem(session, descriptions, tags=None) -> str:
     got = tiff_band_order(descriptions, tags)
     if not got or all(g is None for g in got):
         return ""                          # TIFF carries no readable descriptions
+    if model_band_indices(session, descriptions, tags) is not None:
+        return ""                          # a named subset, picked by name
     if len(got) != len(want):
         return (f"model expects {len(want)} bands ({','.join(want)}) but the TIFF "
                 f"has {len(got)}")
@@ -160,6 +187,22 @@ def water_class_index(session) -> int:
     return names.index("water") if "water" in names else -1
 
 
+#: `resize_interpolation` metadata -> OpenCV flag name. mmcv's Resize, which
+#: both the 5-band and type_pool test pipelines use, is bilinear; the node has
+#: always used INTER_AREA, so a model that declares nothing keeps it.
+RESIZE_INTERPOLATIONS = ("area", "bilinear")
+
+
+def resize_interpolation(session) -> str:
+    """How to resize input bands: the graph's `resize_interpolation`, else "area"."""
+    try:
+        meta = session.get_modelmeta().custom_metadata_map or {}
+    except Exception:                      # noqa: BLE001 - never break inference
+        return "area"
+    declared = (meta.get("resize_interpolation") or "").strip().lower()
+    return declared if declared in RESIZE_INTERPOLATIONS else "area"
+
+
 def normalization_mode(session) -> tuple[bool, str]:
     """(does this module normalise, human description) -- convenience wrapper."""
     spec = normalization_spec(session)
@@ -167,7 +210,8 @@ def normalization_mode(session) -> tuple[bool, str]:
 
 
 def preprocess_bands(img: np.ndarray, height: int, width: int,
-                     normalize: bool = True, spec: dict | None = None) -> np.ndarray:
+                     normalize: bool = True, spec: dict | None = None,
+                     interpolation: str = "area") -> np.ndarray:
     """Resize a (bands, H, W) array and apply the normalisation the model wants.
 
     Accepts any numeric dtype; always works on an internal float32 copy so
@@ -178,14 +222,16 @@ def preprocess_bands(img: np.ndarray, height: int, width: int,
     `spec` comes from `normalization_spec(session)`. Without it the behaviour
     is the historical one: per-band min-max, unless `normalize=False`, which
     resizes only (for a graph that normalises internally).
+    `interpolation` comes from `resize_interpolation(session)`.
     """
     import cv2
 
     img = img.astype(np.float32, copy=True)
+    flag = cv2.INTER_LINEAR if interpolation == "bilinear" else cv2.INTER_AREA
 
     if img.shape[1] != height or img.shape[2] != width:
         img = np.stack(
-            [cv2.resize(img[i], (width, height), interpolation=cv2.INTER_AREA)
+            [cv2.resize(img[i], (width, height), interpolation=flag)
              for i in range(img.shape[0])],
             axis=0,
         )

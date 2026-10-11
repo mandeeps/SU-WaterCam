@@ -15,6 +15,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "tools"))
 
 from segformer_preprocess import (  # noqa: E402
     band_order_problem,
+    model_band_indices,
+    resize_interpolation,
     canonical_bands,
     normalization_spec,
     preprocess_bands,
@@ -164,8 +166,52 @@ def test_bgr_tiff_against_an_rgb_model_is_reported():
 
 
 def test_band_count_disagreement_is_reported():
-    problem = band_order_problem(_FakeSession({"bands": "red,green,blue"}), TIFF_BANDS)
-    assert "3 bands" in problem and "has 5" in problem
+    problem = band_order_problem(_FakeSession({"bands": "red,green,nir,swir"}), TIFF_BANDS)
+    assert "4 bands" in problem and "has 5" in problem
+
+
+# --- resize interpolation ----------------------------------------------------
+
+@pytest.mark.parametrize("meta, want", [
+    ({"resize_interpolation": "bilinear"}, "bilinear"),
+    ({"resize_interpolation": " Bilinear "}, "bilinear"),
+    ({}, "area"),                                   # declares nothing: as before
+    ({"resize_interpolation": "lanczos"}, "area"),  # unknown: as before
+])
+def test_resize_interpolation_is_read_from_the_graph(meta, want):
+    assert resize_interpolation(_FakeSession(meta)) == want
+
+
+def test_bilinear_and_area_resize_differ():
+    img = np.arange(5 * 16 * 16, dtype=np.float32).reshape(5, 16, 16) % 7
+    area = preprocess_bands(img, 5, 5, spec={"mode": "embedded"}, interpolation="area")
+    lin = preprocess_bands(img, 5, 5, spec={"mode": "embedded"}, interpolation="bilinear")
+    assert area.shape == lin.shape == (1, 5, 5, 5)
+    assert not np.allclose(area, lin)
+
+
+# --- a model that wants a subset of the TIFF's bands --------------------------
+
+def test_an_rgb_model_gets_the_rgb_bands_by_name():
+    session = _FakeSession({"bands": "red,green,blue"})
+    assert model_band_indices(session, TIFF_BANDS) == [0, 1, 2]
+    assert band_order_problem(session, TIFF_BANDS) == ""
+
+
+def test_the_subset_follows_the_model_order_and_the_tag():
+    session = _FakeSession({"bands": "nir,red"})
+    assert model_band_indices(session, (), {"BAND_ORDER": "blue,green,red,thermal,nir"}) == [4, 2]
+
+
+@pytest.mark.parametrize("meta, descriptions", [
+    ({"bands": MODEL_BANDS}, TIFF_BANDS),          # same count: feed every band, as before
+    ({}, TIFF_BANDS),                              # model declares nothing
+    ({"bands": "red,green,swir"}, TIFF_BANDS),     # TIFF lacks one of them
+    ({"bands": "red,green,blue"}, (None,) * 5),    # TIFF names nothing
+    ({"bands": "red,green,blue"}, ("Red", "Red", "Green", "Blue", "NIR")),  # ambiguous
+])
+def test_no_subset_unless_every_band_is_named_once(meta, descriptions):
+    assert model_band_indices(_FakeSession(meta), descriptions) is None
 
 
 @pytest.mark.parametrize("session", [
