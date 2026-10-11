@@ -150,7 +150,7 @@ The other top-level fields control monitoring behavior. From
 Also confirm before deploying:
 
 - `emergency_mode: false` and `debug_mode: false` — both should be off for a normal deployment
-- `ip_upload.enabled` — `true` if this site will use cellular/IP upload in addition to (or instead of) LoRa; if so, fill in `server_url` and  `api_key` for the WaterCam API server this unit reports to. This is already set for our tailnet.
+- `ip_upload.enabled` — `true` if this site will use cellular/IP upload in addition to (or instead of) LoRa; if so, fill in `server_url` for the WaterCam API server this unit reports to (already set for our tailnet), and `api_key` with this unit's own token: on the dashboard, Management → select the unit → IP access token → Generate, then copy it here. The token is shown once. Once the server enforces tokens (`IP_AUTH=enforce`), a unit without one can't send over IP.
 - **LoRa sensor packet:** each capture sends the capture time plus only the fields
   that changed by 5% or more since they were last sent (`data/lora_last_sent.json`).
   Orientation (the IMU's heading, roll, pitch) uses an absolute threshold instead,
