@@ -22,7 +22,7 @@ Run directly for testing (pass an explicit socket path under /tmp, because
 /run/segformer/ is created by systemd RuntimeDirectory and will not exist
 for a non-root user running outside systemd):
 
-    /home/pi/miniforge3/envs/5band/bin/python tools/segformer_daemon.py \
+    /home/pi/SU-WaterCam/venv/bin/python tools/segformer_daemon.py \
         --model /home/pi/segformer_5band/segformer_5band_int8.onnx \
         --socket /tmp/segformer_test.sock
 
