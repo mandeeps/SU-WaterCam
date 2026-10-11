@@ -122,3 +122,33 @@ def write_json(path, data, mode=0o600):
                 pass
         raise
     _fsync_dir(dirpath)
+
+
+def current_boot_id():
+    """The kernel's random ID for this boot, or None off Linux."""
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            return f.read().strip()
+    except OSError:
+        return None
+
+
+def reset_iteration_count_once_per_boot(path, boot_id=None):
+    """Zero runtime_config's iteration_count on the first run of each boot only.
+
+    A restart within the same boot (systemd Restart=on-failure after a crash or
+    a failed shutdown) keeps the count, so the unit doesn't start its cycles
+    over. Returns True if it reset the count.
+    """
+    boot_id = boot_id if boot_id is not None else current_boot_id()
+    with locked(path):
+        cfg = read_json(path)
+        if boot_id is not None and cfg.get("iteration_boot_id") == boot_id:
+            print(f"Restart within this boot: keeping iteration_count={cfg.get('iteration_count', 0)}")
+            return False
+        if cfg.get("iteration_count", 0) != 0 or cfg.get("iteration_boot_id") != boot_id:
+            cfg["iteration_count"] = 0
+            cfg["iteration_boot_id"] = boot_id
+            write_json(path, cfg)
+            print("iteration_count reset to 0")
+        return True
