@@ -245,6 +245,12 @@ class TestApplyScheduleGuard:
         from tools.witty_pi_4 import WittyPi4
         return WittyPi4()
 
+    @pytest.fixture(autouse=True)
+    def _schedule_installed(self):
+        # apply_schedule() returns early when no schedule.wpi is installed
+        with patch("tools.witty_pi_4.path.exists", return_value=True):
+            yield
+
     def test_empty_output_returns_dash(self):
         wp = self._make_wittypi()
         with patch("tools.witty_pi_4.check_output", return_value=""):
