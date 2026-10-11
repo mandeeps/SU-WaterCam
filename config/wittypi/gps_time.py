@@ -23,24 +23,33 @@ def main():
     except OSError:
         return 1
     with sock:
-        sock.settimeout(max(1.0, min(5.0, wait)))
+        # Read the socket directly. A timed-out read on a socket *file* (makefile())
+        # leaves it unusable, so when gpsd was cold and the GPS took more than the
+        # timeout to send its first report (normal right after boot), the old loop
+        # could never read again and returned no time.
+        sock.settimeout(1.0)
         sock.sendall(b'?WATCH={"enable":true,"json":true}\n')
-        stream = sock.makefile()
+        buf = b""
         while time.monotonic() < deadline:
             try:
-                line = stream.readline()
-            except OSError:          # socket timeout: gpsd quiet for a while
-                continue
-            if not line:
+                chunk = sock.recv(4096)
+            except socket.timeout:
+                continue                 # gpsd quiet: keep waiting until the deadline
+            except OSError:
                 return 1
-            try:
-                msg = json.loads(line)
-            except ValueError:
-                continue
-            # mode 2/3 = 2D/3D fix; earlier reports can carry a guessed time
-            if msg.get("class") == "TPV" and msg.get("mode", 0) >= 2 and msg.get("time"):
-                print(msg["time"])
-                return 0
+            if not chunk:
+                return 1                 # gpsd closed the connection
+            buf += chunk
+            *lines, buf = buf.split(b"\n")
+            for line in lines:
+                try:
+                    msg = json.loads(line)
+                except ValueError:
+                    continue
+                # mode 2/3 = 2D/3D fix; earlier reports can carry a guessed time
+                if msg.get("class") == "TPV" and msg.get("mode", 0) >= 2 and msg.get("time"):
+                    print(msg["time"])
+                    return 0
     return 1
 
 
