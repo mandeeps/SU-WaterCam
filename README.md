@@ -588,6 +588,8 @@ https://tailscale.com/download
 
 Consider using Tailscale SSH: https://tailscale.com/kb/1193/tailscale-ssh
 
+Install systemd-resolved and the NetworkManager drop-in in `config/networkmanager/` first, so NetworkManager and Tailscale don't overwrite each other's DNS. See [FIELD_DEPLOYMENT_GUIDE.md section 1.3](docs/FIELD_DEPLOYMENT_GUIDE.md#13-confirm-remote-access-tailscale).
+
 `tailscale up --ssh`
 
 Make sure the device is [tagged](https://tailscale.com/kb/1068/tags) and not using a personal Tailscale account. See tailscale-acl.txt in config directory for an example of Access Control List rules to permit SSH into tagged devices. Forbid tagged devices from accessing other tagged devices for security. 

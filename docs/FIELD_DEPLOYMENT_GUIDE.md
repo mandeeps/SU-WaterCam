@@ -75,6 +75,32 @@ sudo rm -f /var/lib/NetworkManager/secret_key /var/lib/dhcpcd/duid
 
 ### 1.3 Confirm remote access (Tailscale)
 
+First switch DNS to systemd-resolved (run from `/home/pi/SU-WaterCam`):
+
+```bash
+sudo apt install systemd-resolved
+sudo install -m 644 config/networkmanager/90-dns-systemd-resolved.conf /etc/NetworkManager/conf.d/
+sudo systemctl reload NetworkManager
+readlink /etc/resolv.conf      # prints: ../run/systemd/resolve/stub-resolv.conf
+```
+
+Without it, NetworkManager and Tailscale both write `/etc/resolv.conf`. Each time a
+connection comes up or goes down, including the `Quectel` connection the software
+starts on demand (1.5.1), NetworkManager's rewrite drops Tailscale's DNS server. The
+server's tailnet name then stops resolving for seconds to minutes. The IP uplink takes
+that to mean WiFi can't reach the server and brings cellular up, on every wake. With
+resolved, NetworkManager hands it each connection's DNS servers, and Tailscale adds
+its own for tailnet names only.
+
+Do this before installing Tailscale; tailscaled picks its DNS mode when it starts. On
+a unit where Tailscale is already up, restart it afterwards. That drops an SSH session
+over Tailscale, so do it over serial or local SSH, or detach it and reconnect after a
+few seconds:
+
+```bash
+sudo systemd-run systemctl restart tailscaled
+```
+
 Run the command provided by Tailscale to install
 
 If there is an issue with the script check (https://console.tailscale.com/admin/machines/new-linux)
@@ -84,6 +110,16 @@ tailscale up --ssh
 ```
 
 This will allow logging into the system using SSH now and when the unit is in the field connected via cellular modem.
+
+Check that tailnet names resolve through resolved. `tailscale0` should list
+`100.100.100.100`, and the server should answer by name (prints `200`):
+
+```bash
+resolvectl dns
+curl -s -o /dev/null -w '%{http_code}\n' "$(python3 -c 'import json; print(json.load(open("runtime_config.json"))["ip_upload"]["server_url"])')/health"
+```
+
+The second check needs `runtime_config.json`, so it can wait until 1.5.
 
 ### 1.4 Sync the clock
 
