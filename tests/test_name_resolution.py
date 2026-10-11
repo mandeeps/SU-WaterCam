@@ -164,6 +164,7 @@ class TestWittypiEmergencyControl:
             patch("tools.wittypi_control.clear_shutdown_time"),
             patch("tools.wittypi_control.set_schedule",
                   return_value="2026-01-01 08:00:00"),
+            patch("tools.wittypi_control.installed_schedule_exists", return_value=False),
         ]
         if get_param_side is not None:
             patches.append(
@@ -222,12 +223,29 @@ class TestWittypiEmergencyControl:
 
         with patch("tools.wittypi_control.clear_shutdown_time"), \
              patch("tools.wittypi_control.set_schedule", return_value="next"), \
+             patch("tools.wittypi_control.installed_schedule_exists", return_value=False), \
              patch("tools.lora_runtime_integration.get_parameter",
                    side_effect=recording_get_param):
             ticktalk_main.wittypi_emergency_control.__wrapped__(False)
 
         assert 'wittypi_start_hour' in param_calls
         assert 'wittypi_interval_minutes' in param_calls
+
+    def test_emergency_off_rearms_installed_schedule_without_rewriting_it(self):
+        """Emergency OFF with a schedule.wpi installed re-arms it (runScript.sh) and
+        never regenerates it: that replaced deployed schedules such as the
+        daylight 2-hour one with the config defaults."""
+        import ticktalk_main
+        regenerate = MagicMock()
+        with patch("tools.wittypi_control.installed_schedule_exists", return_value=True), \
+             patch("tools.wittypi_control.rearm_schedule", return_value="2026-10-11 08:00:00") as rearm, \
+             patch("tools.wittypi_control.set_schedule", regenerate):
+            result = ticktalk_main.wittypi_emergency_control.__wrapped__(False)
+        rearm.assert_called_once()
+        regenerate.assert_not_called()
+        assert result['status'] == 'wittypi_normal_schedule_restored'
+        assert result['action'] == 'schedule_rearmed'
+        assert result['next_startup'] == "2026-10-11 08:00:00"
 
     def test_wittypi_unavailable_returns_error_dict(self):
         """ImportError from wittypi_control → status 'wittypi_unavailable', no crash."""
