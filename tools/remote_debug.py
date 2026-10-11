@@ -190,6 +190,10 @@ def suspend_shutdown_alarm(attempts=3):
 def rearm_schedule():
     """Re-arm the Witty Pi from the installed schedule.wpi (runScript.sh). Never writes it."""
     try:
+        from tools.wittypi_control import installed_schedule_exists
+        if not installed_schedule_exists():
+            log("no schedule.wpi installed: nothing to re-arm")
+            return True
         from tools.witty_pi_4 import WittyPi4
         nxt = WittyPi4().apply_schedule()
         log(f"Witty Pi schedule re-armed, next startup: {nxt}")

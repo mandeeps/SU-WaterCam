@@ -31,12 +31,24 @@ class WittyPi4:
             logging.error("Could not run Witty Pi 4 command: %s", str(e))
             return "ERROR"
 
+    def has_internet(self) -> bool:
+        '''True if utilities.sh's has_internet succeeds. It reports through its exit
+        status and prints nothing, so run_command()'s output can't tell: it is ""
+        on success and "ERROR" on failure, which read the wrong way round.'''
+        env = dict(environ, PATH=environ.get("PATH", "/usr/bin:/bin") + ":/usr/sbin:/sbin")
+        try:
+            check_output(f"cd {WITTYPI_DIRECTORY} && . ./utilities.sh && has_internet", shell=True,
+                         executable="/bin/bash", stderr=STDOUT, timeout=10, env=env)
+            return True
+        except Exception:
+            return False
+
     def sync_time_with_network(self) -> None:
         '''Sync Witty Pi 4 clock with network time'''
 
         # See: https://www.uugear.com/forums/technial-support-discussion/witty-pi-4-how-to-synchronise-time-with-internet-on-boot/
 
-        if self.run_command("has_internet"):
+        if self.has_internet():
             try:
                 output = self.run_command("net_to_system && system_to_rtc")
                 logging.info("Time synchronized with network: %s", output)
@@ -221,6 +233,10 @@ class WittyPi4:
 
     def apply_schedule(self, max_retries: int = 5) -> str:
         '''Apply schedule to Witty Pi 4'''
+        if not path.exists(SCHEDULE_FILE_PATH):
+            # Nothing to arm, and retrying or syncing the clock can't change that.
+            logging.info("No %s installed: no schedule to apply", SCHEDULE_FILE_PATH)
+            return "-"
         for retry in range(max_retries):
             try:
                 # Apply new schedule
@@ -234,8 +250,10 @@ class WittyPi4:
                     next_startup_time = output[1][-19:]
                     return next_startup_time
 
-                logging.warning("Failed to apply schedule: %s", output[0])
-                self.sync_time_with_network()
+                logging.warning("Failed to apply schedule: %s", output[0] if output else "(no output)")
+                if retry == 0:
+                    # A wrong clock is the usual cause (e.g. "interrupted"); fix it once
+                    self.sync_time_with_network()
 
             except Exception as e:
                 logging.error("Failed to apply schedule: %s (%s)", str(e), retry)
