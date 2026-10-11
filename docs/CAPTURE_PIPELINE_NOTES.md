@@ -70,6 +70,9 @@ This is by design and matches what `ticktalk_main.segformer()` does with a subpr
 Neither environment can run the other's stage. `mmseg` also only imports with the working directory
 set to `segformer_5band`, because the package is vendored there.
 
+This applies to the subprocess fallback (`segment_tiff_5band.py`). `segformer_daemon.service`, the
+normal path, needs only onnxruntime, cv2, rasterio and PIL, so it runs in `SU-WaterCam/venv`.
+
 ## The two five-band TIFFs are not interchangeable
 
 Co-registration writes both, and they differ in channel order and geometry:
