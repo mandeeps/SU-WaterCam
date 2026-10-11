@@ -651,6 +651,44 @@ class LoRaHandler:
             print(f"Error queuing file transmission: {e}")
             return False
     
+    @staticmethod
+    def _parse_server_frame(payload: str):
+        """Parts for a server-encoded frame (tools/transmit_ip.parse_downlink_frame), or None."""
+        clean = payload.strip()
+        if not clean or len(clean) % 2 or any(c not in '0123456789abcdefABCDEF' for c in clean):
+            return None
+        try:
+            from tools.transmit_ip import parse_downlink_frame
+        except ImportError:
+            from transmit_ip import parse_downlink_frame
+        return parse_downlink_frame(bytes.fromhex(clean))
+
+    def _apply_server_frame(self, parts) -> None:
+        """Apply a server frame: the IP decoder for parameters, the handler for actions."""
+        rest = []
+        for part in parts:
+            code, value = part['code'], part['payload_hex']
+            if code == '18 98':
+                self._start_remote_debug(value)
+            elif code == '21 91':
+                self._start_emergency(value)
+            elif code == '99 99':
+                self.update_config('emergency_mode', False)
+                print('✅ Emergency mode deactivated')
+                self._reply_with_status()
+            else:
+                rest.append(part)
+        if not rest:
+            return
+        try:
+            from tools.transmit_ip import apply_downlink_command
+        except ImportError:
+            from transmit_ip import apply_downlink_command
+        result = apply_downlink_command({'parts': rest}, set_param_fn=self.update_config)
+        print(f"📥 Server command applied: {result['applied']} skipped: {result['skipped']}")
+        if result['applied']:
+            self._reply_with_status()   # lets the server confirm the change arrived
+
     def _start_emergency(self, value: str) -> None:
         """Emergency mode on for HH hours (21 91 HH; 00 keeps emergency_max_hours).
 
@@ -859,6 +897,15 @@ class LoRaHandler:
             if payload == '21':
                 print('ℹ️ Remote start byte received; emergency mode needs 21 91 HH')
                 return
+
+            # Frames the server encodes (API app/encoders.py): [code 2B][value], the
+            # same codes the IP downlink carries. Tried before the older formats
+            # below, which never matched them, so dashboard configuration over LoRa
+            # was ignored.
+            frame = self._parse_server_frame(payload)
+            if frame:
+                self._apply_server_frame(frame)
+                return
             
             # First try TLV hex multi-command format: [ch:1B][cmd:1B][len:1B][value:len]
             # Entire payload must be hex characters (no delimiters) and even length
@@ -911,9 +958,7 @@ class LoRaHandler:
                 elif channel == '13' and command == '93':
                     self.update_config('emergency_frequency', val_int)
                     print(f'Emergency frequency updated to: {val_int} minutes')
-                elif channel == '14' and command == '94':
-                    self.update_config('photo_interval', val_int)
-                    print(f'Photo interval updated to: {val_int} minutes')
+                # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
                 elif channel == '15' and command == '95':
                     self.update_config('neighborhood_emergency_frequency', val_int)
                     print(f'Neighborhood emergency frequency updated to: {val_int} minutes')
@@ -1027,15 +1072,8 @@ class LoRaHandler:
                         except ValueError:
                             print(f'Invalid emergency frequency value: {value}')
                             
-                    elif channel == '14' and command == '9':
-                        # Photo interval - minute value
-                        try:
-                            val = int(value)
-                            self.update_config('photo_interval', val)
-                            print(f'Photo interval updated to: {val} minutes')
-                        except ValueError:
-                            print(f'Invalid photo interval value: {value}')
-                            
+                    # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
+
                     elif channel == '15' and command == '9':
                         # Neighborhood emergency frequency - minute value
                         try:

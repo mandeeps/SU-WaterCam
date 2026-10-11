@@ -464,7 +464,6 @@ class LoRaRuntimeManager:
             # Timing commands
             '12': lambda v: self.set_parameter('monitoring_frequency', v), # Monitoring frequency (minutes)
             '13': lambda v: self.set_parameter('emergency_frequency', v),  # Emergency frequency (minutes)
-            '14': lambda v: self.set_parameter('photo_interval', v),       # Capture period (seconds)
             '15': lambda v: self.set_parameter('neighborhood_emergency_frequency', v), # Neighborhood frequency
             
             # System control commands
@@ -552,8 +551,7 @@ class LoRaRuntimeManager:
                     return _set('monitoring_frequency', val_int)
                 elif channel == '13' and command == '93':
                     return _set('emergency_frequency', val_int)
-                elif channel == '14' and command == '94':
-                    return _set('photo_interval', val_int)
+                # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
                 elif channel == '15' and command == '95':
                     return _set('neighborhood_emergency_frequency', val_int)
                 elif channel == '22' and command == '00':
@@ -614,8 +612,7 @@ class LoRaRuntimeManager:
                         return self.set_parameter('monitoring_frequency', int(value))
                     elif channel == '13' and command == '93':
                         return self.set_parameter('emergency_frequency', int(value))
-                    elif channel == '14' and command == '94':
-                        return self.set_parameter('photo_interval', int(value))
+                    # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
                     elif channel == '15' and command == '95':
                         return self.set_parameter('neighborhood_emergency_frequency', int(value))
                     elif channel == '22' and command == '00':
