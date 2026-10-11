@@ -170,7 +170,6 @@ def take_two_photos(trigger, directory):
     from gpiozero import LED
     from os import path
     from datetime import datetime
-    from tools.add_metadata import add_metadata
 
     picam2 = None
     try:
@@ -193,10 +192,12 @@ def take_two_photos(trigger, directory):
     # both captures use identical settings and the difference reflects the filter.
     NIR_AWB_WARMUP_S = 2.0
 
-    pin = LED(21)
+    pin = None
     image_off = None
     image_on = None
     try:
+        # inside the try: a GPIO error must still reach the finally that closes the camera
+        pin = LED(21)
         picam2.start()
 
         # Drive pin LOW (IR filter IN) and wait for both filter movement and
@@ -249,12 +250,16 @@ def take_two_photos(trigger, directory):
             picam2.close()
         except Exception:
             pass
-        pin.close()
+        if pin is not None:
+            pin.close()
 
-    # Add metadata after camera is stopped (GPS/IMU reads can be slow).
+    # Add metadata after camera is stopped (GPS/IMU reads can be slow). The
+    # import is here, not at the top: add_metadata needs libxmp (exempi), and
+    # if that ever breaks the photos must still be taken.
     for img in (image_off, image_on):
         if img and path.isfile(img):
             try:
+                from tools.add_metadata import add_metadata
                 add_metadata(img)
             except Exception as exc:
                 print(f"Metadata write failed for {img}: {exc}")

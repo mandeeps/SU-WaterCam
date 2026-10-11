@@ -18,8 +18,6 @@ Usage:
     # Parameters are automatically updated when LoRa commands are received
 """
 
-import fcntl
-import json
 import math
 import os
 import time
@@ -66,11 +64,23 @@ except ImportError:
             else:
                 raise ImportError("lora_handler_concurrent not found")
 
+try:
+    from tools import config_io
+except ImportError:
+    if _current_dir not in sys.path:
+        sys.path.insert(0, _current_dir)
+    import config_io
+
 class LoRaRuntimeManager:
     """
     Manages runtime parameters that can be updated via LoRa commands
     and integrates with the ticktalk_main.py system
     """
+
+    # Emergency mode keeps the unit awake and clears the Witty Pi shutdown
+    # alarm; call_shutdown() ends it after this many hours (runtime_config
+    # emergency_max_hours, 0 = never) so a stray command can't drain the battery.
+    EMERGENCY_MAX_HOURS = 24
 
     # Inclusive (min, max) bounds for each settable parameter.
     # Values outside these ranges are rejected with a warning.
@@ -194,25 +204,23 @@ class LoRaRuntimeManager:
             'audio_recording_enabled': True,  # Enable USB microphone audio recording
         }
         
-        if os.path.exists(self.config_file):
-            try:
-                with open(self.config_file, 'r') as f:
-                    fcntl.flock(f, fcntl.LOCK_SH)
-                    try:
-                        loaded_params = json.load(f)
-                    finally:
-                        fcntl.flock(f, fcntl.LOCK_UN)
-                    # Merge with defaults to ensure all parameters exist
-                    for key, value in default_params.items():
-                        if key not in loaded_params:
-                            loaded_params[key] = value
-                    return loaded_params
-            except Exception as e:
-                print(f"Error loading runtime config: {e}, using defaults")
-                return default_params
-        else:
+        try:
+            # read_json restores the file from runtime_config.json.bak if a power
+            # cut left it damaged.
+            loaded_params = config_io.read_json(self.config_file)
+        except FileNotFoundError:
             self.save_parameters(default_params)
             return default_params
+        except Exception as e:
+            # Run on defaults in memory but leave the file alone: writing the
+            # defaults would erase the unit's identity and upload settings.
+            print(f"⚠️ Error loading runtime config: {e}, using defaults (file left as is)")
+            return default_params
+        # Merge with defaults to ensure all parameters exist
+        for key, value in default_params.items():
+            if key not in loaded_params:
+                loaded_params[key] = value
+        return loaded_params
     
     def save_parameters(self, params: Dict[str, Any], merge: bool = False) -> bool:
         """Save runtime parameters to file. Returns True on success, False on failure.
@@ -225,28 +233,14 @@ class LoRaRuntimeManager:
         since this one last read the file.
         """
         try:
-            # os.open with O_CREAT|O_RDWR opens or creates the file without
-            # truncating it, so the lock is acquired before any data is lost.
-            # Opening with 'w' would truncate before flock, exposing an empty
-            # file to concurrent readers.
-            fd = os.open(self.config_file, os.O_CREAT | os.O_RDWR, 0o600)
-            with os.fdopen(fd, 'r+') as f:
-                fcntl.flock(f, fcntl.LOCK_EX)
-                try:
-                    if merge:
-                        content = f.read()
-                        try:
-                            on_disk = json.loads(content) if content.strip() else {}
-                        except ValueError:
-                            # unreadable file: rebuild it from what we know
-                            on_disk = dict(self.parameters)
-                        on_disk.update(params)
-                        params = on_disk
-                    f.seek(0)
-                    json.dump(params, f, indent=2)
-                    f.truncate()
-                finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
+            # Writes go to a temp file that replaces the config in one rename
+            # (config_io), so a power cut leaves the old file or the new one.
+            with config_io.locked(self.config_file):
+                if merge:
+                    on_disk = self._read_for_update()
+                    on_disk.update(params)
+                    params = on_disk
+                config_io.write_json(self.config_file, params)
             if merge:
                 self.parameters.update(params)
             return True
@@ -262,26 +256,43 @@ class LoRaRuntimeManager:
         cache so subsequent set_parameter()/save_parameters() calls don't
         overwrite the new count with a stale cached value.
         """
-        fd = os.open(self.config_file, os.O_CREAT | os.O_RDWR, 0o600)
-        with os.fdopen(fd, 'r+') as f:
-            fcntl.flock(f, fcntl.LOCK_EX)
-            try:
-                content = f.read()
-                cfg = json.loads(content) if content.strip() else {}
-                new_count = cfg.get('iteration_count', 0) + 1
-                cfg['iteration_count'] = new_count
-                self.parameters['iteration_count'] = new_count  # keep cache consistent
-                f.seek(0)
-                json.dump(cfg, f, indent=2)
-                f.truncate()
-            finally:
-                fcntl.flock(f, fcntl.LOCK_UN)
+        with config_io.locked(self.config_file):
+            cfg = self._read_for_update()
+            new_count = cfg.get('iteration_count', 0) + 1
+            cfg['iteration_count'] = new_count
+            if cfg.get('emergency_mode') and not cfg.get('emergency_since'):
+                # set before emergency_since existed, or by hand: start its clock now
+                cfg['emergency_since'] = time.time()
+            config_io.write_json(self.config_file, cfg)
+            self.parameters['iteration_count'] = new_count  # keep cache consistent
         return {
             'iteration_count': new_count,
             'auto_shutdown_enabled': cfg.get('auto_shutdown_enabled', True),
             'shutdown_iteration_limit': cfg.get('shutdown_iteration_limit', 3),
             'emergency_mode': cfg.get('emergency_mode', False),
+            'emergency_since': cfg.get('emergency_since'),
+            'emergency_max_hours': cfg.get('emergency_max_hours', self.EMERGENCY_MAX_HOURS),
         }
+
+    def _read_for_update(self) -> dict:
+        """The on-disk config for a read-modify-write; call with config_io.locked held.
+
+        A damaged file is restored from its backup. If the backup is damaged
+        too, the file is set aside (runtime_config.json.corrupt-*) and rebuilt
+        from this process's in-memory copy, so the unit keeps counting
+        iterations and shutting down rather than failing every cycle.
+        """
+        try:
+            return config_io.read_json(self.config_file)
+        except FileNotFoundError:
+            return {}
+        except config_io.ConfigUnreadable as e:
+            print(f"⚠️ {e}; rebuilding it from memory")
+            try:
+                os.replace(self.config_file, f"{self.config_file}.corrupt-{time.strftime('%Y%m%d-%H%M%S')}")
+            except OSError:
+                pass
+            return dict(self.parameters)
 
     def _get_config_mtime(self) -> Optional[float]:
         try:
@@ -312,12 +323,7 @@ class LoRaRuntimeManager:
         self._config_mtime = current_mtime
 
         try:
-            with open(self.config_file, 'r') as f:
-                fcntl.flock(f, fcntl.LOCK_SH)
-                try:
-                    new_params = json.load(f)
-                finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
+            new_params = config_io.read_json(self.config_file)
         except Exception as e:
             print(f"Error reloading runtime config: {e}")
             return
@@ -408,7 +414,14 @@ class LoRaRuntimeManager:
         # callbacks are right; the write below merges onto the file anyway.
         self._reload_if_changed()
         prior = self.parameters.get(key)
-        if not self.save_parameters({key: coerced}, merge=True):
+        update = {key: coerced}
+        if key == 'emergency_mode':
+            # call_shutdown() ends emergency mode emergency_max_hours after this
+            if coerced and not prior:
+                update['emergency_since'] = time.time()
+            elif not coerced:
+                update['emergency_since'] = None
+        if not self.save_parameters(update, merge=True):
             print(f"Warning: failed to persist '{key}', change not applied")
             return False
         self.parameters[key] = coerced

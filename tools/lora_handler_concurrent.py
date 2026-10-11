@@ -54,6 +54,16 @@ from typing import Dict, Any, Optional
 
 
 
+
+def _config_io():
+    """tools/config_io, importable whether this module was loaded as tools.x or x."""
+    try:
+        from tools import config_io
+    except ImportError:
+        import config_io
+    return config_io
+
+
 class LoRaSerialPortConflict(RuntimeError):
     """Raised when another OS process already owns the LoRa serial port."""
 
@@ -329,31 +339,23 @@ class LoRaHandler:
             'lora_sf_max_age_days': 7,
         }
         
-        if os.path.exists(self.config_file):
-            try:
-                with open(self.config_file, 'r') as f:
-                    fcntl.flock(f, fcntl.LOCK_SH)
-                    try:
-                        return json.load(f)
-                    finally:
-                        fcntl.flock(f, fcntl.LOCK_UN)
-            except Exception as e:
-                print(f"Error loading config: {e}, using defaults")
-                return default_config
-        else:
-            # Save default config
+        config_io = _config_io()
+        try:
+            # restores lora_config.json from its .bak if a power cut damaged it
+            return {**default_config, **config_io.read_json(self.config_file)}
+        except FileNotFoundError:
             self.save_config(default_config)
+            return default_config
+        except Exception as e:
+            print(f"Error loading config: {e}, using defaults")
             return default_config
     
     def save_config(self, config: Dict[str, Any]):
-        """Save configuration to file"""
+        """Save configuration to file (atomically: a power cut leaves old or new)"""
+        config_io = _config_io()
         try:
-            with open(self.config_file, 'w') as f:
-                fcntl.flock(f, fcntl.LOCK_EX)
-                try:
-                    json.dump(config, f, indent=2)
-                finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
+            with config_io.locked(self.config_file):
+                config_io.write_json(self.config_file, config)
         except Exception as e:
             print(f"Error saving config: {e}")
     

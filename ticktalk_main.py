@@ -645,12 +645,12 @@ def record_audio(trigger, directory):
 
 @SQify
 def coregistration(dirname, lepton_state, photo_state):
-    import fcntl
     from tools.coreg_multiple import coreg
+    from tools.lock_utils import flock_deadline
     print(f"\n running coreg on {dirname}\n")
     try:
-        with open("/tmp/watercam_coreg.lock", 'w') as _lf:
-            fcntl.flock(_lf, fcntl.LOCK_EX)
+        # a hung previous holder must not stall the graph (and shutdown) forever
+        with flock_deadline("/tmp/watercam_coreg.lock", 300):
             filepath = coreg(dirname)
         print(f"\n {filepath} images registered \n")
         return True
@@ -660,12 +660,16 @@ def coregistration(dirname, lepton_state, photo_state):
 
 @SQify
 def segformer(filepath, coreg_state): # operate on coregistered image file
-    import fcntl
     import os
     import subprocess
 
     from tools.coreg_multiple import config as coreg_config
+    from tools.lock_utils import flock_deadline
     from tools.segformer_client import segformer_via_daemon
+
+    # The fallback cold-loads the model (~40 s); give it room but not forever, since
+    # every later step, call_shutdown included, waits for this one.
+    FALLBACK_TIMEOUT_S = 240
 
     # Serve color_preserved_5_band.tiff, not final_5_band.tiff. The two files
     # are not the same image: co-registration writes final_5_band in OpenCV's
@@ -685,6 +689,11 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
     output_path = filepath + "/" + coreg_config.SEGMENTATION_PNG
     socket_path = "/run/segformer/segformer.sock"
 
+    if not coreg_state or not os.path.exists(tiff_path):
+        # Without a co-registered TIFF both paths below are a slow, certain failure.
+        print(f"⚠️ Skipping segmentation: no co-registered image ({tiff_path})")
+        return None
+
     try:
         # Prefer the persistent daemon — no cold-start, model stays loaded.
         if os.path.exists(socket_path):
@@ -696,13 +705,12 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
         segformer_location = os.environ.get("SEGFORMER_DIR", "/home/pi/segformer_5band")
         segformer_python = os.environ.get("SEGFORMER_PYTHON", "/home/pi/miniforge3/envs/5band/bin/python")
         segformer_coreg = os.path.join(segformer_location, "segment_tiff_5band.py")
-        with open("/tmp/watercam_segformer.lock", 'w') as _lf:
-            fcntl.flock(_lf, fcntl.LOCK_EX)
-            subprocess.Popen(
+        with flock_deadline("/tmp/watercam_segformer.lock", FALLBACK_TIMEOUT_S):
+            subprocess.run(
                 [segformer_python, segformer_coreg, tiff_path],
-                cwd=segformer_location,
-            ).wait()
-        return output_path
+                cwd=segformer_location, timeout=FALLBACK_TIMEOUT_S,
+            )
+        return output_path if os.path.exists(output_path) else None
     except Exception as e:
         print(f"⚠️ Failed to run segmentation: {e}")
         return None
@@ -713,10 +721,14 @@ def call_shutdown(state):
     from subprocess import call
     from tools.lora_runtime_integration import get_runtime_manager
 
+    import time
+
     new_count = 1
     auto_shutdown_enabled = True
     shutdown_limit = 3
     emergency_mode = False
+    emergency_since = None
+    emergency_max_hours = 24
 
     try:
         result = get_runtime_manager().atomic_increment_iteration_count()
@@ -724,9 +736,33 @@ def call_shutdown(state):
         auto_shutdown_enabled = result['auto_shutdown_enabled']
         shutdown_limit = result['shutdown_iteration_limit']
         emergency_mode = result['emergency_mode']
+        emergency_since = result.get('emergency_since')
+        emergency_max_hours = result.get('emergency_max_hours', emergency_max_hours)
         print(f"\n Iteration: {new_count} \n")
     except Exception as e:
         print(f"⚠️ Failed to update iteration count: {e}")
+
+    # Emergency mode keeps the unit awake and clears the Witty Pi shutdown
+    # alarm, so nothing else would ever end it: a stray or forgotten command
+    # would run the battery flat. End it after emergency_max_hours (0 = never).
+    try:
+        expired = (emergency_mode and emergency_since and float(emergency_max_hours) > 0
+                   and time.time() - float(emergency_since) > float(emergency_max_hours) * 3600)
+    except (TypeError, ValueError):
+        expired = False
+    if expired:
+        print(f"⏱️ Emergency mode has run {emergency_max_hours} h: ending it and restoring the schedule")
+        try:
+            get_runtime_manager().set_parameter('emergency_mode', False)
+        except Exception as e:
+            print(f"⚠️ Failed to clear emergency_mode: {e}")
+        try:
+            # directly, not through the update callback, which only prints in this process
+            from tools.wittypi_control import apply_emergency_schedule
+            apply_emergency_schedule(False)
+        except Exception as e:
+            print(f"⚠️ Failed to restore the Witty Pi schedule: {e}")
+        emergency_mode = False
 
     if emergency_mode:
         print("🚨 EMERGENCY MODE ACTIVE - Ignoring shutdown limit, continuing data collection")
@@ -743,11 +779,22 @@ def call_shutdown(state):
             stop_recording_if_active()
         except Exception as e:
             print(f"⚠️ Failed to finalize audio recording before shutdown: {e}")
-        try:
-            # Preferred: graceful OS shutdown via doas (configured in /etc/doas.conf for user pi)
-            call(["doas", "/usr/sbin/shutdown", "-h", "now"])
-        except Exception:
-            pass
+        # Graceful OS shutdown via doas (configured in /etc/doas.conf for user pi).
+        # Check that it worked: if doas is missing or misconfigured, try sudo
+        # rather than fall through to a restart loop that captures until the
+        # Witty Pi cuts power. runrtm.py keeps the count across restarts within
+        # one boot, so a restarted runtime asks for shutdown again after a cycle.
+        for cmd in (["doas", "/usr/sbin/shutdown", "-h", "now"],
+                    ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"]):
+            try:
+                rc = call(cmd, timeout=30)
+            except Exception as e:
+                rc = e
+            if rc == 0:
+                break
+            print(f"⚠️ {' '.join(cmd[:2])} shutdown failed: {rc}")
+        else:
+            print("🚨 Could not shut down: the Witty Pi will cut power at the end of the window")
         # Fallback: terminate the TT runtime process
         sys.exit("shutdown")
     else:
