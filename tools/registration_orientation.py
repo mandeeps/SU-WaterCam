@@ -57,6 +57,9 @@ DEFAULT_TILT_THRESHOLD_DEG = 5.0
 DEFAULT_ROTATION_THRESHOLD_DEG = 15.0
 #: calibration_status is (sys, gyro, accel, mag), each 0-3.
 MAG_CALIBRATED = 2
+#: Sent to the server as registration_status (channel 01 08, both transports);
+#: the API's app/decoders.py REGISTRATION_STATUS must list the same codes.
+STATUS_CODES = {"ok": 0, "shifted": 1, "adopted": 2, "no_cache": 3, "no_imu": 4}
 
 
 def cache_path(capture_dir: str) -> Optional[str]:
@@ -197,6 +200,22 @@ def write_capture_flag(capture_dir: str, result: Dict[str, Any]) -> None:
     """Record the check next to the capture it applies to."""
     with open(os.path.join(capture_dir, CAPTURE_FLAG_FILENAME), "w") as f:
         json.dump(result, f, indent=2)
+
+
+def status_code_for_capture(capture_dir: str) -> Optional[int]:
+    """The capture's check as a STATUS_CODES value, or None if it has none.
+
+    None when co-registration or the check failed for this capture; nothing is
+    sent then, so the server keeps the last status it had.
+    """
+    # Called from the uplink steps, which must never fail over this.
+    if not capture_dir:
+        return None
+    try:
+        with open(os.path.join(capture_dir, CAPTURE_FLAG_FILENAME)) as f:
+            return STATUS_CODES.get(json.load(f).get("status"))
+    except (OSError, ValueError, AttributeError, TypeError):
+        return None
 
 
 def describe(result: Dict[str, Any]) -> str:

@@ -166,3 +166,33 @@ def test_cache_filename_matches_coreg():
     pytest.importorskip("pandas")
     from tools.coreg_multiple import config
     assert ro.CACHE_FILENAME == config.TRANSFORM_CACHE_FILENAME
+
+
+# --- sending the status: channel 01 08 ---------------------------------------
+
+@pytest.mark.parametrize("status, code", [("ok", 0), ("shifted", 1), ("adopted", 2),
+                                          ("no_cache", 3), ("no_imu", 4)])
+def test_status_code_for_capture(tmp_path, status, code):
+    ro.write_capture_flag(str(tmp_path), {"status": status})
+    assert ro.status_code_for_capture(str(tmp_path)) == code
+
+
+@pytest.mark.parametrize("content", [None, "not json", '["a list"]', '{"status": "no_reference"}'])
+def test_no_status_code_without_a_usable_check(tmp_path, content):
+    if content is not None:
+        (tmp_path / ro.CAPTURE_FLAG_FILENAME).write_text(content)
+    assert ro.status_code_for_capture(str(tmp_path)) is None
+
+
+def test_status_is_encoded_after_pi_throttled():
+    from tools.lora_handler_concurrent import _encode_compressed_packet
+    packet = _encode_compressed_packet({"timestamp": 1790727396, "battery_percent": 44,
+                                        "pi_throttled": 0x50005, "registration_status": 1})
+    assert packet[-6:] == bytes([0x01, 0x07, 0x55, 0x01, 0x08, 0x01])
+    assert _encode_compressed_packet({"battery_percent": 44, "registration_status": None}) \
+        == bytes([0x02, 0x01, 44])
+
+
+@pytest.mark.parametrize("capture_dir", [None, ""])
+def test_no_status_code_without_a_capture_directory(capture_dir):
+    assert ro.status_code_for_capture(capture_dir) is None
