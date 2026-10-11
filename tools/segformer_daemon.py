@@ -121,6 +121,29 @@ DEFAULT_IMG_SCALE = (1024, 512)
 #: input dimensions divide by 32.
 SIZE_DIVISOR = 32
 
+#: "pad" resizes keeping aspect, then zero-pads up to SIZE_DIVISOR, which is what
+#: the mmseg path does and what the current checkpoint was validated against.
+#: "divisible" resizes straight to a divisible size and never pads. Prefer it once
+#: a checkpoint exists to validate it against.
+SIZE_POLICY = os.environ.get("SEGFORMER_SIZE_POLICY", "pad")
+
+
+def round_to_divisor(h: int, w: int, divisor: int = SIZE_DIVISOR) -> tuple[int, int]:
+    """Nearest size whose dimensions both divide by `divisor`, minimum one step.
+
+    Padding to a multiple of 32 is not free. MiT's spatial-reduction attention
+    pools globally, so a padded strip perturbs predictions across the whole
+    frame. Measured over 64 real captures in segformer_5band: 3.27% of pixels
+    move on average, and water fraction shifts by more than a point in 39 of
+    64. Resizing to a size that already divides avoids the pad entirely, at the
+    cost of a slightly different scale.
+
+    This changes model output, so it cannot be validated against the current
+    100-iteration checkpoint. See segformer_5band/NEXT_CHECKPOINT.md section 3.
+    """
+    return (max(divisor, int(round(h / divisor)) * divisor),
+            max(divisor, int(round(w / divisor)) * divisor))
+
 
 def keep_ratio_size(oh: int, ow: int, img_scale=DEFAULT_IMG_SCALE) -> tuple[int, int]:
     """`mmcv.imrescale` semantics: fit inside img_scale without distorting aspect.
@@ -134,15 +157,20 @@ def keep_ratio_size(oh: int, ow: int, img_scale=DEFAULT_IMG_SCALE) -> tuple[int,
     return int(oh * scale + 0.5), int(ow * scale + 0.5)
 
 
-def input_geometry(input_shape, ori_h: int, ori_w: int) -> tuple[int, int, int, int]:
+def input_geometry(input_shape, ori_h: int, ori_w: int,
+                   policy: str = None) -> tuple[int, int, int, int]:
     """(resize_h, resize_w, pad_h, pad_w) for a graph's [batch, bands, H, W] input.
 
     Each spatial axis is handled on its own. A static axis is the graph's
     contract: resize to exactly that and never pad it, or ORT rejects the input.
     A symbolic axis is derived from the capture -- keep-ratio when both are
     symbolic, otherwise from the static axis so the aspect ratio survives --
-    and padded up to SIZE_DIVISOR so the graph's scale_factor upsample is exact.
+    then made divisible by SIZE_DIVISOR so the graph's scale_factor upsample is
+    exact: by padding up to it (policy "pad", the default) or by resizing to
+    the nearest multiple instead (policy "divisible"; see SIZE_POLICY and
+    round_to_divisor).
     """
+    policy = SIZE_POLICY if policy is None else policy
     static_h = input_shape[2] if isinstance(input_shape[2], int) else None
     static_w = input_shape[3] if isinstance(input_shape[3], int) else None
     if static_h and static_w:
@@ -153,6 +181,10 @@ def input_geometry(input_shape, ori_h: int, ori_w: int) -> tuple[int, int, int, 
         h, w = max(1, int(ori_h * static_w / ori_w + 0.5)), static_w
     else:
         h, w = keep_ratio_size(ori_h, ori_w)
+    if policy == "divisible":
+        rh, rw = round_to_divisor(h, w)
+        h = h if static_h else rh
+        w = w if static_w else rw
     pad_h = 0 if static_h else (-h) % SIZE_DIVISOR
     pad_w = 0 if static_w else (-w) % SIZE_DIVISOR
     return h, w, pad_h, pad_w
