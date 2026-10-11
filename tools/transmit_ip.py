@@ -519,6 +519,48 @@ def poll_downlink(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
         tx.close()
 
 
+# Downlink command codes and their payload lengths, as the server encodes them
+# (app/encoders.py): a frame is one or more [code: 2 bytes][value: fixed width],
+# with no length byte. The same frames arrive over IP (as parts) and over LoRa
+# (as raw bytes, see parse_downlink_frame), so this is the one table for both.
+DOWNLINK_CODE_LENGTHS: Dict[str, int] = {
+    "10 90": 1,    # area_threshold_pct
+    "11 91": 2,    # stage_threshold_cm (u16)
+    "12 92": 1,    # monitoring_freq_h index
+    "13 93": 1,    # emergency_freq_min index
+    "14 94": 1,    # flood_code_freq_min index
+    "16 96": 1,    # audio_recording_enabled
+    "18 98": 1,    # remote debug session: NN x 10 min, 0 = end (docs/REMOTE_DEBUG_SESSION.md)
+    "21 91": 1,    # emergency on for HH hours (00 = emergency_max_hours)
+    "21": 0,       # emergency on, from before 21 91; kept while nodes and API update (IP only)
+    "99 99": 0,    # emergency off: the same 0x99 0x99 as over LoRa
+}
+
+
+def parse_downlink_frame(data: bytes) -> List[Dict[str, str]] | None:
+    """Split a raw server frame into parts for apply_downlink_command().
+
+    Returns None unless the whole frame is a sequence of known two-byte codes,
+    each followed by exactly its value width, so other payload formats are left
+    to their own parsers.
+    """
+    parts: List[Dict[str, str]] = []
+    i = 0
+    while i < len(data):
+        if i + 2 > len(data):
+            return None
+        code = f"{data[i]:02x} {data[i + 1]:02x}"
+        width = DOWNLINK_CODE_LENGTHS.get(code)
+        if width is None:
+            return None
+        value = data[i + 2:i + 2 + width]
+        if len(value) != width:
+            return None
+        parts.append({"code": code, "payload_hex": value.hex()})
+        i += 2 + width
+    return parts or None
+
+
 def apply_downlink_command(
     cmd: Dict[str, Any],
     set_param_fn: Callable[[str, Any], None] | None = None,
@@ -564,20 +606,7 @@ def apply_downlink_command(
     _EF_MIN   = [2, 5, 10]              # emergency_freq_min allowed values
     _FF_MIN   = [10, 20, 30, 40, 50, 60]  # flood_code_freq_min allowed values
 
-    # Expected payload byte-lengths for fixed-width codes. Codes absent from
-    # this dict are not length-checked here and are handled by later decoding.
-    _expected_len: Dict[str, int] = {
-        "10 90": 1,
-        "11 91": 2,
-        "12 92": 1,
-        "13 93": 1,
-        "14 94": 1,
-        "16 96": 1,
-        "18 98": 1,    # remote debug session: NN x 10 min, 0 = end (docs/REMOTE_DEBUG_SESSION.md)
-        "21 91": 1,    # emergency on for HH hours (00 = emergency_max_hours)
-        "21": 0,       # emergency on, from before 21 91; kept while nodes and API update
-        "99 99": 0,    # emergency off: the same 0x99 0x99 as over LoRa
-    }
+    _expected_len = DOWNLINK_CODE_LENGTHS
 
     parts_raw = cmd.get("parts")
     if parts_raw is None:
