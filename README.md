@@ -129,7 +129,9 @@ You can connect to the system using a serial cable. Once it's connected to a net
 <details>
 <summary>If and only if installing software from scratch:</summary>
 
-Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS Lite (Bookworm) to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location)
+Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS Lite (Trixie, Debian 13; the nodes no longer use Bookworm) to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location)
+
+Trixie changed some modem behaviour (systemd 257, ModemManager 1.24); see [quectel-1nce-debugging.md](quectel-1nce-debugging.md#trixie-specific-issues).
 
 https://www.raspberrypi.com/software/
 
