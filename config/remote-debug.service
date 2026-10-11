@@ -1,0 +1,11 @@
+[Unit]
+Description=WaterCam remote debug session: apply requests, expire sessions (docs/REMOTE_DEBUG_SESSION.md)
+After=network.target
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/SU-WaterCam
+ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/tools/remote_debug.py tick
+# Starting a session waits up to ~3 min for cellular and Tailscale.
+TimeoutStartSec=300

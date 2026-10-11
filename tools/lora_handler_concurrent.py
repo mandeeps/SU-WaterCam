@@ -651,6 +651,29 @@ class LoRaHandler:
             print(f"Error queuing file transmission: {e}")
             return False
     
+    def _start_remote_debug(self, value: str) -> None:
+        """Start, extend or end a remote debug session (docs/REMOTE_DEBUG_SESSION.md).
+
+        On a thread: bringing cellular and Tailscale up takes up to ~3 min, and
+        decode() runs in the serial listener. The session's status uplink goes
+        through this handler's transmit(), which waits for the lock.
+        """
+        def run():
+            try:
+                try:
+                    from tools import remote_debug
+                except ImportError:
+                    import remote_debug
+                minutes = remote_debug.minutes_from_code(value)
+                if minutes:
+                    remote_debug.start(minutes, source='lora', handler=self)
+                else:
+                    remote_debug.stop(handler=self, reason='LoRa command')
+            except Exception as e:
+                print(f"⚠️ Remote debug command failed: {e}")
+        print(f'🛠️ Remote debug command, value {value!r}')
+        threading.Thread(target=run, name='remote-debug', daemon=True).start()
+
     def _send_debug_reply(self, hex_payload: str) -> None:
         """Transmit a debug-status reply (runs on its own thread; see decode())."""
         try:
@@ -891,6 +914,9 @@ class LoRaHandler:
                 elif channel == '99' and command == '00':
                     self.update_config('emergency_mode', False)
                     print('✅ Emergency mode deactivated')
+                elif ch == 0x18 and cmd == 0x98:
+                    # "18 98 00" (end remote debug) also parses as a zero-length TLV
+                    self._start_remote_debug(f"{val_int:x}")
                 else:
                     print(f'Unknown TLV channel/command: {channel}/{command} value={val_int}')
 
@@ -1066,6 +1092,10 @@ class LoRaHandler:
                         self.update_config('emergency_mode', False)
                         print('✅ Emergency mode deactivated')
                         
+                    elif channel == '18' and command == '98':
+                        # Remote debug session: value = NN (hex) x 10 min, 00 = end
+                        self._start_remote_debug(value)
+
                     elif channel == '50' and command == '01':
                         # Debug status command - request comprehensive system information
                         print('🔍 Debug status requested via LoRa command')
