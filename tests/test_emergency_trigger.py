@@ -1,11 +1,13 @@
-"""Only the downlink '21' (and the mDot's report of it) turns emergency mode on.
+"""Remote start and emergency mode are separate commands.
 
-The emergency downlink is the single byte '!' (0x21). With the mDot's Class C
-packet processor on, the firmware handles it and prints
-"EMERGENCY: PA_6 pin state: N"; with it off, the packet reaches the Pi as the
-hex payload "21". Nothing else may trigger emergency mode: not the TLV forms
-"2100"/"21 0" that used to, and not any serial line merely containing
-"EMERGENCY".
+'!' (0x21) is only a remote start: with the mDot's Class C packet processor on,
+the firmware powers a sleeping Pi on and prints "EMERGENCY: PA_6 pin state: N";
+with it off, the packet reaches the Pi as the hex payload "21". Neither turns
+emergency mode on any more: it used to only when the Pi was already awake, so the
+same command meant two things depending on power state.
+
+Emergency mode is 21 91 HH (HH hours, hex; 00 = emergency_max_hours), and the node
+answers with its status. 99 99 still ends it.
 """
 import json
 import os
@@ -39,9 +41,34 @@ def manager(tmp_path):
 
 # ── the handler in lora_daemon ──────────────────────────────────────────────
 
-def test_payload_21_turns_emergency_on(handler):
+def test_payload_21_is_only_a_remote_start(handler):
     handler.decode("21")
+    assert handler.config["emergency_mode"] is False
+
+
+def test_the_firmware_line_does_not_turn_emergency_on(handler):
+    with patch("tools.lora_runtime_integration.set_parameter") as set_param:
+        assert handler._is_emergency_message("EMERGENCY: PA_6 pin state: 1")
+    set_param.assert_not_called()
+
+
+@pytest.mark.parametrize("payload, hours", [("219106", 6), ("219130", 48), ("219100", None)])
+def test_21_91_turns_emergency_on_for_hh_hours(handler, payload, hours):
+    with patch.object(LoRaHandler, "_reply_with_status") as reply:
+        handler.decode(payload)
     assert handler.config["emergency_mode"] is True
+    assert isinstance(handler.config["emergency_since"], float)
+    if hours:
+        assert handler.config["emergency_max_hours"] == hours
+    else:
+        assert "emergency_max_hours" not in handler.config     # default kept
+    reply.assert_called_once()
+
+
+def test_21_91_duration_is_capped(handler):
+    with patch.object(LoRaHandler, "_reply_with_status"):
+        handler.decode("2191ff")
+    assert handler.config["emergency_max_hours"] == 168
 
 
 @pytest.mark.parametrize("payload", ["2100", "2101", "21000", "210", "121", "00", "9921"])
@@ -71,9 +98,14 @@ def test_no_other_line_counts(handler, line):
 
 # ── the runtime manager's own payload parser ────────────────────────────────
 
-def test_runtime_payload_21_turns_emergency_on(manager):
+def test_runtime_payload_21_is_only_a_remote_start(manager):
     assert manager.process_lora_payload("21")
-    assert manager.get_parameter("emergency_mode") is True
+    assert manager.get_parameter("emergency_mode") is False
+
+
+def test_emergency_max_hours_is_validated(manager):
+    assert manager.set_parameter("emergency_max_hours", 12)
+    assert not manager.set_parameter("emergency_max_hours", 500)
 
 
 @pytest.mark.parametrize("payload", ["2100", "21 00 00"])

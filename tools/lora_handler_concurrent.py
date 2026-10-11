@@ -456,19 +456,15 @@ class LoRaHandler:
                             print(f"⚠️ Skipping corrupted/invalid message: '{res}'")
                             continue
                         
-                        # Check for the firmware's emergency line FIRST (highest priority)
+                        # The mDot's line for the remote start downlink '!' (0x21).
+                        # '!' only powers a sleeping Pi on; it is not emergency
+                        # mode, which is its own command (21 91 HH). The mDot
+                        # prints this whether or not it pulsed the switch, and
+                        # the Pi only sees it when it was already on, so there
+                        # is nothing to do but log it.
                         if self._is_emergency_message(res):
-                            emergency_status = self._extract_emergency_status(res)
-                            if emergency_status:
-                                print(f"🚨 EMERGENCY TRIGGERED: '{res}'")
-                                # The emergency downlink '!' reached the mDot
-                                try:
-                                    from tools.lora_runtime_integration import set_parameter
-                                    set_parameter('emergency_mode', True)
-                                    print("✅ Emergency mode activated via EMERGENCY message")
-                                except Exception as e:
-                                    print(f"⚠️ Failed to set emergency mode: {e}")
-                            continue  # Emergency messages are handled, don't process further
+                            print(f"ℹ️ Remote start request from the mDot (Pi already on): '{res.strip()}'")
+                            continue
 
                         # The firmware's other "EMERGENCY: ..." lines (switch
                         # activation progress) are logged, not acted on, and
@@ -484,9 +480,11 @@ class LoRaHandler:
                             try:
                                 from tools.lora_runtime_integration import set_parameter
                                 set_parameter('emergency_mode', False)
+                                self.config['emergency_mode'] = False
                                 print("✅ Emergency mode deactivated via '9999' clear message")
                             except Exception as e:
                                 print(f"⚠️ Failed to clear emergency mode: {e}")
+                            self._reply_with_status()   # lets the API confirm it arrived
                             continue  # Emergency clear messages are handled, don't process further
                         
                         # Look for actual LoRa data messages THIRD (priority)
@@ -653,6 +651,37 @@ class LoRaHandler:
             print(f"Error queuing file transmission: {e}")
             return False
     
+    def _start_emergency(self, value: str) -> None:
+        """Emergency mode on for HH hours (21 91 HH; 00 keeps emergency_max_hours).
+
+        The duration starts now, even if emergency mode was already on, and the
+        node answers with its status ({"dbg":1,...,"em":1}) so the API knows the
+        command arrived and stops resending.
+        """
+        try:
+            hours = int(str(value).strip() or "0", 16)
+        except ValueError:
+            print(f"⚠️ Emergency command with a bad duration {value!r}: ignored")
+            return
+        if hours:
+            self.update_config('emergency_max_hours', min(hours, 168))
+        self.update_config('emergency_mode', True)
+        self.update_config('emergency_since', time.time())
+        print(f"🚨 Emergency mode on for {hours or self.get_config('emergency_max_hours', 24)} h")
+        self._reply_with_status()
+
+    def _reply_with_status(self) -> None:
+        """Send the node status JSON (as for 5001) from a helper thread."""
+        try:
+            from tools.lora_debug_integration import handle_debug_status_request
+            reply = handle_debug_status_request(size_limit=self.current_size_limit,
+                                                emergency_mode=self.get_config('emergency_mode', False))
+            if reply['status'] == 'success':
+                threading.Thread(target=self._send_debug_reply, args=(reply['data'],),
+                                 name='status-reply', daemon=True).start()
+        except Exception as e:
+            print(f"⚠️ Status reply failed: {e}")
+
     def _start_remote_debug(self, value: str) -> None:
         """Start, extend or end a remote debug session (docs/REMOTE_DEBUG_SESSION.md).
 
@@ -825,10 +854,10 @@ class LoRaHandler:
             self.update_config('last_lora_command_time', datetime.now().isoformat())
             print(f"📡 LoRa command received at {datetime.now().strftime('%H:%M:%S')}")
             
-            # Handle emergency mode command (no parameters) - legacy format
+            # A bare 21 is the remote start byte '!', which the mDot handles itself
+            # and never forwards; emergency mode is 21 91 HH (_start_emergency).
             if payload == '21':
-                self.update_config('emergency_mode', True)
-                print('🚨 Emergency mode activated!')
+                print('ℹ️ Remote start byte received; emergency mode needs 21 91 HH')
                 return
             
             # First try TLV hex multi-command format: [ch:1B][cmd:1B][len:1B][value:len]
@@ -916,6 +945,9 @@ class LoRaHandler:
                 elif channel == '99' and command == '00':
                     self.update_config('emergency_mode', False)
                     print('✅ Emergency mode deactivated')
+                elif ch == 0x21 and cmd == 0x91:
+                    # "21 91 00" (emergency on, default duration) parses as a zero-length TLV
+                    self._start_emergency(f"{val_int:x}")
                 elif ch == 0x18 and cmd == 0x98:
                     # "18 98 00" (end remote debug) also parses as a zero-length TLV
                     self._start_remote_debug(f"{val_int:x}")
@@ -1094,6 +1126,10 @@ class LoRaHandler:
                         self.update_config('emergency_mode', False)
                         print('✅ Emergency mode deactivated')
                         
+                    elif channel == '21' and command == '91':
+                        # Emergency mode on: value = HH (hex) hours, 00 = default duration
+                        self._start_emergency(value)
+
                     elif channel == '18' and command == '98':
                         # Remote debug session: value = NN (hex) x 10 min, 00 = end
                         self._start_remote_debug(value)

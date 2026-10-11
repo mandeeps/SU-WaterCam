@@ -95,6 +95,7 @@ class LoRaRuntimeManager:
         'shutdown_iteration_limit':         (1, 100),
         'data_retention_days':              (1, 365),
         'compression_level':                (1, 10),
+        'emergency_max_hours':              (0, 168),     # 0 = no expiry
     }
 
     # Parameters that must be stored as integers (not floats).
@@ -108,6 +109,7 @@ class LoRaRuntimeManager:
         'shutdown_iteration_limit',
         'data_retention_days',
         'compression_level',
+        'emergency_max_hours',
     })
 
     def __init__(self, config_file='runtime_config.json', lora_handler=None):
@@ -466,7 +468,7 @@ class LoRaRuntimeManager:
             '15': lambda v: self.set_parameter('neighborhood_emergency_frequency', v), # Neighborhood frequency
             
             # System control commands
-            '21': lambda v: self.set_parameter('emergency_mode', True),          # Emergency mode (no value needed)
+            '21': lambda v: True,   # remote start '!': powers the Pi on, not emergency mode (21 91 HH)
             '22': lambda v: self.set_parameter('debug_mode', bool(v)),           # Debug mode
             
             # Performance commands
@@ -495,9 +497,12 @@ class LoRaRuntimeManager:
     def process_lora_payload(self, payload: str) -> bool:
         """Process LoRa payload in new [Channel][Command][Value] format"""
         try:
-            # Handle legacy format (backward compatibility)
+            # A bare 21 is the remote start byte '!': it powers a sleeping Pi
+            # on and is not emergency mode (that is 21 91 HH, handled by the
+            # LoRa handler's decode()).
             if payload == '21':
-                return self.set_parameter('emergency_mode', True)
+                print('ℹ️ Remote start byte received; emergency mode needs 21 91 HH')
+                return True
             
             # First try TLV hex multi-command format: [ch:1B][cmd:1B][len:1B][value:len]
             def _is_hex_string(s: str) -> bool:

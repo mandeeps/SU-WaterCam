@@ -54,9 +54,10 @@ The mDot does not pass `!` to the Pi, and it drops any downlink that arrives
 while the Pi is off. A woken Pi runs its normal boot: `lora_daemon` starts first,
 then ticktalk, which shuts the Pi down after its cycles (a few minutes). The
 resends make sure `18 98` reaches `lora_daemon` in that gap. The API sends the
-plain command first and only sends `!` when there is no answer: `!` to a running
-Pi is harmless for the power (the mDot checks the Pi's GPIO5 and does nothing),
-but the Pi reads the mDot's log line about it and turns emergency mode on.
+plain command first and only sends `!` when there is no answer, which saves the
+wake round trip for a node that is already up. `!` is only a remote start, so it
+is harmless to a running Pi: the mDot checks the Pi's GPIO5 and does nothing
+([REMOTE_START_AND_EMERGENCY.md](REMOTE_START_AND_EMERGENCY.md)).
 
 The Witty Pi itself doesn't cut a woken Pi short: booted between slots, it arms
 the shutdown for the end of the next ON slot, and `recovery_boot` only defers

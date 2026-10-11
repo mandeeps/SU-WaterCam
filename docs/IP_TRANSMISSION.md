@@ -434,6 +434,11 @@ ip_downlink = ip_downlink_poll_and_apply(lora_init)  # NEW
 | `12 92` | `monitoring_freq_h` | u8 index → `[1,3,6,24,72]` hrs → ×60 | `monitoring_frequency` (min) |
 | `13 93` | `emergency_freq_min` | u8 index → `[2,5,10]` min | `emergency_frequency` |
 | `14 94` | `flood_code_freq_min` | u8 index → `[10,20,30,40,50,60]` min | `neighborhood_emergency_frequency` |
+| `16 96` | `audio_recording_enabled` | u8 bool | `audio_recording_enabled` |
+| `18 98` | remote debug session | u8 × 10 min, 0 = end ([REMOTE_DEBUG_SESSION.md](REMOTE_DEBUG_SESSION.md)) | request for `remote-debug.timer` |
+| `21 91` | emergency mode on | u8 hours, 0 = `emergency_max_hours` ([REMOTE_START_AND_EMERGENCY.md](REMOTE_START_AND_EMERGENCY.md)) | `emergency_mode`, `emergency_max_hours`, `emergency_since` |
+| `99 99` | emergency mode off | no value | `emergency_mode` |
+| `21` | emergency mode on (old code, kept during the transition) | no value | `emergency_mode` |
 
 Unrecognised codes are logged and ignored — forward-compatible with new server
 commands.
