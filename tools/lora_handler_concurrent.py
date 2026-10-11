@@ -708,12 +708,26 @@ class LoRaHandler:
         print(f"🚨 Emergency mode on for {hours or self.get_config('emergency_max_hours', 24)} h")
         self._reply_with_status()
 
+    def _emergency_mode(self) -> bool:
+        """Emergency mode as the node acts on it: runtime_config.json.
+
+        This handler's lora_config.json keeps its own copy, which only LoRa
+        commands update, so it stays True after emergency mode ends some other
+        way (the time limit in call_shutdown, the IP downlink, the dashboard).
+        Reporting that copy told the server emergency mode was still on.
+        """
+        try:
+            from tools.lora_runtime_integration import get_parameter
+            return bool(get_parameter('emergency_mode', False))
+        except Exception:
+            return bool(self.get_config('emergency_mode', False))
+
     def _reply_with_status(self) -> None:
         """Send the node status JSON (as for 5001) from a helper thread."""
         try:
             from tools.lora_debug_integration import handle_debug_status_request
             reply = handle_debug_status_request(size_limit=self.current_size_limit,
-                                                emergency_mode=self.get_config('emergency_mode', False))
+                                                emergency_mode=self._emergency_mode())
             if reply['status'] == 'success':
                 threading.Thread(target=self._send_debug_reply, args=(reply['data'],),
                                  name='status-reply', daemon=True).start()
@@ -1179,7 +1193,7 @@ class LoRaHandler:
                             from tools.lora_debug_integration import handle_debug_status_request
                             debug_response = handle_debug_status_request(
                                 size_limit=self.current_size_limit,
-                                emergency_mode=self.get_config('emergency_mode', False),
+                                emergency_mode=self._emergency_mode(),
                             )
                             
                             if debug_response['status'] == 'success':

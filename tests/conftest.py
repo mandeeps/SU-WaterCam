@@ -260,6 +260,13 @@ def _reset_singletons():
         pass
     try:
         import tools.lora_handler_concurrent as lhc
+        # Stop the listener before dropping the handler. Clearing the reference
+        # alone left its _listen_loop thread running for the rest of the session.
+        # Tests that patch time.sleep (it is the global time module) then made it
+        # spin, which starved the test thread and hung CI on a slow runner.
+        handler = lhc._lora_handler
+        if handler is not None and getattr(handler, "listening", False):
+            handler.stop_listening()
         lhc._lora_handler = None
     except Exception:
         pass

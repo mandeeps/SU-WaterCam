@@ -53,3 +53,21 @@ def test_emergency_state_survives_a_small_limit():
 def test_encode_for_limit_keeps_leading_fields():
     payload, dropped = encode_for_limit([("dbg", 1), ("rd", 5), ("ts", 1791675183)], 17)
     assert payload == b'{"dbg":1,"rd":5}' and dropped == ["ts"]
+
+
+def test_status_reports_emergency_mode_from_runtime_config():
+    """Seen on 005: emergency mode ended by its time limit (runtime_config.json),
+    while the LoRa handler's own lora_config.json still said True, and the node's
+    answers reported em:1."""
+    import tempfile
+    from unittest.mock import patch
+    from tools.lora_handler_concurrent import LoRaHandler
+    h = LoRaHandler.__new__(LoRaHandler)
+    h.config, h.config_file, h.runtime_callback = {"emergency_mode": True}, os.path.join(tempfile.mkdtemp(), "c.json"), None
+    h.current_size_limit = 242
+    sent = []
+    h._send_debug_reply = lambda data: sent.append(json.loads(bytes.fromhex(data)))
+    with patch("tools.lora_runtime_integration.get_parameter", return_value=False), \
+         patch("threading.Thread", lambda target, args, **kw: MagicMock(start=lambda: target(*args))):
+        h._reply_with_status()
+    assert sent[0]["em"] == 0
