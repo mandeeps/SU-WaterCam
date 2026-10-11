@@ -179,8 +179,10 @@ path and the API encoder treat it as the flood-code frequency (an index into
 Today the only packet that wakes the Pi is `!`, and it is consumed rather than
 passed on. Proposed:
 
-- A second wake packet, reserved for maintenance, that pulses the Witty Pi
-  switch exactly like `!` but does not imply emergency.
+- ~~A second wake packet, reserved for maintenance, that pulses the Witty Pi
+  switch exactly like `!` but does not imply emergency.~~ Not needed: `!` is now
+  only a remote start, and emergency mode is its own command
+  ([REMOTE_START_AND_EMERGENCY.md](REMOTE_START_AND_EMERGENCY.md)).
 - While the Pi is off (PA_6 low), the mDot holds the most recent non-emergency
   downlink instead of forwarding it to a serial port nobody is reading, and
   replays it once the Pi is up. The maintenance command then travels as a

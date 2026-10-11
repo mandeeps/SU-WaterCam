@@ -314,3 +314,15 @@ class TestEmergencyMode(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+def test_21_91_turns_emergency_on_for_hh_hours():
+    """IP downlink 21 91 HH: emergency on, duration HH hours from now."""
+    import time as _time
+    from tools.transmit_ip import apply_downlink_command
+    calls = {}
+    r = apply_downlink_command({"parts": [{"code": "21 91", "payload_hex": "0c"}]},
+                               lambda k, v: calls.__setitem__(k, v))
+    assert calls["emergency_max_hours"] == 12 and calls["emergency_mode"] is True
+    assert abs(calls["emergency_since"] - _time.time()) < 5
+    assert r["applied"] == ["emergency_mode=True(12h)"]

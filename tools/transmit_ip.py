@@ -574,7 +574,8 @@ def apply_downlink_command(
         "14 94": 1,
         "16 96": 1,
         "18 98": 1,    # remote debug session: NN x 10 min, 0 = end (docs/REMOTE_DEBUG_SESSION.md)
-        "21": 0,       # emergency on: the same one-byte message as over LoRa
+        "21 91": 1,    # emergency on for HH hours (00 = emergency_max_hours)
+        "21": 0,       # emergency on, from before 21 91; kept while nodes and API update
         "99 99": 0,    # emergency off: the same 0x99 0x99 as over LoRa
     }
 
@@ -701,7 +702,16 @@ def apply_downlink_command(
             logger.info("Queued: remote debug %s", f"{minutes} min" if minutes else "end")
             applied.append(f"remote_debug={minutes}")
 
-        elif code == "21":  # emergency mode on (the only emergency message)
+        elif code == "21 91":  # emergency mode on for HH hours
+            hours = payload_bytes[0]
+            if hours:
+                set_param_fn("emergency_max_hours", min(hours, 168))
+            set_param_fn("emergency_mode", True)
+            set_param_fn("emergency_since", time.time())   # the duration starts now
+            logger.info("Applied: emergency_mode = True for %s h", hours or "default")
+            applied.append(f"emergency_mode=True({hours or 'default'}h)")
+
+        elif code == "21":  # emergency mode on: the API's code before 21 91
             set_param_fn("emergency_mode", True)
             logger.info("Applied: emergency_mode = True")
             applied.append("emergency_mode=True")
