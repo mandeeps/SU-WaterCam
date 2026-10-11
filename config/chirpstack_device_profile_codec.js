@@ -65,6 +65,10 @@ function decodeUplink(input) {
         result.pi_undervoltage = (packed & 0x11) ? 1 : 0;
         break;
       }
+      case '1-8':
+        // Registration orientation check: 0 ok, 1 shifted, 2 adopted, 3 no_cache, 4 no_imu
+        result.registration_status = view.getUint8(offset++);
+        break;
       case '2-1':
         result.battery_percent = view.getUint8(offset++);
         break;

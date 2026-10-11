@@ -234,6 +234,11 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
             print(f"DEBUG: Processing pi_throttled: {data['pi_throttled']:#x}")
             add_u8(0x01, 0x07, pack_throttled_u8(data['pi_throttled']))
 
+        # Registration orientation check (tools/registration_orientation.py). After
+        # 01 07 for the same reason: an older decoder loses only this field.
+        if data.get('registration_status') is not None:
+            add_u8(0x01, 0x08, data['registration_status'])
+
         print(f"DEBUG: Final packet size: {len(packet)} bytes")
         return bytes(packet)
     except Exception as e:
