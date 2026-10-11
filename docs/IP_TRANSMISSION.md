@@ -60,7 +60,7 @@ Add or edit the `ip_upload` block:
 |---|---|---|
 | `enabled` | bool | Master switch. Set `true` to activate IP transport. |
 | `server_url` | str | Base URL of the FastAPI server, no trailing slash. |
-| `api_key` | str | Bearer token for `Authorization` header. Leave empty if the server has no auth. |
+| `api_key` | str | This unit's own IP API token, sent as `Authorization: Bearer <token>` on uplinks and downlink polls. Issued once per device on the dashboard (Management → IP access token). Required when the server runs `IP_AUTH=enforce`; until then a missing token is accepted and logged (API `docs/IP_TRANSPORT.md`). |
 | `device_id` | str | Logical device identifier used for all uplinks and downlink polling. Must be unique per deployment. |
 | `timeout_s` | int | Per-request timeout in seconds. |
 | `retry_attempts` | int | Max POST attempts before giving up (backoff between attempts). |
@@ -456,8 +456,9 @@ calls — zero overhead for LoRa-only deployments.
 1. **Full image upload** — not applicable.  Raw camera files (JPG/PGM/CSV) are
    never transmitted; the compressed flood bitmap via channel `08 18` is the
    intended image payload.
-2. **Auth** — if the server gains API key auth, populate `api_key` in config and
-   update the server to check `Authorization: Bearer <key>` headers.
+2. **Auth — done (API #28).** The server issues each device its own token and checks
+   `Authorization: Bearer <token>` on uplinks and downlink polls. Put the token in
+   `ip_upload.api_key`; no code change is needed on the node.
 3. **GPS decoder bug — fixed (API commit 0a63091)** — `decode_gps_8b` in
    `API/app/decoders.py` had three bugs: 3-byte slices instead of 4-byte,
    `signed=False` which corrupted W-hemisphere longitudes, and raw integer
