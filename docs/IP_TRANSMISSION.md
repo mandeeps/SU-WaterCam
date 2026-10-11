@@ -358,11 +358,16 @@ On by default. Each capture's IP uplink:
    WiFi's route (metric 600) to the modem's (700). If a cellular session is up
    and WiFi has reconnected, the session is taken down first.
 3. **Cellular.** If the server is still unreachable, `nmcli connection up`
-   brings the modem's data connection up, the reading and queued backlog are
-   sent, and any downlink command is collected (the wake-start poll had no
-   route). The connection then stays up for the session, until LoRa or WiFi
+   brings the modem's data connection up and the reading and queued backlog
+   are sent. The connection then stays up for the session, until LoRa or WiFi
    returns or the Pi powers off. If the server can't be reached over it either,
    it is taken down straight away.
+
+Whichever way it went, once a reading is delivered over IP the node polls
+`/ip/downlink` again and applies any command waiting. The wake-start poll runs
+before the uplink and never brings up cellular, so a unit without WiFi gets its
+commands here, after the capture rather than before it. Polling twice is safe:
+the server marks a command delivered as it hands it out.
 
 Only a connection with autoconnect **off** is managed. A unit whose `Quectel`
 connection still autoconnects keeps cellular up as before, so a field unit
@@ -416,9 +421,11 @@ spending time on encoding.
 
 ### `ip_downlink_poll_and_apply(lora_init)` (line ~1647)
 
-Polls `/ip/downlink/{device_id}` once per wake cycle and applies any queued
-parameter-update commands.  Called after `initialize_lora_integration` so
-updated thresholds are in effect for the capture cycle that follows:
+Polls `/ip/downlink/{device_id}` at the start of each wake cycle and applies
+any queued parameter-update commands.  Called after `initialize_lora_integration`
+so updated thresholds are in effect for the capture cycle that follows. It
+doesn't bring up cellular; if the server is unreachable, the poll after the IP
+uplink (above) collects the command instead:
 
 ```python
 lora_init   = initialize_lora_integration(trigger)

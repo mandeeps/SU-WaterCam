@@ -109,7 +109,7 @@ class TestWiFiThenCellular:
         assert m["result"]["success"] is True
         m["up"].assert_not_called()
         m["down"].assert_not_called()
-        tx.poll_downlink.assert_not_called()
+        tx.poll_downlink.assert_called_once()
 
     def test_wifi_back_takes_cellular_session_down(self):
         tx = _tx(reachable=True)
@@ -159,6 +159,51 @@ class TestWiFiThenCellular:
                    return_value={"applied": ["photo_interval"], "skipped": [], "queue_id": 7}) as apply:
             _run(tx)
         apply.assert_called_once()
+
+    def test_downlink_polled_after_uplink_over_wifi(self):
+        # The wake-start poll may have had no route even when the uplink gets
+        # through; poll again whatever the transport.
+        tx = _tx(reachable=True)
+        _run(tx, wifi=True)
+        tx.poll_downlink.assert_called_once()
+
+    def test_no_downlink_poll_when_nothing_was_delivered(self):
+        tx = _tx(reachable=True)
+        tx.send_uplink.return_value = {"success": False, "attempts": 3, "error": "HTTP 500"}
+        _run(tx, wifi=True)
+        tx.poll_downlink.assert_not_called()
+
+    def test_downlink_poll_failure_does_not_fail_the_uplink(self):
+        tx = _tx(reachable=True)
+        tx.poll_downlink.side_effect = RuntimeError("boom")
+        m = _run(tx, wifi=True)
+        assert m["result"]["success"] is True
+
+
+class TestHandleDownlinkReply:
+    def test_poll_failed(self, capsys):
+        from tools.transmit_ip import handle_downlink_reply
+        out = handle_downlink_reply({"success": False, "error": "timeout"}, set_param_fn=lambda k, v: None)
+        assert out == {"status": "poll_failed", "error": "timeout"}
+        assert "poll failed: timeout" in capsys.readouterr().out
+
+    def test_no_command_is_reported(self, capsys):
+        from tools.transmit_ip import handle_downlink_reply
+        out = handle_downlink_reply({"success": True, "command": None},
+                                    set_param_fn=lambda k, v: None, label="IP downlink after uplink")
+        assert out == {"status": "no_command"}
+        assert "IP downlink after uplink: no pending commands" in capsys.readouterr().out
+
+    def test_command_is_applied(self):
+        from tools.transmit_ip import handle_downlink_reply
+        with patch("tools.transmit_ip.apply_downlink_command",
+                   return_value={"applied": ["photo_interval=5"], "skipped": ["99 99"], "queue_id": 3}):
+            out = handle_downlink_reply({"success": True, "command": {"queue_id": 3, "hex_payload": "ab"}},
+                                        set_param_fn=lambda k, v: None)
+        assert out["status"] == "applied"
+        assert out["applied_params"] == ["photo_interval=5"]
+        assert out["skipped_parts"] == ["99 99"]
+        assert out["queue_id"] == 3
 
 
 class TestLoRaDuplicates:
