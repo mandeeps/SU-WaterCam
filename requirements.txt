@@ -22,8 +22,11 @@
 #
 #      /home/pi/SU-WaterCam/venv/bin/pip install -r requirements.txt
 #
-# segformer_daemon.service does NOT use this venv: it runs in the 5band conda
-# env defined by segformer_5band/5band_environment.yml.
+# segformer_daemon.service runs in this venv too. It needs onnxruntime (below),
+# cv2, rasterio, numpy and PIL. Tested on ufo-01-01-005 against the 5band conda
+# env: identical fp32 masks, about 10% faster. The conda env
+# (segformer_5band/5band_environment.yml) is now only for the legacy
+# segment_tiff_5band.py fallback in ticktalk_main.py and for model export.
 
 Adafruit-Blinka==8.62.0
 adafruit-circuitpython-ahtx0==1.0.27
@@ -43,12 +46,15 @@ bitstring==4.3.1
 Brotli==1.2.0
 charset-normalizer==3.4.2
 dill==0.4.0
+flatbuffers==25.12.19
 idna==3.15
 intervaltree==3.1.0
 multiprocess==0.70.18
+onnxruntime==1.31.0
 py-gpsd2==0.1.0
 pyftdi==0.56.0
 pympler==1.1
+protobuf==7.36.2
 psutil==7.2.2
 pyserial==3.5
 python-xmp-toolkit==2.0.2
