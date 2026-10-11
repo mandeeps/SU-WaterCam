@@ -88,3 +88,24 @@ def test_debug_status_request_still_works(handler):
         handler.current_size_limit = 51
         handler.decode("5001")
     dbg.assert_called_once()
+
+
+@pytest.mark.parametrize("payload", ["149402", "0e5e0102", "14945"])
+def test_14_94_never_sets_photo_interval(handler, payload):
+    """#116: 14 94 is the flood-code frequency on every path, never photo_interval."""
+    handler.config["photo_interval"] = 60
+    handler.decode(payload)
+    assert handler.config["photo_interval"] == 60
+
+
+def test_runtime_manager_14_94_never_sets_photo_interval(tmp_path):
+    import json
+    from tools.lora_runtime_integration import LoRaRuntimeManager
+    cfg = tmp_path / "runtime_config.json"
+    cfg.write_text(json.dumps({"photo_interval": 60}))
+    with patch.object(LoRaRuntimeManager, "_init_lora_handler", lambda self: None):
+        m = LoRaRuntimeManager(config_file=str(cfg))
+    for payload in ("149402", "0e5e0102", "14945"):
+        m.process_lora_payload(payload)
+    m.process_lora_command("14", 120)
+    assert m.get_parameter("photo_interval") == 60

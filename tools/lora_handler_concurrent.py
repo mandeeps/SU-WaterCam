@@ -958,9 +958,7 @@ class LoRaHandler:
                 elif channel == '13' and command == '93':
                     self.update_config('emergency_frequency', val_int)
                     print(f'Emergency frequency updated to: {val_int} minutes')
-                elif channel == '14' and command == '94':
-                    self.update_config('photo_interval', val_int)
-                    print(f'Photo interval updated to: {val_int} minutes')
+                # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
                 elif channel == '15' and command == '95':
                     self.update_config('neighborhood_emergency_frequency', val_int)
                     print(f'Neighborhood emergency frequency updated to: {val_int} minutes')
@@ -1074,15 +1072,8 @@ class LoRaHandler:
                         except ValueError:
                             print(f'Invalid emergency frequency value: {value}')
                             
-                    elif channel == '14' and command == '9':
-                        # Photo interval - minute value
-                        try:
-                            val = int(value)
-                            self.update_config('photo_interval', val)
-                            print(f'Photo interval updated to: {val} minutes')
-                        except ValueError:
-                            print(f'Invalid photo interval value: {value}')
-                            
+                    # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
+
                     elif channel == '15' and command == '9':
                         # Neighborhood emergency frequency - minute value
                         try:
