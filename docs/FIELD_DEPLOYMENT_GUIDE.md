@@ -158,6 +158,21 @@ Also confirm before deploying:
   Every `lora_full_send_hours` (default 24) all fields go out, since LoRa uplinks are
   unconfirmed and a lost packet would otherwise leave an old value on the server.
   `always_transmit_sensors: true` sends every field every capture.
+- **Registration orientation check:** co-registration reuses the cached optical-to-thermal
+  transform (`images/registration_transform.json`) on every capture and never re-solves it on
+  its own. After each co-registration the node compares the IMU pose with the one recorded for
+  that transform and writes `registration_check.json` into the capture folder. `status: shifted`
+  means the unit tilted by `coreg_tilt_threshold_deg` (default 5°, from the gravity vector) or
+  turned by `coreg_rotation_threshold_deg` (default 15°, heading included). Turns only count when
+  the magnetometer is calibrated, since an uncalibrated BNO055 reads heading 0. A flag is a
+  prompt to check the alignment, not an error: the cached transform is still used. If the
+  alignment is off, re-seed (`tools/seed_registration_cache.py`); if it is fine, run
+  `python -m tools.registration_orientation --reset` from `~/SU-WaterCam`. A cache with no
+  recorded pose (new, re-seeded, or from before this check) takes the next reading as its
+  reference, so install and seed with the unit in its final position.
+  The status also goes to the server as `registration_status` (channel `01 08`, LoRa and IP)
+  whenever it changes, and the dashboard shows **Check alignment** on the unit's card while it
+  is `shifted`.
 - **Transport order** (on by default): LoRa first, then WiFi, then cellular only if
   neither works. The modem is only kept off until needed once it is set up as in
   1.5.1 below.

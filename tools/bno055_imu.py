@@ -239,6 +239,33 @@ def get_orientation():
     return {"tilt_roll_yaw": e}
 
 
+def get_pose():
+    """Quaternion, gravity vector and calibration status, for comparing two poses.
+
+    Euler angles can't be compared one by one near ±90° pitch (gimbal lock: a small
+    tilt swings heading and roll a long way), and nodes are mounted near there.
+    The quaternion and gravity vector have no such point.
+    """
+    sensor = _get_sensor()
+    if sensor is None:
+        return {}
+    import time as _t
+    for _ in range(20):  # ~2s max, as get_orientation
+        q, g = sensor.quaternion, sensor.gravity
+        if (isinstance(q, tuple) and isinstance(g, tuple) and None not in q + g
+                and any(q) and any(g)):
+            break
+        _t.sleep(0.1)
+    else:
+        logger.warning("BNO055 get_pose: no quaternion/gravity after retry")
+        return {}
+    try:
+        calib = tuple(sensor.calibration_status)  # (sys, gyro, accel, mag), 0-3
+    except Exception:
+        calib = None
+    return {"quaternion": q, "gravity": g, "euler": sensor.euler, "calibration_status": calib}
+
+
 def main():
     sensor = _get_sensor()
     while True:

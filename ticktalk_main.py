@@ -233,6 +233,13 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     else:
         print("⚠️ Pi throttled flags unavailable")
 
+    # This capture's registration orientation check (0 ok, 1 shifted, ...); absent
+    # when co-registration or the check failed, so the server keeps its last value.
+    from tools.registration_orientation import status_code_for_capture
+    registration_status = status_code_for_capture(dirname)
+    if registration_status is not None:
+        data['registration_status'] = registration_status
+
     # Add runtime parameters to sensor data
     emergency_mode = get_parameter('emergency_mode', False)
     area_threshold = get_parameter('area_threshold', 10)
@@ -653,10 +660,24 @@ def coregistration(dirname, lepton_state, photo_state):
         with flock_deadline("/tmp/watercam_coreg.lock", 300):
             filepath = coreg(dirname)
         print(f"\n {filepath} images registered \n")
-        return True
     except Exception as e:
         print(f"⚠️ Failed to run coregistration: {e}")
         return False
+    # Flag, don't re-solve: coreg() keeps using the cached transform even after the
+    # node has turned. tools/registration_orientation.py explains why.
+    try:
+        from tools.bno055_imu import get_pose
+        from tools.lora_runtime_integration import get_parameter
+        from tools.registration_orientation import check, describe, write_capture_flag
+        result = check(
+            dirname, get_pose(),
+            tilt_threshold_deg=get_parameter('coreg_tilt_threshold_deg', 5.0),
+            rotation_threshold_deg=get_parameter('coreg_rotation_threshold_deg', 15.0))
+        write_capture_flag(dirname, result)
+        print(describe(result))
+    except Exception as e:
+        print(f"⚠️ Registration orientation check failed: {e}")
+    return True
 
 @SQify
 def segformer(filepath, coreg_state): # operate on coregistered image file
@@ -1755,6 +1776,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
 
         from tools.pi_power import get_throttled
         data['pi_throttled'] = get_throttled()
+        from tools.registration_orientation import status_code_for_capture
+        data['registration_status'] = status_code_for_capture(dirname)
 
         data['area_threshold']                    = get_parameter('area_threshold', 10)
         data['stage_threshold']                   = get_parameter('stage_threshold', 50)
@@ -1778,6 +1801,10 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         pi_throttled = data.get('pi_throttled')
         if pi_throttled is not None:
             channels.append({"code": "01 07", "payload_hex": struct.pack(">I", pi_throttled).hex()})
+        # 01 08 — registration orientation check (tools/registration_orientation.py); omitted when absent
+        registration_status = data.get('registration_status')
+        if registration_status is not None:
+            channels.append({"code": "01 08", "payload_hex": struct.pack(">I", registration_status).hex()})
 
         # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
         lat = data.get('gps_lat')
