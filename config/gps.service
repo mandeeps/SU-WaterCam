@@ -1,5 +1,5 @@
 [Unit]
-Description=Tell Modem Manager to enable the cell modem GPS in unmanaged mode. This needs ModemManager 1.20 on Bookworm for the Quectel EC25
+Description=Tell Modem Manager to enable the cell modem GPS in unmanaged mode. This needs ModemManager 1.20 or newer for the Quectel EC25 (Trixie ships 1.24)
 Requires=network-online.target 
 After=network-online.target
 
