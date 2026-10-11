@@ -653,10 +653,24 @@ def coregistration(dirname, lepton_state, photo_state):
         with flock_deadline("/tmp/watercam_coreg.lock", 300):
             filepath = coreg(dirname)
         print(f"\n {filepath} images registered \n")
-        return True
     except Exception as e:
         print(f"⚠️ Failed to run coregistration: {e}")
         return False
+    # Flag, don't re-solve: coreg() keeps using the cached transform even after the
+    # node has turned. tools/registration_orientation.py explains why.
+    try:
+        from tools.bno055_imu import get_pose
+        from tools.lora_runtime_integration import get_parameter
+        from tools.registration_orientation import check, describe, write_capture_flag
+        result = check(
+            dirname, get_pose(),
+            tilt_threshold_deg=get_parameter('coreg_tilt_threshold_deg', 5.0),
+            rotation_threshold_deg=get_parameter('coreg_rotation_threshold_deg', 15.0))
+        write_capture_flag(dirname, result)
+        print(describe(result))
+    except Exception as e:
+        print(f"⚠️ Registration orientation check failed: {e}")
+    return True
 
 @SQify
 def segformer(filepath, coreg_state): # operate on coregistered image file
