@@ -1,0 +1,17 @@
+[Unit]
+Description=Keep Tailscale's private-address probes off the cellular modem (config/nftables/watercam-cellular.nft)
+# A device hook needs the device: start when wwan0 appears, stop (and remove the
+# table) when it goes, so a modem that re-enumerates gets a fresh hook.
+BindsTo=sys-subsystem-net-devices-wwan0.device
+After=sys-subsystem-net-devices-wwan0.device
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Its own nft table: never the stock nftables.service, whose /etc/nftables.conf
+# starts with `flush ruleset` and would wipe tailscaled's rules as well.
+ExecStart=/usr/sbin/nft -f /etc/nftables.d/watercam-cellular.nft
+ExecStop=-/usr/sbin/nft delete table netdev watercam_cellular
+
+[Install]
+WantedBy=sys-subsystem-net-devices-wwan0.device

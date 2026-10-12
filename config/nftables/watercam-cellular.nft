@@ -1,0 +1,31 @@
+#!/usr/sbin/nft -f
+# Keep Tailscale's direct-path probes to private addresses off the cellular modem.
+#
+# tailscaled tries every address a peer advertises, including the API server's
+# LAN and Docker-bridge addresses (10.x, 172.16-31.x, 192.168.x, fc00::/7). Over
+# cellular none of those can answer, but each probe still costs data: 28-80 KB a
+# wake, and most of the steady cost while cellular stays up (docs/CELLULAR_DATA.md).
+#
+# Only tailscaled's UDP socket (port 41641, set in /etc/default/tailscaled) is
+# matched: the carrier gives the modem a private address too (10.145.x on 006),
+# and the modem link and DNS must keep working. Probes to public addresses and
+# relayed (DERP) traffic still go out.
+#
+# Dropped at wwan0's egress hook, not in an output chain: a drop in output makes
+# the send fail with EPERM, and tailscaled answers EPERM by rebinding and re-running
+# netcheck (magicsock maybeRebindOnError), which probes every relay region and costs
+# far more than the probes. An egress drop is silent to the sender.
+#
+# Loaded by watercam-cellular-filter.service while wwan0 exists. Its own table, so
+# tailscaled's rules are untouched. Undo: nft delete table netdev watercam_cellular
+
+table netdev watercam_cellular
+delete table netdev watercam_cellular
+
+table netdev watercam_cellular {
+    chain egress {
+        type filter hook egress device "wwan0" priority filter; policy accept;
+        meta protocol ip udp sport 41641 ip daddr { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.0.0/16 } counter drop
+        meta protocol ip6 udp sport 41641 ip6 daddr { fc00::/7, fe80::/10 } counter drop
+    }
+}
