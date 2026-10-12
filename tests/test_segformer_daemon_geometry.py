@@ -50,3 +50,28 @@ def test_static_width_is_kept_and_height_follows_aspect():
 def test_none_axes_are_treated_as_symbolic():
     # onnxruntime reports unnamed dynamic dims as None
     assert input_geometry([1, 5, None, None], ORI_H, ORI_W)[:2] == (512, 683)
+
+
+# ── size policy "divisible" (off by default; needs the next checkpoint) ─────
+
+def test_default_policy_is_pad():
+    # Unchanged behaviour unless SEGFORMER_SIZE_POLICY=divisible is set
+    assert input_geometry([1, 5, "height", "width"], ORI_H, ORI_W) == \
+        input_geometry([1, 5, "height", "width"], ORI_H, ORI_W, policy="pad")
+
+
+def test_divisible_resizes_instead_of_padding():
+    h, w, pad_h, pad_w = input_geometry([1, 5, "height", "width"], ORI_H, ORI_W,
+                                        policy="divisible")
+    assert (pad_h, pad_w) == (0, 0)
+    assert h % SIZE_DIVISOR == 0 and w % SIZE_DIVISOR == 0
+    assert (h, w) == (512, 672)                  # 683 rounds to the nearest 32
+
+
+def test_divisible_never_touches_a_static_axis():
+    assert input_geometry([1, 5, 500, 700], ORI_H, ORI_W, policy="divisible") == \
+        (500, 700, 0, 0)
+    h, w, pad_h, pad_w = input_geometry([1, 5, 600, "width"], ORI_H, ORI_W,
+                                        policy="divisible")
+    assert (h, pad_h) == (600, 0)                # static height kept, not rounded
+    assert w % SIZE_DIVISOR == 0 and pad_w == 0  # symbolic width rounded, not padded
