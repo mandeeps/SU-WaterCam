@@ -239,6 +239,13 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
         if data.get('registration_status') is not None:
             add_u8(0x01, 0x08, data['registration_status'])
 
+        # Software release and loaded model (tools/node_version.py), last so an
+        # older decoder stops cleanly before them. The commit is IP only.
+        if data.get('software_version') is not None:
+            add_u32(0x01, 0x09, data['software_version'])
+        if data.get('model_id') is not None:
+            add_u32(0x01, 0x0B, data['model_id'])
+
         print(f"DEBUG: Final packet size: {len(packet)} bytes")
         return bytes(packet)
     except Exception as e:

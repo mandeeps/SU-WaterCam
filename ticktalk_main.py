@@ -240,6 +240,11 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     if registration_status is not None:
         data['registration_status'] = registration_status
 
+    # Node software release and loaded model (tools/node_version.py); sent when
+    # they change and in the periodic full send.
+    from tools.node_version import uplink_fields
+    data.update(uplink_fields())
+
     # Add runtime parameters to sensor data
     emergency_mode = get_parameter('emergency_mode', False)
     area_threshold = get_parameter('area_threshold', 10)
@@ -1784,6 +1789,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         data['pi_throttled'] = get_throttled()
         from tools.registration_orientation import status_code_for_capture
         data['registration_status'] = status_code_for_capture(dirname)
+        from tools.node_version import uplink_fields
+        data.update(uplink_fields())
 
         data['area_threshold']                    = get_parameter('area_threshold', 10)
         data['stage_threshold']                   = get_parameter('stage_threshold', 50)
@@ -1811,6 +1818,11 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         registration_status = data.get('registration_status')
         if registration_status is not None:
             channels.append({"code": "01 08", "payload_hex": struct.pack(">I", registration_status).hex()})
+        # 01 09 / 01 0A / 01 0B — software release, commit and model (tools/node_version.py)
+        for code, key in (("01 09", "software_version"), ("01 0A", "software_commit"),
+                          ("01 0B", "model_id")):
+            if data.get(key) is not None:
+                channels.append({"code": code, "payload_hex": struct.pack(">I", data[key]).hex()})
 
         # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
         lat = data.get('gps_lat')

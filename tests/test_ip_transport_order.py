@@ -180,6 +180,25 @@ class TestWiFiThenCellular:
         assert m["result"]["success"] is True
 
 
+class TestVersionChannels:
+    def test_ip_uplink_carries_version_commit_and_model(self):
+        tx = _tx(reachable=True)
+        fields = {"software_version": 0x1A0A0100, "software_commit": 0xABC12345, "model_id": 0x4CA62324}
+        with patch("tools.node_version.uplink_fields", return_value=fields):
+            _run(tx, wifi=True)
+        channels = {c["code"]: c["payload_hex"] for c in tx.send_uplink.call_args.args[0]}
+        assert channels["01 09"] == "1a0a0100"
+        assert channels["01 0A"] == "abc12345"
+        assert channels["01 0B"] == "4ca62324"
+
+    def test_missing_fields_are_left_out(self):
+        tx = _tx(reachable=True)
+        with patch("tools.node_version.uplink_fields", return_value={}):
+            _run(tx, wifi=True)
+        codes = {c["code"] for c in tx.send_uplink.call_args.args[0]}
+        assert not codes & {"01 09", "01 0A", "01 0B"}
+
+
 class TestHandleDownlinkReply:
     def test_poll_failed(self, capsys):
         from tools.transmit_ip import handle_downlink_reply

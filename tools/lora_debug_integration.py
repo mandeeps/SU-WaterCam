@@ -95,6 +95,14 @@ def _load_1min() -> Optional[float]:
         return None
 
 
+def _software_version() -> Optional[str]:
+    try:
+        from tools.node_version import short_version
+        return short_version()
+    except Exception:   # noqa: BLE001 - a status reply must never fail over this
+        return None
+
+
 def _throttled() -> Optional[int]:
     try:
         from tools.pi_power import get_throttled
@@ -119,6 +127,8 @@ def collect_compact_status(emergency_mode: Optional[bool] = None) -> List[Field]
         # second: the server confirms emergency on/off from it, so it must survive
         # trimming to a small payload limit ({"dbg":1,"em":1} is 16 B)
         ("em", None if emergency_mode is None else int(bool(emergency_mode))),
+        # software release, e.g. "v2026.10.1-dirty" (tools/node_version.py)
+        ("v", _software_version()),
         ("up", _uptime_hours()),
         ("ct", _cpu_temp_c()),
         ("th", _throttled()),

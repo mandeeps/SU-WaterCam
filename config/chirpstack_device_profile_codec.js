@@ -7,6 +7,9 @@
  * Channel 01 Type 05: Health status (0/1) 
  * Channel 01 Type 06: Movement threshold (0/1)
  * Channel 01 Type 07: Pi throttled flags (u8: low nibble = now, high nibble = since boot; bit 0 = under-voltage)
+ * Channel 01 Type 08: Registration orientation check (u8: 0 ok, 1 shifted, 2 adopted, 3 no_cache, 4 no_imu)
+ * Channel 01 Type 09: Software release (u32: year-2000, month, patch, flags; tools/node_version.py)
+ * Channel 01 Type 0B: Loaded segmentation model (u32: first 8 hex digits of its SHA-256)
  * Channel 02 Type 01: Battery percent
  * Channel 03 Type 01: Tilt/roll/yaw (3x float32)
  * Channel 04 Type 01: Lat/lon/z coordinates (3x float32)
@@ -68,6 +71,17 @@ function decodeUplink(input) {
       case '1-8':
         // Registration orientation check: 0 ok, 1 shifted, 2 adopted, 3 no_cache, 4 no_imu
         result.registration_status = view.getUint8(offset++);
+        break;
+      case '1-9':
+        // Software release: (year-2000)<<24 | month<<16 | patch<<8 | flags
+        // (bit 0 dirty, bit 1 past the tag, bit 2 no release tag)
+        result.software_version = view.getUint32(offset, false);
+        offset += 4;
+        break;
+      case '1-b':
+        // Loaded segmentation model: first 8 hex digits of the ONNX file's SHA-256
+        result.model_id = view.getUint32(offset, false);
+        offset += 4;
         break;
       case '2-1':
         result.battery_percent = view.getUint8(offset++);

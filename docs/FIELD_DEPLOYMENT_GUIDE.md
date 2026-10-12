@@ -121,6 +121,18 @@ curl -s -o /dev/null -w '%{http_code}\n' "$(python3 -c 'import json; print(json.
 
 The second check needs `runtime_config.json`, so it can wait until 1.5.
 
+### 1.3.1 Put the unit on the current release
+
+Units run releases, not `main` ([RELEASES.md](RELEASES.md)). Check what it runs:
+
+```bash
+cd /home/pi/SU-WaterCam && python -m tools.node_version
+```
+
+If it isn't on the current release, or `.git` is larger than a few MB (`du -sh .git`),
+follow [RELEASES.md](RELEASES.md#updating-a-node): update, or convert the full clone to
+a shallow one first.
+
 ### 1.4 Sync the clock
 
 This should have been done automatically, but check the system time is correct.

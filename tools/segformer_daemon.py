@@ -369,6 +369,34 @@ def parse_args():
     return p.parse_args()
 
 
+#: Next to the socket; tools/node_version.py reads it for the uplinks' model_id.
+MODEL_INFO_NAME = "model.json"
+
+
+def record_model(model_path: str, info_path: str) -> None:
+    """Write which model is loaded ({"name", "path", "sha256"}); never raises.
+
+    The model can change with no git change at all (a new file, or a drop-in
+    pointing --model elsewhere), so the node reports the file's own hash.
+    """
+    import hashlib
+
+    try:
+        real = os.path.realpath(model_path)
+        digest = hashlib.sha256()
+        with open(real, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 20), b""):
+                digest.update(chunk)
+        tmp = f"{info_path}.{os.getpid()}"
+        with open(tmp, "w") as f:
+            json.dump({"name": os.path.basename(real), "path": real,
+                       "sha256": digest.hexdigest()}, f)
+        os.replace(tmp, info_path)
+        log.info("Model %s sha256 %s", os.path.basename(real), digest.hexdigest()[:8])
+    except OSError as e:
+        log.warning("Could not record the loaded model in %s: %s", info_path, e)
+
+
 def main():
     args = parse_args()
 
@@ -383,6 +411,7 @@ def main():
             sys.exit(1)
 
     session = load_session(model_path)
+    record_model(model_path, os.path.join(os.path.dirname(args.socket), MODEL_INFO_NAME))
     serve(session, args.socket)
 
 

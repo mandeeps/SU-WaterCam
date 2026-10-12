@@ -1,0 +1,111 @@
+# Releases and node updates
+
+Nodes run **releases**: git tags on `main` that have passed the bench checks below.
+That gives every node a known-good version to go back to, and the dashboard shows
+which nodes aren't on the current one.
+
+## Version numbers
+
+CalVer: `vYYYY.MM.N`, for example `v2026.10.0`, then `v2026.10.1` for the next release
+that month. `N` starts at 0 each month.
+
+A node reports what `git describe` says about its checkout
+(`tools/node_version.py`):
+
+| Node reports | Meaning |
+|---|---|
+| `v2026.10.1` | exactly the release |
+| `v2026.10.1-3-gabc12345` | 3 commits past it: not a release |
+| `v2026.10.1-dirty` | the release with local edits (005's no-shutdown patch, for one) |
+| `abc12345` | no release tag reachable |
+
+It also reports the segmentation model it loaded: the first 8 hex digits of the ONNX
+file's SHA-256, written by `segformer_daemon` to `/run/segformer/model.json`. A model
+can change with no git change at all, as on 006 with the `segformer_type_pool` test
+model, so this is reported separately from the software version.
+
+`python -m tools.node_version` prints both. So does `tools/initial_health_check.py`.
+
+### On the wire
+
+| Channel | Field | Value (u32) | Sent over |
+|---|---|---|---|
+| `01 09` | `software_version` | `(year-2000)<<24 \| month<<16 \| patch<<8 \| flags` | LoRa, IP |
+| `01 0A` | `software_commit` | first 8 hex digits of the commit | IP |
+| `01 0B` | `model_id` | first 8 hex digits of the model's SHA-256 | LoRa, IP |
+
+Flags: bit 0 dirty, bit 1 past the tag, bit 2 no release tag (the version bytes are
+then 0). Over LoRa the fields go at the end of the packet, only when they change and
+in the periodic full send. LoRa status replies (`dbg`) carry `"v"` after `"em"`.
+
+## Making a release
+
+1. CI is green on the commit to release.
+2. **Bench checks:**
+   - a wake test on 005, with shutdown intercepted (`~/test_wake.sh`);
+   - for changes to waking, power, transport or the capture pipeline, a run of real
+     scheduled wakes on 006 over WiFi and cellular, as on 2026-10-11.
+3. If the release adds an uplink channel, deploy the API (and paste the ChirpStack codec)
+   **before** any node runs it: the API rejects an IP uplink with a channel it doesn't
+   know.
+4. Tag and publish, with notes covering the changes since the last release, the deploy
+   order and the pickle's SHA-256:
+   ```bash
+   git tag -a v2026.10.0 -m "v2026.10.0" <commit>
+   git push origin v2026.10.0
+   gh release create v2026.10.0 --title v2026.10.0 --notes-file notes.md
+   ```
+5. Update the nodes (below) and check the dashboard shows the new version for each.
+
+## Updating a node
+
+Nodes keep a **shallow** checkout: only the release they run, not the history. The
+history is about 330 MB (old TensorFlow examples and models, long since deleted), and
+the files of a release are under 1 MB. Images and PDFs are in Git LFS, and nodes don't
+install `git-lfs`, so they only ever hold the 131-byte pointers.
+
+From `/home/pi/SU-WaterCam`:
+
+```bash
+git fetch --depth 1 origin tag v2026.10.1
+git checkout v2026.10.1
+sha256sum output/ticktalk_main.pickle && cat output/ticktalk_main.pickle.sha256   # must match
+sudo systemctl restart lora_daemon segformer_daemon
+```
+
+`git checkout` of a tag leaves a detached HEAD; that is expected. Local edits that don't
+conflict are kept. For 005, save the patch, `git checkout -- ticktalk_main.py`, update,
+then `git apply --3way` the patch as before.
+
+If the release changes anything outside the checkout, the release notes say so:
+systemd units, `doas.conf`, Witty Pi scripts or pip packages.
+
+**Going back** to a known-good release is the same, with the older tag:
+`git fetch --depth 1 origin tag v2026.10.0 && git checkout v2026.10.0`.
+
+Each update keeps the release it replaced, which costs only the files that changed.
+Once a year or so, `git tag -d` the old ones and run `git gc --prune=now`.
+
+### Converting a full clone to a shallow one (once per node)
+
+Existing nodes have the full history in `.git` (about 340 MB). Swapping in a shallow
+`.git` leaves the working files, untracked files (`images/`, `venv/`,
+`runtime_config.json`, calibration files) and local edits as they are:
+
+1. Bring the node to the release with its old clone first (`git pull`, or `git fetch` and
+   `git checkout <tag>`), so the working files already match.
+2. Swap the `.git` directory:
+   ```bash
+   cd /home/pi
+   git clone --depth 1 --no-checkout --branch v2026.10.0 \
+       https://github.com/mandeeps/SU-WaterCam.git swc-shallow
+   mv SU-WaterCam/.git SU-WaterCam.git-full-backup
+   mv swc-shallow/.git SU-WaterCam/.git && rmdir swc-shallow
+   cd SU-WaterCam && git reset -q
+   git status --short     # only local edits and untracked files
+   ```
+3. Once the node has run a cycle on it, `rm -rf ~/SU-WaterCam.git-full-backup`.
+
+On 005 (2026-10-11) the swap took under a second, `.git` went from 343 MB to 1.1 MB,
+and `git status` was identical before and after (its local edit and untracked files
+kept).
