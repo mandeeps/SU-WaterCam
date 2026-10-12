@@ -60,7 +60,7 @@ Add or edit the `ip_upload` block:
 |---|---|---|
 | `enabled` | bool | Master switch. Set `true` to activate IP transport. |
 | `server_url` | str | Base URL of the FastAPI server, no trailing slash. |
-| `api_key` | str | This unit's own IP API token, sent as `Authorization: Bearer <token>` on uplinks and downlink polls. Issued once per device on the dashboard (Management → IP access token). Required when the server runs `IP_AUTH=enforce`; until then a missing token is accepted and logged (API `docs/IP_TRANSPORT.md`). |
+| `api_key` | str | This unit's own IP API token, sent as `Authorization: Bearer <token>` on uplinks and downlink polls. Issued once per device on the dashboard (Management → IP access token); install it with `tools/set_ip_token.py` (below) rather than editing the file by hand. Required when the server runs `IP_AUTH=enforce`; until then a missing token is accepted and logged (API `docs/IP_TRANSPORT.md`). |
 | `device_id` | str | Logical device identifier used for all uplinks and downlink polling. Must be unique per deployment. |
 | `timeout_s` | int | Per-request timeout in seconds. |
 | `retry_attempts` | int | Max POST attempts before giving up (backoff between attempts). |
@@ -458,14 +458,32 @@ calls — zero overhead for LoRa-only deployments.
 
 ---
 
+## Installing the IP token
+
+Generate the token on the dashboard (Management → select the unit → IP access
+token → Generate; it is shown once), then from your own terminal run:
+
+```bash
+tailscale ssh -t pi@<unit-hostname> \
+  '~/SU-WaterCam/venv/bin/python ~/SU-WaterCam/tools/set_ip_token.py'
+```
+
+and paste the token at the hidden prompt. The script checks that it looks like a
+WaterCam token (`wct_…`), stores it as `ip_upload.api_key`, makes
+`runtime_config.json` readable by its owner only (0600, which later config writes
+keep), and prints only the token's last four characters. No restart is needed.
+Keep the token out of shell history, chat and command lines: always paste it at
+the prompt. To check it, send one upload and confirm the unit no longer appears
+under unauthenticated requests on the dashboard (or `GET /ip/auth-status`).
+
 ## Known Gaps / Next Steps
 
 1. **Full image upload** — not applicable.  Raw camera files (JPG/PGM/CSV) are
    never transmitted; the compressed flood bitmap via channel `08 18` is the
    intended image payload.
 2. **Auth — done (API #28).** The server issues each device its own token and checks
-   `Authorization: Bearer <token>` on uplinks and downlink polls. Put the token in
-   `ip_upload.api_key`; no code change is needed on the node.
+   `Authorization: Bearer <token>` on uplinks and downlink polls. Install the token on
+   the unit with `tools/set_ip_token.py`; no code change is needed on the node.
 3. **GPS decoder bug — fixed (API commit 0a63091)** — `decode_gps_8b` in
    `API/app/decoders.py` had three bugs: 3-byte slices instead of 4-byte,
    `signed=False` which corrupted W-hemisphere longitudes, and raw integer
