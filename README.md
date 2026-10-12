@@ -246,6 +246,8 @@ Remember to save and restore the clock offset as the instructions say.
 
 ### SU-WaterCam software setup from scratch
 
+What a field unit exposes, its secrets, and what to do when one is lost: [docs/NODE_SECURITY.md](docs/NODE_SECURITY.md).
+
 Clone the public git repo at the current release, shallow (the files are under 1 MB; the full history is about 330 MB):
 `git clone --depth 1 --branch <release> https://github.com/mandeeps/SU-WaterCam.git`. Releases, updating a node
 and going back to an earlier release are in [docs/RELEASES.md](docs/RELEASES.md).
