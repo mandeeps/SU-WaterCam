@@ -51,7 +51,8 @@ import time
 
 import numpy as np
 
-from segformer_preprocess import (band_order_problem, normalization_mode,
+from segformer_preprocess import (band_order_problem, model_band_indices, normalization_mode,
+                                  resize_interpolation,
                                   normalization_spec, preprocess_bands,
                                   water_class_index)
 
@@ -101,13 +102,16 @@ def load_session(model_path: str):
 # ---------------------------------------------------------------------------
 
 def load_and_preprocess(tiff_path: str, expected_h: int, expected_w: int,
-                        spec: dict | None = None) -> np.ndarray:
+                        spec: dict | None = None, bands: list | None = None,
+                        interpolation: str = "area") -> np.ndarray:
+    """`bands`: 0-based TIFF bands to read, in model order; None reads them all."""
     import rasterio
 
     with rasterio.open(tiff_path) as src:
-        img = src.read()  # (bands, H, W); preprocess_bands handles float32 conversion
+        # (bands, H, W); preprocess_bands handles float32 conversion
+        img = src.read() if bands is None else src.read([b + 1 for b in bands])
 
-    return preprocess_bands(img, expected_h, expected_w, spec=spec)
+    return preprocess_bands(img, expected_h, expected_w, spec=spec, interpolation=interpolation)
 
 
 #: The deployed mmseg test pipeline resizes with `img_scale=(1024, 512)` and
@@ -192,8 +196,11 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
 
     # The model states how it was normalised; anything else hands it a
     # distribution it never saw in training, silently and without error.
+    # An RGB model reads its three bands out of the five-band TIFF by name.
     arr = load_and_preprocess(tiff_path, expected_h, expected_w,
-                              spec=normalization_spec(session))
+                              spec=normalization_spec(session),
+                              bands=model_band_indices(session, descriptions, tiff_tags),
+                              interpolation=resize_interpolation(session))
 
     # Pad symbolic axes up to SIZE_DIVISOR so the graph's scale_factor upsample
     # is exact. Zeros are the post-Normalize mean, matching what the torch path pads with.
