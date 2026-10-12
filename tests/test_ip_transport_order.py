@@ -199,6 +199,58 @@ class TestVersionChannels:
         assert not codes & {"01 09", "01 0A", "01 0B"}
 
 
+class TestCommandInUplinkReply:
+    def test_live_uplink_asks_for_the_command(self):
+        tx = _tx(reachable=True)
+        _run(tx, wifi=True)
+        assert tx.send_uplink.call_args.kwargs.get("want_command") is True
+
+    def test_command_in_the_reply_is_applied_without_a_poll(self):
+        tx = _tx(reachable=True)
+        tx.send_uplink.return_value = {"success": True, "attempts": 1,
+                                       "response": {"decoded": {}, "command": {"queue_id": 9}}}
+        with patch("tools.transmit_ip.apply_downlink_command",
+                   return_value={"applied": ["photo_interval=60"], "skipped": [], "queue_id": 9}) as apply:
+            _run(tx, wifi=True)
+        apply.assert_called_once()
+        tx.poll_downlink.assert_not_called()
+
+    def test_null_command_in_the_reply_means_nothing_pending(self):
+        tx = _tx(reachable=True)
+        tx.send_uplink.return_value = {"success": True, "attempts": 1,
+                                       "response": {"decoded": {}, "command": None}}
+        _run(tx, wifi=True)
+        tx.poll_downlink.assert_not_called()
+
+    def test_older_server_reply_falls_back_to_a_poll(self):
+        tx = _tx(reachable=True)
+        tx.send_uplink.return_value = {"success": True, "attempts": 1, "response": {"decoded": {}}}
+        _run(tx, wifi=True)
+        tx.poll_downlink.assert_called_once()
+
+
+class TestReplyCommand:
+    def test_reply_command(self):
+        from tools.transmit_ip import reply_command
+        assert reply_command({"success": True, "response": {"command": {"queue_id": 1}}}) == \
+            {"success": True, "command": {"queue_id": 1}}
+        assert reply_command({"success": True, "response": {"command": None}}) == \
+            {"success": True, "command": None}
+        assert reply_command({"success": True, "response": {"decoded": {}}}) is None
+        assert reply_command({"success": True, "response": None}) is None
+        assert reply_command({"success": False, "response": {"command": {"queue_id": 1}}}) is None
+
+    def test_send_uplink_sends_the_flag_only_when_asked(self):
+        from tools.transmit_ip import IPTransmitter
+        tx = IPTransmitter.__new__(IPTransmitter)
+        tx.device_id, tx.server_url = "watercam-006", "http://server:8000"
+        with patch.object(IPTransmitter, "_post_with_retry", return_value={"success": True}) as post:
+            tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1, want_command=True)
+            tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1)
+        assert post.call_args_list[0].args[1]["want_command"] is True
+        assert "want_command" not in post.call_args_list[1].args[1]
+
+
 class TestHandleDownlinkReply:
     def test_poll_failed(self, capsys):
         from tools.transmit_ip import handle_downlink_reply

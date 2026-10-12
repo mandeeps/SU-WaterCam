@@ -363,8 +363,10 @@ On by default. Each capture's IP uplink:
    returns or the Pi powers off. If the server can't be reached over it either,
    it is taken down straight away.
 
-Whichever way it went, once a reading is delivered over IP the node polls
-`/ip/downlink` again and applies any command waiting. The wake-start poll runs
+Whichever way it went, once a reading is delivered over IP the node collects
+and applies any command waiting. The uplink asks for it (`want_command`) and the
+server's reply carries it, which saves a separate request on a metered link; from
+a server too old to do that, the node polls `/ip/downlink` instead. The wake-start poll runs
 before the uplink and never brings up cellular, so a unit without WiFi gets its
 commands here, after the capture rather than before it. Polling twice is safe:
 the server marks a command delivered as it hands it out.
