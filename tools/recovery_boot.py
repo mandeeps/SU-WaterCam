@@ -61,6 +61,10 @@ POWER_RESTORE_REASONS = {
 # Startup alarm (I2C_CONF_*_ALARM1) and shutdown alarm (*_ALARM2) registers.
 ALARM1_REGS = (27, 28, 29, 30)  # second, minute, hour, day (BCD)
 ALARM2_REGS = (32, 33, 34, 35)
+# Left once a recovery boot has armed its wake, so wittypi-next-wake.service
+# (tools/ensure_next_wake.py) doesn't pull it forward again at shutdown.
+# /run is cleared at every boot, so the mark only ever covers this shutdown.
+RECOVERY_MARK = "/run/wittypi-recovery-wake"
 
 _ARMED = re.compile(ws.STAMP + r"Schedule next startup at:\s+(\d{4}-\d\d-\d\d \d\d:\d\d:\d\d)")
 # daemon.sh logs this right after sending SYS_UP on GPIO-17. The WittyPi only
@@ -309,6 +313,11 @@ def main(argv=None) -> int:
         # Without a confirmed alarm, shutting down could strand the node.
         print(f"Could not arm the startup alarm ({e}); running the normal cycle instead")
         return 0
+    try:
+        with open(RECOVERY_MARK, "w") as f:
+            f.write(wake_text + "\n")
+    except OSError as e:
+        print(f"Could not leave {RECOVERY_MARK} ({e}); the shutdown check may arm an earlier slot")
     log_to_wittypi(f"Recovery boot: {why}; shutting down until the battery has recharged.", now)
     # Same wording as runScript.sh, so the next boot's previously_armed_startup()
     # finds this alarm and treats a brownout at it as a scheduled wake.
