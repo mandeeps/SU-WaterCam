@@ -49,8 +49,15 @@ in the periodic full send. LoRa status replies (`dbg`) carry `"v"` after `"em"`.
    `unattended-upgrades`, which would download over cellular): `sudo apt update &&
    sudo apt full-upgrade` on 005 and 006 before their bench checks, so the release is
    tested on the packages it will run with. Tailscale is the one internet-facing
-   component; check `tailscale version` against its changelog's security notes. The
-   release notes say which packages to bring units to.
+   component; check `tailscale version` against its changelog's security notes. Also
+   `venv/bin/pip install -U pip` (the venv's pip is not an apt package). The release
+   notes say which packages to bring units to.
+
+   Then record each unit as tested: `python -m tools.node_inventory --mdot-version <ATI>`
+   writes a CycloneDX SBOM of its packages, release, model and firmware. Scan it
+   (`grype sbom:inventory-<host>-<date>.cdx.json`), read anything critical or high that
+   has a fix, and attach the files to the release. The same command on a field unit
+   answers "is this one affected?" when an advisory comes out.
 4. If the release adds an uplink channel, deploy the API (and paste the ChirpStack codec)
    **before** any node runs it: the API rejects an IP uplink with a channel it doesn't
    know.
