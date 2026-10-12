@@ -129,9 +129,18 @@ Units run releases, not `main` ([RELEASES.md](RELEASES.md)). Check what it runs:
 cd /home/pi/SU-WaterCam && python -m tools.node_version
 ```
 
+Install the release signers once, outside the checkout, so the node only accepts
+signed releases ([RELEASES.md](RELEASES.md#release-signing)):
+
+```bash
+sudo install -D -m 644 config/release_signers /etc/watercam/release_signers
+git config --global gpg.format ssh
+git config --global gpg.ssh.allowedSignersFile /etc/watercam/release_signers
+```
+
 If it isn't on the current release, or `.git` is larger than a few MB (`du -sh .git`),
 follow [RELEASES.md](RELEASES.md#updating-a-node): update, or convert the full clone to
-a shallow one first.
+a shallow one first. Check each release with `git verify-tag` before checking it out.
 
 ### 1.4 Sync the clock
 

@@ -45,17 +45,49 @@ in the periodic full send. LoRa status replies (`dbg`) carry `"v"` after `"em"`.
    - a wake test on 005, with shutdown intercepted (`~/test_wake.sh`);
    - for changes to waking, power, transport or the capture pipeline, a run of real
      scheduled wakes on 006 over WiFi and cellular, as on 2026-10-11.
-3. If the release adds an uplink channel, deploy the API (and paste the ChirpStack codec)
+3. **Security patches**, on the bench over WiFi (nodes don't run
+   `unattended-upgrades`, which would download over cellular): `sudo apt update &&
+   sudo apt full-upgrade` on 005 and 006 before their bench checks, so the release is
+   tested on the packages it will run with. Tailscale is the one internet-facing
+   component; check `tailscale version` against its changelog's security notes. The
+   release notes say which packages to bring units to.
+4. If the release adds an uplink channel, deploy the API (and paste the ChirpStack codec)
    **before** any node runs it: the API rejects an IP uplink with a channel it doesn't
    know.
-4. Tag and publish, with notes covering the changes since the last release, the deploy
-   order and the pickle's SHA-256:
+5. Tag **signed**, then publish, with notes covering the changes since the last release,
+   the deploy order and the pickle's SHA-256:
    ```bash
-   git tag -a v2026.10.0 -m "v2026.10.0" <commit>
+   git tag -s v2026.10.0 -m "v2026.10.0" <commit>     # signed with your release key (below)
    git push origin v2026.10.0
    gh release create v2026.10.0 --title v2026.10.0 --notes-file notes.md
    ```
-5. Update the nodes (below) and check the dashboard shows the new version for each.
+6. Update the nodes (below) and check the dashboard shows the new version for each.
+
+### Release signing
+
+Nodes only check out a tag signed by a release key, so a node installs what a
+maintainer released and nothing else, even if the GitHub repo were tampered with.
+Tags are signed with an SSH key (git 2.34 or newer; no GPG needed).
+
+- **A maintainer's release key**, set up once on their own machine:
+  ```bash
+  ssh-keygen -t ed25519 -C "watercam-release <you>" -f ~/.ssh/watercam_release
+  git config --global gpg.format ssh
+  git config --global user.signingkey ~/.ssh/watercam_release.pub
+  ```
+  Keep the private key off nodes and servers, with a passphrase.
+- **The allowed signers** are listed in `config/release_signers`, one line per
+  maintainer: `watercam-releases <the .pub file's key type and key>`. Public keys
+  only, so the file is safe in this public repo.
+- **On each node** the list is installed outside the checkout, so an update can't
+  change whose signatures the node trusts (guide step 1.3.1):
+  ```bash
+  sudo install -D -m 644 config/release_signers /etc/watercam/release_signers
+  git config --global gpg.format ssh
+  git config --global gpg.ssh.allowedSignersFile /etc/watercam/release_signers
+  ```
+  Adding or removing a maintainer means updating `/etc/watercam/release_signers` on
+  each node by hand, deliberately.
 
 ## Updating a node
 
@@ -68,7 +100,7 @@ From `/home/pi/SU-WaterCam`:
 
 ```bash
 git fetch --depth 1 origin tag v2026.10.1
-git checkout v2026.10.1
+git verify-tag v2026.10.1 && git checkout v2026.10.1     # stop if it doesn't verify
 sha256sum output/ticktalk_main.pickle && cat output/ticktalk_main.pickle.sha256   # must match
 sudo systemctl restart lora_daemon segformer_daemon
 ```
@@ -81,7 +113,11 @@ If the release changes anything outside the checkout, the release notes say so:
 systemd units, `doas.conf`, Witty Pi scripts or pip packages.
 
 **Going back** to a known-good release is the same, with the older tag:
-`git fetch --depth 1 origin tag v2026.10.0 && git checkout v2026.10.0`.
+`git fetch --depth 1 origin tag v2026.10.0 && git verify-tag v2026.10.0 && git checkout v2026.10.0`.
+
+`git verify-tag` prints `Good "git" signature for watercam-releases` for a tag signed
+by a listed key, and fails for an unsigned tag or another key; don't check that one
+out. Tested 2026-10-12 with a shallow fetch of the tag alone, as above.
 
 Each update keeps the release it replaced, which costs only the files that changed.
 Once a year or so, `git tag -d` the old ones and run `git gc --prune=now`.
