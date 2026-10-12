@@ -255,6 +255,21 @@ nmcli connection down Quectel      # takes effect now rather than at the next bo
 The polkit rule lets `pi` (which runs ticktalk with no login session) bring the
 connection up and down. Changing the connection's settings still needs `sudo`.
 
+Keep Tailscale's probes to private addresses off the modem. Tailscale tries every
+address the API server advertises, including LAN and Docker ones that can never
+answer over cellular, and each try costs data ([CELLULAR_DATA.md](CELLULAR_DATA.md)):
+
+```bash
+sudo install -D -m 644 config/nftables/watercam-cellular.nft /etc/nftables.d/watercam-cellular.nft
+sudo install -m 644 config/watercam-cellular-filter.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now watercam-cellular-filter.service   # starts whenever wwan0 exists
+sudo nft list table netdev watercam_cellular                     # shows the two drop rules
+```
+
+Don't enable the stock `nftables.service`: its `/etc/nftables.conf` starts with
+`flush ruleset`, which would also remove Tailscale's own firewall rules.
+
 Check it, as `pi` and without `sudo`:
 
 ```bash

@@ -36,7 +36,7 @@ Cellular is the last resort: LoRa first, then WiFi (see
 | Option | Saves (estimate) | Needs |
 |---|---|---|
 | Disable unneeded relay regions in the tailnet policy (`derpMap`, region set to `null`), keeping the home region and a few nearby | up to ~220 KB when the region probing happens | Tailnet admin. Applies to every device on the tailnet. |
-| On the node, drop RFC1918 destinations on `wwan0` (nftables) so the private-address probes never reach the modem | 28–80 KB per wake, and most of the steady cost | Node change; check `tailscaled` copes with the dropped sends |
+| On the node, drop RFC1918 destinations on `wwan0` (nftables) so the private-address probes never reach the modem | 28–80 KB per wake, and most of the steady cost | **Written, not yet measured:** `config/nftables/watercam-cellular.nft` (guide 1.5.1). Dropped at `wwan0`'s egress hook, because a drop in an output chain makes the send fail with `EPERM`, and `tailscaled` answers that by rebinding and re-running netcheck (`maybeRebindOnError`), which probes every relay region. |
 | Tighten the ACL so `tag:watercam` only sees the API server and admin machines (006 sees 11 peers, mostly shared-in devices) | ~15–25 KB, plus fewer updates while up | Tailnet admin. `config/tailscale-acl.txt` is out of date: refresh it from the admin console first. |
 | Inbound UDP to the API server's Tailscale port through the campus firewall, so a direct path forms | ~10–25 KB | Campus IT |
 | Drop the `/health` check before each upload; one POST per wake | ~5 KB | Node change |
