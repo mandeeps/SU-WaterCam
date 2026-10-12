@@ -1,0 +1,18 @@
+[Unit]
+Description=At shutdown, make sure the WittyPi wakes the Pi at the next schedule slot
+# Nothing happens at start: the work is ExecStop, which runs as the system
+# shuts down, however that was started (ticktalk, a manual shutdown, the
+# WittyPi's own shutdown alarm). After= the WittyPi daemon, so this stops, and
+# arms the alarm, before the daemon does. See tools/ensure_next_wake.py.
+After=wittypi.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+# Root: it reads and sets the WittyPi alarm and appends to wittyPi.log.
+ExecStop=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/tools/ensure_next_wake.py
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

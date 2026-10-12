@@ -363,11 +363,12 @@ The application is run via `ticktalk.service`
 ```bash
 sudo cp config/lora_daemon.service config/segformer_daemon.service \
         config/ticktalk.service config/wittypi-recovery.service config/wittypi-boot-mark.service \
-        /etc/systemd/system/
+        config/wittypi-next-wake.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl disable watercam.service 2>/dev/null   # if it was ever enabled
 sudo systemctl enable --now lora_daemon.service segformer_daemon.service
 sudo systemctl enable ticktalk.service wittypi-recovery.service wittypi-boot-mark.service
+sudo systemctl enable --now wittypi-next-wake.service
 ```
 
 `ticktalk` and the WittyPi services start on the next boot.
@@ -378,6 +379,13 @@ receive in `ticktalk` goes through it. Without it the unit has no LoRa.
 it `ticktalk` falls back to loading the model on every cycle, about 40 s
 instead of about 2 s. Both start before `ticktalk.service`; `--now` also starts
 them straight away for the test cycle in 1.11.
+
+`wittypi-next-wake.service` checks the WittyPi's startup alarm every time
+the unit shuts down. The WittyPi's own script arms its alarms only at boot,
+and after a boot between slots (the button, say) it skips the next slot. At
+shutdown this service arms the next `schedule.wpi` slot instead whenever the
+armed wake is missing, past or later than that slot. It never moves a wake
+later, and leaves a recovery boot's deliberate wake alone.
 
 `wittypi-recovery.service` handles recovery after a power outage. Leave the
 WittyPi on "Default ON", so it boots the Pi whenever power returns. When a
