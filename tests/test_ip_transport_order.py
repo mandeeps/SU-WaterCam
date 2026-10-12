@@ -41,6 +41,7 @@ def _tx(reachable, only_if_lora=True, cellular="Quectel"):
     tx.only_if_lora_unavailable = only_if_lora
     tx.cellular_connection = cellular
     tx.cellular_connect_timeout_s = 90
+    tx.wifi_grace_s = 45
     tx.is_reachable.return_value = reachable
     tx.wait_reachable.return_value = True
     tx._drain_queue.return_value = {"drained": 0, "failed": False, "failed_file": None, "drained_ts": []}
@@ -49,7 +50,7 @@ def _tx(reachable, only_if_lora=True, cellular="Quectel"):
     return tx
 
 
-def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True):
+def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True, in_range=False):
     """Run ip_uplink_transmit with hardware and NetworkManager patched; return the mocks."""
     import ticktalk_main
     handler = MagicMock()
@@ -61,6 +62,7 @@ def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True):
         stack.enter_context(patch("tools.lora_handler_concurrent.get_lora_handler", return_value=handler))
         stack.enter_context(patch("tools.transmit_ip.cellular_status", return_value=dict(status)))
         stack.enter_context(patch("tools.transmit_ip.wifi_connected", return_value=wifi))
+        m["in_range"] = stack.enter_context(patch("tools.transmit_ip.wifi_in_range", return_value=in_range))
         m["up"] = stack.enter_context(patch("tools.transmit_ip.cellular_up", return_value=up))
         m["down"] = stack.enter_context(patch("tools.transmit_ip.cellular_down"))
         m["dedup"] = stack.enter_context(patch("tools.lora_store_forward.remove_delivered", return_value=0))
@@ -119,9 +121,13 @@ class TestWiFiThenCellular:
         assert m["result"]["success"] is True
 
     def test_wifi_connected_but_no_route_falls_back_to_cellular_again(self):
+        # WiFi gets its grace period first; only when the server still isn't
+        # reachable over it does cellular come back.
         tx = _tx(reachable=False)
+        tx.wait_reachable.side_effect = [False, True]
         m = _run(tx, status=ON_DEMAND_UP, wifi=True)
         m["down"].assert_called_once_with("Quectel")
+        assert [c.args for c in tx.wait_reachable.call_args_list] == [(45,), (30,)]
         m["up"].assert_called_once()
 
     def test_autoconnect_connection_is_left_alone(self):
@@ -249,6 +255,95 @@ class TestReplyCommand:
             tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1)
         assert post.call_args_list[0].args[1]["want_command"] is True
         assert "want_command" not in post.call_args_list[1].args[1]
+
+
+class TestWiFiGraceBeforeCellular:
+    """A saved WiFi network in range but not usable yet gets a bounded wait first."""
+
+    def test_wifi_in_range_gets_a_wait_and_cellular_stays_down(self):
+        tx = _tx(reachable=False)
+        m = _run(tx, in_range=True)
+        tx.wait_reachable.assert_called_once_with(45)
+        m["up"].assert_not_called()
+        assert m["result"]["success"] is True
+
+    def test_wifi_that_never_comes_falls_back_to_cellular(self):
+        tx = _tx(reachable=False)
+        tx.wait_reachable.side_effect = [False, True]   # the WiFi wait, then cellular
+        m = _run(tx, in_range=True)
+        assert [c.args for c in tx.wait_reachable.call_args_list] == [(45,), (30,)]
+        m["up"].assert_called_once()
+        assert m["result"]["success"] is True
+
+    def test_out_of_range_goes_straight_to_cellular(self):
+        # A cellular-only field unit: no saved network in the scan, so no wait.
+        tx = _tx(reachable=False)
+        m = _run(tx, in_range=False)
+        m["up"].assert_called_once()
+        assert [c.args for c in tx.wait_reachable.call_args_list] == [(30,)]
+
+    def test_connected_wifi_without_the_server_yet_gets_the_wait(self):
+        tx = _tx(reachable=False)
+        m = _run(tx, wifi=True)
+        tx.wait_reachable.assert_called_once_with(45)
+        m["up"].assert_not_called()
+
+    def test_zero_disables_the_wait(self):
+        tx = _tx(reachable=False)
+        tx.wifi_grace_s = 0
+        m = _run(tx, in_range=True)
+        m["in_range"].assert_not_called()
+        m["up"].assert_called_once()
+
+    def test_reachable_at_once_never_waits_or_scans(self):
+        tx = _tx(reachable=True)
+        m = _run(tx)
+        tx.wait_reachable.assert_not_called()
+        m["in_range"].assert_not_called()
+
+    def test_cellular_already_up_doesnt_wait(self):
+        tx = _tx(reachable=False)
+        m = _run(tx, status=ON_DEMAND_UP, in_range=True)
+        assert (45,) not in [c.args for c in tx.wait_reachable.call_args_list]
+
+
+class TestWiFiInRange:
+    """tools.transmit_ip.wifi_in_range against canned nmcli output."""
+
+    @staticmethod
+    def _nmcli(profiles, ssids, scan):
+        def run(cmd, **kw):
+            args = cmd[1:]
+            if args[:5] == ["-t", "-f", "UUID,TYPE", "connection", "show"]:
+                out = profiles
+            elif args[:2] == ["-g", "802-11-wireless.ssid"]:
+                out = ssids[args[-1]]
+            elif args[:4] == ["-t", "-f", "SSID", "device"]:
+                out = scan
+            else:
+                raise AssertionError(f"unexpected nmcli call {args}")
+            return MagicMock(stdout=out)
+        return run
+
+    def _in_range(self, profiles, ssids, scan):
+        with patch("tools.transmit_ip.subprocess.run", side_effect=self._nmcli(profiles, ssids, scan)):
+            return transmit_ip.wifi_in_range()
+
+    def test_saved_network_in_the_scan(self):
+        assert self._in_range("u1:802-11-wireless\nu2:gsm\n", {"u1": "BenchNet\n"}, "Other\nBenchNet\n")
+
+    def test_saved_network_not_in_the_scan(self):
+        assert not self._in_range("u1:802-11-wireless\n", {"u1": "BenchNet\n"}, "Other\n")
+
+    def test_no_saved_wifi(self):
+        assert not self._in_range("u2:gsm\n", {}, "BenchNet\n")
+
+    def test_colon_in_the_ssid(self):
+        assert self._in_range("u1:802-11-wireless\n", {"u1": "Lab\\:5G\n"}, "Lab\\:5G\n")
+
+    def test_nmcli_missing_means_not_in_range(self):
+        with patch("tools.transmit_ip.subprocess.run", side_effect=OSError("no nmcli")):
+            assert transmit_ip.wifi_in_range() is False
 
 
 class TestHandleDownlinkReply:

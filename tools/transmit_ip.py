@@ -157,6 +157,9 @@ class IPTransmitter:
         cell = cfg.get("cellular_connection", "Quectel")
         self.cellular_connection: str = cell if isinstance(cell, str) else ""
         self.cellular_connect_timeout_s: int = max(5, _coerce_int(cfg.get("cellular_connect_timeout_s"), 90))
+        # How long to wait for a saved WiFi network that's in range but not yet
+        # usable before falling back to cellular (0 = don't wait).
+        self.wifi_grace_s: int = max(0, _coerce_int(cfg.get("wifi_grace_s"), 45))
         self._queue_dir: str = os.path.abspath(queue_dir or _DEFAULT_QUEUE_DIR)
 
         self._session = requests.Session()
@@ -859,6 +862,36 @@ def wifi_connected() -> bool:
     except (OSError, subprocess.TimeoutExpired):
         return False
     return any(line == "wifi:connected" for line in r.stdout.splitlines())
+
+
+def _nm_unescape(value: str) -> str:
+    """Undo nmcli's terse-mode escaping of ':' and '\\'."""
+    return value.replace("\\:", ":").replace("\\\\", "\\")
+
+
+def wifi_in_range() -> bool:
+    """True if a saved WiFi network shows up in NetworkManager's last scan.
+
+    Reads the cached scan (no rescan), so it is quick and doesn't touch the radio.
+    Out of range of every saved network, or with none saved, it is False, so a
+    cellular-only unit never waits for WiFi.
+    """
+    def nm(*args):
+        return subprocess.run(["nmcli", *args], capture_output=True, text=True, timeout=10).stdout
+    try:
+        ssids = set()
+        for line in nm("-t", "-f", "UUID,TYPE", "connection", "show").splitlines():
+            uuid, _, kind = line.partition(":")
+            if kind == "802-11-wireless":
+                ssid = _nm_unescape(nm("-g", "802-11-wireless.ssid", "connection", "show", uuid).strip())
+                if ssid:
+                    ssids.add(ssid)
+        if not ssids:
+            return False
+        seen = {_nm_unescape(x) for x in nm("-t", "-f", "SSID", "device", "wifi", "list", "--rescan", "no").splitlines()}
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return bool(ssids & seen)
 
 
 def cellular_up(connection: str, timeout_s: int = 90) -> bool:
