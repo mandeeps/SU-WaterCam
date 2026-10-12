@@ -172,6 +172,7 @@ class IPTransmitter:
         self,
         channels: List[Dict[str, str]],
         device_ts: Optional[int] = None,
+        want_command: bool = False,
     ) -> Dict[str, Any]:
         """POST sensor channel data to /ip/uplink.
 
@@ -188,6 +189,10 @@ class IPTransmitter:
             Optional UNIX epoch (seconds) timestamp from the device clock.
             When provided, the server uses it as the measurement timestamp
             instead of the server arrival time.
+        want_command:
+            Ask the server to put the oldest pending downlink command in the
+            reply (`reply_command()`), marked delivered, instead of the node
+            polling for it. Only for a send whose reply is acted on.
 
         Returns
         -------
@@ -207,6 +212,8 @@ class IPTransmitter:
         }
         if device_ts is not None:
             payload["device_ts"] = device_ts
+        if want_command:
+            payload["want_command"] = True
 
         url = f"{self.server_url}/ip/uplink"
         return self._post_with_retry(url, payload)
@@ -759,6 +766,18 @@ def apply_downlink_command(
         "skipped": skipped,
         "queue_id": cmd.get("queue_id"),
     }
+
+
+def reply_command(uplink_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The command an /ip/uplink reply carried, as a poll_downlink()-style result.
+
+    None when the reply has no `command` key: the server predates want_command,
+    so the caller polls instead. A `command` of null means nothing was pending.
+    """
+    body = uplink_result.get("response") if uplink_result.get("success") else None
+    if not isinstance(body, dict) or "command" not in body:
+        return None
+    return {"success": True, "command": body["command"]}
 
 
 def handle_downlink_reply(

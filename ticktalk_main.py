@@ -1705,10 +1705,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     Readings delivered over IP are removed from the LoRa store-and-forward
     queue, so they aren't sent twice once LoRa joins.
 
-    After a reading is delivered, /ip/downlink is polled again. The wake-start
-    poll (ip_downlink_poll_and_apply) runs before the uplink and never brings
-    up cellular, so on a unit without WiFi it has no route; this is where such
-    a unit gets its commands. It also picks up commands queued during the wake.
+    After a reading is delivered, any pending command is collected: the uplink
+    asks for it (want_command) and the reply carries it, or, from a server that
+    predates that, a poll of /ip/downlink fetches it. The wake-start poll
+    (ip_downlink_poll_and_apply) runs before the uplink and never brings up
+    cellular, so on a unit without WiFi it has no route; this is where such a
+    unit gets its commands. It also picks up commands queued during the wake.
 
     Returns a status dict (never raises) so a failure here never stops the main
     workflow.
@@ -1716,7 +1718,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     import struct
     import time as _time
     from tools.transmit_ip import (IPTransmitter, cellular_status, cellular_up,
-                                   cellular_down, handle_downlink_reply, wifi_connected)
+                                   cellular_down, handle_downlink_reply, reply_command,
+                                   wifi_connected)
     from tools import lora_store_forward as _lsf
     from tools.lora_runtime_integration import get_parameter, set_parameter
 
@@ -1750,6 +1753,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
 
     cellular_started = False
     delivered = False
+    result = {}
     try:
         # ── Collect sensor data ────────────────────────────────────────────────
         # Sensor collection is done BEFORE the reachability check so that a
@@ -1919,7 +1923,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             }
 
         # ── Transmit live reading ──────────────────────────────────────────────
-        result = tx.send_uplink(channels, device_ts=ts_now)
+        # The reply carries any pending command (want_command), saving a poll
+        result = tx.send_uplink(channels, device_ts=ts_now, want_command=True)
         delivered = result["success"]
 
         if result["success"]:
@@ -1951,10 +1956,16 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     finally:
         if delivered:
             # The server is reachable now; collect any command the wake-start
-            # poll missed (see the docstring).
+            # poll missed (see the docstring). The uplink reply carries it; a
+            # server too old to put it there gets polled instead.
             try:
-                handle_downlink_reply(tx.poll_downlink(), set_param_fn=set_parameter,
-                                      label="IP downlink after uplink")
+                carried = reply_command(result)
+                if carried is not None:
+                    handle_downlink_reply(carried, set_param_fn=set_parameter,
+                                          label="IP downlink in uplink reply")
+                else:
+                    handle_downlink_reply(tx.poll_downlink(), set_param_fn=set_parameter,
+                                          label="IP downlink after uplink")
             except Exception as exc:
                 print(f"⚠️ IP downlink after uplink failed: {exc}")
         tx.close()
