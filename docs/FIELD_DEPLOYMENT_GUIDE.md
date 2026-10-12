@@ -73,6 +73,20 @@ sudo truncate -s 0 /etc/machine-id
 sudo rm -f /var/lib/NetworkManager/secret_key /var/lib/dhcpcd/duid
 ```
 
+### 1.2.1 Give the unit its own `pi` password
+
+The serial console stays enabled for field repairs, so `pi`'s password is a root
+login for anyone holding the unit. Set one that is unique to this unit, at least 16
+random characters, and store it in the team's password manager as
+`ufo-01-01-NNN serial`:
+
+```bash
+passwd
+```
+
+Never reuse another unit's password or the image default. See
+[NODE_SECURITY.md](NODE_SECURITY.md), which also has what to do when a unit is lost.
+
 ### 1.3 Confirm remote access (Tailscale)
 
 First switch DNS to systemd-resolved (run from `/home/pi/SU-WaterCam`):
