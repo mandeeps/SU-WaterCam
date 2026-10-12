@@ -246,7 +246,9 @@ Remember to save and restore the clock offset as the instructions say.
 
 ### SU-WaterCam software setup from scratch
 
-Clone the public git repo: https://github.com/mandeeps/SU-WaterCam.git
+Clone the public git repo at the current release, shallow (the files are under 1 MB; the full history is about 330 MB):
+`git clone --depth 1 --branch <release> https://github.com/mandeeps/SU-WaterCam.git`. Releases, updating a node
+and going back to an earlier release are in [docs/RELEASES.md](docs/RELEASES.md).
 Compile lepton.c and capture.c for the device. Install build-essential if not already done: `sudo apt install build-essential`. Then cd to the SU-WaterCam/tools directory and run: 
 `gcc lepton.c -o lepton && gcc capture.c -o capture`
 

@@ -174,6 +174,18 @@ def format_report(result: Dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def software_report() -> str:
+    """Which release and model this node runs (not a pass/fail check)."""
+    try:
+        from tools.node_version import model_info, software_version
+        version, model = software_version(use_cache=False), model_info()
+    except Exception as e:   # noqa: BLE001 - informational only
+        return f"  software: unavailable ({e})"
+    return (f"  {'software':28s} {version['describe'] if version else 'unknown'}\n"
+            f"  {'segmentation model':28s} "
+            + (f"{model['name']} ({model['sha256'][:8]})" if model else "unknown (segformer_daemon not running?)"))
+
+
 def main(argv=None) -> int:
     import argparse
     parser = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0])
@@ -188,6 +200,7 @@ def main(argv=None) -> int:
 
     result = evaluate_health(cpu_temp_c, wittypi, gps, imu)
     print(format_report(result), flush=True)
+    print(software_report(), flush=True)
 
     if result['status'] == 'fail':
         if not args.no_alert:

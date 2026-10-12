@@ -1,0 +1,4 @@
+# Release signing keys (docs/RELEASES.md, Release signing): one line per maintainer,
+#   watercam-releases ssh-ed25519 AAAA...
+# Public keys only. Installed on each node as /etc/watercam/release_signers.
+# No key yet: add the first maintainer's before tagging the first release.

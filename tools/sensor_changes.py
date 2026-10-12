@@ -26,6 +26,9 @@ DEFAULT_STATE_PATH = os.path.join(_REPO_ROOT, "data", "lora_last_sent.json")
 SKIP = ("timestamp", "error")
 LAST_FULL_KEY = "_last_full_send"
 ANGLE_FIELDS = ("tilt_roll_yaw",)
+#: Identifiers packed into integers (tools/node_version.py): any change matters,
+#: and a relative threshold would miss v2026.10.0 -> v2026.10.1.
+EXACT_FIELDS = ("software_version", "software_commit", "model_id")
 
 
 def _angle_change(cur: Any, prev: Any) -> Optional[float]:
@@ -80,6 +83,10 @@ def changed_fields(data: Dict[str, Any], threshold: float = 0.05,
         elif prev is None:
             out[name] = {"current_value": cur, "previous_value": None, "change_percent": 100.0,
                          "reason": "first_reading"}
+        elif name in EXACT_FIELDS:
+            if cur != prev:
+                out[name] = {"current_value": cur, "previous_value": prev, "change_percent": None,
+                             "reason": "changed"}
         elif name in ANGLE_FIELDS:
             moved = _angle_change(cur, prev)
             if moved is None or moved >= angle_threshold_deg:
