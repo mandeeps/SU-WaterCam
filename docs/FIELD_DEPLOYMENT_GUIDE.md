@@ -80,9 +80,15 @@ First switch DNS to systemd-resolved (run from `/home/pi/SU-WaterCam`):
 ```bash
 sudo apt install systemd-resolved
 sudo install -m 644 config/networkmanager/90-dns-systemd-resolved.conf /etc/NetworkManager/conf.d/
+sudo install -D -m 644 config/systemd-resolved/90-watercam.conf /etc/systemd/resolved.conf.d/90-watercam.conf
+sudo systemctl restart systemd-resolved
 sudo systemctl reload NetworkManager
 readlink /etc/resolv.conf      # prints: ../run/systemd/resolve/stub-resolv.conf
+sudo ss -lnup | grep -cE ':(5355|5353) '   # prints: 0 (no LLMNR or mDNS responder)
 ```
+
+`90-watercam.conf` turns off LLMNR and multicast DNS, which resolved enables by
+default: they answer name queries from anyone on the same WiFi or cellular network.
 
 Without it, NetworkManager and Tailscale both write `/etc/resolv.conf`. Each time a
 connection comes up or goes down, including the `Quectel` connection the software
