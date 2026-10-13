@@ -722,8 +722,29 @@ def save_metadata_summary(directory: str, output_paths: dict, image_info: dict) 
     print(f"Saved metadata summary: {metadata_file}")
 
 
+def apply_thread_setting() -> Optional[int]:
+    """Run SimpleITK single-threaded when COREG_SINGLE_THREAD=1 (bench units only).
+
+    A fresh registration isn't repeatable on several threads: ITK's mutual-information
+    metric sums per-thread partial results in whatever order the threads finish, and
+    100 optimizer iterations amplify the floating-point differences (2-9% of pixels
+    between two runs on 005, 2026-10-12). There is no random seed involved: no metric
+    sampling is set, so every pixel is used. On one thread the same capture gives the
+    same output every time, which is what bench comparisons and regression tests need,
+    at about twice the time per fresh registration (~160 s vs ~72 s on 005). Cached
+    transforms are repeatable either way. Deployed units leave this unset.
+    Returns the thread count it set, or None.
+    """
+    if os.environ.get("COREG_SINGLE_THREAD", "").strip().lower() in ("1", "true", "yes"):
+        sitk.ProcessObject.SetGlobalDefaultNumberOfThreads(1)
+        return 1
+    return None
+
+
 def coreg(directory: str, position_changed: bool = False, calibration_file: str = "") -> str:
     try:
+        if apply_thread_setting():
+            print("Co-registration: SimpleITK single-threaded (COREG_SINGLE_THREAD=1)")
         nir_off_path, nir_on_path, lwir_path = validate_input_files(directory)
         # Loading LWIR image
         lwir_image = cv2.imread(lwir_path, cv2.IMREAD_UNCHANGED)
