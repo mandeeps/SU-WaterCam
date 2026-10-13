@@ -618,3 +618,24 @@ class TestWaitTailnet:
         with patch("tools.transmit_ip.tailscale_online") as online:
             assert tx.wait_tailnet(30) is True
         online.assert_not_called()
+
+
+class TestMovedUnit:
+    def test_moved_unit_sends_over_ip_even_with_lora_joined(self, tmp_path, monkeypatch):
+        import json
+        from tools import gps_home
+        monkeypatch.setattr(gps_home, "HOME_PATH", str(tmp_path / "gps_home.json"))
+        (tmp_path / "gps_home.json").write_text(json.dumps({"home": [10.0, 20.0], "moved": True}))
+        tx = _tx(reachable=True)
+        m = _run(tx, joined=True, wifi=True)
+        assert m["result"]["success"] is True
+        channels = tx.send_uplink.call_args[0][0]
+        codes = {c["code"]: c["payload_hex"] for c in channels}
+        assert codes["01 06"] == "00000001"
+
+    def test_unmoved_unit_still_skips_ip_when_lora_joined(self, tmp_path, monkeypatch):
+        from tools import gps_home
+        monkeypatch.setattr(gps_home, "HOME_PATH", str(tmp_path / "gps_home.json"))
+        tx = _tx(reachable=True)
+        m = _run(tx, joined=True, wifi=True)
+        assert m["result"]["status"] == "skipped_lora_joined"

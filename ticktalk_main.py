@@ -193,6 +193,15 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
             data.update(gps)
     except Exception as e:
         print(f"⚠️ Failed to get GPS data: {e}")
+        gps = {}
+    # Moved from the mount position? (tools/gps_home.py) While it is, every packet
+    # carries the alert and the best position available.
+    try:
+        from tools.gps_home import movement_fields
+        move_fields, _ = movement_fields(gps)
+        data.update(move_fields)
+    except Exception as e:
+        print(f"⚠️ GPS movement check failed: {e}")
     
     # Get WittyPi temperature and voltage diagnostics
     wittypi_data = None
@@ -286,6 +295,12 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         except Exception as e:
             print(f"⚠️ Failed to check sensor changes: {e}")
             sensors_to_transmit = {k: {'current_value': v, 'reason': 'tracker_failed'} for k, v in data.items()}
+
+    if data.get('movement_threshold'):
+        # A moved unit sends the alert and its position every time, whatever the tracker says
+        for k in ('movement_threshold', 'lat_lon_z'):
+            if k in data:
+                sensors_to_transmit[k] = {'current_value': data[k], 'reason': 'moved from mount'}
 
     try:
         handler = get_lora_handler()
@@ -1750,7 +1765,16 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         except Exception as e:
             print(f"⚠️ IP uplink: LoRa join state unknown ({e}) — sending over IP")
             lora_joined = False
+        moved = False
         if lora_joined:
+            try:
+                from tools.gps_home import load as _gps_home
+                moved = bool(_gps_home().get("moved"))
+            except Exception:
+                moved = False
+        if lora_joined and moved:
+            print("🚨 Unit moved from its mount position — sending over IP as well as LoRa")
+        elif lora_joined:
             if cellular_active:
                 cellular_down(cell)
                 print(f"📶 LoRa is back — {cell} taken down")
@@ -1778,11 +1802,16 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         except Exception as e:
             print(f"⚠️ IP uplink: AHT20 unavailable: {e}")
 
+        move_info = {}
         try:
-            from tools.get_gps import get_location_with_retry
+            from tools.get_gps import get_location_with_retry, last_fix
             gps, _ = get_location_with_retry()
             if gps:
                 data.update(gps)
+                data['gps_fix_age_s'] = int(last_fix.get("age_s") or 0)
+            from tools.gps_home import movement_fields
+            move_fields, move_info = movement_fields(gps)
+            data['movement_threshold'] = move_fields['movement_threshold']
         except Exception as e:
             print(f"⚠️ IP uplink: GPS unavailable: {e}")
 
@@ -1849,6 +1878,16 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                 })
             except struct.error as e:
                 print(f"⚠️ IP uplink: GPS encoding error (lat={lat}, lon={lon}): {e}")
+            # 04 02 — age of that fix in seconds: 0 live, more when it's the saved
+            # fix (tools/get_gps.py), so the server can tell a stale position
+            channels.append({"code": "04 02",
+                             "payload_hex": struct.pack(">I", max(0, min(data.get('gps_fix_age_s', 0), 0xFFFFFFFF))).hex()})
+        # 01 06 — moved from the mount position (tools/gps_home.py), and 04 03 how far, in metres
+        if data.get('movement_threshold') is not None:
+            channels.append({"code": "01 06", "payload_hex": struct.pack(">I", 1 if data['movement_threshold'] else 0).hex()})
+        if move_info.get("distance_m") is not None:
+            channels.append({"code": "04 03",
+                             "payload_hex": struct.pack(">I", int(min(move_info["distance_m"], 0xFFFFFFFF))).hex()})
 
         # 05 01 — temperature (int16, value × 100)
         temp = data.get('temperature_celsius')
@@ -1954,6 +1993,13 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             print(f"✅ IP uplink OK: {len(channels)} channels sent "
                   f"(attempt {result.get('attempts', '?')})")
             delivered_ts.append(ts_now)
+            try:
+                from tools.transmit_ip import correct_clock
+                offset = correct_clock(result)
+                if offset is not None:
+                    print(f"🕒 Clock was {abs(offset):.0f} s {'behind' if offset > 0 else 'ahead of'} the server's; corrected")
+            except Exception as e:
+                print(f"⚠️ Clock check failed: {e}")
         if delivered_ts:
             # Delivered over IP: don't send the same captures again over LoRa.
             removed = _lsf.remove_delivered(delivered_ts)

@@ -1,0 +1,20 @@
+#!/bin/bash
+# Set the system clock and the Witty Pi RTC to a Unix time from the API's reply
+# (tools/transmit_ip.py correct_clock). Installed root-owned in /usr/local/sbin;
+# pi runs it through doas (config/doas.conf). Refuses anything that isn't a
+# plain integer between 2026-01-01 and 2100-01-01. Writes the RTC itself, as the
+# Witty Pi's system_to_rtc does, rather than sourcing its pi-writable scripts.
+set -eu
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin
+ts=${1:-}
+[[ "$ts" =~ ^[0-9]{10}$ ]] || { echo "usage: watercam-set-clock UNIX_TIME" >&2; exit 2; }
+(( ts >= 1767225600 && ts < 4102444800 )) || { echo "time out of range" >&2; exit 2; }
+date -u -s "@$ts" >/dev/null
+# Witty Pi 4 MCU (bus 1, 0x08), registers 58-64: sec min hour date weekday month year, BCD, local time
+bcd() { echo $(( 10#$1 / 10 * 16 + 10#$1 % 10 )); }
+reg=58
+for f in %S %M %H %d %u %m %y; do
+  i2cset -y 1 0x08 $reg "$(bcd "$(date -d "@$ts" +$f)")"
+  reg=$((reg + 1))
+done
+echo "clock and RTC set to $(date -Is)"
