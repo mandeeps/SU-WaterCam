@@ -127,6 +127,13 @@ ADS1115
 
 The USB-C breakout sits in-line on the USB-C cable from the Voltaic V50 to the WittyPi. VBUS/GND carry power as normal; D+ is tapped for ADC reading only (high-impedance, no load on the signal).
 
+> **Check before building (2026-10-13):** units draw power from the V50's USB-A
+> ports (through the Y-adapter), not its USB-C port, and anything plugged into the
+> USB-C (top) port turns Always On off on the A ports. So the in-line tap above
+> doesn't match the wiring, and a breakout in the top port may switch Always On
+> off. Test whether a D+ and GND only connection there trips it before relying on
+> this path; `docs/POWER_ANALYSIS.md` has the same note for the mDot reading.
+
 ---
 
 ## 5. Software Architecture
