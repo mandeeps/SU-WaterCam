@@ -197,6 +197,21 @@ If `uname -r` doesn't end in `-rt`, the real-time kernel isn't used and can go t
 `sudo apt purge linux-image-rpi-v8-rt 'linux-image-*-rpi-v8-rt'`. Check
 `/boot/firmware/kernel8.img` is still there afterwards.
 
+Turn off apt's background jobs, which download package lists over whatever link is up,
+cellular included (`docs/1NCE_SIM_EXHAUSTION.md`), and remove `man-db`: a deployed node
+doesn't need man pages, and its timer rebuilds their index. The `dpkg` rule keeps later
+installs from adding man pages and docs (copyright notices stay):
+
+```bash
+sudo systemctl mask apt-daily.timer apt-daily-upgrade.timer man-db.timer
+sudo apt purge --autoremove man-db
+printf '%s\n' 'path-exclude /usr/share/man/*' 'path-exclude /usr/share/doc/*' \
+  'path-include /usr/share/doc/*/copyright' | sudo tee /etc/dpkg/dpkg.cfg.d/01-nodoc
+sudo rm -rf /usr/share/man/* && sudo find /usr/share/doc -type f ! -name copyright -delete
+```
+
+Updates are then done by hand (`docs/RELEASES.md`).
+
 **Keep these**, which look removable but aren't:
 
 | Package | Why it stays |
