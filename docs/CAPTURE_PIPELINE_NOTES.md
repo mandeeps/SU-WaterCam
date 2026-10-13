@@ -158,3 +158,25 @@ Two things worth reading off this:
 
 The 32.9% water on an indoor room is not meaningful. That is a 100-iteration checkpoint, not the
 pipeline.
+
+## Repeatable co-registration on bench units (`COREG_SINGLE_THREAD`)
+
+A fresh registration (no cached transform, or the camera has moved) isn't repeatable by
+default: SimpleITK's mutual-information metric runs on several threads and adds up their
+partial results in whatever order they finish, so two runs on the same capture differ
+(2–9% of pixels, masks 0.1–0.3%, on 005 in 2026-10). No random seed is involved; every
+pixel is used. Cached transforms are repeatable either way.
+
+Set `COREG_SINGLE_THREAD=1` to run SimpleITK on one thread: the same capture then gives the
+same output every time, which bench comparisons and regression tests need, at about twice
+the time per fresh registration (~150 s vs ~72 s on 005). Bench units only; deployed units
+leave it unset and keep the speed. On a bench unit:
+
+```bash
+sudo mkdir -p /etc/systemd/system/ticktalk.service.d
+printf '[Service]\nEnvironment=COREG_SINGLE_THREAD=1\n' | \
+    sudo tee /etc/systemd/system/ticktalk.service.d/bench-coreg-single-thread.conf
+sudo systemctl daemon-reload
+```
+
+For a one-off run: `COREG_SINGLE_THREAD=1 venv/bin/python tools/coreg_multiple.py <capture dir> --position-changed`.
