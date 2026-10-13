@@ -31,6 +31,7 @@
     "only_if_lora_unavailable": true,
     "cellular_connection": "Quectel",
     "cellular_connect_timeout_s": 90,
+    "wifi_grace_s": 45,
     "downlink_poll_interval_s": 60,
     "max_queue_depth": 48,
     "max_queue_age_days": 7

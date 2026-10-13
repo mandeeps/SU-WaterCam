@@ -1719,7 +1719,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     import time as _time
     from tools.transmit_ip import (IPTransmitter, cellular_status, cellular_up,
                                    cellular_down, handle_downlink_reply, reply_command,
-                                   wifi_connected)
+                                   wifi_connected, wifi_in_range)
     from tools import lora_store_forward as _lsf
     from tools.lora_runtime_integration import get_parameter, set_parameter
 
@@ -1892,6 +1892,18 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             cellular_active = False
             print(f"📶 WiFi is back — {cell} taken down")
         reachable = tx.is_reachable(timeout_s=5)
+        if (not reachable and on_demand and not cellular_active and tx.wifi_grace_s > 0
+                and (wifi_connected() or wifi_in_range())):
+            # A saved WiFi network is in range but the server isn't reachable over
+            # it yet. At boot a weak signal can take a minute to authenticate (006
+            # sat at -76 dBm and joined 66 s after boot), so wait a bounded time
+            # before spending cellular data. Out of range of every saved network
+            # this is skipped, so a cellular-only unit loses no on-time.
+            print(f"📶 WiFi in range but the server isn't reachable yet — "
+                  f"waiting up to {tx.wifi_grace_s} s before {cell}")
+            reachable = tx.wait_reachable(tx.wifi_grace_s)
+            if reachable:
+                print("📶 Server reachable over WiFi — cellular not needed")
         if not reachable and on_demand and not cellular_active:
             print(f"📶 IP uplink: server unreachable — bringing up {cell}")
             cellular_started = cellular_up(cell, tx.cellular_connect_timeout_s)

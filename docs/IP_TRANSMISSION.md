@@ -52,7 +52,8 @@ Add or edit the `ip_upload` block:
   "fallback_to_lora": true,
   "only_if_lora_unavailable": true,
   "cellular_connection": "Quectel",
-  "cellular_connect_timeout_s": 90
+  "cellular_connect_timeout_s": 90,
+  "wifi_grace_s": 45
 }
 ```
 
@@ -69,6 +70,7 @@ Add or edit the `ip_upload` block:
 | `only_if_lora_unavailable` | bool | Default `true`: skip the IP uplink while the mDot is joined (LoRa first). `false` sends over both. |
 | `cellular_connection` | str | Default `"Quectel"`: the LTE modem's NetworkManager connection, brought up only when the server can't be reached over WiFi. Managed only if its autoconnect is off. `""` leaves the modem alone. See [Transport order](#transport-order-lora-wifi-cellular). |
 | `cellular_connect_timeout_s` | int | How long `nmcli` may take to bring the connection up (default 90; re-attaching took 3–51 s on 006). |
+| `wifi_grace_s` | int | Default 45. When the server isn't reachable but a saved WiFi network is in range (in NetworkManager's last scan) or WiFi is connected, wait up to this long for the server over WiFi before bringing up cellular. A weak signal can take a minute to authenticate at boot. Skipped when no saved network is in range, so a cellular-only unit loses no time. `0` disables it. |
 
 ---
 
