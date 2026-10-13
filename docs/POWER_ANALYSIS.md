@@ -148,6 +148,7 @@ The fixes are #97 (arm the next wake before the load starts) and #98 (after a po
 ## Peaks matter more than averages
 
 - **Clocks:** stock clocks (`arm_freq=1800`) and no `initial_turbo`, which held the CPU at full speed for the first 30 s of boot, lower the peak current. On 006, 2000 MHz plus the modem browned out the Pi even on a healthy supply. The old advice that overclocking saves energy by finishing sooner no longer holds: inference takes 1.6 s.
+- **USB off through boot:** `usb-power-off.service` cuts USB about 5 s into boot, and the wake cycle turns it back on, so the modem's start-up current doesn't land on the boot surge. USB still has power for about 2 s first, from when the kernel starts the USB controller; see the [guide](FIELD_DEPLOYMENT_GUIDE.md#19-enable-the-production-service). It can't help the cut-outs at the very first power-on, which happen before the kernel starts (006, 2026-10-13).
 - **Wiring:** keep the Y-adapter, so the load is spread across both V50 A ports. Never plug anything into the V50's top USB-C port while it powers a unit: it sags and resets the output, and it turns Always On off on the A ports. Charge on the bench through the side port, which keeps the pack full.
 - **Overlap:** the IP upload runs after LoRa, once segmentation is done. On 006 the wake's peaks were the same with the modem attached or in low power, so the modem isn't what drives them at stock clocks.
 

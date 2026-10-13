@@ -943,18 +943,33 @@ def cellular_up(connection: str, timeout_s: int = 90) -> bool:
 
     The connection should have autoconnect off, so the modem stays registered
     but carries no data until a wake has no other route to the server.
+
+    USB may still be off (tools/usb_power.py). A modem that has just been
+    powered takes 20-40 s to show up in NetworkManager; until then nmcli
+    finds no device for the connection, so it is retried within timeout_s.
     """
-    try:
-        r = subprocess.run(
-            ["nmcli", "--wait", str(timeout_s), "connection", "up", connection],
-            capture_output=True, text=True, timeout=timeout_s + 10,
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
-        logger.warning("nmcli connection up %s failed: %s", connection, exc)
+    from tools.usb_power import usb_power_on, wait_for
+    end = time.monotonic() + timeout_s
+    if usb_power_on():
+        wait_for("/dev/cdc-wdm*", timeout_s)
+    while True:
+        wait = max(round(end - time.monotonic()), 5)
+        try:
+            r = subprocess.run(
+                ["nmcli", "--wait", str(wait), "connection", "up", connection],
+                capture_output=True, text=True, timeout=wait + 10,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            logger.warning("nmcli connection up %s failed: %s", connection, exc)
+            return False
+        if r.returncode == 0:
+            return True
+        msg = (r.stderr or r.stdout).strip()
+        if "no suitable device" in msg.lower() and time.monotonic() + 5 < end:
+            time.sleep(5)
+            continue
+        logger.warning("nmcli connection up %s: %s", connection, msg)
         return False
-    if r.returncode != 0:
-        logger.warning("nmcli connection up %s: %s", connection, (r.stderr or r.stdout).strip())
-    return r.returncode == 0
 
 
 def cellular_down(connection: str) -> None:

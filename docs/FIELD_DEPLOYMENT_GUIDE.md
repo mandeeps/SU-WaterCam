@@ -462,6 +462,33 @@ goes straight back to sleep. **Press the WittyPi button** to start a normal
 cycle on the bench or at deployment. On the bench you can also set
 `"recovery_boot": {"enabled": false}`.
 
+Keep USB off through boot. The cellular modem draws its start-up current as
+soon as USB has power, adding to the boot surge that can brown out a
+battery-powered unit. `usb-power-off.service` turns USB off about 5 s into
+boot, and the wake cycle turns it back on when it starts (before the audio
+recording). `syncTime.sh` turns it on earlier when there's no WiFi, and
+`usb-power-on.timer` does 60 s after boot whatever happens, so a unit whose
+cycle fails early is still reachable over cellular. A Pi 4's USB ports share
+one power switch, so the modem and microphone are always on or off together.
+The two `uhubctl` lines from `config/doas.conf` let `ticktalk` turn USB on.
+
+```bash
+sudo apt install uhubctl
+sudo cp config/usb-power-off.service config/usb-power-on.service config/usb-power-on.timer \
+        /etc/systemd/system/
+sudo cp config/quectel-gnss.service /etc/systemd/system/
+sudo cp config/wittypi/syncTime.sh /home/pi/wittypi/
+sudo systemctl daemon-reload
+sudo systemctl disable quectel-gnss.service   # drops the old gpsd.service link
+sudo systemctl enable quectel-gnss.service usb-power-off.service usb-power-on.timer
+grep uhubctl config/doas.conf | sudo tee -a /etc/doas.conf && sudo doas -C /etc/doas.conf
+```
+
+`quectel-gnss.service` now starts whenever the modem's AT port appears, and
+hands the GPS port to gpsd, which was already running. To keep USB on from the
+start on a bench unit, run `sudo mkdir -p /etc/watercam && sudo touch /etc/watercam/usb-on-at-boot`.
+To turn it on by hand, run `doas uhubctl -l 1-1 -a on`.
+
 Optionally, install the power logger. It writes one line a minute to
 `~/powerlog/powerlog.csv`, synced to disk so the last reading before a
 brownout survives, with a marker line for every boot. When a unit fails in

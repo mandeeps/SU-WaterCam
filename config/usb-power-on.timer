@@ -1,0 +1,9 @@
+[Unit]
+Description=Turn USB back on 60 s after boot, in case the wake cycle never did
+# so a unit whose cycle fails early is still reachable over cellular
+
+[Timer]
+OnBootSec=60
+
+[Install]
+WantedBy=timers.target

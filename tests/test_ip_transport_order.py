@@ -15,6 +15,8 @@ import sys
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from tools import lora_store_forward as lsf
@@ -515,6 +517,13 @@ def _proc(rc=0, out=""):
 
 
 class TestNmcli:
+    @pytest.fixture(autouse=True)
+    def usb_already_on(self):
+        # these tests patch the shared subprocess module, so tools.usb_power
+        # would think it had just powered the modem and wait for it
+        with patch("tools.usb_power.usb_power_on", return_value=False):
+            yield
+
     def test_up_runs_nmcli_with_wait(self):
         with patch("tools.transmit_ip.subprocess.run", return_value=_proc()) as run:
             assert transmit_ip.cellular_up("Quectel", 60) is True
@@ -523,6 +532,26 @@ class TestNmcli:
     def test_up_failure_returns_false(self):
         with patch("tools.transmit_ip.subprocess.run", return_value=_proc(4)):
             assert transmit_ip.cellular_up("Quectel") is False
+
+    def test_up_retries_until_the_modem_appears(self):
+        missing = MagicMock(returncode=10, stdout="", stderr="Error: No suitable device found for this connection")
+        with patch("tools.usb_power.usb_power_on", return_value=True) as on, \
+             patch("tools.usb_power.wait_for", return_value=True), \
+             patch("tools.transmit_ip.time.sleep"), \
+             patch("tools.transmit_ip.subprocess.run", side_effect=[missing, missing, _proc()]) as run:
+            assert transmit_ip.cellular_up("Quectel", 60) is True
+        on.assert_called_once()
+        assert run.call_count == 3
+
+    def test_up_gives_up_when_the_modem_never_appears(self):
+        missing = MagicMock(returncode=10, stdout="", stderr="Error: No suitable device found for this connection")
+        clock = itertools.count(0, 20)
+        with patch("tools.usb_power.usb_power_on", return_value=True), \
+             patch("tools.usb_power.wait_for", return_value=False), \
+             patch("tools.transmit_ip.time.sleep"), \
+             patch("tools.transmit_ip.time.monotonic", side_effect=lambda: next(clock)), \
+             patch("tools.transmit_ip.subprocess.run", return_value=missing):
+            assert transmit_ip.cellular_up("Quectel", 60) is False
 
     def test_missing_nmcli_never_raises(self):
         with patch("tools.transmit_ip.subprocess.run", side_effect=FileNotFoundError("nmcli")):

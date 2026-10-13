@@ -642,12 +642,19 @@ def record_audio(trigger, directory):
     One WAV segment per iteration (same directory photos/thermal go into),
     so a hard WittyPi power-cut loses at most the in-progress segment rather
     than the whole wake window. See tools/audio_recorder.py.
+
+    Also turns USB power on for the cycle: usb-power-off.service keeps the
+    microphone and the cellular modem (whose GPS the LoRa step reads) off
+    through boot. See tools/usb_power.py.
     """
     from tools.audio_recorder import get_audio_recorder
     from tools.lora_runtime_integration import get_parameter
+    from tools.usb_power import usb_power_on, wait_for_usb_mic
 
+    usb_power_on()
     if not get_parameter('audio_recording_enabled', False):
         return "disabled"
+    wait_for_usb_mic()
 
     retention_days = get_parameter('data_retention_days', 7)
     recorder = get_audio_recorder(retention_days=retention_days)
