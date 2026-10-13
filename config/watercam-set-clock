@@ -17,4 +17,5 @@ for f in %S %M %H %d %u %m %y; do
   i2cset -y 1 0x08 $reg "$(bcd "$(date -d "@$ts" +$f)")"
   reg=$((reg + 1))
 done
+echo server > /run/watercam-time-source
 echo "clock and RTC set to $(date -Is)"

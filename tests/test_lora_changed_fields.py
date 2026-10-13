@@ -193,3 +193,14 @@ class TestMissingReadings:
         sc.mark_sent({"battery_percent": 39}, state_path=path)
         assert sc.changed_fields({"battery_percent": None}, state_path=path) == {}
         assert sc.changed_fields({"battery_percent": None}, state_path=path, everything=True) == {}
+
+
+class TestPosition:
+    def test_position_sent_first_then_only_after_25_m(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        assert "lat_lon_z" in sc.changed_fields({"lat_lon_z": [10.0, 20.0, 5.0]}, state_path=path)
+        sc.mark_sent({"lat_lon_z": [10.0, 20.0, 5.0]}, state_path=path)
+        # GPS jitter (about 11 m) isn't sent; 33 m is
+        assert sc.changed_fields({"lat_lon_z": [10.0001, 20.0, 5.0]}, state_path=path) == {}
+        out = sc.changed_fields({"lat_lon_z": [10.0003, 20.0, 5.0]}, state_path=path)
+        assert out["lat_lon_z"]["change_m"] == __import__("pytest").approx(33.4, abs=1)

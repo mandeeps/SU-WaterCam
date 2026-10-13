@@ -191,6 +191,9 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         gps, packet = get_location_with_retry()
         if gps:
             data.update(gps)
+            # The LoRa packet builder sends the position as lat_lon_z (04 01); the
+            # tracker passes it on only when it moved 25 m (tools/sensor_changes.py)
+            data['lat_lon_z'] = [gps['gps_lat'], gps['gps_lon'], gps.get('gps_alt') or 0.0]
     except Exception as e:
         print(f"⚠️ Failed to get GPS data: {e}")
         gps = {}

@@ -944,6 +944,18 @@ def tailscale_online(host: str) -> Optional[bool]:
 
 SET_CLOCK = "/usr/local/sbin/watercam-set-clock"
 CLOCK_TOLERANCE_S = 5
+# Set by syncTime.sh (network or GPS time at boot) or by SET_CLOCK; /run is cleared at boot
+TIME_SOURCE = "/run/watercam-time-source"
+# This boot's check, so it runs once: holds the boot id, so a /tmp that survives reboots is fine
+CLOCK_CHECKED = "/tmp/watercam-clock-checked"
+
+
+def _boot_id() -> str:
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
 
 
 def correct_clock(uplink_result: Dict[str, Any]) -> Optional[float]:
@@ -955,11 +967,27 @@ def correct_clock(uplink_result: Dict[str, Any]) -> Optional[float]:
     resolution) fixes that once the upload has reached the server. Only an
     offset over CLOCK_TOLERANCE_S is corrected, through the root-owned
     SET_CLOCK helper and its doas rule. Returns the offset applied, or None.
+
+    Runs at most once per boot, and not at all when the clock was already set
+    from the network or GPS this boot (TIME_SOURCE). The Date header comes with
+    the upload's own reply, so the check sends nothing extra either way.
     """
     from email.utils import parsedate_to_datetime
     date = (uplink_result or {}).get("server_date")
-    if not date or not os.path.exists(SET_CLOCK):
+    if not date or not os.path.exists(SET_CLOCK) or os.path.exists(TIME_SOURCE):
         return None
+    boot = _boot_id()
+    try:
+        with open(CLOCK_CHECKED) as f:
+            if boot and f.read().strip() == boot:
+                return None
+    except OSError:
+        pass
+    try:
+        with open(CLOCK_CHECKED, "w") as f:
+            f.write(boot)
+    except OSError:
+        pass
     try:
         server = parsedate_to_datetime(date).timestamp() + (uplink_result.get("rtt_s") or 0) / 2
     except (TypeError, ValueError):
