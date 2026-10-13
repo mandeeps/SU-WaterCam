@@ -409,6 +409,21 @@ python tools/bno055_calibration.py --unit-config <unit_config_file>.json --mode 
 
 Verify `bno055_calibration.json` shows `"mag": 3` when done. Without it heading data will be unreliable and georeferencing will be difficult.
 
+### 1.7.1 Clear the learned mount position
+
+A unit learns its mount position from its first three consistent GPS fixes, and
+from then on alerts (`01 06`, with its position, over LoRa and IP) when two
+fixes put it more than `gps_move_alert_m` (default 50 m) away: it may have been
+taken or come off its mount. Clear the old position before a unit goes to a new
+site, so it learns the new one there:
+
+```bash
+python tools/gps_home.py --reset
+```
+
+`python tools/gps_home.py` shows whether a position has been learned and
+whether the unit counts as moved.
+
 ### 1.8 Confirm camera calibration exists
 
 Calibration for our set of hardware is done and the file should transfer from unit to unit as long as hardware does not change. I forgot to copy it to the SD card image, so download from (https://drive.google.com/file/d/1Lpb0LEcR_ePSkGa5xrXXbkxigSQw4oQi/view?usp=drive_link) and copy it to `config/camera_calibration.json` in the SU-WaterCam directory using scp or an SD card reader.
@@ -468,8 +483,8 @@ current as soon as USB has power. `usb-power-off.service` turns USB off about
 the kernel and early userspace. The wake cycle, `cellular_up()` and
 `syncTime.sh` also turn it on, in case the timer didn't run. The modem's GPS
 needs 40–50 s for a fix after that, so the wake's first LoRa step uses the last
-saved fix (`gps_last_fix.json`, kept for `gps_cache_max_age_h`, default a
-week). A Pi 4's USB ports share one power switch, so the modem and microphone
+saved fix (`gps_last_fix.json`, kept for `gps_cache_max_age_h`, default two
+days). A Pi 4's USB ports share one power switch, so the modem and microphone
 are always on or off together.
 The two `uhubctl` lines from `config/doas.conf` let `ticktalk` turn USB on.
 
@@ -483,6 +498,15 @@ sudo systemctl daemon-reload
 sudo systemctl disable quectel-gnss.service   # drops the old gpsd.service link
 sudo systemctl enable quectel-gnss.service usb-power-off.service usb-power-on.timer
 grep uhubctl config/doas.conf | sudo tee -a /etc/doas.conf && sudo doas -C /etc/doas.conf
+```
+
+Install the clock helper. A unit with no WiFi at boot gets no network time, and
+without a GPS fix no GPS time either; after each IP upload it sets its clock and
+the Witty Pi RTC from the server's reply when they're more than 5 s off:
+
+```bash
+sudo install -o root -g root -m 755 config/watercam-set-clock /usr/local/sbin/
+grep watercam-set-clock config/doas.conf | sudo tee -a /etc/doas.conf && sudo doas -C /etc/doas.conf
 ```
 
 `quectel-gnss.service` now starts whenever the modem's AT port appears, and

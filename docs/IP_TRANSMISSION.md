@@ -176,7 +176,10 @@ The server's `CHANNEL_REGISTRY` maps 2-byte codes to sensor fields.  The
 | `01 04` | `emergency_status` | 4 | uint32 bool (0 or 1) |
 | `02 01` | `battery_pct` | 4 | uint32 (0–100) |
 | `03 01` | `imu_block` | 12 | 3× int32 accel (mg), or custom IMU packing |
+| `01 06` | `move_threshold` | 4 | uint32 bool: 1 while the unit is away from its mount position (`tools/gps_home.py`) |
 | `04 01` | `gps_block` | 8 | int32 lat\_microdeg, int32 lon\_microdeg |
+| `04 02` | `gps_fix_age_s` | 4 | uint32 seconds: 0 for a live fix, more for the saved one (`tools/get_gps.py`) |
+| `04 03` | `gps_move_distance_m` | 4 | uint32 metres from the mount position, once it's known |
 | `05 01` | `temperature_c` | 2 | int16 (value × 100) |
 | `06 01` | `humidity_pct` | 1 | uint8 (0–100) |
 | `07 17` | `camera_flood_detect` | 4 | uint32 bool |

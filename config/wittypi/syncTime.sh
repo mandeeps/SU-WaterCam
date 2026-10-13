@@ -35,6 +35,7 @@ if [[ "$net_ts" != "-1" ]]; then
   log '  Applying network time to system...'
   sudo date -u -s @$net_ts >/dev/null
   system_to_rtc
+  echo network > /run/watercam-time-source   # tools/transmit_ip.py correct_clock skips then
   exit 0
 fi
 
@@ -45,6 +46,7 @@ if [[ -n "$gps_time" && -n "$gps_ts" && "$gps_ts" -gt 1767225600 ]]; then   # af
   log "  Applying GPS time ($gps_time) to system..."
   sudo date -u -s @$gps_ts >/dev/null
   system_to_rtc
+  echo gps > /run/watercam-time-source
   exit 0
 fi
 

@@ -29,6 +29,11 @@ ANGLE_FIELDS = ("tilt_roll_yaw",)
 #: Identifiers packed into integers (tools/node_version.py): any change matters,
 #: and a relative threshold would miss v2026.10.0 -> v2026.10.1.
 EXACT_FIELDS = ("software_version", "software_commit", "model_id")
+#: The unit's position, [lat, lon, alt]: sent when it moved POSITION_THRESHOLD_M,
+#: so GPS jitter doesn't put 12 bytes in every LoRa packet. A unit away from its
+#: mount sends it every time anyway (tools/gps_home.py).
+POSITION_FIELDS = ("lat_lon_z",)
+POSITION_THRESHOLD_M = 25.0
 
 
 def _angle_change(cur: Any, prev: Any) -> Optional[float]:
@@ -62,6 +67,15 @@ def full_send_due(hours: float, state_path: Optional[str] = None,
     return not isinstance(last, (int, float)) or now - last >= hours * 3600
 
 
+def _position_change(cur: Any, prev: Any) -> Optional[float]:
+    """Metres between two [lat, lon, ...] positions, or None if they aren't comparable."""
+    try:
+        from tools.gps_home import distance_m
+        return distance_m(float(prev[0]), float(prev[1]), float(cur[0]), float(cur[1]))
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
 def changed_fields(data: Dict[str, Any], threshold: float = 0.05,
                    state_path: Optional[str] = None,
                    everything: bool = False,
@@ -87,6 +101,11 @@ def changed_fields(data: Dict[str, Any], threshold: float = 0.05,
             if cur != prev:
                 out[name] = {"current_value": cur, "previous_value": prev, "change_percent": None,
                              "reason": "changed"}
+        elif name in POSITION_FIELDS:
+            dist = _position_change(cur, prev)
+            if dist is None or dist >= POSITION_THRESHOLD_M:
+                out[name] = {"current_value": cur, "previous_value": prev, "change_m": dist,
+                             "reason": "threshold_exceeded"}
         elif name in ANGLE_FIELDS:
             moved = _angle_change(cur, prev)
             if moved is None or moved >= angle_threshold_deg:

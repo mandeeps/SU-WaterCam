@@ -452,9 +452,11 @@ class IPTransmitter:
 
         for attempt in range(1, self.retry_attempts + 1):
             try:
+                sent_at = time.monotonic()
                 resp = self._session.post(
                     url, json=payload, timeout=self.timeout_s
                 )
+                rtt_s = time.monotonic() - sent_at
                 last_status = resp.status_code
 
                 if resp.status_code in (200, 201):
@@ -470,6 +472,8 @@ class IPTransmitter:
                         "success": True,
                         "status_code": resp.status_code,
                         "response": body,
+                        "server_date": resp.headers.get("Date"),
+                        "rtt_s": rtt_s,
                         "error": None,
                         "attempts": attempt,
                     }
@@ -936,6 +940,73 @@ def tailscale_online(host: str) -> Optional[bool]:
         if (peer.get("DNSName") or "").rstrip(".").lower() == host:
             return bool((status.get("Self") or {}).get("Online")) and bool(peer.get("Online"))
     return None
+
+
+SET_CLOCK = "/usr/local/sbin/watercam-set-clock"
+CLOCK_TOLERANCE_S = 5
+# Set by syncTime.sh (network or GPS time at boot) or by SET_CLOCK; /run is cleared at boot
+TIME_SOURCE = "/run/watercam-time-source"
+# This boot's check, so it runs once: holds the boot id, so a /tmp that survives reboots is fine
+CLOCK_CHECKED = "/tmp/watercam-clock-checked"
+
+
+def _boot_id() -> str:
+    try:
+        with open("/proc/sys/kernel/random/boot_id") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def correct_clock(uplink_result: Dict[str, Any]) -> Optional[float]:
+    """Set the clock and RTC from the server's reply when they're off.
+
+    A unit with no WiFi at boot gets no network time (cellular isn't up then)
+    and, without a GPS fix, no GPS time either, so its RTC drifts and misses
+    daylight-saving changes. The uplink reply's HTTP Date header (1 s
+    resolution) fixes that once the upload has reached the server. Only an
+    offset over CLOCK_TOLERANCE_S is corrected, through the root-owned
+    SET_CLOCK helper and its doas rule. Returns the offset applied, or None.
+
+    Runs at most once per boot, and not at all when the clock was already set
+    from the network or GPS this boot (TIME_SOURCE). The Date header comes with
+    the upload's own reply, so the check sends nothing extra either way.
+    """
+    from email.utils import parsedate_to_datetime
+    date = (uplink_result or {}).get("server_date")
+    if not date or not os.path.exists(SET_CLOCK) or os.path.exists(TIME_SOURCE):
+        return None
+    boot = _boot_id()
+    try:
+        with open(CLOCK_CHECKED) as f:
+            if boot and f.read().strip() == boot:
+                return None
+    except OSError:
+        pass
+    try:
+        with open(CLOCK_CHECKED, "w") as f:
+            f.write(boot)
+    except OSError:
+        pass
+    try:
+        server = parsedate_to_datetime(date).timestamp() + (uplink_result.get("rtt_s") or 0) / 2
+    except (TypeError, ValueError):
+        return None
+    offset = server - time.time()
+    if abs(offset) <= CLOCK_TOLERANCE_S:
+        return None
+    try:
+        r = subprocess.run(["doas", SET_CLOCK, str(int(round(server)))],
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as exc:
+        logger.warning("clock correction failed: %s", exc)
+        return None
+    if r.returncode != 0:
+        logger.warning("clock correction failed: %s", (r.stderr or r.stdout).strip())
+        return None
+    logger.warning("clock was %.0f s %s the server's; corrected (system and RTC)",
+                   abs(offset), "behind" if offset > 0 else "ahead of")
+    return offset
 
 
 def cellular_up(connection: str, timeout_s: int = 90) -> bool:
