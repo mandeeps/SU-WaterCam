@@ -1,12 +1,11 @@
 """USB power for the cellular modem and the USB microphone.
 
-usb-power-off.service turns USB off early in boot, so the modem's start-up
-current doesn't add to the boot surge that can brown out a battery-powered
-unit (docs/POWER_ANALYSIS.md). The wake cycle turns it back on when it starts
-(record_audio in ticktalk_main.py), and cellular_up() and syncTime.sh do too
-if they need the modem first. usb-power-on.timer turns it on 60 s after boot
-whatever happens, so a unit whose cycle fails early stays reachable over
-cellular.
+usb-power-off.service turns USB off about 5 s into boot, and usb-power-on.timer
+turns it back on 8 s after boot, so the modem's start-up current misses the
+kernel and early userspace (docs/POWER_ANALYSIS.md). The wake cycle
+(record_audio in ticktalk_main.py), cellular_up() and syncTime.sh turn it on
+too, in case the timer didn't. The modem's GPS then needs 40-50 s for a fix, so
+a wake's first LoRa step uses the last saved fix (tools/get_gps.py).
 
 A Pi 4's four USB ports share one power switch, so the modem and microphone
 are always on or off together. uhubctl needs root: pi runs it through doas

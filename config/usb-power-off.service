@@ -1,9 +1,8 @@
 [Unit]
 Description=Keep USB (cellular modem, microphone) off through boot (tools/usb_power.py)
-# Without it the modem's start-up current adds to the boot surge, which can
-# brown out a battery-powered unit. The wake cycle turns USB back on, and
-# usb-power-on.timer does 60 s after boot if nothing has. On a bench unit that
-# needs USB from the start, touch /etc/watercam/usb-on-at-boot.
+# Without it the modem's start-up current adds to the kernel's and early
+# userspace's. usb-power-on.timer turns USB back on 8 s after boot. On a bench
+# unit that needs USB from the start, touch /etc/watercam/usb-on-at-boot.
 DefaultDependencies=no
 After=systemd-udev-trigger.service
 Before=sysinit.target

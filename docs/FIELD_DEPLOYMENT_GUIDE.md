@@ -462,14 +462,15 @@ goes straight back to sleep. **Press the WittyPi button** to start a normal
 cycle on the bench or at deployment. On the bench you can also set
 `"recovery_boot": {"enabled": false}`.
 
-Keep USB off through boot. The cellular modem draws its start-up current as
-soon as USB has power, adding to the boot surge that can brown out a
-battery-powered unit. `usb-power-off.service` turns USB off about 5 s into
-boot, and the wake cycle turns it back on when it starts (before the audio
-recording). `syncTime.sh` turns it on earlier when there's no WiFi, and
-`usb-power-on.timer` does 60 s after boot whatever happens, so a unit whose
-cycle fails early is still reachable over cellular. A Pi 4's USB ports share
-one power switch, so the modem and microphone are always on or off together.
+Keep USB off through early boot. The cellular modem draws its start-up
+current as soon as USB has power. `usb-power-off.service` turns USB off about
+5 s into boot and `usb-power-on.timer` turns it back on 8 s after boot, past
+the kernel and early userspace. The wake cycle, `cellular_up()` and
+`syncTime.sh` also turn it on, in case the timer didn't run. The modem's GPS
+needs 40–50 s for a fix after that, so the wake's first LoRa step uses the last
+saved fix (`gps_last_fix.json`, kept for `gps_cache_max_age_h`, default a
+week). A Pi 4's USB ports share one power switch, so the modem and microphone
+are always on or off together.
 The two `uhubctl` lines from `config/doas.conf` let `ticktalk` turn USB on.
 
 ```bash

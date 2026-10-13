@@ -1,9 +1,11 @@
 [Unit]
-Description=Turn USB back on 60 s after boot, in case the wake cycle never did
-# so a unit whose cycle fails early is still reachable over cellular
+Description=Turn USB (cellular modem, microphone) back on 8 s after boot
+# Past the kernel and early userspace, so the modem's start-up current misses
+# them, but early enough for its GPS to have a fix by the wake's second capture
+# (tools/usb_power.py). The wake cycle and cellular_up() turn it on too if needed.
 
 [Timer]
-OnBootSec=60
+OnBootSec=8
 
 [Install]
 WantedBy=timers.target
