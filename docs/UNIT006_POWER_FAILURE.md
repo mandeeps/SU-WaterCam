@@ -107,15 +107,23 @@ output fell to about 4.3 V at the 1.2 A of a capture cycle.
     006 both times.
   - **Field relevance:** field units don't charge through this port, so it is a
     bench hazard rather than the field cause.
+- **Anything in the top USB-C port turns Always On off on the A ports.**
+  *Confirmed (2026-10-13).* A charger or any other plug there switches the pack
+  out of Always On, so it can drop to its low-current auto-off while it powers a
+  unit. Keep the top port empty on every working unit, on the bench too.
 - **The side solar port doesn't reset the output, but its sag under real solar
   charging is untested.** *Open.*
   - **Plugging in and out** caused no resets.
-  - **Why the load tests don't count:** the solar input holds its input at
-    5.2 V (matching the panel's 5.21 V maximum-power point), and a 5.0–5.1 V
-    wall charger probably can't reach that. That fits what happened: the V50
-    drained completely overnight with that charger in the side port while
-    running 006 at idle. So the side-port load tests probably weren't charging
-    at all.
+  - **A wall charger there does charge.** *Confirmed (2026-10-13).* After a
+    full day of 15-minute wakes on 006, with a wall charger in the side port,
+    the V50's LEDs still showed full. An earlier overnight drain with a charger
+    in the side port (006 idling, before these fixes) had suggested the
+    5.0–5.1 V charger couldn't reach the input's 5.2 V solar operating point;
+    with the charger used on 2026-10-12 and 13 it keeps up. So the side port is
+    the bench charging port.
+  - **Why the earlier load tests may not count:** that drain is why the
+    side-port load tests above are marked as probably not charging; repeat them
+    if the sag under charging matters.
 - **The solar input is capped at about 10 W.** *Confirmed from spec.* The 20 W
   panel peaks at 23 W (5.21 V, 4.46 A), but each V50 solar input accepts at
   most 2 A.
@@ -264,8 +272,9 @@ uploads to the production server.
 - **Match the schedule to the season,** and consider moving `BEGIN` into
   daylight saving time, or dropping the 23:00 wake, to remove the summer hour
   shift.
-- **Keep the Y-adapter,** and never charge through the V50's top USB-C port
-  while it powers a unit.
+- **Keep the Y-adapter,** and never plug anything into the V50's top USB-C
+  port while it powers a unit: it sags and resets the output, and it turns
+  Always On off. Charge on the bench through the side port.
 - **Check the GPIO extension header's voltage drop** with a multimeter during a
   capture.
 
