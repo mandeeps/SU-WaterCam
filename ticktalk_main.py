@@ -1907,8 +1907,10 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         if not reachable and on_demand and not cellular_active:
             print(f"📶 IP uplink: server unreachable — bringing up {cell}")
             cellular_started = cellular_up(cell, tx.cellular_connect_timeout_s)
-            # Tailscale needs a few seconds to find a path over the new link.
-            reachable = cellular_started and tx.wait_reachable(30)
+            # Tailscale needs a few seconds to find a path over the new link. Wait
+            # for it locally rather than probing /health over cellular; the POST
+            # below, with its retries, is the reachability check.
+            reachable = cellular_started and tx.wait_tailnet(30)
             if cellular_started and not reachable:
                 cellular_down(cell)   # no use to us, and Tailscale would keep using data
                 cellular_started = False
@@ -1927,6 +1929,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                 _lsf.remove_delivered(delivered_ts)
             print(f"⚠️ IP uplink: drain failed on {drain['failed_file']} — queuing live reading")
             tx._enqueue(channels, ts_now)
+            if cellular_started and not delivered_ts:
+                cellular_down(cell)   # never reached the server: stop Tailscale using data
             return {
                 "status": "queued_drain_failed",
                 "success": False,
@@ -1952,6 +1956,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             print(f"⚠️ IP uplink failed after {result.get('attempts', '?')} attempt(s): "
                   f"{result.get('error', 'unknown error')} — queuing reading")
             tx._enqueue(channels, ts_now)
+            if cellular_started and not delivered_ts:
+                cellular_down(cell)   # never reached the server: stop Tailscale using data
             if tx.fallback_to_lora:
                 print("📡 LoRa fallback is enabled — data may also be sent via the LoRa path")
 

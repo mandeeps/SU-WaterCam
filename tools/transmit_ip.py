@@ -309,6 +309,30 @@ class IPTransmitter:
                 return False
             time.sleep(2)
 
+    def wait_tailnet(self, deadline_s: float) -> bool:
+        """Wait for Tailscale to be back online after a link change, without
+        sending anything over the link.
+
+        Used on cellular instead of ``wait_reachable``: probing /health every
+        2 s while Tailscale finds a path costs cellular data, and the uplink
+        POST, with its retries, is a check of its own. This asks the local
+        daemon (``tailscale status``) whether this node and the server are
+        online. True straight away when the server isn't a tailnet name or the
+        status can't be read, leaving the decision to the POST.
+        """
+        from urllib.parse import urlparse
+        host = (urlparse(self.server_url).hostname or "").lower()
+        if not host.endswith(".ts.net"):
+            return True
+        end = time.monotonic() + deadline_s
+        while True:
+            online = tailscale_online(host)
+            if online is None or online:
+                return True
+            if time.monotonic() >= end:
+                return False
+            time.sleep(2)
+
     def close(self) -> None:
         """Close the underlying requests.Session and release pooled connections."""
         self._session.close()
@@ -892,6 +916,26 @@ def wifi_in_range() -> bool:
     except (OSError, subprocess.TimeoutExpired):
         return False
     return bool(ssids & seen)
+
+
+def tailscale_online(host: str) -> Optional[bool]:
+    """Whether the local Tailscale daemon is online and sees ``host`` online.
+
+    Reads ``tailscale status --json``, which sends nothing over the network.
+    None if the status can't be read or ``host`` isn't a peer.
+    """
+    try:
+        r = subprocess.run(["tailscale", "status", "--json"],
+                           capture_output=True, text=True, timeout=10)
+        status = json.loads(r.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if not isinstance(status, dict):
+        return None
+    for peer in (status.get("Peer") or {}).values():
+        if (peer.get("DNSName") or "").rstrip(".").lower() == host:
+            return bool((status.get("Self") or {}).get("Online")) and bool(peer.get("Online"))
+    return None
 
 
 def cellular_up(connection: str, timeout_s: int = 90) -> bool:

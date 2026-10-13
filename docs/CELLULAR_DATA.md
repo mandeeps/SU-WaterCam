@@ -60,7 +60,7 @@ the tailnet policy was tightened that day. Every upload succeeded.
 | On the node, drop RFC1918 destinations on `wwan0` (nftables) so the private-address probes never reach the modem | 28–80 KB per wake, and most of the steady cost | **Measured 2026-10-12, now on by default** (guide 1.5.1, `config/nftables/watercam-cellular.nft`): 19–28 KB per wake down to 0, see below. Dropped at `wwan0`'s egress hook, because a drop in an output chain makes the send fail with `EPERM`, and `tailscaled` answers that by rebinding and re-running netcheck (`maybeRebindOnError`), which probes every relay region. |
 | Tighten the ACL so `tag:watercam` only sees the API server and admin machines (006 sees 11 peers, mostly shared-in devices) | ~15–25 KB, plus fewer updates while up | Tailnet admin. `config/tailscale-acl.txt` is out of date: refresh it from the admin console first. |
 | Inbound UDP to the API server's Tailscale port through the campus firewall, so a direct path forms | ~10–25 KB | Campus IT |
-| Drop the `/health` check before each upload; one POST per wake | ~5 KB | Node change |
+| Drop the `/health` probes over cellular; one POST per wake | ~5 KB | **Done:** after bringing cellular up, the node waits on `tailscale status` (local, no traffic) instead of probing `/health` every 2 s, and the POST is the check. The WiFi-side check is unchanged. |
 
 Together these might bring a cellular wake to roughly 40–70 KB. That is an
 estimate; confirm it with another recorded wake.
