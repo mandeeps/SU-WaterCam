@@ -24,6 +24,13 @@ sleep 30
 
 # 1. network time (HTTP Date header, about 1 s)
 net_ts=$(get_network_timestamp)
+if [[ "$net_ts" == "-1" && -x /usr/sbin/uhubctl ]]; then
+  # No network. Make sure the modem has power for the GPS time below
+  # (usb-power-on.timer normally has turned USB on by now). Cellular data isn't
+  # brought up: the connection has autoconnect off, so waiting for it is no use.
+  sudo /usr/sbin/uhubctl -l 1-1 -a on >/dev/null 2>&1
+  sudo /usr/sbin/uhubctl -l 2 -a on >/dev/null 2>&1
+fi
 if [[ "$net_ts" != "-1" ]]; then
   log '  Applying network time to system...'
   sudo date -u -s @$net_ts >/dev/null

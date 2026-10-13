@@ -1,0 +1,17 @@
+[Unit]
+Description=Keep USB (cellular modem, microphone) off through boot (tools/usb_power.py)
+# Without it the modem's start-up current adds to the kernel's and early
+# userspace's. usb-power-on.timer turns USB back on 8 s after boot. On a bench
+# unit that needs USB from the start, touch /etc/watercam/usb-on-at-boot.
+DefaultDependencies=no
+After=systemd-udev-trigger.service
+Before=sysinit.target
+ConditionPathExists=!/etc/watercam/usb-on-at-boot
+
+[Service]
+Type=oneshot
+# The USB 2 hub (1-1) enumerates about 1 s after the kernel starts; wait up to 5 s for it.
+ExecStart=/bin/sh -c 'for i in $(seq 50); do [ -e /sys/bus/usb/devices/1-1 ] && break; sleep 0.1; done; /usr/sbin/uhubctl -l 2 -a off >/dev/null; /usr/sbin/uhubctl -l 1-1 -a off >/dev/null'
+
+[Install]
+WantedBy=sysinit.target

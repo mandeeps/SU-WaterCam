@@ -2,15 +2,20 @@
 Description=Enable Quectel EC25 GNSS subsystem
 # Wait for the modem's AT port to appear on USB, not for network connectivity.
 # The SIM data limit being exhausted must not block GPS.
+# USB is off through boot (usb-power-off.service), so the port appears during
+# the wake: start whenever it does, and stop when it goes away.
+BindsTo=dev-ttyUSB2.device
 After=dev-ttyUSB2.device ModemManager.service
-Requires=dev-ttyUSB2.device
-Before=gpsd.service
+# Not Before=gpsd.service: gpsdctl below starts gpsd through its socket, and that
+# ordering made the two wait on each other (deadlock, found on 006 2026-10-13).
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/quectel-gnss-enable
+# gpsd may already be running without the NMEA port (USB came on after it started): hand it over
+ExecStartPost=-/usr/bin/timeout 15 /usr/sbin/gpsdctl add /dev/ttyUSB1
 RemainAfterExit=yes
 
 [Install]
-# Pull this in whenever gpsd is enabled, so the ordering is always enforced.
-WantedBy=multi-user.target gpsd.service
+# Not wanted by gpsd.service: with USB off, gpsd would wait for the port.
+WantedBy=dev-ttyUSB2.device

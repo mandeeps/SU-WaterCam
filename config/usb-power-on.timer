@@ -1,0 +1,11 @@
+[Unit]
+Description=Turn USB (cellular modem, microphone) back on 8 s after boot
+# Past the kernel and early userspace, so the modem's start-up current misses
+# them, but early enough for its GPS to have a fix by the wake's second capture
+# (tools/usb_power.py). The wake cycle and cellular_up() turn it on too if needed.
+
+[Timer]
+OnBootSec=8
+
+[Install]
+WantedBy=timers.target

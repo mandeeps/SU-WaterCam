@@ -83,3 +83,6 @@ images/
 **/*_segmentation.png
 registration_transform.json
 registration_transform.tfm
+
+# last GPS fix (tools/get_gps.py); says where the unit is
+gps_last_fix.json
