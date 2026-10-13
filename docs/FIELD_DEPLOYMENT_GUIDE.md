@@ -181,6 +181,18 @@ Only installed packages are passed to `apt`: on a fresh trixie unit some of thes
 upgraded from bookworm the venv's `lib/python3.11` is about 300 MB: Python 3.13 reads
 only `lib/python3.13`.
 
+Units set up before 2026-10-12 have apt's `python3-opencv`, which pulls in about 450 MB
+the nodes never use (VTK, LLVM 17, AMD's GPU runtime, OpenMPI). Swap it for pip's headless
+build, which gives the same results (`requirements.txt`), and restart the segmentation
+daemon so it loads the new one:
+
+```bash
+/home/pi/SU-WaterCam/venv/bin/pip install opencv-python-headless==4.14.0.94
+/home/pi/SU-WaterCam/venv/bin/python -c "import cv2; print(cv2.__version__, cv2.__file__)"   # 4.14.0, in venv/
+sudo apt purge --autoremove python3-opencv
+sudo systemctl restart segformer_daemon
+```
+
 If `uname -r` doesn't end in `-rt`, the real-time kernel isn't used and can go too:
 `sudo apt purge linux-image-rpi-v8-rt 'linux-image-*-rpi-v8-rt'`. Check
 `/boot/firmware/kernel8.img` is still there afterwards.
