@@ -57,10 +57,8 @@ dtoverlay=uart5
 dtoverlay=pi3-miniuart-bt
 dtoverlay=miniuart-bt
 
-# run at max clock rate during boot, int is duration in seconds 
-initial_turbo=30
-# set max clock to 2GHz
-arm_freq=2000
+# Stock clocks, no initial_turbo: running flat out at boot (or at 2 GHz) adds
+# to the boot surge that browns out battery-powered units. docs/POWER_ANALYSIS.md
 
 # I2C clock stretching for BNO055 IMU
 # https://learn.adafruit.com/circuitpython-on-raspberrypi-linux/i2c-clock-stretching

@@ -15,7 +15,7 @@ what still needs measuring.
 
 | Part | Notes |
 |---|---|
-| Raspberry Pi 4B | Some units run `arm_freq=2000`; stock is 1800 (see [Peaks](#peaks-matter-more-than-averages)) |
+| Raspberry Pi 4B | Stock clocks (1800 MHz) and no `initial_turbo` since `config/config.txt` dropped both; older units may still run `arm_freq=2000` (see [Peaks](#peaks-matter-more-than-averages)) |
 | Witty Pi 4 | Power switching, RTC and schedule; always powered |
 | Dorhea IR-Cut camera, FLIR Lepton 3.5 | Optical/NIR and thermal capture |
 | MultiTech mDot | LoRaWAN, Class C (listens continuously), powered from the Witty Pi's always-on 3.3 V rail |
@@ -147,7 +147,7 @@ The fixes are #97 (arm the next wake before the load starts) and #98 (after a po
 
 ## Peaks matter more than averages
 
-- **Clocks:** stock clocks (`arm_freq=1800`) lower the peak current. On 006, 2000 MHz plus the modem browned out the Pi even on a healthy supply. The old advice that overclocking saves energy by finishing sooner no longer holds: inference takes 1.6 s.
+- **Clocks:** stock clocks (`arm_freq=1800`) and no `initial_turbo`, which held the CPU at full speed for the first 30 s of boot, lower the peak current. On 006, 2000 MHz plus the modem browned out the Pi even on a healthy supply. The old advice that overclocking saves energy by finishing sooner no longer holds: inference takes 1.6 s.
 - **Wiring:** keep the Y-adapter, so the load is spread across both V50 A ports. Never charge through the V50's top USB-C port while it powers a unit.
 - **Overlap:** the IP upload runs after LoRa, once segmentation is done. On 006 the wake's peaks were the same with the modem attached or in low power, so the modem isn't what drives them at stock clocks.
 
