@@ -6,13 +6,14 @@ Description=Enable Quectel EC25 GNSS subsystem
 # the wake: start whenever it does, and stop when it goes away.
 BindsTo=dev-ttyUSB2.device
 After=dev-ttyUSB2.device ModemManager.service
-Before=gpsd.service
+# Not Before=gpsd.service: gpsdctl below starts gpsd through its socket, and that
+# ordering made the two wait on each other (deadlock, found on 006 2026-10-13).
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/bin/quectel-gnss-enable
-# gpsd was already running and missed the NMEA port; hand it over
-ExecStartPost=-/usr/sbin/gpsdctl add /dev/ttyUSB1
+# gpsd may already be running without the NMEA port (USB came on after it started): hand it over
+ExecStartPost=-/usr/bin/timeout 15 /usr/sbin/gpsdctl add /dev/ttyUSB1
 RemainAfterExit=yes
 
 [Install]
