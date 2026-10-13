@@ -212,8 +212,9 @@ off. The mDot can read it with no new chips:
 - **v6 HAT:** add a connector for the D+ lead. The KiCad mDot symbol's pin
   numbers don't match MultiTech's guide (PB0/PB1 are swapped, as are PA0/PA7),
   so lay out by pin name and check the footprint.
-- **To confirm first:** that the field V50s are the "Always On" model the
-  feature is documented for.
+- **Always On:** every V50 has it. Anything plugged into a USB-A port presses a
+  mechanical switch that puts the pack in Always On mode, so a field unit, wired
+  to both A ports, is always in it.
 
 Also in `battery_manager.py`: the INA260 path ignores charging and charges the
 whole off period at the current measured at boot. Fix it before anyone fits an

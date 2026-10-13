@@ -124,6 +124,9 @@ output fell to about 4.3 V at the 1.2 A of a capture cycle.
   - **Why it helps:** each A port is rated 2 A (3 A combined), and with the
     modem active, peak draw reached 2.06–2.21 A (averaged readings). Keep it in
     the field for now.
+- **The V50 is always in Always On mode on a unit.** *Confirmed.* Plugging
+  anything into a USB-A port presses a mechanical switch that selects it, so
+  the pack's low-current auto-off can't explain power cuts on a wired unit.
 - **The V50 restores its output after recharging.** *Confirmed.* The product
   is designed to do this, and unit 007 recovered this way through a winter. A
   V50 that stayed off is therefore unlikely to explain 006's six days.
