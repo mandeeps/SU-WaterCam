@@ -8,6 +8,7 @@ back. Readings delivered over IP are removed from the LoRa S&F queue (matched by
 """
 
 import ast
+import itertools
 import json
 import os
 import sys
@@ -44,6 +45,7 @@ def _tx(reachable, only_if_lora=True, cellular="Quectel"):
     tx.wifi_grace_s = 45
     tx.is_reachable.return_value = reachable
     tx.wait_reachable.return_value = True
+    tx.wait_tailnet.return_value = True
     tx._drain_queue.return_value = {"drained": 0, "failed": False, "failed_file": None, "drained_ts": []}
     tx.send_uplink.return_value = {"success": True, "attempts": 1}
     tx.poll_downlink.return_value = {"success": True, "command": None}
@@ -124,10 +126,11 @@ class TestWiFiThenCellular:
         # WiFi gets its grace period first; only when the server still isn't
         # reachable over it does cellular come back.
         tx = _tx(reachable=False)
-        tx.wait_reachable.side_effect = [False, True]
+        tx.wait_reachable.return_value = False
         m = _run(tx, status=ON_DEMAND_UP, wifi=True)
         m["down"].assert_called_once_with("Quectel")
-        assert [c.args for c in tx.wait_reachable.call_args_list] == [(45,), (30,)]
+        tx.wait_reachable.assert_called_once_with(45)
+        tx.wait_tailnet.assert_called_once_with(30)
         m["up"].assert_called_once()
 
     def test_autoconnect_connection_is_left_alone(self):
@@ -152,11 +155,24 @@ class TestWiFiThenCellular:
 
     def test_cellular_up_but_server_unreachable_takes_it_down(self):
         tx = _tx(reachable=False)
-        tx.wait_reachable.return_value = False
+        tx.wait_tailnet.return_value = False
         m = _run(tx)
         assert m["result"]["status"] == "queued"
         m["down"].assert_called_once_with("Quectel")
         tx.poll_downlink.assert_not_called()
+
+    def test_post_failure_over_cellular_takes_it_down(self):
+        tx = _tx(reachable=False)
+        tx.send_uplink.return_value = {"success": False, "attempts": 3, "error": "timeout"}
+        m = _run(tx)
+        assert m["result"]["status"] == "queued"
+        m["down"].assert_called_once_with("Quectel")
+
+    def test_cellular_path_never_probes_health(self):
+        tx = _tx(reachable=False)
+        _run(tx)
+        tx.is_reachable.assert_called_once()   # the WiFi check, before cellular comes up
+        tx.wait_reachable.assert_not_called()
 
     def test_downlink_command_over_cellular_is_applied(self):
         tx = _tx(reachable=False)
@@ -269,9 +285,10 @@ class TestWiFiGraceBeforeCellular:
 
     def test_wifi_that_never_comes_falls_back_to_cellular(self):
         tx = _tx(reachable=False)
-        tx.wait_reachable.side_effect = [False, True]   # the WiFi wait, then cellular
+        tx.wait_reachable.return_value = False   # the WiFi wait; cellular then waits on wait_tailnet
         m = _run(tx, in_range=True)
-        assert [c.args for c in tx.wait_reachable.call_args_list] == [(45,), (30,)]
+        tx.wait_reachable.assert_called_once_with(45)
+        tx.wait_tailnet.assert_called_once_with(30)
         m["up"].assert_called_once()
         assert m["result"]["success"] is True
 
@@ -280,7 +297,8 @@ class TestWiFiGraceBeforeCellular:
         tx = _tx(reachable=False)
         m = _run(tx, in_range=False)
         m["up"].assert_called_once()
-        assert [c.args for c in tx.wait_reachable.call_args_list] == [(30,)]
+        tx.wait_reachable.assert_not_called()
+        tx.wait_tailnet.assert_called_once_with(30)
 
     def test_connected_wifi_without_the_server_yet_gets_the_wait(self):
         tx = _tx(reachable=False)
@@ -532,3 +550,42 @@ class TestNmcli:
             assert transmit_ip.wifi_connected() is True
         with patch("tools.transmit_ip.subprocess.run", return_value=_proc(0, "wifi:disconnected\n")):
             assert transmit_ip.wifi_connected() is False
+
+
+class TestWaitTailnet:
+    def _status(self, self_online=True, peer_online=True):
+        return json.dumps({"Self": {"Online": self_online},
+                           "Peer": {"k": {"DNSName": "server.example.ts.net.", "Online": peer_online}}})
+
+    def test_online_peer(self):
+        with patch("tools.transmit_ip.subprocess.run", return_value=_proc(out=self._status())):
+            assert transmit_ip.tailscale_online("server.example.ts.net") is True
+        with patch("tools.transmit_ip.subprocess.run", return_value=_proc(out=self._status(self_online=False))):
+            assert transmit_ip.tailscale_online("server.example.ts.net") is False
+
+    def test_unknown_peer_or_no_tailscale_is_none(self):
+        with patch("tools.transmit_ip.subprocess.run", return_value=_proc(out=self._status())):
+            assert transmit_ip.tailscale_online("other.example.ts.net") is None
+        with patch("tools.transmit_ip.subprocess.run", side_effect=FileNotFoundError("tailscale")):
+            assert transmit_ip.tailscale_online("server.example.ts.net") is None
+
+    def test_wait_tailnet_waits_until_online(self):
+        tx = IPTransmitter(override_url="http://server.example.ts.net:8000")
+        with patch("tools.transmit_ip.tailscale_online", side_effect=[False, False, True]) as online, \
+             patch("tools.transmit_ip.time.sleep"):
+            assert tx.wait_tailnet(30) is True
+        assert online.call_count == 3
+
+    def test_wait_tailnet_gives_up(self):
+        tx = IPTransmitter(override_url="http://server.example.ts.net:8000")
+        clock = itertools.count(0, 20)
+        with patch("tools.transmit_ip.tailscale_online", return_value=False), \
+             patch("tools.transmit_ip.time.sleep"), \
+             patch("tools.transmit_ip.time.monotonic", side_effect=lambda: next(clock)):
+            assert tx.wait_tailnet(30) is False
+
+    def test_non_tailnet_server_needs_no_wait(self):
+        tx = IPTransmitter(override_url="http://192.0.2.10:8000")
+        with patch("tools.transmit_ip.tailscale_online") as online:
+            assert tx.wait_tailnet(30) is True
+        online.assert_not_called()
