@@ -257,7 +257,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         'monitoring_frequency': get_parameter('monitoring_frequency', 60),
         'emergency_frequency': get_parameter('emergency_frequency', 5),
         'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30),
-        'audio_recording_enabled': 1 if get_parameter('audio_recording_enabled', True) else 0,
+        'audio_recording_enabled': 1 if get_parameter('audio_recording_enabled', False) else 0,
     })
 
     # Embed capture timestamp so stored packets carry original collection time
@@ -646,7 +646,7 @@ def record_audio(trigger, directory):
     from tools.audio_recorder import get_audio_recorder
     from tools.lora_runtime_integration import get_parameter
 
-    if not get_parameter('audio_recording_enabled', True):
+    if not get_parameter('audio_recording_enabled', False):
         return "disabled"
 
     retention_days = get_parameter('data_retention_days', 7)
@@ -974,7 +974,7 @@ def lora_token(bitmap):
         'monitoring_frequency': get_parameter('monitoring_frequency', 60),
         'emergency_frequency': get_parameter('emergency_frequency', 5),
         'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30),
-        'audio_recording_enabled': 1 if get_parameter('audio_recording_enabled', True) else 0,
+        'audio_recording_enabled': 1 if get_parameter('audio_recording_enabled', False) else 0,
     })
 
     try:
@@ -1801,7 +1801,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         data['monitoring_frequency']              = get_parameter('monitoring_frequency', 60)
         data['emergency_frequency']               = get_parameter('emergency_frequency', 5)
         data['neighborhood_emergency_frequency']  = get_parameter('neighborhood_emergency_frequency', 30)
-        data['audio_recording_enabled']           = 1 if get_parameter('audio_recording_enabled', True) else 0
+        data['audio_recording_enabled']           = 1 if get_parameter('audio_recording_enabled', False) else 0
 
         # ── Build channel list ─────────────────────────────────────────────────
         channels = []
