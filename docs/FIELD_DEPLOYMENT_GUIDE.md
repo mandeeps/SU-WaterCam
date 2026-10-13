@@ -169,7 +169,7 @@ depending on them on a node, and the software doesn't use them (checked on 005 a
 2026-10-12):
 
 ```bash
-P=""; for p in neovim wget lrzsz gcc-12 g++-12 cpp-12 python3.11-minimal libpython3.11-minimal; do
+P=""; for p in neovim wget lrzsz minicom gcc-12 g++-12 cpp-12 python3.11-minimal libpython3.11-minimal; do
   dpkg -s "$p" >/dev/null 2>&1 && P="$P $p"; done
 [ -n "$P" ] && sudo apt purge --autoremove $P
 RC=$(dpkg -l | awk '/^rc/{print $2}'); [ -n "$RC" ] && sudo apt purge $RC   # config left by removed packages
@@ -194,7 +194,7 @@ If `uname -r` doesn't end in `-rt`, the real-time kernel isn't used and can go t
 | `git`, `perl` | `tools/node_version.py` and updates use git, which needs perl. |
 | `gcc-14`, `build-essential`, `python3-dev` | `requirements.txt` builds `RPi.GPIO` from source; without them the venv can't be rebuilt on the unit. |
 | `nano` (or `vim-tiny`) | An editor for repairs over the serial console. |
-| `minicom` | Talking to the mDot by hand on the bench. |
+| `tio` | Typing AT commands to the mDot (`tio /dev/ttyAMA5`) or the modem by hand. It replaces `minicom`, which the README also mentions but nobody has used on 005 or 006. |
 
 Afterwards, run the health check (1.10) and a test cycle (1.11) as usual.
 
