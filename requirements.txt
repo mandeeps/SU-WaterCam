@@ -3,7 +3,7 @@
 # 1. System packages. These come from apt, not pip (picamera2 and the camera
 #    stack are only packaged for Debian), and the venv must see them:
 #
-#      sudo apt install python3-picamera2 python3-opencv python3-numpy \
+#      sudo apt install python3-picamera2 python3-numpy \
 #          python3-pandas python3-scipy python3-gpiozero python3-piexif \
 #          python3-pil python3-pytz python3-rasterio python3-gdal \
 #          python3-pygraphviz python3-venv python3-wheel python3-dev \
@@ -15,12 +15,20 @@
 #    GPS that py-gpsd2 talks to; rsync is how captures are copied off a node.
 #
 #    Verified on ufo-01-01-005 and ufo-01-01-006 (Debian 13 trixie), where these
-#    provide cv2, numpy, pandas, scipy, picamera2, gpiozero, piexif, PIL, pytz,
+#    provide numpy, pandas, scipy, picamera2, gpiozero, piexif, PIL, pytz,
 #    rasterio and osgeo to the venv.
 #
 # 2. The pip packages below, into that venv:
 #
 #      /home/pi/SU-WaterCam/venv/bin/pip install -r requirements.txt
+#
+# OpenCV (cv2) comes from pip's opencv-python-headless, not apt's python3-opencv:
+# apt's package pulls in about 450 MB the nodes never use (VTK, LLVM 17, AMD's GPU
+# runtime, OpenMPI, Tesseract). Compared on 005 and 006 (2026-10-12) with the same
+# cached transform: identical masks, and identical images apart from band 4 on 006
+# (17% of pixels off by at most 2/255). It needs numpy>=2, which apt's python3-numpy
+# provides, so pip installs no second numpy. Headless means no windows:
+# tools/camera_calibration.py's interactive capture is a workstation tool.
 #
 # segformer_daemon.service runs in this venv too. It needs onnxruntime (below),
 # cv2, rasterio, numpy and PIL. Tested on ufo-01-01-005 against the 5band conda
@@ -51,6 +59,7 @@ idna==3.15
 intervaltree==3.1.0
 multiprocess==0.70.18
 onnxruntime==1.31.0
+opencv-python-headless==4.14.0.94
 py-gpsd2==0.1.0
 pyftdi==0.56.0
 pympler==1.1
