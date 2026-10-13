@@ -56,13 +56,14 @@ in the periodic full send. LoRa status replies (`dbg`) carry `"v"` after `"em"`.
    Then record each unit as tested: `python -m tools.node_inventory --mdot-version <ATI>`
    writes a CycloneDX SBOM of its packages, release, model and firmware. Scan it
    (`grype sbom:inventory-<host>-<date>.cdx.json`), read anything critical or high that
-   has a fix, and attach the files to the release. The same command on a field unit
+   has a fix, and add the files to WaterCam-Team/documentation under `inventories/su-watercam-<tag>/` with a short README of the scan result. Not to the release: releases are immutable once published, so nothing can be attached afterwards. Not to this repo either: every node downloads its files on each update. The same command on a field unit
    answers "is this one affected?" when an advisory comes out.
 4. If the release adds an uplink channel, deploy the API (and paste the ChirpStack codec)
    **before** any node runs it: the API rejects an IP uplink with a channel it doesn't
    know.
 5. Tag **signed**, then publish, with notes covering the changes since the last release,
-   the deploy order and the pickle's SHA-256:
+   the deploy order, the pickle's SHA-256 and where the inventories are. Releases are
+   immutable: once published, files can't be added (the notes can still be edited):
    ```bash
    git tag -s v2026.10.0 -m "v2026.10.0" <commit>     # signed with your release key (below)
    git push origin v2026.10.0
