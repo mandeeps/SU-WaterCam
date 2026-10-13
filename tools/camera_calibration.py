@@ -2,7 +2,22 @@
 Camera Calibration & Georeferencing Pipeline
 =============================================
 DEPENDENCIES:
-    pip install opencv-python numpy scipy Pillow piexif pyproj
+    This is a workstation tool. It needs the full OpenCV build with windows
+    (opencv-python): the interactive capture and the corner preview use
+    cv2.imshow/cv2.waitKey, which the nodes' opencv-python-headless doesn't have.
+    Install it into a temporary venv, never into a node's venv: opencv-python and
+    opencv-python-headless both provide the cv2 module and overwrite each other.
+
+        python3 -m venv /tmp/calib-venv
+        /tmp/calib-venv/bin/pip install opencv-python==4.14.0.94 numpy scipy Pillow piexif pyproj
+        cd SU-WaterCam/tools && /tmp/calib-venv/bin/python camera_calibration.py
+        rm -rf /tmp/calib-venv     # when done
+
+    Keep the OpenCV version the same as requirements.txt's opencv-python-headless,
+    so the calibration it writes (config/camera_calibration.json) is applied by
+    the same version on the nodes. The GeoTIFF export also needs GDAL (osgeo),
+    which pip can't easily build; use the distribution's python3-gdal for that.
+    On a node, use tools/calibrate_node.py instead (headless).
 
 WORKFLOW OVERVIEW:
     1. Capture calibration images of a checkerboard
