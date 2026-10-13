@@ -162,6 +162,42 @@ If it isn't on the current release, or `.git` is larger than a few MB (`du -sh .
 follow [RELEASES.md](RELEASES.md#updating-a-node): update, or convert the full clone to
 a shallow one first. Check each release with `git verify-tag` before checking it out.
 
+### 1.3.2 Remove packages a node doesn't need
+
+Fewer packages means less to patch and less for an intruder to use. These have nothing
+depending on them on a node, and the software doesn't use them (checked on 005 and 006,
+2026-10-12):
+
+```bash
+P=""; for p in neovim wget lrzsz gcc-12 g++-12 cpp-12 python3.11-minimal libpython3.11-minimal; do
+  dpkg -s "$p" >/dev/null 2>&1 && P="$P $p"; done
+[ -n "$P" ] && sudo apt purge --autoremove $P
+RC=$(dpkg -l | awk '/^rc/{print $2}'); [ -n "$RC" ] && sudo apt purge $RC   # config left by removed packages
+rm -rf /home/pi/SU-WaterCam/venv/lib/python3.11      # pre-trixie venv copy, never loaded
+```
+
+Only installed packages are passed to `apt`: on a fresh trixie unit some of these
+(the bookworm leftovers) don't exist at all, and `apt` would stop on them. On units
+upgraded from bookworm the venv's `lib/python3.11` is about 300 MB: Python 3.13 reads
+only `lib/python3.13`.
+
+If `uname -r` doesn't end in `-rt`, the real-time kernel isn't used and can go too:
+`sudo apt purge linux-image-rpi-v8-rt 'linux-image-*-rpi-v8-rt'`. Check
+`/boot/firmware/kernel8.img` is still there afterwards.
+
+**Keep these**, which look removable but aren't:
+
+| Package | Why it stays |
+|---|---|
+| `python3.13` | The venv runs on it (trixie's Python). |
+| `curl` | The Witty Pi's `utilities.sh` sets the clock from network time with it. `libcurl` stays anyway for OpenCV and GDAL. |
+| `git`, `perl` | `tools/node_version.py` and updates use git, which needs perl. |
+| `gcc-14`, `build-essential`, `python3-dev` | `requirements.txt` builds `RPi.GPIO` from source; without them the venv can't be rebuilt on the unit. |
+| `nano` (or `vim-tiny`) | An editor for repairs over the serial console. |
+| `minicom` | Talking to the mDot by hand on the bench. |
+
+Afterwards, run the health check (1.10) and a test cycle (1.11) as usual.
+
 ### 1.4 Sync the clock
 
 This should have been done automatically, but check the system time is correct.
