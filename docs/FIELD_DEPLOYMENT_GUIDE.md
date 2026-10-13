@@ -162,6 +162,69 @@ If it isn't on the current release, or `.git` is larger than a few MB (`du -sh .
 follow [RELEASES.md](RELEASES.md#updating-a-node): update, or convert the full clone to
 a shallow one first. Check each release with `git verify-tag` before checking it out.
 
+### 1.3.2 Remove packages a node doesn't need
+
+Fewer packages means less to patch and less for an intruder to use. These have nothing
+depending on them on a node, and the software doesn't use them (checked on 005 and 006,
+2026-10-12):
+
+```bash
+P=""; for p in neovim wget lrzsz minicom gcc-12 g++-12 cpp-12 python3.11-minimal libpython3.11-minimal; do
+  dpkg -s "$p" >/dev/null 2>&1 && P="$P $p"; done
+[ -n "$P" ] && sudo apt purge --autoremove $P
+RC=$(dpkg -l | awk '/^rc/{print $2}'); [ -n "$RC" ] && sudo apt purge $RC   # config left by removed packages
+rm -rf /home/pi/SU-WaterCam/venv/lib/python3.11      # pre-trixie venv copy, never loaded
+```
+
+Only installed packages are passed to `apt`: on a fresh trixie unit some of these
+(the bookworm leftovers) don't exist at all, and `apt` would stop on them. On units
+upgraded from bookworm the venv's `lib/python3.11` is about 300 MB: Python 3.13 reads
+only `lib/python3.13`.
+
+Units set up before 2026-10-12 have apt's `python3-opencv`, which pulls in about 450 MB
+the nodes never use (VTK, LLVM 17, AMD's GPU runtime, OpenMPI). Swap it for pip's headless
+build, which gives the same results (`requirements.txt`), and restart the segmentation
+daemon so it loads the new one:
+
+```bash
+/home/pi/SU-WaterCam/venv/bin/pip install opencv-python-headless==4.14.0.94
+/home/pi/SU-WaterCam/venv/bin/python -c "import cv2; print(cv2.__version__, cv2.__file__)"   # 4.14.0, in venv/
+sudo apt purge --autoremove python3-opencv
+sudo systemctl restart segformer_daemon
+```
+
+If `uname -r` doesn't end in `-rt`, the real-time kernel isn't used and can go too:
+`sudo apt purge linux-image-rpi-v8-rt 'linux-image-*-rpi-v8-rt'`. Check
+`/boot/firmware/kernel8.img` is still there afterwards.
+
+Turn off apt's background jobs, which download package lists over whatever link is up,
+cellular included (`docs/1NCE_SIM_EXHAUSTION.md`), and remove `man-db`: a deployed node
+doesn't need man pages, and its timer rebuilds their index. The `dpkg` rule keeps later
+installs from adding man pages and docs (copyright notices stay):
+
+```bash
+sudo systemctl mask apt-daily.timer apt-daily-upgrade.timer man-db.timer
+sudo apt purge --autoremove man-db
+printf '%s\n' 'path-exclude /usr/share/man/*' 'path-exclude /usr/share/doc/*' \
+  'path-include /usr/share/doc/*/copyright' | sudo tee /etc/dpkg/dpkg.cfg.d/01-nodoc
+sudo rm -rf /usr/share/man/* && sudo find /usr/share/doc -type f ! -name copyright -delete
+```
+
+Updates are then done by hand (`docs/RELEASES.md`).
+
+**Keep these**, which look removable but aren't:
+
+| Package | Why it stays |
+|---|---|
+| `python3.13` | The venv runs on it (trixie's Python). |
+| `curl` | The Witty Pi's `utilities.sh` sets the clock from network time with it. `libcurl` stays anyway for OpenCV and GDAL. |
+| `git`, `perl` | `tools/node_version.py` and updates use git, which needs perl. |
+| `gcc-14`, `build-essential`, `python3-dev` | `requirements.txt` builds `RPi.GPIO` from source; without them the venv can't be rebuilt on the unit. |
+| `nano` (or `vim-tiny`) | An editor for repairs over the serial console. |
+| `tio` | Typing AT commands to the mDot (`tio /dev/ttyAMA5`) or the modem by hand. It replaces `minicom`, which the README also mentions but nobody has used on 005 or 006. |
+
+Afterwards, run the health check (1.10) and a test cycle (1.11) as usual.
+
 ### 1.4 Sync the clock
 
 This should have been done automatically, but check the system time is correct.
