@@ -25,15 +25,11 @@ sleep 30
 # 1. network time (HTTP Date header, about 1 s)
 net_ts=$(get_network_timestamp)
 if [[ "$net_ts" == "-1" && -x /usr/sbin/uhubctl ]]; then
-  # No network yet. USB may be off through boot (usb-power-off.service): turn the
-  # modem on, then give it up to a minute to register and connect.
+  # No network. Make sure the modem has power for the GPS time below
+  # (usb-power-on.timer normally has turned USB on by now). Cellular data isn't
+  # brought up: the connection has autoconnect off, so waiting for it is no use.
   sudo /usr/sbin/uhubctl -l 1-1 -a on >/dev/null 2>&1
   sudo /usr/sbin/uhubctl -l 2 -a on >/dev/null 2>&1
-  for i in 1 2 3 4 5 6; do
-    sleep 10
-    net_ts=$(get_network_timestamp)
-    [[ "$net_ts" != "-1" ]] && break
-  done
 fi
 if [[ "$net_ts" != "-1" ]]; then
   log '  Applying network time to system...'
