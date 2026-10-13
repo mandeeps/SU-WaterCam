@@ -18,6 +18,7 @@
   "shutdown_iteration_limit": 3,
   "data_retention_days": 7,
   "backup_enabled": true,
+  "audio_recording_enabled": false,
 
   "ip_upload": {
     "enabled": false,

@@ -203,7 +203,7 @@ class LoRaRuntimeManager:
             'shutdown_iteration_limit': 2,  # Number of iterations before shutdown
             'data_retention_days': 7,       # Days to retain data files
             'backup_enabled': True,         # Enable data backup
-            'audio_recording_enabled': True,  # Enable USB microphone audio recording
+            'audio_recording_enabled': False,  # USB microphone recording; only some units have one
         }
         
         try:
