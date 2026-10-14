@@ -883,6 +883,18 @@ def call_shutdown(state):
     print(f"🔍 Shutdown check: count={new_count}, limit={shutdown_limit}, enabled={auto_shutdown_enabled}")
 
     if auto_shutdown_enabled and new_count >= shutdown_limit:
+        # The monitoring work is done and the connection is up: pick up any
+        # command sent during the cycle before powering off. One may say not to
+        # (emergency on, a remote access session) -- tools/last_downlink_check.py
+        try:
+            from tools.last_downlink_check import check as last_downlink_check
+            last = last_downlink_check()
+        except Exception as e:
+            print(f"⚠️ Last downlink check failed: {e}")
+            last = {}
+        if last.get("keep_awake"):
+            print(f"📬 Not shutting down: {last.get('why')} (set by the last downlink check)")
+            return "kept_awake_by_downlink"
         print(f"\n🚨 SHUTDOWN TRIGGERED: {new_count} iterations >= {shutdown_limit} limit\n")
         try:
             # Finalize the in-progress audio segment so its WAV header is
