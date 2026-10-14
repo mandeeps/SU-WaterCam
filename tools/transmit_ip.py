@@ -569,6 +569,7 @@ DOWNLINK_CODE_LENGTHS: Dict[str, int] = {
     "14 94": 1,    # flood_code_freq_min index
     "16 96": 1,    # audio_recording_enabled
     "18 98": 1,    # remote debug session: NN x 10 min, 0 = end (docs/REMOTE_DEBUG_SESSION.md)
+    "18 99": 1,    # the same session over WiFi only, never cellular
     "21 91": 1,    # emergency on for HH hours (00 = emergency_max_hours)
     "21": 0,       # emergency on, from before 21 91; kept while nodes and API update (IP only)
     "99 99": 0,    # emergency off: the same 0x99 0x99 as over LoRa
@@ -757,7 +758,7 @@ def apply_downlink_command(
             logger.info("Applied: audio_recording_enabled = %s", val)
             applied.append(f"audio_recording_enabled={val}")
 
-        elif code == "18 98":  # remote debug session (Tailscale over cellular)
+        elif code in ("18 98", "18 99"):  # remote access session; 18 99 = WiFi only
             # Run by remote-debug.timer, not here: starting a session stops
             # ticktalk, which is the process running this.
             try:
@@ -765,9 +766,11 @@ def apply_downlink_command(
             except ImportError:
                 import remote_debug
             minutes = remote_debug.minutes_from_code(f"{payload_bytes[0]:02x}")
-            remote_debug.request(minutes, "ip")
-            logger.info("Queued: remote debug %s", f"{minutes} min" if minutes else "end")
-            applied.append(f"remote_debug={minutes}")
+            wifi_only = code == "18 99"
+            remote_debug.request(minutes, "ip", wifi_only=wifi_only)
+            logger.info("Queued: remote %s session %s", "WiFi" if wifi_only else "debug",
+                        f"{minutes} min" if minutes else "end")
+            applied.append(f"remote_{'wifi' if wifi_only else 'debug'}={minutes}")
 
         elif code == "21 91":  # emergency mode on for HH hours
             hours = payload_bytes[0]

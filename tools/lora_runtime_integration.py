@@ -201,7 +201,9 @@ class LoRaRuntimeManager:
             # Advanced parameters
             'auto_shutdown_enabled': True,  # Enable automatic shutdown after iterations
             'shutdown_iteration_limit': 2,  # Number of iterations before shutdown
-            'data_retention_days': 7,       # Days to retain data files
+            'data_retention_days': 7,       # Days to keep photos (JPEG, TIFF) and audio
+            'storage_low_free_pct': 20,     # Below this free space, remove the oldest photos...
+            'storage_target_free_pct': 30,  # ... until this much is free (tools/data_retention.py)
             'backup_enabled': True,         # Enable data backup
             'audio_recording_enabled': False,  # USB microphone recording; only some units have one
         }

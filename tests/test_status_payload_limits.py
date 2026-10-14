@@ -20,7 +20,7 @@ def _sent(handler):
     return json.loads(bytes.fromhex(handler.transmit.call_args.args[0]))
 
 
-@pytest.mark.parametrize("limit, keys", [(242, {"dbg", "rd", "tn", "cl", "ts"}),
+@pytest.mark.parametrize("limit, keys", [(242, {"dbg", "rd", "tn", "cl", "ts", "wf"}),
                                          (53, {"dbg", "rd", "tn", "cl", "ts"}),   # SF9
                                          (24, {"dbg", "rd", "tn"}),
                                          (17, {"dbg", "rd"})])

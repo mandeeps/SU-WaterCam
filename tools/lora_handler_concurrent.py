@@ -439,6 +439,47 @@ class LoRaHandler:
         except Exception:
             return False
 
+
+    def link_check(self, timeout_s: float = 20.0) -> Dict[str, Any]:
+        """Ask the network whether it hears this node (AT+NLC, a LinkCheckReq).
+
+        AT+NJS only reports the saved session, which stays 1 with no gateway in
+        range. A link check needs the network server's answer: on success the mDot
+        prints "<dB above the demodulation floor>,<gateways that heard it>".
+        Returns {"ok", "margin_db", "gateways", "error"}; never raises.
+        """
+        import re as _re
+        result = {"ok": False, "margin_db": None, "gateways": 0, "error": None}
+        try:
+            with self.transmit_lock:
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
+                try:
+                    self.ser.reset_input_buffer()
+                    self.ser.write(b'AT+NLC\r\n')
+                    raw = b''
+                    end = time.time() + timeout_s
+                    while time.time() < end:
+                        n = self.ser.in_waiting
+                        if n:
+                            raw += self.ser.read(n)
+                            if b'OK' in raw or b'ERROR' in raw:
+                                break
+                        else:
+                            time.sleep(0.1)
+                finally:
+                    fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
+            text = raw.decode('utf-8', errors='replace')
+            m = None
+            for line in text.replace('\r', '').split('\n'):
+                m = _re.fullmatch(r'\s*(\d+),(\d+)\s*', line) or m
+            if m and 'OK' in text:
+                result.update(ok=int(m.group(2)) > 0, margin_db=int(m.group(1)), gateways=int(m.group(2)))
+            else:
+                result["error"] = text.strip().splitlines()[-1] if text.strip() else "no answer"
+        except Exception as e:
+            result["error"] = str(e)
+        return result
+
     def _listen_loop(self):
         """Main listening loop - runs in separate thread"""
         print('Listening for incoming packets')
@@ -682,6 +723,8 @@ class LoRaHandler:
             code, value = part['code'], part['payload_hex']
             if code == '18 98':
                 self._start_remote_debug(value)
+            elif code == '18 99':
+                self._start_remote_debug(value, wifi_only=True)
             elif code == '21 91':
                 self._start_emergency(value)
             elif code == '99 99':
@@ -746,7 +789,7 @@ class LoRaHandler:
         except Exception as e:
             print(f"⚠️ Status reply failed: {e}")
 
-    def _start_remote_debug(self, value: str) -> None:
+    def _start_remote_debug(self, value: str, wifi_only: bool = False) -> None:
         """Start, extend or end a remote debug session (docs/REMOTE_DEBUG_SESSION.md).
 
         On a thread: bringing cellular and Tailscale up takes up to ~3 min, and
@@ -761,7 +804,7 @@ class LoRaHandler:
                     import remote_debug
                 minutes = remote_debug.minutes_from_code(value)
                 if minutes:
-                    remote_debug.start(minutes, source='lora', handler=self)
+                    remote_debug.start(minutes, source='lora', handler=self, wifi_only=wifi_only)
                 else:
                     remote_debug.stop(handler=self, reason='LoRa command')
             except Exception as e:
@@ -2330,6 +2373,12 @@ class LoRaHandlerClient:
         except Exception as e:
             print(f"⚠️ LoRa daemon unreachable (is_joined): {e}")
             return False
+
+    def link_check(self) -> Dict[str, Any]:
+        try:
+            return dict(self._call("link_check", self._LONG_TIMEOUT_S))
+        except Exception as e:
+            return {"ok": False, "margin_db": None, "gateways": 0, "error": f"LoRa daemon: {e}"}
 
     def queue_transmit(self, data: Dict[str, Any]) -> bool:
         try:
