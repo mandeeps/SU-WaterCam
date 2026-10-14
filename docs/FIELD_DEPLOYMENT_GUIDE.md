@@ -536,6 +536,35 @@ sudo cp config/journald-volatile.conf /etc/systemd/journald.conf.d/
 sudo systemctl restart systemd-journald
 ```
 
+### 1.9.1 LoRa health, WiFi only when needed, photo retention
+
+**LoRa health.** Each boot the unit asks the network whether it hears it: a
+link check (`AT+NLC`) that the network server must answer with the signal
+margin and the number of gateways (`tools/lora_health.py`). The mDot's
+"joined" flag isn't enough: it's a saved session, still set with no gateway in
+range. LoRa counts as healthy with an answer from a gateway at least
+`lora_min_margin_db` (default 5 dB) above the noise floor, and at most one
+failed check in the last three wakes. History: `data/lora_health.json`.
+
+**WiFi off while LoRa works.** Healthy LoRa turns the WiFi radio off for the
+wake, as cellular already is; otherwise WiFi comes on so the IP uplink can use
+it before cellular (`tools/wifi_policy.py`). NetworkManager remembers the
+radio state, so the next boot starts with WiFi off too. WiFi stays on during a
+remote access session, while the unit counts as moved from its mount, and with
+`"wifi_when_lora_healthy": true` in `runtime_config.json`. **Set that on bench
+units before updating them**, or a unit with good LoRa drops off SSH. To reach
+a deployed unit with WiFi off, start a remote access session from the
+dashboard: WiFi only (`18 99`), WiFi then cellular (`18 9A`), or cellular
+directly for units without WiFi (`18 98`).
+
+**Photo retention.** By default every file is kept (`data_retention_days` 0)
+while the system is being developed. Set a number of days to remove JPEG and
+TIFF files (never masks, bitmaps or metadata) older than that, and audio too.
+Whatever the setting, when the card's free space is at or below
+`storage_low_free_pct` (20 %) each wake removes the oldest JPEGs and TIFFs until
+`storage_target_free_pct` (30 %) is free (`tools/data_retention.py`), so a full
+card can't stop the unit. The photos aren't uploaded, so this is the only copy.
+
 ### 1.10 Run the startup health check
 
 `tools/initial_health_check.py` checks CPU temperature, WittyPi voltages, GPS fix, and IMU availability in one shot, and sends a LoRa alert on failure.

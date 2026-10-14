@@ -16,7 +16,7 @@
   "max_retransmissions": 3,
   "auto_shutdown_enabled": true,
   "shutdown_iteration_limit": 3,
-  "data_retention_days": 7,
+  "data_retention_days": 0,
   "backup_enabled": true,
   "audio_recording_enabled": false,
 

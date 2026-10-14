@@ -569,6 +569,8 @@ DOWNLINK_CODE_LENGTHS: Dict[str, int] = {
     "14 94": 1,    # flood_code_freq_min index
     "16 96": 1,    # audio_recording_enabled
     "18 98": 1,    # remote debug session: NN x 10 min, 0 = end (docs/REMOTE_DEBUG_SESSION.md)
+    "18 99": 1,    # the same session over WiFi only, never cellular
+    "18 9A": 1,    # the same session over WiFi if a known network answers, else cellular
     "21 91": 1,    # emergency on for HH hours (00 = emergency_max_hours)
     "21": 0,       # emergency on, from before 21 91; kept while nodes and API update (IP only)
     "99 99": 0,    # emergency off: the same 0x99 0x99 as over LoRa
@@ -587,7 +589,7 @@ def parse_downlink_frame(data: bytes) -> List[Dict[str, str]] | None:
     while i < len(data):
         if i + 2 > len(data):
             return None
-        code = f"{data[i]:02x} {data[i + 1]:02x}"
+        code = f"{data[i]:02X} {data[i + 1]:02X}"   # upper case, as the tables (18 9A)
         width = DOWNLINK_CODE_LENGTHS.get(code)
         if width is None:
             return None
@@ -680,7 +682,7 @@ def apply_downlink_command(
             )
             skipped.append(str(code_raw))
             continue
-        code = code_raw.strip()
+        code = code_raw.strip().upper()   # codes with hex letters (18 9A) match either case
         if not code:
             logger.warning(
                 "apply_downlink_command: missing or empty code in part %s — skipping", part
@@ -757,7 +759,7 @@ def apply_downlink_command(
             logger.info("Applied: audio_recording_enabled = %s", val)
             applied.append(f"audio_recording_enabled={val}")
 
-        elif code == "18 98":  # remote debug session (Tailscale over cellular)
+        elif code in ("18 98", "18 99", "18 9A"):  # remote access: cellular, WiFi only, WiFi then cellular
             # Run by remote-debug.timer, not here: starting a session stops
             # ticktalk, which is the process running this.
             try:
@@ -765,9 +767,10 @@ def apply_downlink_command(
             except ImportError:
                 import remote_debug
             minutes = remote_debug.minutes_from_code(f"{payload_bytes[0]:02x}")
-            remote_debug.request(minutes, "ip")
-            logger.info("Queued: remote debug %s", f"{minutes} min" if minutes else "end")
-            applied.append(f"remote_debug={minutes}")
+            connection = remote_debug.CODE_CONNECTION[code]
+            remote_debug.request(minutes, "ip", connection=connection)
+            logger.info("Queued: remote session (%s) %s", connection, f"{minutes} min" if minutes else "end")
+            applied.append(f"remote_debug={minutes}" + ("" if connection == "cellular" else f":{connection}"))
 
         elif code == "21 91":  # emergency mode on for HH hours
             hours = payload_bytes[0]

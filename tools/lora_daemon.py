@@ -105,6 +105,10 @@ def _do_is_joined(handler, params):
     return handler.is_joined()
 
 
+def _do_link_check(handler, params):
+    return handler.link_check()
+
+
 def _do_queue_transmit(handler, params):
     return handler.queue_transmit(params["data"])
 
@@ -132,6 +136,7 @@ def _do_get_size_limit(handler, params):
 
 ACTIONS = {
     "is_joined": _do_is_joined,
+    "link_check": _do_link_check,
     "queue_transmit": _do_queue_transmit,
     "queue_binary_transmit": _do_queue_binary_transmit,
     "process_transmit_queue": _do_process_transmit_queue,

@@ -67,6 +67,8 @@ def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True, in_range=
         stack.enter_context(patch("tools.transmit_ip.cellular_status", return_value=dict(status)))
         stack.enter_context(patch("tools.transmit_ip.wifi_connected", return_value=wifi))
         m["in_range"] = stack.enter_context(patch("tools.transmit_ip.wifi_in_range", return_value=in_range))
+        m["health"] = stack.enter_context(patch("tools.lora_health.assess",
+                                                return_value={"healthy": joined, "reason": "test"}))
         m["up"] = stack.enter_context(patch("tools.transmit_ip.cellular_up", return_value=up))
         m["down"] = stack.enter_context(patch("tools.transmit_ip.cellular_down"))
         m["dedup"] = stack.enter_context(patch("tools.lora_store_forward.remove_delivered", return_value=0))

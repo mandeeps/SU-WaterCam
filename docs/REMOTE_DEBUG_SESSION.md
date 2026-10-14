@@ -12,6 +12,19 @@ and from the planned maintenance mode (#117, Wi-Fi only).
 ## Command
 
 `18 98 NN`, on fPort 10 like the other downlinks. It has the same meaning over IP.
+The code picks the connection:
+
+| Code | Connection |
+|---|---|
+| `18 98 NN` | Cellular directly, for units without WiFi (what `18 98` always meant) |
+| `18 99 NN` | WiFi only: never cellular, so no SIM data |
+| `18 9A NN` | WiFi if a known network answers within 60 s, else cellular |
+
+WiFi is off while LoRa works (`tools/wifi_policy.py`); the WiFi sessions turn it
+on and wait for a known network and Tailscale. With none in range, `18 99`
+stays unreachable rather than use cellular. The dashboard's Remote Access panel
+picks the code (Connection). The status uplink adds `"wf"`: 1 when the session
+is on WiFi.
 
 | `NN` | Meaning |
 |---|---|

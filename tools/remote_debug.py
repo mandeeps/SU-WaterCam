@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 """Remote debug session: keep the node up on cellular with Tailscale for an admin.
 
-Started by the `18 98 NN` downlink (LoRa or IP) or by hand. Design and install
+Started by a downlink (LoRa or IP) or by hand. The code picks the connection:
+`18 98 NN` cellular directly (units without WiFi; what 18 98 always meant),
+`18 99 NN` WiFi only, never cellular, and `18 9A NN` WiFi if a known network is
+in range, else cellular. WiFi is off while LoRa works (tools/wifi_policy.py). Design and install
 steps: docs/REMOTE_DEBUG_SESSION.md.
 
     remote_debug.py start [--minutes 60]   start, or extend the running session
@@ -35,6 +38,10 @@ MIN_MINUTES = 10
 MAX_MINUTES = 240
 DEFAULT_MINUTES = 60
 TAILSCALE_WAIT_S = 120
+WIFI_WAIT_S = 60          # a known network in range joins well within this
+CONNECTIONS = ("cellular", "wifi", "auto")
+CODE_CONNECTION = {"18 98": "cellular", "18 99": "wifi", "18 9A": "auto"}
+WIFI_TAILSCALE_WAIT_S = 45
 SYSTEMCTL = "/usr/bin/systemctl"
 
 
@@ -161,6 +168,22 @@ WITTYPI_DIR = "/home/pi/wittypi"
 ALARM_CLEARED = "00 00:00:00"
 
 
+def wifi_up(deadline_s=WIFI_WAIT_S):
+    """Turn the WiFi radio on and wait for wlan0 to join a known network."""
+    try:
+        from tools.wifi_policy import radio
+    except ImportError:
+        from wifi_policy import radio
+    radio(True)
+    end = time.time() + deadline_s
+    while time.time() < end:
+        rc, out = _run(["nmcli", "-t", "-f", "DEVICE,STATE", "device"], timeout=10)
+        if rc == 0 and any(line.startswith("wlan0:connected") for line in out.splitlines()):
+            return True
+        time.sleep(3)
+    return False
+
+
 def _wittypi(func, timeout=20):
     """Run one utilities.sh function. Clearing an alarm can take longer than the 3 s
     tools/witty_pi_4.py allows, and i2cget/i2cset live in /usr/sbin."""
@@ -215,7 +238,7 @@ def _size_limit(handler):
 
 
 def send_status(state, handler=None):
-    """LoRa uplink {"dbg":1,"rd":<min left>,"tn":0/1,"cl":0/1,"ts":<epoch>}; best effort.
+    """LoRa uplink {"dbg":1,"rd":<min left>,"tn":0/1,"cl":0/1,"ts":<epoch>,"wf":0/1}; best effort.
 
     Trimmed to the mDot's payload limit like the 5001 reply, dropping fields from
     the end. {"dbg":1,"rd":N} (about 17 B) is the least the server needs to confirm
@@ -225,7 +248,8 @@ def send_status(state, handler=None):
     if state and state.get("active"):
         left = max(0, int((state["until"] - time.time()) // 60))
     fields = [("dbg", 1), ("rd", left), ("tn", int(bool(state and state.get("tailscale")))),
-              ("cl", int(bool(state and state.get("cellular")))), ("ts", int(time.time()))]
+              ("cl", int(bool(state and state.get("cellular")))), ("ts", int(time.time())),
+              ("wf", int(bool(state and state.get("wifi"))))]   # last: dropped first when space is short
     try:
         if handler is None:
             from tools.lora_handler_concurrent import get_lora_handler
@@ -275,16 +299,21 @@ def load_state():
     return _read_json(STATE_FILE)
 
 
-def start(minutes=DEFAULT_MINUTES, source="cli", handler=None):
-    """Start the session, or extend a running one to `minutes` from now."""
+def start(minutes=DEFAULT_MINUTES, source="cli", handler=None, connection="cellular"):
+    """Start the session, or extend a running one to `minutes` from now.
+
+    connection: "cellular" (18 98) straight to the modem; "wifi" (18 99) WiFi or
+    nothing, so no SIM data; "auto" (18 9A) WiFi if a known network answers,
+    else cellular."""
     minutes = clamp_minutes(minutes)
+    connection = connection if connection in CONNECTIONS else "cellular"
     with _Lock():
         state = load_state() or {}
         conn = _cellular_connection()
         if not state.get("active"):
             was_up, _ = cellular_state(conn)
             state = {"active": True, "started": time.time(), "source": source,
-                     "connection": conn, "cellular_was_up": was_up}
+                     "connection": conn, "cellular_was_up": was_up, "mode": connection}
         extending = bool(state.get("tailscale")) and state.get("boot_id") == _boot_id()
         state["until"] = time.time() + minutes * 60
         log(f"session until {time.strftime('%H:%M', time.localtime(state['until']))} ({minutes} min, from {source})")
@@ -307,9 +336,21 @@ def _establish(state):
     state["alarm_cleared"] = suspend_shutdown_alarm()
     _systemctl("stop")
     conn = state.get("connection") or _cellular_connection()
-    state["cellular"] = cellular_state(conn)[0] or cellular_up(conn)
-    state["tailscale"] = wait_for_tailscale()
-    log(f"cellular {'up' if state['cellular'] else 'DOWN'}, tailscale {'online' if state['tailscale'] else 'NOT online'}")
+    mode = state.get("mode", "cellular")
+    # WiFi first unless asked for cellular: it costs no data (and is off while LoRa works)
+    state["wifi"] = mode != "cellular" and wifi_up() and wait_for_tailscale(WIFI_TAILSCALE_WAIT_S)
+    if state["wifi"]:
+        state["cellular"] = cellular_state(conn)[0]
+        state["tailscale"] = True
+    elif mode == "wifi":
+        state["cellular"] = False
+        state["tailscale"] = False
+        log("WiFi only: no known network reachable, and cellular isn't used")
+    else:
+        state["cellular"] = cellular_state(conn)[0] or cellular_up(conn)
+        state["tailscale"] = wait_for_tailscale()
+    log(f"wifi {'up' if state['wifi'] else 'down'}, cellular {'up' if state['cellular'] else 'down'}, "
+        f"tailscale {'online' if state['tailscale'] else 'NOT online'}")
     _write_json(STATE_FILE, state)
 
 
@@ -339,10 +380,11 @@ def stop(shutdown=False, handler=None, reason="requested"):
     return True
 
 
-def request(minutes, source):
+def request(minutes, source, connection="cellular"):
     """Ask the timer to start (minutes > 0) or stop (0) a session: for callers that
     can't run it themselves (ticktalk stopping itself would end the call)."""
-    _write_json(REQUEST_FILE, {"minutes": int(minutes), "source": source, "at": time.time()})
+    _write_json(REQUEST_FILE, {"minutes": int(minutes), "source": source, "at": time.time(),
+                               "connection": connection})
 
 
 def tick():
@@ -355,7 +397,8 @@ def tick():
         state = load_state()
     if req:
         if int(req.get("minutes", 0)) > 0:
-            start(req["minutes"], source=req.get("source", "request"))
+            start(req["minutes"], source=req.get("source", "request"),
+                  connection=req.get("connection", "cellular"))
         else:
             stop(reason=f"request from {req.get('source', '?')}")
         return
@@ -379,13 +422,15 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("start", help="start, or extend the running session")
     s.add_argument("--minutes", type=int, default=DEFAULT_MINUTES)
+    s.add_argument("--connection", choices=CONNECTIONS, default="cellular",
+                   help="cellular (18 98), wifi only (18 99), or auto: WiFi, else cellular (18 9A)")
     t = sub.add_parser("stop", help="restore normal operation")
     t.add_argument("--shutdown", action="store_true", help="power off instead of running a capture cycle")
     sub.add_parser("status")
     sub.add_parser("tick")
     args = p.parse_args(argv)
     if args.cmd == "start":
-        start(args.minutes)
+        start(args.minutes, connection=args.connection)
     elif args.cmd == "stop":
         stop(shutdown=args.shutdown)
     elif args.cmd == "tick":
@@ -397,7 +442,7 @@ def main(argv=None):
         else:
             left = max(0, int((st["until"] - time.time()) // 60))
             print(f"Session active: {left} min left (until {time.strftime('%H:%M', time.localtime(st['until']))}), "
-                  f"started by {st.get('source')}, cellular {'up' if cellular_state(st.get('connection', 'Quectel'))[0] else 'down'}, "
+                  f"started by {st.get('source')} ({st.get('mode', 'cellular')}), cellular {'up' if cellular_state(st.get('connection', 'Quectel'))[0] else 'down'}, "
                   f"tailscale {'online' if tailscale_online() else 'offline'}")
     return 0
 

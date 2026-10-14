@@ -670,11 +670,19 @@ def record_audio(trigger, directory):
     from tools.usb_power import usb_power_on, wait_for_usb_mic
 
     usb_power_on()
+    # Photos: past data_retention_days (0, the default, keeps them), or the oldest
+    # when the card is 80 % full
+    # (tools/data_retention.py). The capture starting now is left alone.
+    try:
+        from tools.data_retention import run as photo_retention
+        photo_retention(current_dir=directory)
+    except Exception as e:
+        print(f"⚠️ Photo retention failed: {e}")
     if not get_parameter('audio_recording_enabled', False):
         return "disabled"
     wait_for_usb_mic()
 
-    retention_days = get_parameter('data_retention_days', 7)
+    retention_days = get_parameter('data_retention_days', 0)
     recorder = get_audio_recorder(retention_days=retention_days)
     if recorder.start_segment(directory):
         return "recording"
@@ -1761,12 +1769,16 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     cellular_active = on_demand and cell_status["active"]
 
     if tx.only_if_lora_unavailable:
+        # Joined isn't enough: the saved session says joined with no gateway in
+        # range. Skip IP only when a link check this boot showed LoRa works.
         try:
-            from tools.lora_handler_concurrent import get_lora_handler
-            handler = get_lora_handler()
-            lora_joined = handler is not None and handler.is_joined()
+            from tools.lora_health import assess
+            health = assess()
+            lora_joined = bool(health.get("healthy"))
+            if not lora_joined:
+                print(f"📡 LoRa not healthy ({health.get('reason')}) — sending over IP too")
         except Exception as e:
-            print(f"⚠️ IP uplink: LoRa join state unknown ({e}) — sending over IP")
+            print(f"⚠️ IP uplink: LoRa health unknown ({e}) — sending over IP")
             lora_joined = False
         moved = False
         if lora_joined:
@@ -1781,7 +1793,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             if cellular_active:
                 cellular_down(cell)
                 print(f"📶 LoRa is back — {cell} taken down")
-            print("📡 LoRa is joined — IP uplink not needed this cycle")
+            print("📡 LoRa is healthy — IP uplink not needed this cycle")
             tx.close()
             return {"status": "skipped_lora_joined", "success": False}
 
@@ -2062,6 +2074,15 @@ def ip_downlink_poll_and_apply(_lora_init):
     """
     from tools.transmit_ip import IPTransmitter, handle_downlink_reply
     from tools.lora_runtime_integration import set_parameter
+
+    # Is LoRa really working here (a link check the network must answer)? If so
+    # WiFi stays off for this wake, as cellular does (tools/lora_health.py,
+    # tools/wifi_policy.py).
+    try:
+        from tools import lora_health, wifi_policy
+        wifi_policy.apply(lora_health.assess())
+    except Exception as e:
+        print(f"⚠️ LoRa health / WiFi policy failed: {e}")
 
     tx = IPTransmitter()
 

@@ -38,6 +38,8 @@ def node(tmp_path, monkeypatch):
     monkeypatch.setattr(rd, "cellular_up", cellular_up)
     monkeypatch.setattr(rd, "cellular_down", cellular_down)
     monkeypatch.setattr(rd, "wait_for_tailscale", lambda *a: sim.tailscale())
+    sim.wifi.return_value = False          # no known network: cellular, as before
+    monkeypatch.setattr(rd, "wifi_up", lambda *a: sim.wifi())
     monkeypatch.setattr(rd, "suspend_shutdown_alarm", lambda: (sim.suspend(), True)[1])
     monkeypatch.setattr(rd, "rearm_schedule", lambda: sim.rearm())
     monkeypatch.setattr(rd, "_systemctl", lambda action, unit="ticktalk.service": sim.systemctl(action))
@@ -197,3 +199,45 @@ def test_start_answers_before_tailscale_and_resends_are_cheap(node):
     rd.start(30)                                            # an API resend
     assert node.status.call_count == 1
     assert node.systemctl.call_count == 1 and node.up.call_count == 1   # not re-established
+
+
+
+def test_wifi_first_skips_cellular(node):
+    node.wifi.return_value = True
+    rd.start(60, connection="auto")
+    st = rd.load_state()
+    assert st["wifi"] is True and st["tailscale"] is True
+    node.up.assert_not_called()
+
+
+def test_wifi_only_never_uses_cellular(node):
+    rd.start(60, connection="wifi")
+    st = rd.load_state()
+    assert st["mode"] == "wifi" and st["wifi"] is False and st["tailscale"] is False
+    node.up.assert_not_called()
+
+
+def test_wifi_only_request_reaches_start(node):
+    rd.request(30, "ip", connection="wifi")
+    rd.tick()
+    assert rd.load_state()["mode"] == "wifi"
+
+
+def test_status_reports_wifi(node):
+    node.wifi.return_value = True
+    rd.start(60, connection="auto")
+    assert node.status.call_args[0][0].get("wifi") is True
+
+
+
+def test_cellular_session_never_tries_wifi(node):
+    node.wifi.return_value = True
+    rd.start(60)                                   # 18 98: cellular directly
+    st = rd.load_state()
+    assert st["mode"] == "cellular" and st["wifi"] is False
+    node.wifi.assert_not_called()
+    node.up.assert_called_once()
+
+
+def test_codes_map_to_connections():
+    assert rd.CODE_CONNECTION == {"18 98": "cellular", "18 99": "wifi", "18 9A": "auto"}
