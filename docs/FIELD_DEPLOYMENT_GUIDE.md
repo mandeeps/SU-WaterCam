@@ -397,6 +397,18 @@ The mDot module's DevEUI must already be registered in ChirpStack before the uni
 
 Once it's confirmed that the device is running our firmware and it is set up in ChirpStack, you can connect to the gateway following the instructions in https://docs.google.com/document/d/1Z83h89x7jlwzRIvbZtyiRxBoMupdoHzL/edit?usp=drive_link&ouid=115248649914453432688&rtpof=true&sd=true
 
+**Set the gateway's sub-band before the first join.** A new mDot uses US915
+sub-band 0 (all 64 channels) and our gateway listens on sub-band 1, so only about
+one join request in eight is heard and a join can take 15 minutes. On the Pi:
+
+```bash
+python3 tools/mdot_subband.py            # sets and saves sub-band 1 (nothing if already set)
+python3 tools/mdot_subband.py --check    # report only
+```
+
+It stops and restarts `lora_daemon` around it. A gateway on another sub-band:
+`--sub-band N`, or `--from-mask` on a unit that has joined and sent an uplink.
+
 I'd recommend using SSH at this point to connect to the Raspberry Pi instead of serial. On the Raspberry Pi run `tio /dev/ttyAMA5` to issue the commands to connect to the gateway when you know it is in range.
 
 ### 1.7 IMU Stage 1 calibration
