@@ -80,16 +80,22 @@ def drain(
     *,
     queue_dir: str = DEFAULT_QUEUE_DIR,
     max_age_days: int = DEFAULT_MAX_AGE_DAYS,
+    size_limit: Optional[int] = None,
 ) -> dict:
     """Transmit up to *max_packets* oldest queued entries via *handler*.
 
     Both payloads in a record (sensor + bitmap) must transmit successfully
-    before the file is deleted.  Stops on first transmission failure and
-    leaves the remainder for the next cycle.
+    before the file is deleted; one that went out is cleared from the file, so
+    a later retry doesn't send it twice.  Stops on first transmission failure
+    and leaves the remainder for the next cycle.
 
-    Returns {"drained": int, "failed": bool}.
+    *size_limit* (the mDot's current payload limit): a payload larger than it
+    isn't tried at all (the mDot would refuse it and the gateway gains nothing);
+    draining stops there until a cycle with a higher data rate ("deferred").
+
+    Returns {"drained": int, "failed": bool, "deferred": bool}.
     """
-    result = {"drained": 0, "failed": False}
+    result = {"drained": 0, "failed": False, "deferred": False}
     try:
         entries = sorted(f for f in os.listdir(queue_dir) if f.endswith(".json"))
     except FileNotFoundError:
@@ -121,15 +127,26 @@ def drain(
                 pass
             continue
 
+        # Oldest first: wait for a data rate that fits rather than skipping ahead
+        if size_limit is not None and any(
+                record.get(k) and len(record[k]) // 2 > size_limit for k in ("sensor_hex", "bitmap_hex")):
+            logger.info("LoRa S&F: %s waits for a payload limit above %d B", fname, size_limit)
+            result["deferred"] = True
+            break
+
         # Both payloads must succeed; stop on first failure.
         ok = True
-        for hex_payload in (record.get("sensor_hex"), record.get("bitmap_hex")):
+        for key in ("sensor_hex", "bitmap_hex"):
+            hex_payload = record.get(key)
             if not hex_payload:
                 continue
             if not handler.transmit(hex_payload):
                 logger.warning("LoRa S&F: drain failed on %s", fname)
                 ok = False
                 break
+            record[key] = None
+            if any(record.get(k) for k in ("sensor_hex", "bitmap_hex")):
+                _rewrite(path, record)
 
         if ok:
             try:
@@ -143,6 +160,16 @@ def drain(
             break
 
     return result
+
+
+def _rewrite(path: str, record: dict) -> None:
+    """Save a record with its delivered payload cleared (atomic; never raises)."""
+    try:
+        with open(path + ".tmp", "w") as fh:
+            json.dump(record, fh)
+        os.replace(path + ".tmp", path)
+    except OSError as exc:
+        logger.warning("LoRa S&F: could not update %s: %s", path, exc)
 
 
 def remove_delivered(

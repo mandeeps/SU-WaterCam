@@ -134,6 +134,10 @@ def _do_get_size_limit(handler, params):
     return handler.get_size_limit()
 
 
+def _do_size_limit_now(handler, params):
+    return handler.size_limit_now()
+
+
 ACTIONS = {
     "is_joined": _do_is_joined,
     "link_check": _do_link_check,
@@ -143,6 +147,7 @@ ACTIONS = {
     "transmit": _do_transmit,
     "get_queue_depth": _do_get_queue_depth,
     "get_size_limit": _do_get_size_limit,
+    "size_limit_now": _do_size_limit_now,
 }
 
 
