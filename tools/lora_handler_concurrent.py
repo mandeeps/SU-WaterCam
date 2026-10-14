@@ -2040,6 +2040,13 @@ class LoRaHandler:
                 fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
                 try:
                     self._query_txs_locked()
+                    if self.current_size_limit < COMPACT_PACKET_SIZE:
+                        # MAC commands waiting for an uplink take the room: send
+                        # them in one probe (as transmit() does on "Tx buffer
+                        # filled by MAC Commands"), then ask again
+                        print(f"📏 {self.current_size_limit} B free: flushing pending MAC commands")
+                        self._flush_mac_commands()
+                        self._query_txs_locked()
                 finally:
                     fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
         except Exception as e:
@@ -2070,7 +2077,13 @@ class LoRaHandler:
             if res:
                 try:
                     response = res.decode('utf-8').strip()
-                    size_limit = self._extract_txs_size_limit(response)
+                    # The answer to our own AT+TXS (input flushed first), so a small
+                    # number is real: pending MAC commands take room from the payload,
+                    # leaving under 11 B at DR0. The listener's parser rejects those.
+                    if response.isdigit() and len(response) <= 3:
+                        size_limit = int(response)
+                    else:
+                        size_limit = self._extract_txs_size_limit(response)
                     if size_limit is not None:
                         self.current_size_limit = size_limit
                         print(f"DEBUG: Size limit refreshed to: {size_limit} bytes")
