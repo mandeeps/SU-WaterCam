@@ -342,7 +342,7 @@ class LoRaHandler:
             'max_retransmissions': 3,
             'auto_shutdown_enabled': True,
             'shutdown_iteration_limit': 2,
-            'data_retention_days': 30,
+            'data_retention_days': 0,   # keep everything (tools/data_retention.py)
             'backup_enabled': True,
             'emergency_mode': False,
             'lora_sf_enabled': True,

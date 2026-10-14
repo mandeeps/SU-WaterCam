@@ -670,7 +670,8 @@ def record_audio(trigger, directory):
     from tools.usb_power import usb_power_on, wait_for_usb_mic
 
     usb_power_on()
-    # Photos: past data_retention_days, or the oldest when the card is 80 % full
+    # Photos: past data_retention_days (0, the default, keeps them), or the oldest
+    # when the card is 80 % full
     # (tools/data_retention.py). The capture starting now is left alone.
     try:
         from tools.data_retention import run as photo_retention
@@ -681,7 +682,7 @@ def record_audio(trigger, directory):
         return "disabled"
     wait_for_usb_mic()
 
-    retention_days = get_parameter('data_retention_days', 7)
+    retention_days = get_parameter('data_retention_days', 0)
     recorder = get_audio_recorder(retention_days=retention_days)
     if recorder.start_segment(directory):
         return "recording"

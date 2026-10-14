@@ -557,12 +557,13 @@ a deployed unit with WiFi off, start a remote access session from the
 dashboard: WiFi only (`18 99`), WiFi then cellular (`18 9A`), or cellular
 directly for units without WiFi (`18 98`).
 
-**Photo retention.** Each wake removes JPEG and TIFF files (never masks,
-bitmaps or metadata) older than `data_retention_days` (default 7), and, when
-the card's free space is at or below `storage_low_free_pct` (20 %), the oldest
-ones until `storage_target_free_pct` (30 %) is free (`tools/data_retention.py`).
-The photos aren't uploaded, so this is the only copy: raise
-`data_retention_days` on a unit whose photos should be kept.
+**Photo retention.** By default every file is kept (`data_retention_days` 0)
+while the system is being developed. Set a number of days to remove JPEG and
+TIFF files (never masks, bitmaps or metadata) older than that, and audio too.
+Whatever the setting, when the card's free space is at or below
+`storage_low_free_pct` (20 %) each wake removes the oldest JPEGs and TIFFs until
+`storage_target_free_pct` (30 %) is free (`tools/data_retention.py`), so a full
+card can't stop the unit. The photos aren't uploaded, so this is the only copy.
 
 ### 1.10 Run the startup health check
 

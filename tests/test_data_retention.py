@@ -75,3 +75,23 @@ def test_enough_space_removes_nothing_for_space(images, monkeypatch):
 
 def test_missing_images_dir_is_fine(tmp_path):
     assert dr.run(root=str(tmp_path / "nope"))["aged"] == 0
+
+
+def test_default_keeps_everything_but_space_rule_still_works(images, monkeypatch):
+    root, params = images
+    del params["data_retention_days"]            # the default
+    assert dr.DEFAULT_DAYS == 0
+    old = capture(root, "20250101-090000", 400)
+    assert dr.run(root=str(root), now=NOW)["aged"] == 0 and len(os.listdir(old)) == 4
+    monkeypatch.setattr(dr, "free_pct", lambda path: 10.0)        # card nearly full
+    assert dr.run(root=str(root), now=NOW)["for_space"] == 2
+
+
+def test_audio_zero_retention_keeps_recordings(monkeypatch):
+    from tools import audio_recorder
+    called = []
+    monkeypatch.setattr(audio_recorder.AudioRecorder, "_cleanup_old_segments", lambda self, d: called.append(d))
+    monkeypatch.setattr(audio_recorder, "_find_usb_mic_device", lambda: None)
+    audio_recorder.AudioRecorder(retention_days=0)
+    audio_recorder.AudioRecorder(retention_days=30)
+    assert called == [30]

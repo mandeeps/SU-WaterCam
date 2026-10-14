@@ -5,12 +5,14 @@ nothing sent them anywhere or removed them, so a card filled in months. Each
 wake cycle, run() removes JPEG and TIFF files only (never masks, bitmaps,
 metadata or audio, which has its own rule in tools/audio_recorder.py):
 
-1. older than data_retention_days (runtime parameter, default 7), and
+1. older than data_retention_days (runtime parameter; the default 0 keeps
+   everything, while the system is still being developed), and
 2. if the card's free space is at or below storage_low_free_pct (default 20 %),
    the oldest ones until it's back to storage_target_free_pct (default 30 %).
 
-The capture being written now is never touched. These photos are the only
-copy, so raise data_retention_days on a unit whose photos should be kept.
+The capture being written now is never touched. Rule 2 still applies with
+retention off, so a full card can't stop the unit: it removes only the oldest
+photos, and only when space is short.
 """
 import os
 import shutil
@@ -20,7 +22,7 @@ from typing import Iterable, List, Optional, Tuple
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 IMAGES_DIR = os.path.join(REPO, "images")
 EXTENSIONS = (".jpg", ".jpeg", ".tif", ".tiff")
-DEFAULT_DAYS = 7
+DEFAULT_DAYS = 0         # keep everything
 DEFAULT_LOW_PCT = 20.0
 DEFAULT_TARGET_PCT = 30.0
 

@@ -60,7 +60,7 @@ class AudioRecorder:
             print("⚠️ No USB microphone detected — audio recording disabled")
         else:
             print(f"🎙️ USB microphone found at {self._device}")
-        if retention_days is not None:
+        if retention_days is not None and retention_days > 0:   # 0 keeps everything
             self._cleanup_old_segments(retention_days)
 
     def available(self) -> bool:
