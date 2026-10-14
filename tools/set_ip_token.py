@@ -55,7 +55,7 @@ def main(argv=None, prompt=getpass.getpass):
               file=sys.stderr)
         return 1
     device = store_token(args.config, token)
-    print(f"Saved for {device} (token ends ...{token[-4:]}). It is used from the next IP upload; "
+    print(f"Saved the token for {device}. It is used from the next IP upload; "
           "no restart needed.")
     return 0
 
