@@ -6,8 +6,8 @@ WiFi before cellular. NetworkManager keeps the radio state across boots, so a
 unit that found LoRa healthy also boots with WiFi off next time.
 
 WiFi stays on:
-- during a remote access session (18 99 WiFi only, or 18 98 WiFi then
-  cellular; tools/remote_debug.py),
+- during a remote access session that uses WiFi (18 99 WiFi only, or 18 9A
+  WiFi then cellular; tools/remote_debug.py),
 - while the unit counts as moved from its mount (tools/gps_home.py), so the
   alert has every route out,
 - with the runtime parameter wifi_when_lora_healthy true (bench units).
@@ -52,10 +52,12 @@ def radio_is_on() -> Optional[bool]:
 
 
 def _session_active() -> bool:
+    """A remote session that uses WiFi (not a cellular-only one) is running."""
     try:
         import json
         with open(REMOTE_STATE) as f:
-            return bool(json.load(f).get("active"))
+            st = json.load(f)
+        return bool(st.get("active")) and st.get("mode", "cellular") != "cellular"
     except (OSError, ValueError):
         return False
 

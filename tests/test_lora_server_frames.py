@@ -66,8 +66,10 @@ def test_actions_go_to_their_handlers(handler):
          patch.object(LoRaHandler, "_start_remote_debug") as rd:
         handler.decode("219106")
         handler.decode("189803")
+        handler.decode("189903")
+        handler.decode("189a03")
     em.assert_called_once_with("06")
-    rd.assert_called_once_with("03")
+    assert [c.args for c in rd.call_args_list] == [("03", "18 98"), ("03", "18 99"), ("03", "18 9A")]
 
 
 def test_emergency_off_frame(handler):

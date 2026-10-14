@@ -112,3 +112,14 @@ def test_link_check_error_reply():
     with patch("tools.lora_handler_concurrent.fcntl.lockf"):
         r = h.link_check()
     assert r["ok"] is False and r["error"] == "ERROR"
+
+
+
+def test_cellular_session_leaves_wifi_policy_alone(tmp_path, monkeypatch):
+    import json
+    state = tmp_path / "remote_debug.json"
+    monkeypatch.setattr(wp, "REMOTE_STATE", str(state))
+    state.write_text(json.dumps({"active": True, "mode": "cellular"}))
+    assert wp._session_active() is False
+    state.write_text(json.dumps({"active": True, "mode": "auto"}))
+    assert wp._session_active() is True

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Remote debug session: keep the node up on cellular with Tailscale for an admin.
 
-Started by the `18 98 NN` downlink (LoRa or IP) or by hand; `18 99 NN` is the
-same session over WiFi only, never cellular (WiFi is off while LoRa works,
-tools/wifi_policy.py). Both try WiFi first, so `18 98` only uses cellular data
-when no known network is in range. Design and install
+Started by a downlink (LoRa or IP) or by hand. The code picks the connection:
+`18 98 NN` cellular directly (units without WiFi; what 18 98 always meant),
+`18 99 NN` WiFi only, never cellular, and `18 9A NN` WiFi if a known network is
+in range, else cellular. WiFi is off while LoRa works (tools/wifi_policy.py). Design and install
 steps: docs/REMOTE_DEBUG_SESSION.md.
 
     remote_debug.py start [--minutes 60]   start, or extend the running session
@@ -39,6 +39,8 @@ MAX_MINUTES = 240
 DEFAULT_MINUTES = 60
 TAILSCALE_WAIT_S = 120
 WIFI_WAIT_S = 60          # a known network in range joins well within this
+CONNECTIONS = ("cellular", "wifi", "auto")
+CODE_CONNECTION = {"18 98": "cellular", "18 99": "wifi", "18 9A": "auto"}
 WIFI_TAILSCALE_WAIT_S = 45
 SYSTEMCTL = "/usr/bin/systemctl"
 
@@ -297,18 +299,21 @@ def load_state():
     return _read_json(STATE_FILE)
 
 
-def start(minutes=DEFAULT_MINUTES, source="cli", handler=None, wifi_only=False):
+def start(minutes=DEFAULT_MINUTES, source="cli", handler=None, connection="cellular"):
     """Start the session, or extend a running one to `minutes` from now.
 
-    wifi_only (`18 99`): connect over WiFi or not at all, so no cellular data."""
+    connection: "cellular" (18 98) straight to the modem; "wifi" (18 99) WiFi or
+    nothing, so no SIM data; "auto" (18 9A) WiFi if a known network answers,
+    else cellular."""
     minutes = clamp_minutes(minutes)
+    connection = connection if connection in CONNECTIONS else "cellular"
     with _Lock():
         state = load_state() or {}
         conn = _cellular_connection()
         if not state.get("active"):
             was_up, _ = cellular_state(conn)
             state = {"active": True, "started": time.time(), "source": source,
-                     "connection": conn, "cellular_was_up": was_up, "wifi_only": bool(wifi_only)}
+                     "connection": conn, "cellular_was_up": was_up, "mode": connection}
         extending = bool(state.get("tailscale")) and state.get("boot_id") == _boot_id()
         state["until"] = time.time() + minutes * 60
         log(f"session until {time.strftime('%H:%M', time.localtime(state['until']))} ({minutes} min, from {source})")
@@ -331,12 +336,13 @@ def _establish(state):
     state["alarm_cleared"] = suspend_shutdown_alarm()
     _systemctl("stop")
     conn = state.get("connection") or _cellular_connection()
-    # WiFi first: it costs no data, and it's off while LoRa works
-    state["wifi"] = wifi_up() and wait_for_tailscale(WIFI_TAILSCALE_WAIT_S)
+    mode = state.get("mode", "cellular")
+    # WiFi first unless asked for cellular: it costs no data (and is off while LoRa works)
+    state["wifi"] = mode != "cellular" and wifi_up() and wait_for_tailscale(WIFI_TAILSCALE_WAIT_S)
     if state["wifi"]:
         state["cellular"] = cellular_state(conn)[0]
         state["tailscale"] = True
-    elif state.get("wifi_only"):
+    elif mode == "wifi":
         state["cellular"] = False
         state["tailscale"] = False
         log("WiFi only: no known network reachable, and cellular isn't used")
@@ -374,11 +380,11 @@ def stop(shutdown=False, handler=None, reason="requested"):
     return True
 
 
-def request(minutes, source, wifi_only=False):
+def request(minutes, source, connection="cellular"):
     """Ask the timer to start (minutes > 0) or stop (0) a session: for callers that
     can't run it themselves (ticktalk stopping itself would end the call)."""
     _write_json(REQUEST_FILE, {"minutes": int(minutes), "source": source, "at": time.time(),
-                               "wifi_only": bool(wifi_only)})
+                               "connection": connection})
 
 
 def tick():
@@ -391,7 +397,8 @@ def tick():
         state = load_state()
     if req:
         if int(req.get("minutes", 0)) > 0:
-            start(req["minutes"], source=req.get("source", "request"), wifi_only=bool(req.get("wifi_only")))
+            start(req["minutes"], source=req.get("source", "request"),
+                  connection=req.get("connection", "cellular"))
         else:
             stop(reason=f"request from {req.get('source', '?')}")
         return
@@ -415,14 +422,15 @@ def main(argv=None):
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("start", help="start, or extend the running session")
     s.add_argument("--minutes", type=int, default=DEFAULT_MINUTES)
-    s.add_argument("--wifi-only", action="store_true", help="WiFi only, never cellular (as 18 99)")
+    s.add_argument("--connection", choices=CONNECTIONS, default="cellular",
+                   help="cellular (18 98), wifi only (18 99), or auto: WiFi, else cellular (18 9A)")
     t = sub.add_parser("stop", help="restore normal operation")
     t.add_argument("--shutdown", action="store_true", help="power off instead of running a capture cycle")
     sub.add_parser("status")
     sub.add_parser("tick")
     args = p.parse_args(argv)
     if args.cmd == "start":
-        start(args.minutes, wifi_only=args.wifi_only)
+        start(args.minutes, connection=args.connection)
     elif args.cmd == "stop":
         stop(shutdown=args.shutdown)
     elif args.cmd == "tick":
@@ -434,7 +442,7 @@ def main(argv=None):
         else:
             left = max(0, int((st["until"] - time.time()) // 60))
             print(f"Session active: {left} min left (until {time.strftime('%H:%M', time.localtime(st['until']))}), "
-                  f"started by {st.get('source')}{' (WiFi only)' if st.get('wifi_only') else ''}, cellular {'up' if cellular_state(st.get('connection', 'Quectel'))[0] else 'down'}, "
+                  f"started by {st.get('source')} ({st.get('mode', 'cellular')}), cellular {'up' if cellular_state(st.get('connection', 'Quectel'))[0] else 'down'}, "
                   f"tailscale {'online' if tailscale_online() else 'offline'}")
     return 0
 

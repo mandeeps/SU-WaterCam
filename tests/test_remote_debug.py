@@ -204,26 +204,40 @@ def test_start_answers_before_tailscale_and_resends_are_cheap(node):
 
 def test_wifi_first_skips_cellular(node):
     node.wifi.return_value = True
-    rd.start(60)
+    rd.start(60, connection="auto")
     st = rd.load_state()
     assert st["wifi"] is True and st["tailscale"] is True
     node.up.assert_not_called()
 
 
 def test_wifi_only_never_uses_cellular(node):
-    rd.start(60, wifi_only=True)
+    rd.start(60, connection="wifi")
     st = rd.load_state()
-    assert st["wifi_only"] is True and st["wifi"] is False and st["tailscale"] is False
+    assert st["mode"] == "wifi" and st["wifi"] is False and st["tailscale"] is False
     node.up.assert_not_called()
 
 
 def test_wifi_only_request_reaches_start(node):
-    rd.request(30, "ip", wifi_only=True)
+    rd.request(30, "ip", connection="wifi")
     rd.tick()
-    assert rd.load_state()["wifi_only"] is True
+    assert rd.load_state()["mode"] == "wifi"
 
 
 def test_status_reports_wifi(node):
     node.wifi.return_value = True
-    rd.start(60)
+    rd.start(60, connection="auto")
     assert node.status.call_args[0][0].get("wifi") is True
+
+
+
+def test_cellular_session_never_tries_wifi(node):
+    node.wifi.return_value = True
+    rd.start(60)                                   # 18 98: cellular directly
+    st = rd.load_state()
+    assert st["mode"] == "cellular" and st["wifi"] is False
+    node.wifi.assert_not_called()
+    node.up.assert_called_once()
+
+
+def test_codes_map_to_connections():
+    assert rd.CODE_CONNECTION == {"18 98": "cellular", "18 99": "wifi", "18 9A": "auto"}

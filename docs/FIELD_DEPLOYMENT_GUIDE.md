@@ -554,7 +554,8 @@ remote access session, while the unit counts as moved from its mount, and with
 `"wifi_when_lora_healthy": true` in `runtime_config.json`. **Set that on bench
 units before updating them**, or a unit with good LoRa drops off SSH. To reach
 a deployed unit with WiFi off, start a remote access session from the
-dashboard (`18 99`, WiFi only, or `18 98`, WiFi then cellular).
+dashboard: WiFi only (`18 99`), WiFi then cellular (`18 9A`), or cellular
+directly for units without WiFi (`18 98`).
 
 **Photo retention.** Each wake removes JPEG and TIFF files (never masks,
 bitmaps or metadata) older than `data_retention_days` (default 7), and, when

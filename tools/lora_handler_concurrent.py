@@ -721,10 +721,8 @@ class LoRaHandler:
         rest = []
         for part in parts:
             code, value = part['code'], part['payload_hex']
-            if code == '18 98':
-                self._start_remote_debug(value)
-            elif code == '18 99':
-                self._start_remote_debug(value, wifi_only=True)
+            if code in ('18 98', '18 99', '18 9A'):
+                self._start_remote_debug(value, code)
             elif code == '21 91':
                 self._start_emergency(value)
             elif code == '99 99':
@@ -789,7 +787,7 @@ class LoRaHandler:
         except Exception as e:
             print(f"⚠️ Status reply failed: {e}")
 
-    def _start_remote_debug(self, value: str, wifi_only: bool = False) -> None:
+    def _start_remote_debug(self, value: str, code: str = '18 98') -> None:
         """Start, extend or end a remote debug session (docs/REMOTE_DEBUG_SESSION.md).
 
         On a thread: bringing cellular and Tailscale up takes up to ~3 min, and
@@ -804,7 +802,8 @@ class LoRaHandler:
                     import remote_debug
                 minutes = remote_debug.minutes_from_code(value)
                 if minutes:
-                    remote_debug.start(minutes, source='lora', handler=self, wifi_only=wifi_only)
+                    remote_debug.start(minutes, source='lora', handler=self,
+                                       connection=remote_debug.CODE_CONNECTION.get(code, 'cellular'))
                 else:
                     remote_debug.stop(handler=self, reason='LoRa command')
             except Exception as e:
