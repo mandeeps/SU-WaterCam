@@ -55,6 +55,50 @@ from typing import Dict, Any, Optional
 
 
 
+# Compact packet: channel 0C type 01 and nine bytes, 11 in all, so it fits
+# US915 DR0 (SF10, 11-byte payloads). Sent instead of the full sensor packet
+# when that doesn't fit the mDot's current limit; the full one waits in the
+# store-and-forward queue (tools/lora_store_forward.py). Layout after 0C 01:
+#   u32 capture time (as 00 01)
+#   u8  flags: bit 0 emergency, 1 flood detected, 2 flood growing, 3 health
+#       fault, 4 moved from mount, 5 under-voltage now, 6 under-voltage since boot
+#   u8  battery percent            (255: none)
+#   u8  Witty Pi input voltage (data['wittypi_vin']), 25 mV steps, 0-6.35 V (255: none)
+#   i8  temperature, whole degrees C (-128: none)
+#   u8  relative humidity percent  (255: none)
+COMPACT_PACKET_SIZE = 11
+
+
+def encode_compact_packet(data: Dict[str, Any]) -> bytes:
+    """The key readings of a capture in 11 bytes (layout above)."""
+    def num(key):
+        v = data.get(key)
+        try:
+            return None if v is None else float(v)
+        except (TypeError, ValueError):
+            return None
+
+    flags = 0
+    for bit, key in ((0, 'emergency_status'), (1, 'camera_flood_detected'),
+                     (2, 'camera_flood_growing'), (3, 'health_status'), (4, 'movement_threshold')):
+        if data.get(key):
+            flags |= 1 << bit
+    if data.get('pi_throttled') is not None:
+        from tools.pi_power import pack_throttled_u8
+        packed = pack_throttled_u8(data['pi_throttled'])
+        flags |= (1 << 5) if packed & 0x01 else 0
+        flags |= (1 << 6) if packed & 0x10 else 0
+
+    def u8(v, scale=1.0, top=254):
+        return 255 if v is None else max(0, min(top, int(round(v * scale))))
+
+    temp = num('temperature_celsius')
+    t8 = -128 if temp is None else max(-127, min(127, int(round(temp))))
+    return (bytes([0x0C, 0x01]) + struct.pack(">I", int(data.get('timestamp') or 0))
+            + bytes([flags, u8(num('battery_percent')), u8(num('wittypi_vin') if data.get('wittypi_vin') is not None else num('wittypi_battery_voltage'), 40)])
+            + struct.pack(">b", t8) + bytes([u8(num('relative_humidity'))]))
+
+
 def _config_io():
     """tools/config_io, importable whether this module was loaded as tools.x or x."""
     try:
@@ -1983,6 +2027,31 @@ class LoRaHandler:
     def get_size_limit(self) -> int:
         """Get the current payload size limit"""
         return self.current_size_limit
+
+    def size_limit_now(self) -> int:
+        """Ask the mDot (AT+TXS) for its payload limit at the current data rate.
+
+        The stored limit lags: after a rejoin the mDot is back at DR0 (11 bytes)
+        until ADR raises it. Under both locks, like link_check(), so the reply
+        can't be mistaken for a send's.
+        """
+        try:
+            with self.transmit_lock:
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
+                try:
+                    self._query_txs_locked()
+                    if self.current_size_limit < COMPACT_PACKET_SIZE:
+                        # MAC commands waiting for an uplink take the room: send
+                        # them in one probe (as transmit() does on "Tx buffer
+                        # filled by MAC Commands"), then ask again
+                        print(f"📏 {self.current_size_limit} B free: flushing pending MAC commands")
+                        self._flush_mac_commands()
+                        self._query_txs_locked()
+                finally:
+                    fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
+        except Exception as e:
+            print(f"⚠️ AT+TXS failed, keeping {self.current_size_limit} B: {e}")
+        return self.current_size_limit
     
     def get_last_transmission_status(self) -> dict:
         """Get the last transmission status"""
@@ -2008,7 +2077,13 @@ class LoRaHandler:
             if res:
                 try:
                     response = res.decode('utf-8').strip()
-                    size_limit = self._extract_txs_size_limit(response)
+                    # The answer to our own AT+TXS (input flushed first), so a small
+                    # number is real: pending MAC commands take room from the payload,
+                    # leaving under 11 B at DR0. The listener's parser rejects those.
+                    if response.isdigit() and len(response) <= 3:
+                        size_limit = int(response)
+                    else:
+                        size_limit = self._extract_txs_size_limit(response)
                     if size_limit is not None:
                         self.current_size_limit = size_limit
                         print(f"DEBUG: Size limit refreshed to: {size_limit} bytes")
@@ -2424,6 +2499,13 @@ class LoRaHandlerClient:
             print(f"⚠️ LoRa daemon unreachable (get_size_limit): {e}, using default")
             return 242  # default LoRaWAN payload size, matches LoRaHandler's own default
 
+    def size_limit_now(self) -> int:
+        try:
+            return int(self._call("size_limit_now", self._LONG_TIMEOUT_S))
+        except Exception as e:
+            print(f"⚠️ LoRa daemon unreachable (size_limit_now): {e}, using the stored limit")
+            return self.get_size_limit()
+
     def compressed_encoding(self, data: Dict[str, Any]) -> bytes:
         # Pure/stateless -- computed locally, not via RPC (see class docstring).
         return _encode_compressed_packet(data)
@@ -2538,6 +2620,13 @@ def get_size_limit() -> int:
     if handler is None:
         return 242  # default LoRaWAN payload size, matches LoRaHandler's own default
     return handler.get_size_limit()
+
+def size_limit_now() -> int:
+    """The mDot's payload limit asked now (AT+TXS), not the stored one."""
+    handler = get_lora_handler()
+    if handler is None:
+        return 242
+    return handler.size_limit_now()
 
 def refresh_size_limit() -> bool:
     """Convenience function to manually refresh the size limit"""

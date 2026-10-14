@@ -95,15 +95,18 @@ class TestCompressBitmapBudget:
 
 class TestCompressBitmapEdgeCases:
 
-    def test_budget_below_min_returns_empty_without_calling_compress_image(self):
-        """Budget < 32B → immediate b'', compress_image never called."""
+    def test_budget_below_min_compresses_full_size_to_queue(self):
+        """Budget < 32B (e.g. DR0's 11 B) → a full-size bitmap (238 B) for the
+        store-and-forward queue and the IP uplink, not nothing."""
         import ticktalk_main
-        # lora_limit=35 → max_bitmap_bytes=31 < 32 → skip
+        # lora_limit=35 → max_bitmap_bytes=31 < 32
         with patch("tools.lora_handler_concurrent.get_size_limit", return_value=35), \
-             patch("tools.compress_segmented.compress_image") as mock_ci:
+             patch("tools.compress_segmented.compress_image",
+                   return_value={"success": True, "compressed_data": b"x" * 200,
+                                 "total_size": 200, "width": 64, "height": 64}) as mock_ci:
             result = ticktalk_main.compress_bitmap.__wrapped__("fake.png")
-        assert result == b""
-        mock_ci.assert_not_called()
+        assert result == b"x" * 200
+        assert mock_ci.call_args.kwargs["max_bytes"] == 238
 
     def test_compress_failure_returns_empty(self):
         import ticktalk_main

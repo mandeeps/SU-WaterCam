@@ -27,6 +27,10 @@
  * Channel 0A Type 02: WittyPi battery voltage (float32, Volts)
  * Channel 0A Type 03: WittyPi internal voltage (float32, Volts)
  * Channel 0B Type 01: Debug status message (JSON string)
+ * Channel 0C Type 01: Compact packet (11 bytes in all, for DR0): u32 capture time, u8 flags
+ *   (bit 0 emergency, 1 flood detected, 2 flood growing, 3 health fault, 4 moved, 5 under-voltage
+ *   now, 6 since boot), u8 battery % (255 none), u8 Witty Pi voltage in 25 mV (255 none),
+ *   i8 temperature C (-128 none), u8 humidity % (255 none). The full packet follows later.
  * 
  * @param {object} input
  * @param {number[]} input.bytes Byte array containing the uplink payload, e.g. [255, 230, 255, 0]
@@ -168,6 +172,29 @@ function decodeUplink(input) {
           result.debug_status_raw = debugJson;
           result.debug_status_error = 'Failed to parse JSON';
         }
+        break;
+      }
+      case 'c-1': {
+        // Compact packet (tools/lora_handler_concurrent.py encode_compact_packet)
+        result.compact = 1;
+        result.timestamp = view.getUint32(offset, false);
+        const flags = view.getUint8(offset + 4);
+        result.emergency_status = flags & 1;
+        result.camera_flood_detected = (flags >> 1) & 1;
+        result.camera_flood_growing = (flags >> 2) & 1;
+        result.health_status = (flags >> 3) & 1;
+        result.movement_threshold = (flags >> 4) & 1;
+        result.pi_undervoltage = (flags & 0x60) ? 1 : 0;
+        result.pi_throttled = ((flags >> 5) & 1) | (((flags >> 6) & 1) << 16);
+        const battery = view.getUint8(offset + 5);
+        if (battery !== 255) result.battery_percent = battery;
+        const volts = view.getUint8(offset + 6);
+        if (volts !== 255) result.wittypi_battery_voltage = volts / 40;
+        const temp = view.getInt8(offset + 7);
+        if (temp !== -128) result.temperature_celsius = temp;
+        const humidity = view.getUint8(offset + 8);
+        if (humidity !== 255) result.relative_humidity = humidity;
+        offset += 9;
         break;
       }
       default:

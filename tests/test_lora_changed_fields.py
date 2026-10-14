@@ -48,11 +48,16 @@ class TestChangedFields:
         assert "a" in sc.changed_fields({"a": 1}, state_path=str(path))
 
 
-def _run_capture(tmp_path, temperature, joined=True, bitmap=b"\x01\x00\x40\x00\x30\x00", orientation=None):
+def _run_capture(tmp_path, temperature, joined=True, bitmap=b"\x01\x00\x40\x00\x30\x00", orientation=None,
+                 size_limit=242, transmit_ok=True):
     """Run lora_token_with_tracker once; return the handler mock."""
     import ticktalk_main
     handler = MagicMock()
     handler.is_joined.return_value = joined
+    handler.size_limit_now.return_value = size_limit
+    handler.transmit.return_value = transmit_ok
+    from tools.lora_handler_concurrent import _encode_compressed_packet
+    handler.compressed_encoding.side_effect = _encode_compressed_packet
     cap = tmp_path / "20261007-120000"
     cap.mkdir(exist_ok=True)
     (cap / "capture_time").write_text("1791400000\n")
@@ -79,7 +84,7 @@ def _run_capture(tmp_path, temperature, joined=True, bitmap=b"\x01\x00\x40\x00\x
 
 
 def _sensor_packets(handler):
-    return [c.args[0] for c in handler.queue_transmit.call_args_list
+    return [c.args[0] for c in handler.compressed_encoding.call_args_list
             if "flood_bitmap_compressed" not in c.args[0]]
 
 
@@ -102,7 +107,7 @@ class TestLoRaSend:
 
     def test_bitmap_packet_still_sent_without_capture_time(self, tmp_path):
         h = _run_capture(tmp_path, 20.0)
-        bitmaps = [c.args[0] for c in h.queue_transmit.call_args_list if "flood_bitmap_compressed" in c.args[0]]
+        bitmaps = [c.args[0] for c in h.compressed_encoding.call_args_list if "flood_bitmap_compressed" in c.args[0]]
         assert bitmaps and "timestamp" not in bitmaps[0]
 
     def test_queued_fields_count_as_sent(self, tmp_path):
@@ -204,3 +209,34 @@ class TestPosition:
         assert sc.changed_fields({"lat_lon_z": [10.0001, 20.0, 5.0]}, state_path=path) == {}
         out = sc.changed_fields({"lat_lon_z": [10.0003, 20.0, 5.0]}, state_path=path)
         assert out["lat_lon_z"]["change_m"] == __import__("pytest").approx(33.4, abs=1)
+
+
+class TestSmallPayloadLimit:
+    """US915 DR0 (11 B): queue what doesn't fit, send the compact packet instead."""
+
+    def test_dr0_queues_full_packets_and_sends_compact(self, tmp_path):
+        big_bitmap = bytes(60)
+        h = _run_capture(tmp_path, 20.0, size_limit=11, bitmap=big_bitmap)
+        sent = [c.args[0] for c in h.transmit.call_args_list]
+        assert len(sent) == 1 and sent[0].startswith("0c01") and len(sent[0]) == 22
+        h.enqueue.assert_called_once()
+        sensor_hex, bitmap_hex = h.enqueue.call_args.args[:2]
+        assert sensor_hex.startswith("0001") and bitmap_hex.startswith("0818")
+
+    def test_small_bitmap_still_goes_at_dr0(self, tmp_path):
+        h = _run_capture(tmp_path, 20.0, size_limit=11)     # 10-byte bitmap packet fits
+        sent = [c.args[0] for c in h.transmit.call_args_list]
+        assert sent[0].startswith("0c01") and sent[1].startswith("0818")   # compact first: bitmap pairing
+        assert h.enqueue.call_args.args[1] is None
+
+    def test_failed_send_is_queued(self, tmp_path):
+        h = _run_capture(tmp_path, 20.0, size_limit=242, transmit_ok=False)
+        h.enqueue.assert_called_once()
+        assert h.enqueue.call_args.args[0].startswith("0001")
+        # the key readings still get a try in 11 bytes
+        assert any(c.args[0].startswith("0c01") for c in h.transmit.call_args_list)
+
+    def test_fits_sends_no_compact_and_queues_nothing(self, tmp_path):
+        h = _run_capture(tmp_path, 20.0, size_limit=242)
+        assert not any(c.args[0].startswith("0c01") for c in h.transmit.call_args_list)
+        h.enqueue.assert_not_called()
