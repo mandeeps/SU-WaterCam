@@ -30,7 +30,7 @@ def test_stores_token_and_keeps_other_settings(tmp_path, capsys):
     assert cfg["ip_upload"] == {"device_id": "watercam-005", "api_key": TOKEN}
     assert cfg["area_threshold"] == 15
     out = capsys.readouterr().out
-    assert "watercam-005" in out and TOKEN[-4:] in out and TOKEN not in out
+    assert "watercam-005" in out and TOKEN[-4:] not in out   # no part of the token is printed
 
 
 def test_file_becomes_owner_only_and_stays_so(tmp_path):
