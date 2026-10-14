@@ -142,6 +142,13 @@ if result["success"] and result["command"]:
 The server marks the command as delivered **atomically on retrieval** — there is
 no separate acknowledge call. Once polled, the command is consumed.
 
+A wake polls three times: at the start (often skipped, the network isn't up
+yet), after an IP uplink is delivered, and **just before shutdown**
+(`tools/last_downlink_check.py`, from `call_shutdown`). The last one takes up
+to three queued commands and never brings a connection up. If a command turns
+emergency mode on or starts a remote access session, the node doesn't power
+off. LoRa needs no poll: Class C downlinks reach the mDot as soon as they're sent.
+
 **Returns:**
 ```python
 {
