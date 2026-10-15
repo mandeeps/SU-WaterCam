@@ -1,0 +1,8 @@
+[Unit]
+Description=WaterCam hard maximum awake time: power off a Pi that has been up too long (docs/FIELD_DEPLOYMENT_GUIDE.md 1.9)
+
+[Service]
+Type=oneshot
+User=pi
+WorkingDirectory=/home/pi/SU-WaterCam
+ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/tools/max_awake.py check
