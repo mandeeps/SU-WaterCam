@@ -164,6 +164,75 @@ The fixes are #97 (arm the next wake before the load starts) and #98 (after a po
 
 ---
 
+## Combined-load test: segmentation, all cores, WiFi and cellular (006, 2026-10-15)
+
+006 on its V50 (wall-charged, Y-adapter), Witty Pi output sampled about 30 times
+a second (`i2cget` of the current/voltage registers, which take a fresh ADC
+reading each time), `get_throttled` once a second. Segmentation was the 5-band
+model through the daemon in a loop; "all cores" was `stress-ng --cpu 4`. WiFi
+and cellular were never on together: the WiFi radio was off whenever cellular
+was up. Uploads went to a public speed-test endpoint (Cloudflare `__up`); the
+whole test used about 6.4 MB of cellular data.
+
+| Load | Mean | Peak | Min Vout | Pi under-voltage |
+|---|---|---|---|---|
+| Idle | 0.63 A | 0.96 A | 4.75 V | no |
+| Segmentation | 1.32 A | 1.97 A | 4.63 V | no |
+| Segmentation + cellular upload (2 MB) | 1.18 A | **2.51 A** | **4.55 V** | **yes** (0x50005) |
+| All 4 cores | 1.42 A | 1.93 A | 4.66 V | no |
+| All 4 cores + WiFi upload (100 MB) | 1.67 A | 1.97 A | 4.56 V | no |
+| All 4 cores + cellular upload (3 MB) | 1.34 A | **2.60 A** | **4.48 V** | **yes** (0x50005) |
+| Cellular alone (a first run, after the load ended) | 0.61 A | 1.76 A | 4.51 V | no |
+
+- **The modem's bursts on top of CPU load are what cross the line:** 0.6-0.9 A
+  above the load alone, to 2.5-2.6 A, and the Pi flagged under-voltage while it
+  happened, even through the Y-adapter. WiFi under the same load stayed under
+  2 A without a flag.
+- **The fix in software:** heavy CPU work and cellular transmission take turns
+  (`tools/lock_utils.py` `power_exclusive`). Coregistration and segmentation
+  hold the power lock while they run; `ip_uplink_transmit` holds it from bringing
+  cellular up (or from the start of the upload, if cellular is already up) until
+  the upload is done. Each side waits up to 60-120 s and then goes ahead anyway,
+  so a stuck holder never stalls a cycle. The cost is a few seconds' delay to the
+  second iteration on a wake that falls back to cellular.
+- Cellular came up in about 1 s on the second run; on the first it took about
+  5 minutes, which wasn't seen again.
+
+### Powering the modem separately (split cable or powered hub)
+
+Feeding the modem from the V50 directly would take its bursts off the Pi's
+input, but it has two real problems:
+
+- **Back-feeding the Pi.** A powered hub, or a split cable that keeps the VBUS
+  wire to the Pi, can send 5 V back into the Pi's USB port. Many cheap hubs
+  connect their supply to the upstream VBUS as well as the downstream ports. The
+  Pi 4 doesn't support being powered that way: it can be left partly powered,
+  fail to boot, or risk SD-card writes. On our units it is worse: when the Witty
+  Pi cuts the Pi's power at shutdown, a back-fed USB port could keep the Pi
+  partly powered, which can confuse the Witty Pi's halt detection (it watches
+  the Pi's TXD line) and defeat the power cut. Only a hub that doesn't back-feed
+  (or a cable with the Pi-side VBUS wire cut, which forum users report as
+  unreliable) would be safe.
+- **An always-on load.** Today the modem loses power with the Pi, and USB is
+  off through early boot (`usb-power-off.service`). Powered from the V50 it
+  would stay on between wakes, registered on the network, a continuous drain
+  on a 48 Wh pack, unless something switched it, and `uhubctl` would no longer
+  control its power.
+
+So the software fix is the better first step; a separately powered modem would
+need a non-back-feeding switched supply.
+
+### Is one USB-C cable enough without the overlap?
+
+With heavy work and cellular kept apart, the peaks were 1.97 A (segmentation,
+or all cores with WiFi) and 1.76 A (cellular alone): just under one V50 A
+port's 2 A rating. The single cable also drops less than the Y-adapter in our
+earlier measurement (29 vs 59 mV/A, [UNIT006_POWER_FAILURE.md](UNIT006_POWER_FAILURE.md)),
+so on a unit with a low reading it would give a higher voltage, provided the
+port holds a 2 A peak. That's at the edge of the rating, so confirm it on a
+unit (009, which reads low) by running this test on a single cable with the
+power lock in place before taking the Y-adapter off any unit.
+
 ## Ideas that still apply
 
 | Idea | Effect |

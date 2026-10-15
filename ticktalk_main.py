@@ -744,11 +744,13 @@ def record_audio(trigger, directory):
 @SQify
 def coregistration(dirname, lepton_state, photo_state):
     from tools.coreg_multiple import coreg
+    from tools.lock_utils import power_exclusive
     from tools.lock_utils import flock_deadline
     print(f"\n running coreg on {dirname}\n")
     try:
         # a hung previous holder must not stall the graph (and shutdown) forever
-        with flock_deadline("/tmp/watercam_coreg.lock", 300):
+        with flock_deadline("/tmp/watercam_coreg.lock", 300), \
+                power_exclusive("coregistration", 120):
             filepath = coreg(dirname)
         print(f"\n {filepath} images registered \n")
     except Exception as e:
@@ -776,7 +778,7 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
     import subprocess
 
     from tools.coreg_multiple import config as coreg_config
-    from tools.lock_utils import flock_deadline
+    from tools.lock_utils import flock_deadline, power_exclusive
     from tools.segformer_client import segformer_via_daemon
 
     # The fallback cold-loads the model (~40 s); give it room but not forever, since
@@ -808,8 +810,11 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
 
     try:
         # Prefer the persistent daemon — no cold-start, model stays loaded.
+        # Not while a cellular upload runs: together they pull the Pi under-voltage.
         if os.path.exists(socket_path):
-            if segformer_via_daemon(tiff_path, output_path, socket_path):
+            with power_exclusive("segmentation", 120):
+                ok = segformer_via_daemon(tiff_path, output_path, socket_path)
+            if ok:
                 return output_path
             print("⚠️ Daemon call failed, falling back to subprocess")
 
@@ -817,7 +822,8 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
         segformer_location = os.environ.get("SEGFORMER_DIR", "/home/pi/segformer_5band")
         segformer_python = os.environ.get("SEGFORMER_PYTHON", "/home/pi/miniforge3/envs/5band/bin/python")
         segformer_coreg = os.path.join(segformer_location, "segment_tiff_5band.py")
-        with flock_deadline("/tmp/watercam_segformer.lock", FALLBACK_TIMEOUT_S):
+        with flock_deadline("/tmp/watercam_segformer.lock", FALLBACK_TIMEOUT_S), \
+                power_exclusive("segmentation", 120):
             subprocess.run(
                 [segformer_python, segformer_coreg, tiff_path],
                 cwd=segformer_location, timeout=FALLBACK_TIMEOUT_S,
@@ -1868,6 +1874,13 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     cellular_started = False
     delivered = False
     result = {}
+    # Cellular transmission and heavy CPU work take turns (tools/lock_utils.py
+    # power_exclusive): held from bringing cellular up, or from here if it is
+    # already up, until this upload is done.
+    from tools.lock_utils import PowerHold
+    power = PowerHold()
+    if cellular_active:
+        power.acquire("cellular upload", 60)
     try:
         # ── Collect sensor data ────────────────────────────────────────────────
         # Sensor collection is done BEFORE the reachability check so that a
@@ -2035,6 +2048,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                 print("📶 Server reachable over WiFi — cellular not needed")
         if not reachable and on_demand and not cellular_active:
             print(f"📶 IP uplink: server unreachable — bringing up {cell}")
+            power.acquire("cellular upload", 60)
             cellular_started = cellular_up(cell, tx.cellular_connect_timeout_s)
             # Tailscale needs a few seconds to find a path over the new link. Wait
             # for it locally rather than probing /health over cellular; the POST
@@ -2123,6 +2137,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             except Exception as exc:
                 print(f"⚠️ IP downlink after uplink failed: {exc}")
         tx.close()
+        power.release()
 
 
 @SQify
