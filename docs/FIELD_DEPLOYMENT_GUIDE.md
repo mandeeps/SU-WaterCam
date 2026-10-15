@@ -235,6 +235,13 @@ present:
 - `dtoverlay=uart5` and `enable_uart=1`: the mDot is on the Pi 4's alternative
   UART, `/dev/ttyAMA5` (GPIO 12/13, header pins 32/33), not the primary one, whose TX line the Witty
   Pi watches to tell that the Pi has halted;
+- `gpio=5=op,dh` (**mDot units only**): drives GPIO5 (header pin 29) high from the
+  firmware, so the mDot's PA_6 input reads "Pi is on" for remote start. Without
+  it the line depends on the Pi's boot pull-up, which is too weak for the mDot's
+  2.1 V minimum input-high level. Never set it on a handheld unit whose capture
+  button is on pin 29. Check it after a reboot with `pinctrl get 5`: it must
+  show `op dh`. A Witty Pi L3V7 (firmware ID 0x37) has a daemon that
+  reconfigures GPIO5, so don't use that model on an mDot unit;
 - `dtparam=i2c_arm=on`, `dtparam=i2c_arm_baudrate=400000`: Witty Pi, IMU, AHT20;
 - `dtparam=spi=on`: the Lepton thermal camera;
 - `camera_auto_detect=0` with `dtoverlay=ov5647`: the RGB camera;
@@ -552,6 +559,23 @@ sudo systemctl enable --now wittypi-next-wake.service
 
 `ticktalk` and the WittyPi services start on the next boot.
 
+**Hard maximum awake time.** A wake is normally 10-15 minutes and `ticktalk`
+powers the Pi off at the end of it. `max-awake.timer` is the backstop for when
+that doesn't happen (a hung capture, a restart loop): every 5 minutes it checks
+the uptime and, past `max_awake_minutes` (`runtime_config.json`, default 60,
+`0` turns it off), runs the same `doas /usr/sbin/shutdown -h now` that
+`call_shutdown()` uses, so the Witty Pi sees a normal halt and
+`wittypi-next-wake.service` arms the next slot. It never powers off while a
+remote debug session is active, while `/etc/watercam/hold-awake` exists
+(`sudo touch` it to keep a unit up on the bench, remove it afterwards), or in
+emergency mode. `tools/max_awake.py check --dry-run` says what it would do.
+
+```bash
+sudo cp config/max-awake.service config/max-awake.timer /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now max-awake.timer
+```
+
 `lora_daemon.service` owns the mDot serial port, and every LoRa send or
 receive in `ticktalk` goes through it. Without it the unit has no LoRa.
 `segformer_daemon.service` keeps the flood-segmentation model loaded. Without
@@ -671,7 +695,8 @@ card can't stop the unit. The photos aren't uploaded, so this is the only copy.
 - **Remote debug session** (dashboard "Remote access"): install
   `config/remote-debug.service` and `.timer` and enable the timer, as in
   [REMOTE_DEBUG_SESSION.md](REMOTE_DEBUG_SESSION.md). Install it on every unit
-  that should accept remote-access requests.
+  that should accept remote-access requests (`sudo systemctl enable --now
+  remote-debug.timer`); the startup health check (1.10) warns when it isn't enabled.
 - **filebrowser:** off on deployed units (`sudo systemctl disable --now
   filebrowser`), it costs cellular data ([1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
 - **Legacy, don't install:** `watercam.service` (replaced by ticktalk),
@@ -696,6 +721,11 @@ Without `--no-alert`, a failure also queues a LoRa alert.
 
 Exit code `0` means everything passed. If it fails, read the printed failure reasons (`gps_unavailable`, `imu_unavailable`, `wittypi_input_voltage_low_*V`,
 etc.) and resolve them before moving on. GPS will very likely fail indoors, re-check it outdoors in Phase 2.
+
+After the readings it prints `WARN` lines for setup mistakes (they don't change
+the exit code): on an mDot unit, GPIO5 not driven high (`pinctrl get 5` should say
+`op dh`; see 1.3.3) or a Witty Pi L3V7 (firmware ID 0x37); and
+`remote-debug.timer` not enabled.
 
 ### 1.11 Test a full capture-and-transmit cycle
 
@@ -753,6 +783,28 @@ Then install this repo's `beforeScript.sh`, which lets the WittyPi arm the next 
 ```bash
 cp /home/pi/SU-WaterCam/config/wittypi/beforeScript.sh /home/pi/wittypi/beforeScript.sh
 ```
+
+### 1.14 Post-install smoke checklist
+
+Run through this on the bench, after the last reboot and before the unit leaves
+for the site:
+
+- [ ] `pinctrl get 5` shows `op dh` (mDot units only; not on a handheld with the
+      capture button on pin 29).
+- [ ] `systemctl is-enabled remote-debug.timer max-awake.timer` prints `enabled`
+      twice (`/etc/watercam/hold-awake` must not exist).
+- [ ] `venv/bin/python tools/initial_health_check.py --no-alert` prints no
+      `WARN` lines (GPS may fail indoors).
+- [ ] **IP token:** if `ip_upload.enabled` is true, the operator installs the
+      unit's token from their own terminal with `tools/set_ip_token.py`
+      ([IP_TRANSMISSION.md](IP_TRANSMISSION.md#installing-the-ip-token)); don't
+      paste it into a chat or command line. A unit without a token is
+      unauthenticated on the dashboard.
+- [ ] One full cycle (1.11) reached the dashboard, and `ticktalk.service` is
+      enabled.
+- [ ] **Tailscale ACL:** diff the live ACL in the admin console against
+      `config/tailscale-acl.txt` (they have diverged before) and update whichever
+      is wrong.
 
 ## Phase 2: Field Installation
 

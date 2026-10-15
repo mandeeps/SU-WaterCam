@@ -9,6 +9,12 @@ Runs once at startup to validate:
 - GPS location availability
 - IMU orientation availability
 
+It also prints WARN lines (they don't change the exit code) for setup mistakes:
+- on a unit with an mDot: GPIO5 (the mDot's "Pi is on" line) not driven high
+  (`gpio=5=op,dh` in config.txt), or a Witty Pi L3V7 (firmware ID 0x37), whose
+  daemon reconfigures GPIO5;
+- `remote-debug.timer` not enabled.
+
 On any failure, sends a LoRa packet describing the failed checks.
 
 This script is intended to be invoked manually or from a systemd unit/boot script
@@ -142,6 +148,75 @@ def evaluate_health(
     }
 
 
+CONFIG_TXT_PATHS = ('/boot/firmware/config.txt', '/boot/config.txt')
+WITTYPI_FW_L3V7 = 0x37   # Witty Pi 4 L3V7: its daemon reconfigures GPIO5
+
+
+def has_mdot(config_paths=CONFIG_TXT_PATHS) -> bool:
+    """A unit with an mDot has the uart5 overlay on (handhelds don't)."""
+    for path in config_paths:
+        try:
+            with open(path) as f:
+                for line in f:
+                    if line.split('#', 1)[0].strip().startswith('dtoverlay=uart5'):
+                        return True
+            return False
+        except OSError:
+            continue
+    return False
+
+
+def parse_pinctrl(output: str) -> Dict[str, str]:
+    """Function and level from `pinctrl get 5`, e.g. '5: op dh pu | hi // GPIO5 = output'
+    gives {'func': 'op', 'level': 'dh'}; {} when it isn't that form."""
+    parts = output.split('|', 1)[0].split()
+    if len(parts) < 3 or not parts[0].rstrip(':').isdigit():
+        return {}
+    return {'func': parts[1], 'level': parts[2]}
+
+
+def read_gpio5() -> Dict[str, str]:
+    try:
+        import subprocess
+        r = subprocess.run(['pinctrl', 'get', '5'], capture_output=True, text=True, timeout=5)
+        return parse_pinctrl(r.stdout) if r.returncode == 0 else {}
+    except Exception:
+        return {}
+
+
+def read_wittypi_firmware_id():
+    """The Witty Pi's firmware ID (I2C 0x08, register 0), or None."""
+    try:
+        from tools.powerlog import i2c
+        return i2c(0)
+    except Exception:
+        return None
+
+
+def remote_debug_timer_enabled() -> bool:
+    try:
+        import subprocess
+        r = subprocess.run(['systemctl', 'is-enabled', 'remote-debug.timer'],
+                           capture_output=True, text=True, timeout=10)
+        return r.stdout.strip() == 'enabled'
+    except Exception:
+        return False
+
+
+def setup_warnings(mdot: bool, gpio5: Dict[str, str], wittypi_fw, timer_enabled: bool) -> List[str]:
+    """Setup mistakes that don't stop a cycle but lose remote start or remote access."""
+    warnings: List[str] = []
+    if mdot:
+        if gpio5.get('func') != 'op' or gpio5.get('level') != 'dh':
+            got = f"{gpio5.get('func')} {gpio5.get('level')}" if gpio5 else 'unreadable'
+            warnings.append(f'gpio5_not_driven_high ({got}; add gpio=5=op,dh to config.txt)')
+        if wittypi_fw == WITTYPI_FW_L3V7:
+            warnings.append('wittypi_l3v7_daemon_reconfigures_gpio5 (firmware ID 0x37)')
+    if not timer_enabled:
+        warnings.append('remote_debug_timer_not_enabled (systemctl enable --now remote-debug.timer)')
+    return warnings
+
+
 def send_lora_alert() -> bool:
     """Transmit a minimal LoRa alert signalling health-check failure.
 
@@ -201,6 +276,11 @@ def main(argv=None) -> int:
     result = evaluate_health(cpu_temp_c, wittypi, gps, imu)
     print(format_report(result), flush=True)
     print(software_report(), flush=True)
+    mdot = has_mdot()
+    for w in setup_warnings(mdot, read_gpio5() if mdot else {},
+                            read_wittypi_firmware_id() if mdot else None,
+                            remote_debug_timer_enabled()):
+        print(f"  WARN  {w}", flush=True)
 
     if result['status'] == 'fail':
         if not args.no_alert:

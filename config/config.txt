@@ -54,6 +54,10 @@ dtparam=eth_led1=4
 
 # enable alt UARTs to connect to mDot without interfering with WittyPi
 dtoverlay=uart5
+# mDot units only: drive the mDot's "Pi is on" input (PA_6 -> GPIO5, pin 29) high.
+# Without it the line relies on the boot pull-up, out of spec for the mDot's 2.1 V VIH.
+# Never on a handheld whose capture button is on pin 29 (button-service-gpiozero.py).
+gpio=5=op,dh
 dtoverlay=pi3-miniuart-bt
 dtoverlay=miniuart-bt
 
