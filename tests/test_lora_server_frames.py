@@ -109,5 +109,50 @@ def test_runtime_manager_14_94_never_sets_photo_interval(tmp_path):
         m = LoRaRuntimeManager(config_file=str(cfg))
     for payload in ("149402", "0e5e0102", "14945"):
         m.process_lora_payload(payload)
-    m.process_lora_command("14", 120)
     assert m.get_parameter("photo_interval") == 60
+
+
+# ── one downlink table: legacy codes gone, code 12 is the server's index ────
+
+@pytest.mark.parametrize("payload", [
+    "22000001", "31000005", "32000003", "40000000", "41000005", "42000007", "43000001",   # TLV
+    "22001", "31005", "32003", "40000", "41005", "42007", "43001",                          # digits
+])
+def test_removed_legacy_codes_ignored(handler, payload):
+    before = dict(handler.config)
+    handler.decode(payload)
+    for key in ("debug_mode", "compression_level", "max_retransmissions",
+                "auto_shutdown_enabled", "shutdown_iteration_limit",
+                "data_retention_days", "backup_enabled"):
+        assert handler.config.get(key) == before.get(key)
+
+
+@pytest.mark.parametrize("payload", ["22000001", "40000000", "41000001", "42000001", "43000000", "31000005", "32000003"])
+def test_runtime_manager_ignores_removed_codes(tmp_path, payload):
+    import json
+    from tools.lora_runtime_integration import LoRaRuntimeManager
+    cfg = tmp_path / "runtime_config.json"
+    cfg.write_text(json.dumps({"auto_shutdown_enabled": True, "shutdown_iteration_limit": 2}))
+    with patch.object(LoRaRuntimeManager, "_init_lora_handler", lambda self: None):
+        m = LoRaRuntimeManager(config_file=str(cfg))
+    assert not m.process_lora_payload(payload)
+    assert m.get_parameter("auto_shutdown_enabled") is True
+    assert m.get_parameter("shutdown_iteration_limit") == 2
+
+
+def test_runtime_manager_code_12_is_an_hours_index(tmp_path):
+    """12 92 carries an index into the server's hours list [1, 3, 6, 24, 72]."""
+    import json
+    from tools.lora_runtime_integration import LoRaRuntimeManager
+    cfg = tmp_path / "runtime_config.json"
+    cfg.write_text(json.dumps({"monitoring_frequency": 60}))
+    with patch.object(LoRaRuntimeManager, "_init_lora_handler", lambda self: None):
+        m = LoRaRuntimeManager(config_file=str(cfg))
+    assert m.process_lora_payload("129203")        # index 3 = 24 h
+    assert m.get_parameter("monitoring_frequency") == 24 * 60
+
+
+@pytest.mark.parametrize("payload", ["129203", "0c5c0103"])
+def test_handler_code_12_is_an_hours_index_on_every_path(handler, payload):
+    handler.decode(payload)
+    assert handler.config["monitoring_frequency"] == 24 * 60
