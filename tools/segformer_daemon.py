@@ -51,7 +51,9 @@ import time
 
 import numpy as np
 
-from segformer_preprocess import (band_order_problem, model_band_indices, normalization_mode,
+from segformer_preprocess import (ModelContractError, band_order_problem,
+                                  check_model_contract, graph_input_channels,
+                                  model_band_indices, model_metadata, normalization_mode,
                                   resize_interpolation,
                                   normalization_spec, preprocess_bands,
                                   water_class_index)
@@ -86,6 +88,12 @@ def load_session(model_path: str):
         providers=["CPUExecutionProvider"],
     )
     input_meta = session.get_inputs()[0]
+    # Refuse a model whose declared channels or normalization we cannot honour,
+    # before it ever sees a frame. A model with no metadata passes (min-max).
+    problems = check_model_contract(model_metadata(session), graph_input_channels(session))
+    if problems:
+        raise ModelContractError(
+            f"{os.path.basename(model_path)} refused: " + "; ".join(problems))
     _, how = normalization_mode(session)
     log.info(
         "Model loaded: %s | input '%s' %s | normalisation: %s",
@@ -373,8 +381,11 @@ def parse_args():
 MODEL_INFO_NAME = "model.json"
 
 
-def record_model(model_path: str, info_path: str) -> None:
+def record_model(model_path: str, info_path: str, meta: dict | None = None) -> None:
     """Write which model is loaded ({"name", "path", "sha256"}); never raises.
+
+    `meta` (the model's metadata_props) adds "model_name" and "model_version"
+    when the model declares them; "name" stays the file name.
 
     The model can change with no git change at all (a new file, or a drop-in
     pointing --model elsewhere), so the node reports the file's own hash.
@@ -389,29 +400,52 @@ def record_model(model_path: str, info_path: str) -> None:
                 digest.update(chunk)
         tmp = f"{info_path}.{os.getpid()}"
         with open(tmp, "w") as f:
-            json.dump({"name": os.path.basename(real), "path": real,
-                       "sha256": digest.hexdigest()}, f)
+            rec = {"name": os.path.basename(real), "path": real,
+                   "sha256": digest.hexdigest()}
+            for k in ("model_name", "model_version"):
+                if (meta or {}).get(k):
+                    rec[k] = meta[k]
+            json.dump(rec, f)
         os.replace(tmp, info_path)
-        log.info("Model %s sha256 %s", os.path.basename(real), digest.hexdigest()[:8])
+        log.info("Model %s%s sha256 %s", os.path.basename(real),
+                 f" ({meta['model_name']} {meta.get('model_version', '')})"
+                 if (meta or {}).get("model_name") else "", digest.hexdigest()[:8])
     except OSError as e:
         log.warning("Could not record the loaded model in %s: %s", info_path, e)
+
+
+def load_first_usable(candidates: list):
+    """(path, session) for the first candidate that exists and loads; else exits.
+
+    A model the daemon refuses (`ModelContractError`) or cannot open is logged
+    as an error and the next candidate (the FP32 fallback) is tried, so a bad
+    drop-in does not leave the node without segmentation if the old model is
+    still there.
+    """
+    tried = False
+    for path in candidates:
+        if not os.path.exists(path):
+            log.warning("model not found at %s", path)
+            continue
+        tried = True
+        try:
+            return path, load_session(path)
+        except Exception as e:                        # noqa: BLE001
+            log.error("cannot use %s: %s", path, e)
+    log.error("No usable ONNX model found%s. Run tools/export_segformer_onnx.py first.",
+              "" if tried else " (none exist)")
+    sys.exit(1)
 
 
 def main():
     args = parse_args()
 
-    model_path = args.model
-    if not os.path.exists(model_path):
-        log.warning("INT8 model not found at %s, trying FP32 fallback", model_path)
-        model_path = args.fallback_fp32
-        if not os.path.exists(model_path):
-            log.error(
-                "No ONNX model found. Run tools/export_segformer_onnx.py first."
-            )
-            sys.exit(1)
-
-    session = load_session(model_path)
-    record_model(model_path, os.path.join(os.path.dirname(args.socket), MODEL_INFO_NAME))
+    candidates = [args.model]
+    if args.fallback_fp32 and args.fallback_fp32 != args.model:
+        candidates.append(args.fallback_fp32)
+    model_path, session = load_first_usable(candidates)
+    record_model(model_path, os.path.join(os.path.dirname(args.socket), MODEL_INFO_NAME),
+                 model_metadata(session))
     serve(session, args.socket)
 
 

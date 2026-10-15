@@ -90,6 +90,110 @@ def normalization_spec(session) -> dict:
                 "desc": f"min-max (WARNING: '{declared}' declared but unusable: {e})"}
 
 
+#: Highest model-metadata schema this daemon understands (docs/MODEL_METADATA.md
+#: in segformer_5band / photo_processing).
+SUPPORTED_SCHEMA = 1
+KNOWN_BANDS = ("red", "green", "blue", "thermal", "nir")
+
+
+class ModelContractError(ValueError):
+    """The model declares something this daemon cannot feed it correctly."""
+
+
+def model_metadata(session) -> dict:
+    """The graph's `metadata_props` ({} for a model that declares nothing)."""
+    try:
+        return dict(session.get_modelmeta().custom_metadata_map or {})
+    except Exception:                      # noqa: BLE001 - never break inference
+        return {}
+
+
+def check_model_contract(meta: dict, graph_channels=None) -> list:
+    """Reasons to refuse a model, from its metadata; [] when it is fine.
+
+    Refuses what would feed the model a distribution or channel set it never
+    saw (a wrong channel count, a normalization or resize this daemon cannot
+    reproduce, a schema from the future). Band *order* is not checked here: it
+    stays a warning (`band_order_problem`). A model with no metadata passes:
+    it is the historical min-max model.
+    """
+    import json
+
+    if not meta:
+        return []
+    out = []
+    schema = meta.get("schema", "")
+    if schema:
+        if not schema.isdigit() or int(schema) > SUPPORTED_SCHEMA:
+            out.append(f"metadata schema {schema!r} is newer than this daemon "
+                       f"understands (max {SUPPORTED_SCHEMA})")
+
+    bands = [b.strip().lower() for b in (meta.get("bands") or "").split(",") if b.strip()]
+    declared = meta.get("in_channels", "")
+    n = None
+    if declared:
+        if not declared.isdigit():
+            out.append(f"in_channels {declared!r} is not a number")
+        else:
+            n = int(declared)
+    if bands:
+        unknown = [b for b in bands if b not in KNOWN_BANDS]
+        if unknown:
+            out.append(f"unknown band name(s) {','.join(unknown)}: the daemon can "
+                       f"only supply {','.join(KNOWN_BANDS)}")
+        if len(set(bands)) != len(bands):
+            out.append("a band is listed more than once")
+        if n is not None and n != len(bands):
+            out.append(f"in_channels {n} but {len(bands)} bands declared")
+    if n is None and bands:
+        n = len(bands)
+    if n is not None and isinstance(graph_channels, int) and n != graph_channels:
+        out.append(f"metadata says {n} channels but the graph takes {graph_channels}")
+    if n is not None and not 1 <= n <= len(KNOWN_BANDS):
+        out.append(f"cannot supply {n} channels (the capture has {len(KNOWN_BANDS)} bands)")
+
+    if meta.get("input_layout", "NCHW") != "NCHW":
+        out.append(f"input_layout {meta['input_layout']!r}: only NCHW is supported")
+
+    norm = meta.get("normalization", "")
+    if norm:
+        embedded = norm.startswith(EMBEDDED_PREFIX)
+        method = norm.split(":", 1)[-1]
+        if embedded:
+            if meta.get("input_range", "raw_0_255") != "raw_0_255":
+                out.append(f"{norm} but input_range {meta['input_range']!r}: the daemon "
+                           f"feeds raw 0-255 to a graph that normalises itself")
+        elif method not in SUPPORTED_EXTERNAL:
+            out.append(f"normalization {norm!r} is not one the daemon can apply "
+                       f"({', '.join(SUPPORTED_EXTERNAL)}, or embedded:<method>)")
+        else:
+            keys = {"meanstd": ("norm_mean", "norm_std"),
+                    "percentile": ("norm_p_lo", "norm_p_hi")}.get(method, ())
+            for k in keys:
+                try:
+                    vals = json.loads(meta[k])
+                    if len(vals) != (n or len(vals)):
+                        out.append(f"{k} has {len(vals)} values for {n} channels")
+                except (KeyError, ValueError, TypeError):
+                    out.append(f"normalization {norm!r} needs {k}, which is missing "
+                               f"or unreadable")
+
+    interp = (meta.get("resize_interpolation") or "").strip().lower()
+    if interp and interp not in RESIZE_INTERPOLATIONS:
+        out.append(f"resize_interpolation {interp!r}: the daemon has "
+                   f"{', '.join(RESIZE_INTERPOLATIONS)}")
+    return out
+
+
+def graph_input_channels(session):
+    """The graph's channel count if it is static, else None."""
+    try:
+        c = session.get_inputs()[0].shape[1]
+    except Exception:                      # noqa: BLE001
+        return None
+    return c if isinstance(c, int) else None
+
+
 def canonical_bands(descriptions) -> list:
     """Band descriptions from the TIFF -> canonical names, `None` where unknown."""
     out = []
