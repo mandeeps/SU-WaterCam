@@ -1071,12 +1071,6 @@ class LoRaHandler:
                     self.update_config('emergency_frequency', val_int)
                     print(f'Emergency frequency updated to: {val_int} minutes')
                 # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
-                elif channel == '15' and command == '95':
-                    self.update_config('neighborhood_emergency_frequency', val_int)
-                    print(f'Neighborhood emergency frequency updated to: {val_int} minutes')
-                elif channel == '44' and command == '00':
-                    self.update_config('audio_recording_enabled', bool(val_int))
-                    print(f'Audio recording {"enabled" if bool(val_int) else "disabled"}')
                 elif channel == '99' and command == '00':
                     self.update_config('emergency_mode', False)
                     print('✅ Emergency mode deactivated')
@@ -1161,25 +1155,6 @@ class LoRaHandler:
                             print(f'Invalid emergency frequency value: {value}')
                             
                     # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
-
-                    elif channel == '15' and command == '9':
-                        # Neighborhood emergency frequency - minute value
-                        try:
-                            val = int(value)
-                            self.update_config('neighborhood_emergency_frequency', val)
-                            print(f'Neighborhood emergency frequency updated to: {val} minutes')
-                        except ValueError:
-                            print(f'Invalid neighborhood emergency frequency value: {value}')
-                            
-                            
-                    elif channel == '44' and command == '0':
-                        # Audio recording enabled/disabled
-                        try:
-                            val = bool(int(value))
-                            self.update_config('audio_recording_enabled', val)
-                            print(f'Audio recording {"enabled" if val else "disabled"}')
-                        except ValueError:
-                            print(f'Invalid audio recording value: {value}')
 
                     elif channel == '99' and command == '0':
                         # Deactivate emergency mode

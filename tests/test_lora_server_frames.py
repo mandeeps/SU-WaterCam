@@ -115,15 +115,16 @@ def test_runtime_manager_14_94_never_sets_photo_interval(tmp_path):
 # ── one downlink table: legacy codes gone, code 12 is the server's index ────
 
 @pytest.mark.parametrize("payload", [
-    "22000001", "31000005", "32000003", "40000000", "41000005", "42000007", "43000001",   # TLV
-    "22001", "31005", "32003", "40000", "41005", "42007", "43001",                          # digits
+    "22000001", "31000005", "32000003", "40000000", "41000005", "42000007", "43000001", "15950001", "44000001",   # TLV
+    "22001", "31005", "32003", "40000", "41005", "42007", "43001", "15951", "44001",              # digits
 ])
 def test_removed_legacy_codes_ignored(handler, payload):
     before = dict(handler.config)
     handler.decode(payload)
     for key in ("debug_mode", "compression_level", "max_retransmissions",
                 "auto_shutdown_enabled", "shutdown_iteration_limit",
-                "data_retention_days", "backup_enabled"):
+                "data_retention_days", "backup_enabled",
+                "neighborhood_emergency_frequency", "audio_recording_enabled"):
         assert handler.config.get(key) == before.get(key)
 
 
