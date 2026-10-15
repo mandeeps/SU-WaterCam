@@ -235,9 +235,9 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
     # four-class taxonomy (snow_ice, wet_ground) are training signal that makes
     # the water boundary sharper, not output — see photo_processing/training/
     # classes.py. Collapsing here rather than downstream matters because
-    # tools/compress_segmented.py Otsu-thresholds this PNG into a 1-bit LoRa
-    # bitmap: hand it {0, 85, 170, 255} and the threshold lands somewhere
-    # arbitrary between two non-water classes.
+    # tools/compress_segmented.py thresholds this PNG at 127 into a 1-bit LoRa
+    # bitmap and refuses anything but a 0/255 mask: hand it {0, 85, 170, 255}
+    # and two non-water classes would count as water.
     n_classes = logits.shape[1]
     water = water_class_index(session)
     if water >= 0:

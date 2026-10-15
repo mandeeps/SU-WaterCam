@@ -986,6 +986,10 @@ def compress_bitmap(segmented_file):
     print(f"Compressing {segmented_file} for transmission (max {max_bitmap_bytes}B)")
     try:
         bitmap_dict = compress_image(segmented_file, max_bytes=max_bitmap_bytes)
+        if bitmap_dict.get('error'):
+            # Not a binary water mask (tools/compress_segmented.py mask_format_error)
+            print(f"⚠️ Not sending {segmented_file}: {bitmap_dict['error']}")
+            return b''
         if not bitmap_dict.get('success'):
             print(f"⚠️ Could not compress {segmented_file} to fit within {max_bitmap_bytes}B (SF too high?)")
             return b''
