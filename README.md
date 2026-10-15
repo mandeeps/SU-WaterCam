@@ -59,7 +59,7 @@ or compatible single board computer with GPIO, I2C, SPI etc.,
 
        TODO: Alternatively boot from USB SSD - this has pros/cons
 
-* Dual USB-A to single USB-C cable to connect Voltaic power pack to WittyPi 4, preferably with right angle connectors for smaller cases. Only the USB-A ports on the Voltaic packs are always on, and each outputs 2.5A max, 3A together, so we need a Y power adapter.
+* Dual USB-A to single USB-C cable to connect Voltaic power pack to WittyPi 4, preferably with right angle connectors for smaller cases. Only the USB-A ports on the Voltaic packs are always on. Each is rated 5 V / 2 A, 3 A for both together (Voltaic V50 instruction booklet), and with the cellular modem active a unit has peaked at 2.06–2.21 A, so we use a Y power adapter across both ports (docs/UNIT006_POWER_FAILURE.md).
 
 * Cellular modem with USB Adapter board:
   
