@@ -279,10 +279,26 @@ use them. `config/xtra2.bin` is optional assistance data that speeds up a cold
 GNSS fix (README, "XTRA").
 
 **Witty Pi software** comes from the UUGear installer on our images, in
-`/home/pi/wittypi`. Its settings, as on 006: Default ON (register 17 = 1, a 10 s
-delay), low-voltage cut-off 3.5 V, recovery 3.7 V, power-cut delay 7 s. Check
-them with the read-only register dump in [WITTYPI_SCHEDULING.md](WITTYPI_SCHEDULING.md)
-section 7, and set them with `cd ~/wittypi && sudo ./wittyPi.sh` if different.
+`/home/pi/wittypi`. Settings:
+- **Default ON:** on (register 17 = 1) with a **10 s delay** (register 47), so
+  the Pi isn't switched on into a supply that is still settling when power
+  returns.
+- **Low-voltage cut-off and recovery voltage: disabled** (registers 19 and 22 =
+  255, register 41 "ignore power mode" = 0). Our units are fed 5 V into the
+  Witty Pi's USB-C input (power mode 0, register 7), and in that mode the
+  firmware ignores both thresholds: it never blocks an alarm on voltage and
+  never shuts down or wakes on it (`canTriggerAlarm()`, the low-voltage and
+  recovery checks in the firmware only act in mode 1, the 6-30 V input, or
+  with register 41 set). The V50's output is regulated 5 V until the pack is
+  empty and then cuts off, so a threshold would give no warning anyway; an
+  empty pack is handled by Default ON plus recovery boot (1.9) and the mDot
+  watchdog. Don't set register 41: a threshold would then also act on the
+  brief dips at power-on and during uploads, and could cut a cycle short.
+- **Power-cut delay:** 7 s (register 21 = 70).
+
+Check them with the read-only register dump in
+[WITTYPI_SCHEDULING.md](WITTYPI_SCHEDULING.md) section 7 (add 7 and 41), and
+set them with `cd ~/wittypi && sudo ./wittyPi.sh` if different.
 
 **Expected from the image, leave enabled:** `fake-hwclock` (keeps the clock
 moving forward across boots without the RTC) and `zramswap`. Mask the file
