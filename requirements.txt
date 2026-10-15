@@ -21,6 +21,13 @@
 # 2. The pip packages below, into that venv:
 #
 #      /home/pi/SU-WaterCam/venv/bin/pip install -r requirements.txt
+#      /home/pi/SU-WaterCam/venv/bin/pip install --ignore-installed six==1.17.0
+#
+#    The second line puts six in the venv itself. With --system-site-packages pip
+#    counts apt's python3-six as installed and skips it, and apt removes
+#    python3-six along with python3-opencv (purged per the guide, 1.3.2): then
+#    astunparse fails to import and ticktalk doesn't start (010, 2026-10-15).
+#    Check: venv/bin/python -c "import six; print(six.__file__)" is under venv/.
 #
 # OpenCV (cv2) comes from pip's opencv-python-headless, not apt's python3-opencv:
 # apt's package pulls in about 450 MB the nodes never use (VTK, LLVM 17, AMD's GPU
