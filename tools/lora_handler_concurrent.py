@@ -1070,40 +1070,12 @@ class LoRaHandler:
                     self.update_config('stage_threshold', float(val_int))
                     print(f'Stage threshold updated to: {float(val_int)} cm')
                 elif channel == '12' and command == '92':
-                    self.update_config('monitoring_frequency', val_int)
-                    print(f'Monitoring frequency updated to: {val_int} minutes')
+                    # an index into the server's hours list, not minutes
+                    self._apply_server_frame([{'code': '12 92', 'payload_hex': f"{val_int & 0xFF:02x}"}])
                 elif channel == '13' and command == '93':
                     self.update_config('emergency_frequency', val_int)
                     print(f'Emergency frequency updated to: {val_int} minutes')
                 # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
-                elif channel == '15' and command == '95':
-                    self.update_config('neighborhood_emergency_frequency', val_int)
-                    print(f'Neighborhood emergency frequency updated to: {val_int} minutes')
-                elif channel == '22' and command == '00':
-                    self.update_config('debug_mode', bool(val_int))
-                    print(f'Debug mode {"enabled" if bool(val_int) else "disabled"}')
-                elif channel == '31' and command == '00':
-                    cl = max(1, min(10, val_int))
-                    self.update_config('compression_level', cl)
-                    print(f'Compression level updated to: {cl}')
-                elif channel == '32' and command == '00':
-                    self.update_config('max_retransmissions', val_int)
-                    print(f'Max retransmissions updated to: {val_int}')
-                elif channel == '40' and command == '00':
-                    self.update_config('auto_shutdown_enabled', bool(val_int))
-                    print(f'Auto shutdown {"enabled" if bool(val_int) else "disabled"}')
-                elif channel == '41' and command == '00':
-                    self.update_config('shutdown_iteration_limit', val_int)
-                    print(f'Shutdown iteration limit updated to: {val_int}')
-                elif channel == '42' and command == '00':
-                    self.update_config('data_retention_days', val_int)
-                    print(f'Data retention updated to: {val_int} days')
-                elif channel == '43' and command == '00':
-                    self.update_config('backup_enabled', bool(val_int))
-                    print(f'Backup {"enabled" if bool(val_int) else "disabled"}')
-                elif channel == '44' and command == '00':
-                    self.update_config('audio_recording_enabled', bool(val_int))
-                    print(f'Audio recording {"enabled" if bool(val_int) else "disabled"}')
                 elif channel == '99' and command == '00':
                     self.update_config('emergency_mode', False)
                     print('✅ Emergency mode deactivated')
@@ -1172,14 +1144,12 @@ class LoRaHandler:
                             print(f'Invalid stage threshold value: {value}')
                             
                     elif channel == '12' and command == '9':
-                        # Monitoring frequency - minute value
+                        # Monitoring frequency - index into the server's hours list
                         try:
-                            val = int(value)
-                            self.update_config('monitoring_frequency', val)
-                            print(f'Monitoring frequency updated to: {val} minutes')
+                            self._apply_server_frame([{'code': '12 92', 'payload_hex': f"{int(value) & 0xFF:02x}"}])
                         except ValueError:
                             print(f'Invalid monitoring frequency value: {value}')
-                            
+
                     elif channel == '13' and command == '9':
                         # Emergency frequency - minute value
                         try:
@@ -1190,91 +1160,6 @@ class LoRaHandler:
                             print(f'Invalid emergency frequency value: {value}')
                             
                     # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
-
-                    elif channel == '15' and command == '9':
-                        # Neighborhood emergency frequency - minute value
-                        try:
-                            val = int(value)
-                            self.update_config('neighborhood_emergency_frequency', val)
-                            print(f'Neighborhood emergency frequency updated to: {val} minutes')
-                        except ValueError:
-                            print(f'Invalid neighborhood emergency frequency value: {value}')
-                            
-                            
-                    elif channel == '22' and command == '0':
-                        # Debug mode
-                        try:
-                            val = bool(int(value))
-                            self.update_config('debug_mode', val)
-                            print(f'Debug mode {"enabled" if val else "disabled"}')
-                        except ValueError:
-                            print(f'Invalid debug mode value: {value}')
-                            
-                            
-                            
-                    elif channel == '31' and command == '0':
-                        # Compression level
-                        try:
-                            val = int(value)
-                            val = max(1, min(10, val))  # Clamp between 1-10
-                            self.update_config('compression_level', val)
-                            print(f'Compression level updated to: {val}')
-                        except ValueError:
-                            print(f'Invalid compression level value: {value}')
-                            
-                    elif channel == '32' and command == '0':
-                        # Max retransmissions
-                        try:
-                            val = int(value)
-                            self.update_config('max_retransmissions', val)
-                            print(f'Max retransmissions updated to: {val}')
-                        except ValueError:
-                            print(f'Invalid max retransmissions value: {value}')
-                            
-                    elif channel == '40' and command == '0':
-                        # Auto shutdown enabled/disabled
-                        try:
-                            val = bool(int(value))
-                            self.update_config('auto_shutdown_enabled', val)
-                            print(f'Auto shutdown {"enabled" if val else "disabled"}')
-                        except ValueError:
-                            print(f'Invalid auto shutdown value: {value}')
-                            
-                    elif channel == '41' and command == '0':
-                        # Shutdown iteration limit
-                        try:
-                            val = int(value)
-                            self.update_config('shutdown_iteration_limit', val)
-                            print(f'Shutdown iteration limit updated to: {val}')
-                        except ValueError:
-                            print(f'Invalid shutdown iteration limit value: {value}')
-                            
-                    elif channel == '42' and command == '0':
-                        # Data retention days
-                        try:
-                            val = int(value)
-                            self.update_config('data_retention_days', val)
-                            print(f'Data retention updated to: {val} days')
-                        except ValueError:
-                            print(f'Invalid data retention value: {value}')
-                            
-                    elif channel == '43' and command == '0':
-                        # Backup enabled/disabled
-                        try:
-                            val = bool(int(value))
-                            self.update_config('backup_enabled', val)
-                            print(f'Backup {"enabled" if val else "disabled"}')
-                        except ValueError:
-                            print(f'Invalid backup value: {value}')
-
-                    elif channel == '44' and command == '0':
-                        # Audio recording enabled/disabled
-                        try:
-                            val = bool(int(value))
-                            self.update_config('audio_recording_enabled', val)
-                            print(f'Audio recording {"enabled" if val else "disabled"}')
-                        except ValueError:
-                            print(f'Invalid audio recording value: {value}')
 
                     elif channel == '99' and command == '0':
                         # Deactivate emergency mode

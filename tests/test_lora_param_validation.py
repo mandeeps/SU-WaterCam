@@ -283,11 +283,25 @@ class TestSetParameterRanges(unittest.TestCase):
     # ---- new-key rollback: key must not be left behind on save failure -------
 
     def test_new_key_not_left_behind_on_save_failure(self):
-        # 'novel_param' does not exist in parameters before this call
-        self.mgr.parameters.pop('novel_param', None)
+        # 'emergency_since' (settable, not a default) does not exist in parameters before this call
+        self.mgr.parameters.pop('emergency_since', None)
         with patch.object(self.mgr, 'save_parameters', return_value=False):
-            self.mgr.set_parameter('novel_param', 'x')
-        self.assertNotIn('novel_param', self.mgr.parameters)
+            self.mgr.set_parameter('emergency_since', 1.5)
+        self.assertNotIn('emergency_since', self.mgr.parameters)
+
+    # ---- allow-list: unknown keys are refused --------------------------------
+
+    def test_unknown_key_refused(self):
+        self.assertFalse(self.mgr._validate_param('not_a_setting', 1))
+        self.assertFalse(self.mgr.set_parameter('not_a_setting', 1))
+        self.assertNotIn('not_a_setting', self.mgr.parameters)
+
+    def test_ip_upload_block_not_settable(self):
+        self.assertFalse(self.mgr.set_parameter('ip_upload', {'enabled': True}))
+
+    def test_every_default_key_is_settable(self):
+        for key in self.mgr._DEFAULT_PARAMS:
+            self.assertIn(key, self.mgr._SETTABLE_PARAMS)
 
 
 if __name__ == '__main__':

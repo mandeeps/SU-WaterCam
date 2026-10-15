@@ -112,6 +112,41 @@ class LoRaRuntimeManager:
         'emergency_max_hours',
     })
 
+    # The one list of runtime_config defaults (written on first run, merged under
+    # a loaded file).
+    _DEFAULT_PARAMS: dict = {
+        # Flood detection parameters
+        'area_threshold': 10,           # Flood detection area threshold (%)
+        'stage_threshold': 50,          # Water stage threshold (cm)
+        
+        # Timing parameters
+        'monitoring_frequency': 60,     # Monitoring frequency (minutes)
+        'emergency_frequency': 30,       # Emergency transmission frequency (minutes)
+        'photo_interval': 60,           # Capture period within a wake (seconds)
+        'neighborhood_emergency_frequency': 30,  # Neighborhood emergency frequency
+        
+        # System control parameters
+        'emergency_mode': False,        # Emergency mode flag
+        'debug_mode': False,            # Debug logging mode
+        
+        # Performance parameters
+        'max_retransmissions': 3,       # Maximum retransmission attempts
+        
+        # Advanced parameters
+        'auto_shutdown_enabled': True,  # Enable automatic shutdown after iterations
+        'shutdown_iteration_limit': 2,  # Number of iterations before shutdown
+        'data_retention_days': 0,       # Days to keep photos (JPEG, TIFF) and audio; 0 keeps all
+        'storage_low_free_pct': 20,     # Below this free space, remove the oldest photos...
+        'storage_target_free_pct': 30,  # ... until this much is free (tools/data_retention.py)
+        'backup_enabled': True,         # Enable data backup
+        'audio_recording_enabled': False,  # USB microphone recording; only some units have one
+        'iteration_count': 0,           # Wake cycles since boot (atomic_increment_iteration_count)
+    }
+
+    # Keys set_parameter() accepts: the defaults, the ranged keys, and the
+    # emergency timestamp it writes itself. Anything else is refused.
+    _SETTABLE_PARAMS: frozenset = frozenset(_DEFAULT_PARAMS) | frozenset(_PARAM_RANGES) | {'emergency_since'}
+
     def __init__(self, config_file='runtime_config.json', lora_handler=None):
         self.config_file = config_file
         self.parameters = self.load_parameters()
@@ -180,33 +215,7 @@ class LoRaRuntimeManager:
 
     def load_parameters(self) -> Dict[str, Any]:
         """Load runtime parameters from file or create defaults"""
-        default_params = {
-            # Flood detection parameters
-            'area_threshold': 10,           # Flood detection area threshold (%)
-            'stage_threshold': 50,          # Water stage threshold (cm)
-            
-            # Timing parameters
-            'monitoring_frequency': 60,     # Monitoring frequency (minutes)
-            'emergency_frequency': 30,       # Emergency transmission frequency (minutes)
-            'photo_interval': 60,           # Capture period within a wake (seconds)
-            'neighborhood_emergency_frequency': 30,  # Neighborhood emergency frequency
-            
-            # System control parameters
-            'emergency_mode': False,        # Emergency mode flag
-            'debug_mode': False,            # Debug logging mode
-            
-            # Performance parameters
-            'max_retransmissions': 3,       # Maximum retransmission attempts
-            
-            # Advanced parameters
-            'auto_shutdown_enabled': True,  # Enable automatic shutdown after iterations
-            'shutdown_iteration_limit': 2,  # Number of iterations before shutdown
-            'data_retention_days': 0,       # Days to keep photos (JPEG, TIFF) and audio; 0 keeps all
-            'storage_low_free_pct': 20,     # Below this free space, remove the oldest photos...
-            'storage_target_free_pct': 30,  # ... until this much is free (tools/data_retention.py)
-            'backup_enabled': True,         # Enable data backup
-            'audio_recording_enabled': False,  # USB microphone recording; only some units have one
-        }
+        default_params = dict(self._DEFAULT_PARAMS)
         
         try:
             # read_json restores the file from runtime_config.json.bak if a power
@@ -361,7 +370,10 @@ class LoRaRuntimeManager:
         return self.lora_handler is not None
     
     def _validate_param(self, key: str, value: Any) -> bool:
-        """Return True if value is within the allowed range for key, False otherwise."""
+        """Return True if key is settable and value is within its allowed range."""
+        if key not in self._SETTABLE_PARAMS:
+            print(f"Warning: unknown parameter '{key}', refused")
+            return False
         bounds = self._PARAM_RANGES.get(key)
         if bounds is None:
             return True
@@ -456,199 +468,36 @@ class LoRaRuntimeManager:
             self.update_callbacks[parameter] = []
         self.update_callbacks[parameter].append(callback)
     
-    def process_lora_command(self, command: str, value: Any) -> bool:
-        """Process incoming LoRa command in old format (backward compatibility)"""
-        command_mapping = {
-            # Basic flood detection commands
-            '10': lambda v: self.set_parameter('area_threshold', v * 10),  # Area threshold (10% increments)
-            '11': lambda v: self.set_parameter('stage_threshold', v),      # Stage threshold (cm)
-            
-            # Timing commands
-            '12': lambda v: self.set_parameter('monitoring_frequency', v), # Monitoring frequency (minutes)
-            '13': lambda v: self.set_parameter('emergency_frequency', v),  # Emergency frequency (minutes)
-            '15': lambda v: self.set_parameter('neighborhood_emergency_frequency', v), # Neighborhood frequency
-            
-            # System control commands
-            '21': lambda v: True,   # remote start '!': powers the Pi on, not emergency mode (21 91 HH)
-            '22': lambda v: self.set_parameter('debug_mode', bool(v)),           # Debug mode
-            
-            # Performance commands
-            '32': lambda v: self.set_parameter('max_retransmissions', v),        # Max retransmissions
-            
-            # Advanced commands
-            '40': lambda v: self.set_parameter('auto_shutdown_enabled', bool(v)), # Auto shutdown
-            '41': lambda v: self.set_parameter('shutdown_iteration_limit', v),    # Shutdown limit
-            '42': lambda v: self.set_parameter('data_retention_days', v),         # Data retention
-            '43': lambda v: self.set_parameter('backup_enabled', bool(v)),        # Backup enable
-            
-            # Emergency mode deactivation
-            '99': lambda v: self.set_parameter('emergency_mode', False),          # Deactivate emergency mode
-        }
-        
-        if command in command_mapping:
-            try:
-                return bool(command_mapping[command](value))
-            except Exception as e:
-                print(f"Error processing LoRa command '{command}' with value '{value}': {e}")
-                return False
-        else:
-            print(f"Unknown LoRa command: {command}")
-            return False
-    
     def process_lora_payload(self, payload: str) -> bool:
-        """Process LoRa payload in new [Channel][Command][Value] format"""
+        """Apply a server downlink frame (hex) through the one downlink table.
+
+        The table, its value widths and the decoding live in tools/transmit_ip.py
+        (DOWNLINK_CODE_LENGTHS, apply_downlink_command), shared with the IP path
+        and the LoRa handler's decode(). Anything else is ignored.
+        """
         try:
             # A bare 21 is the remote start byte '!': it powers a sleeping Pi
-            # on and is not emergency mode (that is 21 91 HH, handled by the
-            # LoRa handler's decode()).
+            # on and is not emergency mode (that is 21 91 HH).
             if payload == '21':
                 print('ℹ️ Remote start byte received; emergency mode needs 21 91 HH')
                 return True
-            
-            # First try TLV hex multi-command format: [ch:1B][cmd:1B][len:1B][value:len]
-            def _is_hex_string(s: str) -> bool:
-                hexdigits = set('0123456789abcdefABCDEF')
-                return len(s) % 2 == 0 and all(c in hexdigits for c in s)
-
-            def _parse_tlv_commands(hex_payload: str):
-                try:
-                    data = bytes.fromhex(hex_payload)
-                except Exception as e:
-                    print(f"Warning: Failed to parse TLV hex payload '{hex_payload}': {e}")
-                    return None
-                i = 0
-                cmds = []
-                while i + 3 <= len(data):
-                    ch = data[i]
-                    cmd = data[i+1]
-                    vlen = data[i+2]
-                    i += 3
-                    if i + vlen > len(data):
-                        return None
-                    value_bytes = data[i:i+vlen]
-                    i += vlen
-                    cmds.append((ch, cmd, value_bytes))
-                if i != len(data):
-                    return None
-                return cmds
-
-            def _to_int_be(b: bytes) -> int:
-                if not b:
-                    return 0
-                return int.from_bytes(b, byteorder='big', signed=False)
-
-            def _apply_command_tlv(ch: int, cmd: int, value_bytes: bytes) -> bool:
-                channel = f"{ch:02d}"
-                command = f"{cmd:02d}"
-                val_int = _to_int_be(value_bytes)
-
-                def _set(param, value) -> bool:
-                    return self.set_parameter(param, value)
-
-                if channel == '10' and command == '90':
-                    return _set('area_threshold', val_int * 10)
-                elif channel == '11' and command == '91':
-                    return _set('stage_threshold', val_int)
-                elif channel == '12' and command == '92':
-                    return _set('monitoring_frequency', val_int)
-                elif channel == '13' and command == '93':
-                    return _set('emergency_frequency', val_int)
-                # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
-                elif channel == '15' and command == '95':
-                    return _set('neighborhood_emergency_frequency', val_int)
-                elif channel == '22' and command == '00':
-                    return _set('debug_mode', bool(val_int))
-                elif channel == '31' and command == '00':
-                    return _set('compression_level', val_int)
-                elif channel == '32' and command == '00':
-                    return _set('max_retransmissions', val_int)
-                elif channel == '40' and command == '00':
-                    return _set('auto_shutdown_enabled', bool(val_int))
-                elif channel == '41' and command == '00':
-                    return _set('shutdown_iteration_limit', val_int)
-                elif channel == '42' and command == '00':
-                    return _set('data_retention_days', val_int)
-                elif channel == '43' and command == '00':
-                    return _set('backup_enabled', bool(val_int))
-                elif channel == '99' and command == '00':
-                    return _set('emergency_mode', False)
-                else:
-                    print(f"Warning: unknown TLV channel/command {channel}/{command}, ignored")
-                    return False
-
-            if _is_hex_string(payload):
-                tlv_cmds = _parse_tlv_commands(payload)
-                if tlv_cmds is not None and len(tlv_cmds) > 0:
-                    results = []
-                    failed = []
-                    for ch, cmd, vbytes in tlv_cmds:
-                        ok = _apply_command_tlv(ch, cmd, vbytes)
-                        results.append(ok)
-                        if not ok:
-                            failed.append(f"{ch:02d}/{cmd:02d}")
-                    # Commands applied sequentially — partial apply is possible:
-                    # if a later command fails, earlier successful ones remain persisted.
-                    fully_applied = all(results)
-                    if not fully_applied:
-                        print(
-                            f"Warning: {len(failed)}/{len(results)} TLV commands not applied: {failed}. "
-                            "Earlier commands in the same payload may already have been applied."
-                        )
-                    return fully_applied
-
-            # Handle new format: [Channel][Command][Value] (single)
-            if len(payload) >= 4:
-                channel = payload[:2]
-                command = payload[2:4]
-                value = payload[4:]
-                
-                # Process commands based on channel and command combination.
-                # set_parameter() is the single validation + coercion point; dispatchers
-                # just parse the raw string into the right type and delegate.
-                try:
-                    if channel == '10' and command == '90':
-                        return self.set_parameter('area_threshold', int(value) * 10)
-                    elif channel == '11' and command == '91':
-                        return self.set_parameter('stage_threshold', float(value))
-                    elif channel == '12' and command == '92':
-                        return self.set_parameter('monitoring_frequency', int(value))
-                    elif channel == '13' and command == '93':
-                        return self.set_parameter('emergency_frequency', int(value))
-                    # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
-                    elif channel == '15' and command == '95':
-                        return self.set_parameter('neighborhood_emergency_frequency', int(value))
-                    elif channel == '22' and command == '00':
-                        return self.set_parameter('debug_mode', bool(int(value)))
-                    elif channel == '31' and command == '00':
-                        return self.set_parameter('compression_level', int(value))
-                    elif channel == '32' and command == '00':
-                        return self.set_parameter('max_retransmissions', int(value))
-                    elif channel == '40' and command == '00':
-                        return self.set_parameter('auto_shutdown_enabled', bool(int(value)))
-                    elif channel == '41' and command == '00':
-                        return self.set_parameter('shutdown_iteration_limit', int(value))
-                    elif channel == '42' and command == '00':
-                        return self.set_parameter('data_retention_days', int(value))
-                    elif channel == '43' and command == '00':
-                        return self.set_parameter('backup_enabled', bool(int(value)))
-                    elif channel == '99' and command == '00':
-                        return self.set_parameter('emergency_mode', False)
-                    else:
-                        print(f'Unknown channel/command combination: Channel {channel}, Command {command} with value: {value}')
-                        return False
-                except (ValueError, TypeError) as e:
-                    print(f'Invalid value for channel {channel} command {command}: {value!r} ({e})')
-                    return False
-            else:
-                print(f'Invalid payload format: {payload} (minimum 4 characters required for [Channel][Command][Value] format)')
+            try:
+                from tools.transmit_ip import parse_downlink_frame, apply_downlink_command
+            except ImportError:
+                from transmit_ip import parse_downlink_frame, apply_downlink_command
+            clean = payload.strip()
+            parts = None
+            if clean and len(clean) % 2 == 0 and all(c in '0123456789abcdefABCDEF' for c in clean):
+                parts = parse_downlink_frame(bytes.fromhex(clean))
+            if not parts:
+                print(f"Unknown LoRa payload ignored: {payload!r}")
                 return False
-                
+            result = apply_downlink_command({'parts': parts}, set_param_fn=self.set_parameter)
+            return bool(result['applied']) and not result['skipped']
         except Exception as e:
             print(f"Error processing LoRa command '{payload}': {e}")
-            import traceback
-            traceback.print_exc()
             return False
-    
+
     def get_system_status(self) -> Dict[str, Any]:
         """Get current system status including all parameters"""
         return {
@@ -837,33 +686,18 @@ if __name__ == "__main__":
     # Print initial status
     manager.print_status()
     
-    # Test some parameter updates using new format
-    print("\n--- Testing Parameter Updates (New Format) ---")
-    manager.process_lora_payload('1090')  # Set area threshold to 0%
-    manager.process_lora_payload('1010')  # Set area threshold to 100%
-    manager.process_lora_payload('1191')  # Set stage threshold to 1 cm
-    manager.process_lora_payload('1292')  # Set monitoring frequency to 2 min
-    manager.process_lora_payload('2100')  # Activate emergency mode
+    # Test some parameter updates with server frames ([code 2B][value])
+    print("\n--- Testing Parameter Updates (server frames) ---")
+    manager.process_lora_payload('109005')    # area threshold 5%
+    manager.process_lora_payload('11910032')  # stage threshold 50 cm
+    manager.process_lora_payload('129201')    # monitoring frequency index 1 (3 h)
+    manager.process_lora_payload('219101')    # emergency mode on for 1 h
     
     # Print updated status
     manager.print_status()
     
     # Test deactivating emergency mode
-    manager.process_lora_payload('9900')
-    manager.print_status()
-    
-    # Test some parameter updates using old format (backward compatibility)
-    print("\n--- Testing Parameter Updates (Old Format) ---")
-    manager.process_lora_command('10', 5)  # Set area threshold to 50%
-    manager.process_lora_command('11', 75)  # Set stage threshold to 75 cm
-    manager.process_lora_command('12', 30)  # Set monitoring frequency to 30 min
-    manager.process_lora_command('21', None)  # Activate emergency mode
-    
-    # Print updated status
-    manager.print_status()
-    
-    # Test deactivating emergency mode
-    manager.process_lora_command('99', None)
+    manager.process_lora_payload('9999')
     manager.print_status()
     
     # Clean up
