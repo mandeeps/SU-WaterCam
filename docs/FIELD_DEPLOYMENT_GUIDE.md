@@ -225,6 +225,93 @@ Updates are then done by hand (`docs/RELEASES.md`).
 
 Afterwards, run the health check (1.10) and a test cycle (1.11) as usual.
 
+### 1.3.3 Boot settings, base packages and other system files
+
+Our images come with these; check them on a unit set up another way, and after
+an OS upgrade. Reboot after changing `config.txt` or `cmdline.txt`.
+
+**`/boot/firmware/config.txt`:** the settings in `config/config.txt` must be
+present:
+- `dtoverlay=uart5` and `enable_uart=1`: the mDot is on the Pi 4's alternative
+  UART, `/dev/ttyAMA5` (GPIO 12/13, header pins 32/33), not the primary one, whose TX line the Witty
+  Pi watches to tell that the Pi has halted;
+- `dtparam=i2c_arm=on`, `dtparam=i2c_arm_baudrate=400000`: Witty Pi, IMU, AHT20;
+- `dtparam=spi=on`: the Lepton thermal camera;
+- `camera_auto_detect=0` with `dtoverlay=ov5647`: the RGB camera;
+- `dtoverlay=disable-bt` (Bluetooth off), audio, HDMI and LEDs off, to save power;
+- **stock clocks:** no `arm_freq`, `over_voltage` or `initial_turbo` lines
+  (an overclock or boot turbo raises the boot inrush that dips the supply;
+  [POWER_ANALYSIS.md](POWER_ANALYSIS.md)). `arm_boost=1` is the Pi 4's stock
+  1.8 GHz and stays.
+
+`config/config.txt` also has a `spidev.bufsiz` line, which does nothing there:
+it belongs in `cmdline.txt`.
+
+**`/boot/firmware/cmdline.txt`:** don't copy `config/cmdline.txt` over it (its
+`root=` is generic and it loads the USB-gadget modules). Make sure the one line
+contains `spidev.bufsiz=131072` (Lepton frames) and
+`cfg80211.ieee80211_regdom=US` (WiFi channels), keeping the image's own
+`root=PARTUUID=…`.
+
+**Packages** the software needs:
+
+```bash
+sudo apt install i2c-tools gpsd opendoas nftables uhubctl tio
+```
+
+(`i2c-tools` for the Witty Pi and the recovery/next-wake services, `gpsd` for
+GNSS, `opendoas` for the shutdown/USB/clock rules in 1.9, `nftables` for the
+cellular filter in 1.5.1, `uhubctl` for USB power in 1.9, `tio` for the mDot.)
+`lrzsz` isn't needed: `mDot-AT-firmware/tools/mdot_serial_flash.py` has its own
+YMODEM sender.
+
+**Cellular modem GNSS** (units with the Quectel EC25):
+
+```bash
+sudo install -m 755 config/quectel-gnss-enable /usr/local/bin/
+sudo install -m 644 config/77-mm-quectel-ignore-gps.rules /etc/udev/rules.d/
+sudo udevadm control --reload && sudo udevadm trigger
+```
+
+The helper turns the GNSS engine on (`AT+QGPS=1`) for `quectel-gnss.service`
+(1.9); the udev rule keeps ModemManager off the modem's GNSS ports so gpsd can
+use them. `config/xtra2.bin` is optional assistance data that speeds up a cold
+GNSS fix (README, "XTRA").
+
+**Witty Pi software** comes from the UUGear installer on our images, in
+`/home/pi/wittypi`. Settings:
+- **Default ON:** on (register 17 = 1) with a **10 s delay** (register 47), so
+  the Pi isn't switched on into a supply that is still settling when power
+  returns.
+- **Low-voltage cut-off and recovery voltage: disabled** (registers 19 and 22 =
+  255, register 41 "ignore power mode" = 0). Our units are fed 5 V into the
+  Witty Pi's USB-C input (power mode 0, register 7), and in that mode the
+  firmware ignores both thresholds: it never blocks an alarm on voltage and
+  never shuts down or wakes on it (`canTriggerAlarm()`, the low-voltage and
+  recovery checks in the firmware only act in mode 1, the 6-30 V input, or
+  with register 41 set). The V50's output is regulated 5 V until the pack is
+  empty and then cuts off, so a threshold would give no warning anyway; an
+  empty pack is handled by Default ON plus recovery boot (1.9) and the mDot
+  watchdog. Don't set register 41: a threshold would then also act on the
+  brief dips at power-on and during uploads, and could cut a cycle short.
+- **Power-cut delay:** 7 s (register 21 = 70).
+
+Check them with the read-only register dump in
+[WITTYPI_SCHEDULING.md](WITTYPI_SCHEDULING.md) section 7 (add 7 and 41), and
+set them with `cd ~/wittypi && sudo ./wittyPi.sh` if different.
+
+**Expected from the image, leave enabled:** `fake-hwclock` (keeps the clock
+moving forward across boots without the RTC) and `zramswap`. Mask the file
+indexer like the other timers in 1.3.2: `sudo systemctl mask locate.timer`.
+
+**Firewall:** no host firewall beyond Tailscale's own rules and the cellular
+filter in 1.5.1, so no `ufw` and no stock `nftables.service`.
+
+**Tailscale:** the tailnet ACL (`config/tailscale-acl.txt`, applied in the
+Tailscale admin console, not on the node) limits the relays (DERP) to nyc, ord
+and iad, which cuts cellular data. The live ACL has diverged from the repo
+copy; check the admin console when changing it.
+
 ### 1.4 Sync the clock
 
 This should have been done automatically, but check the system time is correct.
@@ -576,6 +663,22 @@ Whatever the setting, when the card's free space is at or below
 `storage_low_free_pct` (20 %) each wake removes the oldest JPEGs and TIFFs until
 `storage_target_free_pct` (30 %) is free (`tools/data_retention.py`), so a full
 card can't stop the unit. The photos aren't uploaded, so this is the only copy.
+
+### 1.9.2 Optional, legacy and bench-only services
+
+- **Remote debug session** (dashboard "Remote access"): install
+  `config/remote-debug.service` and `.timer` and enable the timer, as in
+  [REMOTE_DEBUG_SESSION.md](REMOTE_DEBUG_SESSION.md). Install it on every unit
+  that should accept remote-access requests.
+- **filebrowser:** off on deployed units (`sudo systemctl disable --now
+  filebrowser`), it costs cellular data ([1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
+- **Legacy, don't install:** `watercam.service` (replaced by ticktalk),
+  `gps.service` (replaced by `quectel-gnss.service`), `button.service`,
+  `temperature.service`; `config/dhcpcd.conf` (NetworkManager is used) and
+  `config/avrdude_gpio.conf` (Witty Pi firmware flashing only).
+- **Bench-only:** the `throttle-log` service (logs `get_throttled` at boot and
+  shutdown to `~/throttle_log.csv`), `~/test_wake.sh`, and any ticktalk drop-ins
+  under `/etc/systemd/system/ticktalk.service.d/`. Remove them before deploying.
 
 ### 1.10 Run the startup health check
 
