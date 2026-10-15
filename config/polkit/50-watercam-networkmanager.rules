@@ -1,8 +1,12 @@
 // ticktalk runs as pi with no login session, so polkit would refuse it.
 // It brings the LTE connection up and down itself when WiFi can't reach the
-// server (ip_upload.cellular_connection). Install to /etc/polkit-1/rules.d/.
+// server (ip_upload.cellular_connection), and switches the WiFi radio off while
+// LoRa works (tools/wifi_policy.py, nmcli radio wifi), which needs
+// enable-disable-wifi: without it the radio stays on. Install to
+// /etc/polkit-1/rules.d/. Grant only; never narrow pi's NetworkManager control.
 polkit.addRule(function (action, subject) {
-    if (action.id == "org.freedesktop.NetworkManager.network-control" &&
+    if ((action.id == "org.freedesktop.NetworkManager.network-control" ||
+         action.id == "org.freedesktop.NetworkManager.enable-disable-wifi") &&
         subject.user == "pi") {
         return polkit.Result.YES;
     }
