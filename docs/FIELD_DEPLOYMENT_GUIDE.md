@@ -336,7 +336,9 @@ nmcli connection down Quectel      # takes effect now rather than at the next bo
 ```
 
 The polkit rule lets `pi` (which runs ticktalk with no login session) bring the
-connection up and down. Changing the connection's settings still needs `sudo`.
+connection up and down, and switch the WiFi radio off while LoRa works (1.9.1).
+Changing the connection's settings still needs `sudo`. Check it with
+`nmcli general permissions`: `network-control` and `enable-disable-wifi` both `yes`.
 
 Keep Tailscale's probes to private addresses off the modem. Tailscale tries every
 address the API server advertises, including LAN and Docker ones that can never
