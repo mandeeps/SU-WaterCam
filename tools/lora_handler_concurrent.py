@@ -295,6 +295,11 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
         if data.get('clock_unverified') is not None:
             add_u8(0x01, 0x0D, 1 if data['clock_unverified'] else 0)
 
+        # Water percentage of the capture's mask (tools/flood_baseline.py), last
+        # for the same reason as 01 07: an older decoder loses only this field.
+        if data.get('camera_water_pct') is not None:
+            add_u8(0x07, 0x37, max(0, min(100, int(data['camera_water_pct']))))
+
         print(f"DEBUG: Final packet size: {len(packet)} bytes")
         return bytes(packet)
     except Exception as e:

@@ -9,27 +9,40 @@ import brotli
 from pathlib import Path
 
 # --- Utility functions ---
-def to_binary(img: Image.Image) -> np.ndarray:
-    arr = np.array(img.convert('L'))
-    # Otsu's method or mean threshold
-    threshold = np.mean(arr) if arr.std() < 1e-3 else otsu(arr)
-    return (arr > threshold).astype(np.uint8)
+#: Masks are single-channel 0/255, water bright (tools/segformer_daemon.py).
+#: A fixed threshold, not Otsu or the mean: those split a uniform image at its
+#: own value, so an all-water mask came out as no water at all.
+WATER_THRESHOLD = 127
+#: Share of pixels other than 0 and 255 above which an image is not a mask.
+MAX_INTERMEDIATE_FRACTION = 0.01
+MASK_MODES = ('L', '1')
 
-def otsu(arr):
-    hist, bins = np.histogram(arr.flatten(), bins=256, range=(0,256))
-    total = arr.size
-    sumB, wB, maximum, sum1, threshold = 0., 0., 0., np.dot(np.arange(256), hist), 0
-    for t in range(256):
-        wB += hist[t]
-        if wB == 0: continue
-        wF = total - wB
-        if wF == 0: break
-        sumB += t * hist[t]
-        mB, mF = sumB / wB, (sum1 - sumB) / wF
-        between = wB * wF * (mB - mF) ** 2
-        if between > maximum:
-            threshold, maximum = t, between
-    return threshold
+def mask_format_error(img: Image.Image):
+    """Why img is not a binary water mask (a string), or None if it is one.
+
+    Refuses colour images (the older RGB/RGBA colour masks, whose water is not
+    the bright class) and greyscale images with many values between 0 and 255
+    (a photo, or class indices 0/1 that the threshold would read as dry)."""
+    if img.mode not in MASK_MODES:
+        return f"mask must be single-channel 0/255 (mode L), got mode {img.mode}"
+    if img.mode == '1':
+        return None
+    arr = np.asarray(img)
+    if arr.size == 0:
+        return "mask is empty"
+    intermediate = np.count_nonzero((arr != 0) & (arr != 255)) / arr.size
+    if intermediate > MAX_INTERMEDIATE_FRACTION:
+        return (f"mask is not binary: {intermediate:.1%} of pixels are neither 0 nor 255")
+    return None
+
+def to_binary(img: Image.Image) -> np.ndarray:
+    """1 where water (above WATER_THRESHOLD), 0 elsewhere."""
+    arr = np.array(img.convert('L'))
+    return (arr > WATER_THRESHOLD).astype(np.uint8)
+
+def water_percent(img: Image.Image) -> int:
+    """Share of the mask that is water, 0-100 (rounded)."""
+    return int(round(100.0 * float(to_binary(img).mean())))
 
 def resize_keep_aspect(img, target):
     img = img.copy()
@@ -127,6 +140,7 @@ def compress_image(input_path, max_bytes=228, min_size=32, output_path=None, sav
     Returns:
         dict: Dictionary containing compression results:
             - 'success' (bool): Whether compression was successful
+            - 'error' (str): Why the image was refused (not a binary water mask)
             - 'compressed_data' (bytes): The compressed data (if successful)
             - 'width' (int): Final image width (if successful)
             - 'height' (int): Final image height (if successful)
@@ -139,6 +153,10 @@ def compress_image(input_path, max_bytes=228, min_size=32, output_path=None, sav
     
     # Load and compress image
     img = Image.open(input_path)
+    error = mask_format_error(img)
+    if error:
+        print(f"⚠️ {input_path}: {error}: not compressed")
+        return {'success': False, 'error': error}
     result = find_best_size(img, max_bytes, min_size)
     
     if not result:
@@ -210,7 +228,7 @@ def main():
         if not args.no_images:
             print('Decompression verified.')
     else:
-        print('Could not compress to target size.')
+        print(result.get('error') or 'Could not compress to target size.')
 
 if __name__ == '__main__':
     main() 

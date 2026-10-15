@@ -254,6 +254,14 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     if registration_status is not None:
         data['registration_status'] = registration_status
 
+    # Water % of this capture's mask, and the flood flags when detection is on
+    # (tools/flood_baseline.py); absent when there is no mask.
+    try:
+        from tools.flood_baseline import flood_fields
+        data.update(flood_fields(dirname))
+    except Exception as e:
+        print(f"⚠️ Flood check failed: {e}")
+
     # Node software release and loaded model (tools/node_version.py); sent when
     # they change and in the periodic full send.
     from tools.node_version import uplink_fields
@@ -314,6 +322,11 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         for k in ('movement_threshold', 'lat_lon_z'):
             if k in data:
                 sensors_to_transmit[k] = {'current_value': data[k], 'reason': 'moved from mount'}
+    if data.get('camera_flood_detected') or data.get('camera_flood_growing'):
+        # Likewise a flooded unit sends its flood flags and water % every time
+        for k in ('camera_flood_detected', 'camera_flood_growing', 'camera_water_pct'):
+            if k in data:
+                sensors_to_transmit[k] = {'current_value': data[k], 'reason': 'flood'}
 
     try:
         handler = get_lora_handler()
@@ -986,6 +999,10 @@ def compress_bitmap(segmented_file):
     print(f"Compressing {segmented_file} for transmission (max {max_bitmap_bytes}B)")
     try:
         bitmap_dict = compress_image(segmented_file, max_bytes=max_bitmap_bytes)
+        if bitmap_dict.get('error'):
+            # Not a binary water mask (tools/compress_segmented.py mask_format_error)
+            print(f"⚠️ Not sending {segmented_file}: {bitmap_dict['error']}")
+            return b''
         if not bitmap_dict.get('success'):
             print(f"⚠️ Could not compress {segmented_file} to fit within {max_bitmap_bytes}B (SF too high?)")
             return b''
@@ -1942,6 +1959,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             data['clock_unverified'] = 1 if clock_unverified(dirname) else 0
         except Exception as e:
             print(f"⚠️ IP uplink: drop counter / clock flag unavailable: {e}")
+        flood = {}
+        try:
+            from tools.flood_baseline import flood_fields
+            flood = flood_fields(dirname)
+        except Exception as e:
+            print(f"⚠️ IP uplink: flood check failed: {e}")
 
         data['area_threshold']                    = get_parameter('area_threshold', 10)
         data['stage_threshold']                   = get_parameter('stage_threshold', 50)
@@ -2021,10 +2044,15 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             channels.append({"code": "06 01",
                              "payload_hex": struct.pack(">B", max(0, min(100, int(round(hum))))).hex()})
 
-        # 07 17 — flood detect (inferred from bitmap content)
-        flood_detected = bool(bitmap and any(b != 0 for b in bitmap))
-        channels.append({"code": "07 17",
-                         "payload_hex": struct.pack(">I", int(flood_detected)).hex()})
+        # 07 17 / 07 27 — flood detected / growing (tools/flood_baseline.py), only
+        # when detection is on and a baseline is set; 07 37 — water % of the mask
+        # (uint8, 0-100) whenever the capture has one
+        for code, key in (("07 17", "camera_flood_detected"), ("07 27", "camera_flood_growing")):
+            if key in flood:
+                channels.append({"code": code, "payload_hex": struct.pack(">I", flood[key]).hex()})
+        if flood.get('camera_water_pct') is not None:
+            channels.append({"code": "07 37",
+                             "payload_hex": struct.pack(">B", flood['camera_water_pct']).hex()})
 
         # 08 18 — flood bitmap (variable length, only if non-empty)
         if bitmap:
@@ -2034,6 +2062,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         _u32 = lambda v: max(0, min(0xFFFFFFFF, int(v)))
         channels.append({"code": "09 19",
                          "payload_hex": struct.pack(">I", _u32(data['area_threshold'])).hex()})
+        # stage_threshold is reserved: reported, but nothing on the node uses it
         channels.append({"code": "09 29",
                          "payload_hex": struct.pack(">I", _u32(data['stage_threshold'])).hex()})
         channels.append({"code": "09 39",

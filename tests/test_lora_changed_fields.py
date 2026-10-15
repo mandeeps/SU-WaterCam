@@ -240,3 +240,21 @@ class TestSmallPayloadLimit:
         h = _run_capture(tmp_path, 20.0, size_limit=242)
         assert not any(c.args[0].startswith("0c01") for c in h.transmit.call_args_list)
         h.enqueue.assert_not_called()
+
+
+class TestWaterPercent:
+    def test_capture_with_a_mask_sends_its_water_pct(self, tmp_path):
+        np = __import__("pytest").importorskip("numpy")
+        from PIL import Image
+        from tools import flood_baseline as fb
+        cap = tmp_path / "20261007-120000"
+        cap.mkdir()
+        arr = np.zeros((10, 10), np.uint8)
+        arr[:4] = 255
+        Image.fromarray(arr, mode="L").save(str(cap / fb.MASK_NAMES[0]))
+        with patch.object(fb, "DEFAULT_STATE_PATH", str(tmp_path / "flood.json")):
+            h = _run_capture(tmp_path, 20.0)
+        pkts = _sensor_packets(h)
+        assert pkts[0]["camera_water_pct"] == 40
+        # detection is off by default: no flags
+        assert "camera_flood_detected" not in pkts[0]
