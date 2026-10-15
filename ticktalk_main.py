@@ -175,7 +175,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
 
     # LoRa transmission is always enabled
     # The capture time is the capture's ID on every transport (tools/capture_time.py).
-    from tools.capture_time import capture_time
+    from tools.capture_time import capture_time, clock_unverified
     captured_at = capture_time(dirname)
 
     # Get sensor data
@@ -258,6 +258,14 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     # they change and in the periodic full send.
     from tools.node_version import uplink_fields
     data.update(uplink_fields())
+    # Entries the store-and-forward queues dropped unsent (tools/drop_counter.py) and
+    # whether this capture predates a verified clock (tools/capture_time.py).
+    try:
+        from tools import drop_counter
+        data['sf_dropped'] = drop_counter.total()
+        data['clock_unverified'] = 1 if clock_unverified(dirname) else 0
+    except Exception as e:
+        print(f"⚠️ Failed to read drop counter / clock flag: {e}")
 
     # Add runtime parameters to sensor data
     emergency_mode = get_parameter('emergency_mode', False)
@@ -1927,6 +1935,13 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         data['registration_status'] = status_code_for_capture(dirname)
         from tools.node_version import uplink_fields
         data.update(uplink_fields())
+        try:
+            from tools import drop_counter
+            from tools.capture_time import clock_unverified
+            data['sf_dropped'] = drop_counter.total()
+            data['clock_unverified'] = 1 if clock_unverified(dirname) else 0
+        except Exception as e:
+            print(f"⚠️ IP uplink: drop counter / clock flag unavailable: {e}")
 
         data['area_threshold']                    = get_parameter('area_threshold', 10)
         data['stage_threshold']                   = get_parameter('stage_threshold', 50)
@@ -1959,6 +1974,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                           ("01 0B", "model_id")):
             if data.get(key) is not None:
                 channels.append({"code": code, "payload_hex": struct.pack(">I", data[key]).hex()})
+        # 01 0C — store-and-forward entries dropped unsent (tools/drop_counter.py), u32
+        # 01 0D — 1 if this capture was taken before the clock was verified, u8
+        if data.get('sf_dropped') is not None:
+            channels.append({"code": "01 0C", "payload_hex": struct.pack(">I", min(data['sf_dropped'], 0xFFFFFFFF)).hex()})
+        if data.get('clock_unverified') is not None:
+            channels.append({"code": "01 0D", "payload_hex": struct.pack(">B", 1 if data['clock_unverified'] else 0).hex()})
 
         # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
         lat = data.get('gps_lat')

@@ -25,6 +25,8 @@ import os
 import time
 from typing import Optional
 
+from tools import drop_counter
+
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = os.environ.get("WATERCAM_REPO", "/home/pi/SU-WaterCam")
@@ -53,6 +55,7 @@ def enqueue(
         while len(existing) >= max_depth:
             try:
                 os.unlink(os.path.join(queue_dir, existing.pop(0)))
+                drop_counter.record("lora", path=drop_counter.path_for(queue_dir))
             except OSError:
                 pass
         record = {
@@ -115,6 +118,7 @@ def drain(
             logger.warning("LoRa S&F: dropping corrupt file %s", fname)
             try:
                 os.unlink(path)
+                drop_counter.record("lora", path=drop_counter.path_for(queue_dir))
             except OSError:
                 pass
             continue
@@ -123,6 +127,7 @@ def drain(
             logger.info("LoRa S&F: evicting stale entry %s", fname)
             try:
                 os.unlink(path)
+                drop_counter.record("lora", path=drop_counter.path_for(queue_dir))
             except OSError:
                 pass
             continue
