@@ -54,6 +54,8 @@ from typing import Any, Callable, Dict, List, Optional
 
 import requests
 
+from tools import drop_counter
+
 logger = logging.getLogger(__name__)
 
 # Default config path — relative to the project root (one level above tools/).
@@ -356,6 +358,7 @@ class IPTransmitter:
             while len(existing) >= self.max_queue_depth:
                 try:
                     os.unlink(os.path.join(self._queue_dir, existing.pop(0)))
+                    drop_counter.record("ip", path=drop_counter.path_for(self._queue_dir))
                 except OSError:
                     pass
             record = {
@@ -403,6 +406,7 @@ class IPTransmitter:
                 logger.warning("Dropping corrupt queue file: %s", fname)
                 try:
                     os.unlink(path)
+                    drop_counter.record("ip", path=drop_counter.path_for(self._queue_dir))
                 except OSError:
                     pass
                 continue
@@ -411,6 +415,7 @@ class IPTransmitter:
                 logger.info("Evicting stale queue entry: %s", fname)
                 try:
                     os.unlink(path)
+                    drop_counter.record("ip", path=drop_counter.path_for(self._queue_dir))
                 except OSError:
                     pass
                 continue
@@ -997,6 +1002,8 @@ def correct_clock(uplink_result: Dict[str, Any]) -> Optional[float]:
         return None
     offset = server - time.time()
     if abs(offset) <= CLOCK_TOLERANCE_S:
+        from tools.capture_time import mark_clock_verified
+        mark_clock_verified()      # the clock agrees with the server: later captures are fine
         return None
     try:
         r = subprocess.run(["doas", SET_CLOCK, str(int(round(server)))],

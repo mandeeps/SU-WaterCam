@@ -289,6 +289,11 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
             add_u32(0x01, 0x09, data['software_version'])
         if data.get('model_id') is not None:
             add_u32(0x01, 0x0B, data['model_id'])
+        # Dropped store-and-forward entries and the unverified-clock flag, last again.
+        if data.get('sf_dropped') is not None:
+            add_u32(0x01, 0x0C, min(int(data['sf_dropped']), 0xFFFFFFFF))
+        if data.get('clock_unverified') is not None:
+            add_u8(0x01, 0x0D, 1 if data['clock_unverified'] else 0)
 
         print(f"DEBUG: Final packet size: {len(packet)} bytes")
         return bytes(packet)

@@ -16,8 +16,8 @@ The reply
 One uplink: compact JSON, UTF-8, sent raw (no TLV). It always starts with
 {"dbg":1 so the server can tell it apart from sensor uplinks. Fields come in
 priority order and are dropped from the end until the reply fits the mDot's
-current payload limit, so it still goes out at low data rates (about 105 bytes
-in full; US915 DR2 allows 125, DR1 53, DR0 11):
+current payload limit, so it still goes out at low data rates (about 115 bytes
+in full, about 115 with sd; US915 DR2 allows 125, DR1 53, DR0 11):
 
     dbg  format version (always present)
     up   uptime, hours
@@ -30,6 +30,7 @@ in full; US915 DR2 allows 125, DR1 53, DR0 11):
     dp   root filesystem used, %
     ld   1-minute load average
     ts   node clock, Unix seconds
+    sd   store-and-forward entries dropped unsent since install (LoRa + IP queues)
 
 Any field that can't be read is left out rather than sent as a fake value.
 It reads only /proc, /sys, vcgencmd and the WittyPi registers: no psutil, no
@@ -120,6 +121,14 @@ def _wittypi_volts(int_reg: int) -> Optional[float]:
     return float(text) if text else None
 
 
+def _sf_dropped() -> Optional[int]:
+    try:
+        from tools import drop_counter
+        return drop_counter.total()
+    except Exception:   # noqa: BLE001 - a status reply must never fail over this
+        return None
+
+
 def collect_compact_status(emergency_mode: Optional[bool] = None) -> List[Field]:
     """The reply's fields, in priority order, leaving out any that can't be read."""
     candidates: List[Field] = [
@@ -138,6 +147,7 @@ def collect_compact_status(emergency_mode: Optional[bool] = None) -> List[Field]
         ("dp", _disk_used_pct()),
         ("ld", _load_1min()),
         ("ts", int(time.time())),
+        ("sd", _sf_dropped()),
     ]
     return [(k, v) for k, v in candidates if v is not None]
 
