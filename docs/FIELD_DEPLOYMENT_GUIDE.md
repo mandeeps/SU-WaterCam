@@ -576,6 +576,11 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now max-awake.timer
 ```
 
+On a unit that is meant to stay on (a development unit, or one held on for bench
+work with `ticktalk` stopped), create the hold flag **before** enabling the
+timer, or it powers the Pi off within 5 minutes of passing the limit:
+`sudo mkdir -p /etc/watercam && sudo touch /etc/watercam/hold-awake`.
+
 `lora_daemon.service` owns the mDot serial port, and every LoRa send or
 receive in `ticktalk` goes through it. Without it the unit has no LoRa.
 `segformer_daemon.service` keeps the flood-segmentation model loaded. Without
