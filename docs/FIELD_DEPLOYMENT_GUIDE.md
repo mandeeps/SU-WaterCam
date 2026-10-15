@@ -240,7 +240,7 @@ present:
   it the line depends on the Pi's boot pull-up, which is too weak for the mDot's
   2.1 V minimum input-high level. Never set it on a handheld unit whose capture
   button is on pin 29. Check it after a reboot with `pinctrl get 5`: it must
-  show `op dh`. A Witty Pi L3V7 (firmware ID 0x37) has a daemon that
+  show `op` and `| hi` (e.g. `5: op -- pu | hi`; trixie shows the drive as `--`). A Witty Pi L3V7 (firmware ID 0x37) has a daemon that
   reconfigures GPIO5, so don't use that model on an mDot unit;
 - `dtparam=i2c_arm=on`, `dtparam=i2c_arm_baudrate=400000`: Witty Pi, IMU, AHT20;
 - `dtparam=spi=on`: the Lepton thermal camera;
@@ -724,7 +724,7 @@ etc.) and resolve them before moving on. GPS will very likely fail indoors, re-c
 
 After the readings it prints `WARN` lines for setup mistakes (they don't change
 the exit code): on an mDot unit, GPIO5 not driven high (`pinctrl get 5` should say
-`op dh`; see 1.3.3) or a Witty Pi L3V7 (firmware ID 0x37); and
+`op ... | hi`; see 1.3.3) or a Witty Pi L3V7 (firmware ID 0x37); and
 `remote-debug.timer` not enabled.
 
 ### 1.11 Test a full capture-and-transmit cycle
@@ -789,7 +789,7 @@ cp /home/pi/SU-WaterCam/config/wittypi/beforeScript.sh /home/pi/wittypi/beforeSc
 Run through this on the bench, after the last reboot and before the unit leaves
 for the site:
 
-- [ ] `pinctrl get 5` shows `op dh` (mDot units only; not on a handheld with the
+- [ ] `pinctrl get 5` shows `op` and `| hi` (mDot units only; not on a handheld with the
       capture button on pin 29).
 - [ ] `systemctl is-enabled remote-debug.timer max-awake.timer` prints `enabled`
       twice (`/etc/watercam/hold-awake` must not exist).

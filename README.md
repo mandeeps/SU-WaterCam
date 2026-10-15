@@ -560,7 +560,7 @@ For the remote start over Lora function, the WittyPi ground should be connected 
 
     gpio=5=op,dh
 
-Without it the line relies on the Pi's weak pull-up during boot, which together with the mDot's internal pull-down forms a divider at roughly 1.0-2.0 V. The mDot datasheet requires at least 2.1 V for a logic high, so that is out of spec and remote start can fail. Check it with `pinctrl get 5`, which must show `op dh`. Add the line only on units with an mDot. Never combine the capture button (button-service-gpiozero.py, which also uses pin 29) with an mDot unit: the button would short the driven pin. The startup health check (tools/initial_health_check.py) warns when the pin isn't driven high on a unit with the uart5 overlay, and when a Witty Pi L3V7 (firmware ID 0x37, whose daemon reconfigures GPIO5) is fitted. 
+Without it the line relies on the Pi's weak pull-up during boot, which together with the mDot's internal pull-down forms a divider at roughly 1.0-2.0 V. The mDot datasheet requires at least 2.1 V for a logic high, so that is out of spec and remote start can fail. Check it with `pinctrl get 5`, which must show `op` and `| hi` (e.g. `5: op -- pu | hi`). Add the line only on units with an mDot. Never combine the capture button (button-service-gpiozero.py, which also uses pin 29) with an mDot unit: the button would short the driven pin. The startup health check (tools/initial_health_check.py) warns when the pin isn't driven high on a unit with the uart5 overlay, and when a Witty Pi L3V7 (firmware ID 0x37, whose daemon reconfigures GPIO5) is fitted. 
 
 
 

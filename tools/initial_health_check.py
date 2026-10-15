@@ -167,12 +167,14 @@ def has_mdot(config_paths=CONFIG_TXT_PATHS) -> bool:
 
 
 def parse_pinctrl(output: str) -> Dict[str, str]:
-    """Function and level from `pinctrl get 5`, e.g. '5: op dh pu | hi // GPIO5 = output'
-    gives {'func': 'op', 'level': 'dh'}; {} when it isn't that form."""
-    parts = output.split('|', 1)[0].split()
-    if len(parts) < 3 or not parts[0].rstrip(':').isdigit():
+    """Function and pin level from `pinctrl get 5`: '5: op -- pu | hi // GPIO5 = output'
+    (as on trixie, where a driven output shows its drive as --) gives
+    {'func': 'op', 'level': 'hi'}; {} when it isn't that form."""
+    left, sep, right = output.partition('|')
+    parts, level = left.split(), right.split()[:1]
+    if not sep or len(parts) < 2 or not parts[0].rstrip(':').isdigit() or not level:
         return {}
-    return {'func': parts[1], 'level': parts[2]}
+    return {'func': parts[1], 'level': level[0]}
 
 
 def read_gpio5() -> Dict[str, str]:
@@ -207,7 +209,7 @@ def setup_warnings(mdot: bool, gpio5: Dict[str, str], wittypi_fw, timer_enabled:
     """Setup mistakes that don't stop a cycle but lose remote start or remote access."""
     warnings: List[str] = []
     if mdot:
-        if gpio5.get('func') != 'op' or gpio5.get('level') != 'dh':
+        if gpio5.get('func') != 'op' or gpio5.get('level') != 'hi':
             got = f"{gpio5.get('func')} {gpio5.get('level')}" if gpio5 else 'unreadable'
             warnings.append(f'gpio5_not_driven_high ({got}; add gpio=5=op,dh to config.txt)')
         if wittypi_fw == WITTYPI_FW_L3V7:

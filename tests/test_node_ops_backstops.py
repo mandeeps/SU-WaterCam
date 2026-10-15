@@ -71,8 +71,11 @@ def test_check_dry_run_and_session_and_hold(monkeypatch, tmp_path):
 # --- startup health setup warnings -----------------------------------------
 
 def test_parse_pinctrl():
-    assert hc.parse_pinctrl("5: op dh pu | hi // GPIO5 = output") == {"func": "op", "level": "dh"}
-    assert hc.parse_pinctrl("5: ip    pu | hi // GPIO5 = input") == {"func": "ip", "level": "pu"}
+    # as read on 005 (trixie) with gpio=5=op,dh, and before it
+    assert hc.parse_pinctrl(" 5: op -- pu | hi // GPIO5 = output") == {"func": "op", "level": "hi"}
+    assert hc.parse_pinctrl("5: op dh pu | hi // GPIO5 = output") == {"func": "op", "level": "hi"}
+    assert hc.parse_pinctrl(" 5: ip    pu | hi // GPIO5 = input") == {"func": "ip", "level": "hi"}
+    assert hc.parse_pinctrl(" 5: op -- pu | lo // GPIO5 = output") == {"func": "op", "level": "lo"}
     assert hc.parse_pinctrl("") == {}
     assert hc.parse_pinctrl("garbage") == {}
 
@@ -88,7 +91,7 @@ def test_has_mdot(tmp_path):
 
 
 def test_setup_warnings():
-    good = {"func": "op", "level": "dh"}
+    good = {"func": "op", "level": "hi"}
     assert hc.setup_warnings(True, good, 0x26, True) == []
     assert any("gpio5" in w for w in hc.setup_warnings(True, {"func": "ip", "level": "pu"}, 0x26, True))
     assert any("gpio5" in w for w in hc.setup_warnings(True, {}, None, True))
