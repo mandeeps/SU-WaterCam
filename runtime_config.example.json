@@ -1,5 +1,6 @@
 {
   "area_threshold": 10,
+  "camera_flood_detection_enabled": false,
   "stage_threshold": 50,
   "monitoring_frequency": 60,
   "emergency_frequency": 5,

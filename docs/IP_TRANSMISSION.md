@@ -189,11 +189,12 @@ The server's `CHANNEL_REGISTRY` maps 2-byte codes to sensor fields.  The
 | `04 03` | `gps_move_distance_m` | 4 | uint32 metres from the mount position, once it's known |
 | `05 01` | `temperature_c` | 2 | int16 (value × 100) |
 | `06 01` | `humidity_pct` | 1 | uint8 (0–100) |
-| `07 17` | `camera_flood_detect` | 4 | uint32 bool |
-| `07 27` | `camera_new_local_max` | 4 | uint32 bool |
+| `07 17` | `camera_flood_detect` | 4 | uint32 bool: water % ≥ baseline + `area_threshold`; only when `camera_flood_detection_enabled` and a baseline is set (`tools/flood_baseline.py`) |
+| `07 27` | `camera_new_local_max` | 4 | uint32 bool: water % rose by `area_threshold` or more since the previous capture; same condition |
+| `07 37` | `camera_water_pct` | 1 | uint8 (0–100): water share of the capture's mask, whenever it has one (same 1 byte over LoRa) |
 | `08 18` | `camera_flood_bitmap` | variable | raw bitmap bytes |
 | `09 19` | `sr_area_threshold_pct` | 4 | uint32 |
-| `09 29` | `sr_stage_threshold_cm` | 4 | uint32 (cm) |
+| `09 29` | `sr_stage_threshold_cm` | 4 | uint32 (cm); reserved, unused on the node |
 | `09 39` | `sr_monitoring_frequency` | 4 | uint32 |
 | `09 49` | `sr_emergency_frequency` | 4 | uint32 |
 | `09 59` | `sr_neighborhood_emerg_freq` | 4 | uint32 |
@@ -426,7 +427,7 @@ stop sending over IP while their LoRa is joined.
 - AHT20: `temperature_celsius` → channel `05 01`, `relative_humidity` → `06 01`
 - GPS: `gps_lat` / `gps_lon` → channel `04 01`
 - WittyPi: `battery_voltage` converted to % → channel `02 01`
-- Bitmap: contents → channel `08 18`; flood detect flag → channel `07 17`
+- Bitmap: contents → channel `08 18`; water % of the mask → `07 37`; flood detected / growing (when enabled) → `07 17` / `07 27`
 - Runtime params: area/stage thresholds, frequencies → channels `09 19`–`09 59`
 
 **Reachability check:** `is_reachable()` is called before encoding; if the

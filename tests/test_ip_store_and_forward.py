@@ -366,6 +366,55 @@ class TestIPUplinkTransmitIntegration:
         assert result["success"] is False
         instance._enqueue.assert_called_once()
 
+    def test_water_pct_and_flood_flags_channels(self, tmp_path):
+        """07 37 carries the water %; 07 17 / 07 27 only when flood_fields gives them."""
+        import ticktalk_main
+        flood = {"camera_water_pct": 42, "camera_flood_detected": 1, "camera_flood_growing": 0}
+        with patch("tools.transmit_ip.IPTransmitter") as MockTx, \
+                patch("tools.flood_baseline.flood_fields", return_value=flood):
+            instance = MockTx.return_value
+            instance.enabled = True
+            instance.only_if_lora_unavailable = False
+            instance.cellular_connection = ""
+            instance.is_reachable.return_value = False
+            instance._enqueue.return_value = True
+            instance.fallback_to_lora = False
+            patches = self._patch_hardware()
+            for p in patches.values():
+                p.__enter__()
+            try:
+                ticktalk_main.ip_uplink_transmit.__wrapped__(
+                    bitmap=[], _sensor_tracker=None, dirname=None)
+            finally:
+                for p in patches.values():
+                    p.__exit__(None, None, None)
+        channels = {c["code"]: c["payload_hex"] for c in instance._enqueue.call_args.args[0]}
+        assert channels["07 37"] == "2a"
+        assert channels["07 17"] == "00000001" and channels["07 27"] == "00000000"
+
+    def test_no_flood_channels_without_a_mask(self, tmp_path):
+        import ticktalk_main
+        with patch("tools.transmit_ip.IPTransmitter") as MockTx:
+            instance = MockTx.return_value
+            instance.enabled = True
+            instance.only_if_lora_unavailable = False
+            instance.cellular_connection = ""
+            instance.is_reachable.return_value = False
+            instance._enqueue.return_value = True
+            instance.fallback_to_lora = False
+            patches = self._patch_hardware()
+            for p in patches.values():
+                p.__enter__()
+            try:
+                ticktalk_main.ip_uplink_transmit.__wrapped__(
+                    bitmap=b"\x01\x02", _sensor_tracker=None, dirname=None)
+            finally:
+                for p in patches.values():
+                    p.__exit__(None, None, None)
+        codes = {c["code"] for c in instance._enqueue.call_args.args[0]}
+        assert not codes & {"07 17", "07 27", "07 37"}
+        assert "08 18" in codes
+
     def test_send_failure_queues_live_reading(self, tmp_path):
         import ticktalk_main
         with patch("tools.transmit_ip.IPTransmitter") as MockTx:

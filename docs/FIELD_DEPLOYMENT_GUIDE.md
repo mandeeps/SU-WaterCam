@@ -374,8 +374,9 @@ The other top-level fields control monitoring behavior. From
 
 | Field                              | Units   | Range   | Meaning                                                                                           |
 | ---------------------------------- | ------- | ------- | ------------------------------------------------------------------------------------------------- |
-| `area_threshold`                   | %       | 0–100   | Flood-extent area (as % of frame) that triggers elevated/emergency reporting                      |
-| `stage_threshold`                  | cm      | 0–65535 | Water stage (level) threshold                                                                     |
+| `area_threshold`                   | points  | 0–100   | Percentage points of water above the unit's baseline that count as a flood, and the rise between captures that counts as growing (default 10) |
+| `camera_flood_detection_enabled`   | bool    |         | Node-side flood flags (07 17 detected, 07 27 growing); default `false`. Needs the baseline (section 2.4.1). The water % (07 37) is sent either way |
+| `stage_threshold`                  | cm      | 0–65535 | Reserved: kept and reported, but unused on the node (the server applies its own stream gauge thresholds) |
 | `monitoring_frequency`             | minutes | 1–10080 | How often the unit checks/reports under normal conditions                                         |
 | `emergency_frequency`              | minutes | 1–1440  | How often it reports once a threshold is exceeded (should be shorter than `monitoring_frequency`) |
 | `photo_interval`                   | seconds | 30–1440 | Time between captures while the unit is awake (default 60); applied to the running program        |
@@ -531,6 +532,10 @@ python tools/gps_home.py --reset
 
 `python tools/gps_home.py` shows whether a position has been learned and
 whether the unit counts as moved.
+
+Clear any flood baseline from a previous site the same way
+(`python tools/flood_baseline.py --reset`); the new one is set at the site
+(section 2.4.1).
 
 ### 1.8 Confirm camera calibration exists
 
@@ -845,6 +850,26 @@ GPS acquiring a fix outdoors from a cold start can take a few minutes (longer wi
 ### 2.4 Confirm data is flowing from the final position
 
 Check the dashboard again for a reading with GPS coordinates matching the actual install location, and confirm the WittyPi schedule is triggering boots as expected.
+
+### 2.4.1 Set the flood baseline
+
+The camera sees some water in normal conditions, so a flood is judged against
+the water percentage at installation. Once a capture from the final position
+has been segmented (the dashboard shows its mask and water %), on the unit:
+
+```bash
+cd ~/SU-WaterCam
+venv/bin/python tools/flood_baseline.py --set-from-latest   # or --set N, N = 0-100
+venv/bin/python tools/flood_baseline.py --show
+```
+
+Pick a capture in normal conditions: after rain or with a high river, use
+`--set N` with the usual level instead. Flood detection stays off until
+`camera_flood_detection_enabled` is set to `true` in `runtime_config.json`; then
+the unit sends flood detected (07 17) when the water percentage is at least
+baseline + `area_threshold`, and flood growing (07 27) when it rose by
+`area_threshold` or more since the previous capture. After moving or re-aiming
+the camera, run `--reset` and set the baseline again.
 
 ### 2.5 Final weatherproofing
 

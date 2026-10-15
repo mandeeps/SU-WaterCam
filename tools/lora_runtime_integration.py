@@ -96,6 +96,7 @@ class LoRaRuntimeManager:
         'data_retention_days':              (0, 365),   # 0 keeps everything
         'compression_level':                (1, 10),
         'emergency_max_hours':              (0, 168),     # 0 = no expiry
+        'flood_baseline_water_pct':         (0, 100),     # tools/flood_baseline.py
     }
 
     # Parameters that must be stored as integers (not floats).
@@ -110,13 +111,20 @@ class LoRaRuntimeManager:
         'data_retention_days',
         'compression_level',
         'emergency_max_hours',
+        'flood_baseline_water_pct',
     })
 
     # The one list of runtime_config defaults (written on first run, merged under
     # a loaded file).
     _DEFAULT_PARAMS: dict = {
         # Flood detection parameters
-        'area_threshold': 10,           # Flood detection area threshold (%)
+        # area_threshold: percentage points of water above the unit's baseline
+        # (flood_baseline_water_pct) that count as a flood, and the rise between
+        # captures that counts as growing (tools/flood_baseline.py)
+        'area_threshold': 10,
+        'camera_flood_detection_enabled': False,  # node-side flood flags 07 17 / 07 27
+        # Reserved: kept and reported (09 29) but unused on the node; the
+        # server applies its own thresholds to stream gauge readings.
         'stage_threshold': 50,          # Water stage threshold (cm)
         
         # Timing parameters
