@@ -674,7 +674,7 @@ card can't stop the unit. The photos aren't uploaded, so this is the only copy.
   that should accept remote-access requests.
 - **filebrowser:** off on deployed units (`sudo systemctl disable --now
   filebrowser`), it costs cellular data ([1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
-- **Legacy, don't install:** `watercam.service` (replaced by ticktalk),
+- **Legacy, never install:** `watercam.service` (replaced by ticktalk; the unit file is gone from `config/`),
   `gps.service` (replaced by `quectel-gnss.service`), `button.service`,
   `temperature.service`; `config/dhcpcd.conf` (NetworkManager is used) and
   `config/avrdude_gpio.conf` (Witty Pi firmware flashing only).
