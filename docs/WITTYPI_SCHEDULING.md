@@ -41,7 +41,10 @@ boot and next-wake services) and 1.13 (installing a schedule),
   so a reset of the ATtiny (a brownout) loses it.
 - `canTriggerAlarm()` blocks alarms while Vin is at or below the low-voltage
   threshold (or the recovery voltage after a low-voltage shutdown), and a
-  blocked alarm is lost like any other missed one.
+  blocked alarm is lost like any other missed one, **but only in power mode 1**
+  (the 6-30 V input). Our units feed 5 V into the USB-C input (mode 0, register
+  7 = 0), where it always allows the alarm, and the low-voltage shutdown and
+  recovery wake don't act either unless register 41 ("ignore power mode") is set.
 
 ## 2. Power on and off
 
@@ -151,7 +154,7 @@ then shows two boots for that wake.
    mDot watchdog (mDot-AT-firmware `AT+WDOG`, 20 h) presses the switch.
 2. An alarm set in the past, or one that passes while the ATtiny is resetting,
    is never fired.
-3. A startup alarm during a low-Vin condition is blocked and lost.
+3. A startup alarm during a low-Vin condition is blocked and lost (power mode 1 only; not our units).
 4. MISC bit 0 set: a startup alarm while the Pi is halting is dropped instead
    of cached.
 5. TXD stuck high after a halt: power never cut, so the next alarm (needs the
@@ -173,13 +176,13 @@ then shows two boots for that wake.
 - The alarm and configuration registers, read-only:
 
 ```bash
-for r in 9 10 11 17 19 21 22 27 28 29 30 32 33 34 35 47 48 49; do
+for r in 7 9 10 11 17 19 21 22 27 28 29 30 32 33 34 35 41 47 48 49; do
   printf '%s=0x%02x ' $r $(i2cget -y 1 0x08 $r)
 done; echo
 ```
 
-(9/10 triggered flags, 11 last reason, 17 Default ON, 19 low-voltage and 22
-recovery thresholds x0.1 V (255 off), 21 power-cut delay x0.1 s, 27-30 startup
+(7 power mode, 0 = 5 V USB-C input; 9/10 triggered flags, 11 last reason, 17 Default ON, 19 low-voltage and 22
+recovery thresholds x0.1 V (255 off), 21 power-cut delay x0.1 s, 41 ignore power mode, 27-30 startup
 and 32-35 shutdown alarms in BCD (s, m, h, day), 47 Default ON delay, 48 MISC,
 49 guaranteed wake.)
 
