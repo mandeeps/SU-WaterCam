@@ -712,6 +712,24 @@ reading shows up. Stop the service again if you still need to seal the case as t
 sudo systemctl stop ticktalk.service
 ```
 
+### 1.11.1 Power wiring
+
+- **V50 to Witty Pi through the Y-adapter:** both V50 USB-A ports into the
+  dual USB-A to single USB-C cable, into the Witty Pi's USB-C input. Each A port
+  is rated 5 V / 2 A (3 A for both, Voltaic's booklet); a cellular upload
+  during segmentation has peaked at 2.06-2.21 A, past one port's rating
+  ([POWER_ANALYSIS.md](POWER_ANALYSIS.md#peaks-matter-more-than-averages),
+  [UNIT006_POWER_FAILURE.md](UNIT006_POWER_FAILURE.md)). Use a short, thick USB-C
+  cable and seat both ends firmly: a marginal cable dropped 006's power at wakes.
+- **The A ports are always on:** anything in a USB-A port presses the V50's
+  Always On switch, so the pack never auto-shuts off under a light load.
+- **Never use the V50's top USB-C port** while it powers a unit: anything in it
+  turns Always On off on the A ports and sags the output. Charge on the bench
+  through the **side** port, which keeps the pack full while it powers the unit.
+- **Solar:** the panel goes into the V50's solar input (at most about 2 A).
+- Check after wiring: `get_throttled` is `0x0` after a capture cycle (1.11) and
+  the Witty Pi reports Vout around 4.9 V (`~/powerlog/powerlog.csv`).
+
 ### 1.12 Weatherproofing
 
 Once everything above passes, follow `README.md`'s sealing steps (silicone sealant on case openings, LWIR window installation for the Lepton, water resistance check) before transporting the unit.

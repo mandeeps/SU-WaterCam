@@ -150,7 +150,17 @@ The fixes are #97 (arm the next wake before the load starts) and #98 (after a po
 - **Clocks:** stock clocks (`arm_freq=1800`) and no `initial_turbo`, which held the CPU at full speed for the first 30 s of boot, lower the peak current. On 006, 2000 MHz plus the modem browned out the Pi even on a healthy supply. The old advice that overclocking saves energy by finishing sooner no longer holds: inference takes 1.6 s.
 - **USB off through early boot:** `usb-power-off.service` cuts USB about 5 s into boot and `usb-power-on.timer` restores it 8 s after boot, so the modem's start-up current misses the kernel and early userspace. The modem's GPS then needs 40–50 s for a fix, so the wake's first LoRa step uses the last saved fix (`tools/get_gps.py`). USB still has power for about 2 s first, from when the kernel starts the USB controller; see the [guide](FIELD_DEPLOYMENT_GUIDE.md#19-enable-the-production-service). It can't help the cut-outs at the very first power-on, which happen before the kernel starts (006, 2026-10-13).
 - **Wiring:** keep the Y-adapter, so the load is spread across both V50 A ports. Never plug anything into the V50's top USB-C port while it powers a unit: it sags and resets the output, and it turns Always On off on the A ports. Charge on the bench through the side port, which keeps the pack full.
-- **Overlap:** the IP upload runs after LoRa, once segmentation is done. On 006 the wake's peaks were the same with the modem attached or in low power, so the modem isn't what drives them at stock clocks.
+- **Overlap:** within one capture iteration the IP upload runs after LoRa, once segmentation is done. Across the two iterations of a wake it can overlap: the next iteration's capture starts on the 60 s clock whether or not the previous upload has finished (006, 2026-10-14 20:45: iteration 1's upload started 20:45:58, iteration 2's photos 20:46:26 and segmentation 20:46:33). A WiFi upload ends within a second, but bringing cellular and Tailscale up can take tens of seconds (`cellular_up` allows 90 s), so a cellular upload can run during the next segmentation: the highest-draw case. On 006 the wake's peaks were the same with the modem attached or in low power, so an idle modem isn't what drives them at stock clocks.
+- **Single cable vs the Y-adapter (006, 2026-10-13/14, at WiFi-cycle currents):**
+
+  | | Single new USB-C cable (47 wakes overnight) | Y-adapter + the same cable (31 wakes) |
+  |---|---|---|
+  | Wakes made | 47/47 | 31/31 |
+  | Power-on dips ("newly connected") | 30 % | 35 % |
+  | `get_throttled` | 0x0 throughout | 0x0 throughout |
+  | Vout mean / min | 4.92 / 4.81 V | 4.89 / 4.80 V |
+
+  No difference at 0.6-0.9 A, as expected: one A port carries that easily, and the dips are a short inrush at power-on that neither wiring removes. This doesn't settle the wiring for the field, where a cellular upload can coincide with segmentation (above) and has peaked at 2.06-2.21 A, past one port's 2 A rating ([UNIT006_POWER_FAILURE.md](UNIT006_POWER_FAILURE.md)). Keep the Y-adapter until a combined segmentation + cellular test on one cable shows otherwise.
 
 ---
 
