@@ -72,8 +72,10 @@ RPi.GPIO==0.7.1
 requests==2.33.0
 setuptools==83.0.0
 simpleitk==2.5.2
+six==1.17.0
 smbus2==0.6.1
 sortedcontainers==2.4.0
+spidev==3.8
 sysv-ipc==1.1.0
 timedinput==0.1.1
 typing_extensions==4.14.1
