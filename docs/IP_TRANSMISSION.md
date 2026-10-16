@@ -239,8 +239,8 @@ units on older software:
 |---|---|---|---|---|
 | `03 01` (12 B) | `03 02` (6 B) | `tilt_roll_yaw` (heading, roll, pitch) | u16 heading, i16 roll, i16 pitch, in 0.01° | value / 100; heading kept in 0–360 (mod 360), roll and pitch clamped to ±327.67 |
 | `05 01` (4 B) | `05 02` (2 B) | `temperature_celsius` (AHT20) | i16 in 0.01 °C | value / 100 |
-| `0A 01` (4 B) | not sent | `wittypi_temperature` | (`0A 11`, i16 in 0.01 °C: decoded, never sent) | value / 100 |
-| `0A 03` (4 B) | not sent | `wittypi_internal_voltage` (Witty Pi Vout) | (`0A 13`, u16 in mV: decoded, never sent) | value / 1000 (V) |
+| `0A 01` (4 B) | not sent | `wittypi_temperature` | | |
+| `0A 03` (4 B) | not sent | `wittypi_internal_voltage` (Witty Pi Vout) | | |
 
 The ChirpStack codec (`config/chirpstack_device_profile_codec.js`) gives both
 forms the same field names and units, so the server's mapping is unchanged. A

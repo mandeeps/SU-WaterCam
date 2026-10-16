@@ -28,8 +28,6 @@
  * Channel 0A Type 01: WittyPi temperature (float32, Celsius; older nodes, no longer sent)
  * Channel 0A Type 02: WittyPi battery voltage (float32, Volts)
  * Channel 0A Type 03: WittyPi internal voltage (float32, Volts; older nodes, no longer sent)
- * Channel 0A Type 11: WittyPi temperature in 0.01 Celsius (i16; decoded, not sent)
- * Channel 0A Type 13: WittyPi internal voltage in mV (u16; decoded, not sent)
  * Channel 0B Type 01: Debug status message (JSON string)
  * Channel 0C Type 01: Compact packet (11 bytes in all, for DR0): u32 capture time, u8 flags
  *   (bit 0 emergency, 1 flood detected, 2 flood growing, 3 health fault, 4 moved, 5 under-voltage
@@ -213,8 +211,7 @@ function decodeUplink(input) {
       }
       // Legacy forms (older nodes). Superseded on the node but still decoded:
       // 03 01 / 05 01 float32 (now 03 02 / 05 02), and the Witty Pi temperature and
-      // output voltage, no longer sent over LoRa (0A 01 / 0A 03 float32, and their
-      // 0A 11 / 0A 13 compact forms).
+      // output voltage (0A 01 / 0A 03 float32), no longer sent over LoRa.
       case '3-1':
         result.tilt_roll_yaw = [
           view.getFloat32(offset, false),
@@ -234,14 +231,6 @@ function decodeUplink(input) {
       case 'a-3':
         result.wittypi_internal_voltage = view.getFloat32(offset, false);
         offset += 4;
-        break;
-      case 'a-11':
-        result.wittypi_temperature = view.getInt16(offset, false) / 100;
-        offset += 2;
-        break;
-      case 'a-13':
-        result.wittypi_internal_voltage = view.getUint16(offset, false) / 1000;
-        offset += 2;
         break;
       default:
         offset = view.byteLength; // Stop on unknown

@@ -172,8 +172,6 @@ def test_codec_still_decodes_old_float_channels():
            + b"\x05\x01" + struct.pack(">f", 22.25) + b"\x0a\x01" + struct.pack(">f", 30.625)
            + b"\x0a\x03" + struct.pack(">f", 4.875) + b"\x07\x37\x46")
     out = _codec_decode(pkt)
-    compact_wittypi = _codec_decode(b"\x0a\x11" + struct.pack(">h", 3062) + b"\x0a\x13" + struct.pack(">H", 4880))
-    assert compact_wittypi == {"wittypi_temperature": 30.62, "wittypi_internal_voltage": 4.88}
     assert out["timestamp"] == 1792108958 and out["tilt_roll_yaw"] == [0.0, 7.125, 85.0625]
     assert out["temperature_celsius"] == 22.25 and out["wittypi_temperature"] == 30.625
     assert out["wittypi_internal_voltage"] == 4.875 and out["camera_water_pct"] == 70

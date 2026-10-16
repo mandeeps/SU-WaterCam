@@ -303,8 +303,8 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
         # in 0.01 deg (u16 heading 0-360, i16 roll, i16 pitch), 05 02 temperature as
         # i16 0.01 C. Last for the same reason as 01 07; a missing or non-numeric
         # reading is left out. The Witty Pi temperature and output voltage aren't sent
-        # over LoRa (the server doesn't store them); the decoders keep 0A 01/03 and
-        # 0A 11/13 for units on older code.
+        # over LoRa (the server doesn't store them); the decoders keep 0A 01/03 for
+        # units on older code.
         tilt = data.get('tilt_roll_yaw')
         if isinstance(tilt, (list, tuple)) and len(tilt) == 3 and all(_finite(x) for x in tilt):
             packet.extend(bytes([0x03, 0x02]))
