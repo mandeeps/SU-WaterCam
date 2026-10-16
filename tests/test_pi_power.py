@@ -50,7 +50,7 @@ def test_encoded_last_so_older_decoders_stop_cleanly():
         "wittypi_internal_voltage": 4.83,
         "pi_throttled": 0x50005,
     })
-    assert packet[-3:] == bytes([0x01, 0x07, 0x55])
+    assert packet[-3:] == bytes([0x01, 0x07, 0x55])   # Witty Pi Vout isn't sent over LoRa
 
 
 def test_omitted_when_unreadable():

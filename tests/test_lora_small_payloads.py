@@ -112,17 +112,23 @@ def test_drain_does_not_resend_a_delivered_half(tmp_path):
 # Every field the node's sensor packet can carry, as ticktalk passes it (the
 # 2026-10-15 test wake on 005, plus the fields that only appear sometimes).
 FULL_SENSOR_DATA = {
-    'device_ts': 1792108958, 'emergency_status': 0, 'movement_threshold': 0,
+    'timestamp': 1792108958, 'emergency_status': 0, 'movement_threshold': 0,
     'tilt_roll_yaw': (0.0, 7.125, 85.0625), 'temperature_celsius': 22.2,
     'relative_humidity': 35, 'wittypi_temperature': 30.625,
     'wittypi_internal_voltage': 4.88, 'wittypi_vin': 4.49, 'pi_throttled': 0,
     'registration_status': 0, 'software_version': 5, 'model_id': 320164049,
     'sf_dropped': 3, 'clock_unverified': 1, 'camera_water_pct': 70,
     'camera_flood_detected': 1, 'camera_flood_growing': 0,
-    'area_threshold': 10, 'stage_threshold': 50, 'monitoring_frequency': 60,
+    'status_area_threshold': 10, 'stage_threshold': 50, 'monitoring_frequency': 60,
     'emergency_frequency': 30, 'neighborhood_emergency_frequency': 30,
     'audio_recording_enabled': 1,
 }
+
+
+def _codec_decode(pkt):
+    js = ("const fs=require('fs');eval(fs.readFileSync(process.argv[1],'utf8'));"
+          "console.log(JSON.stringify(decodeUplink({bytes:JSON.parse(process.argv[2]),fPort:1}).data));")
+    return json.loads(subprocess.check_output(["node", "-e", js, CODEC, json.dumps(list(pkt))], text=True))
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
@@ -132,9 +138,7 @@ def test_codec_decodes_every_sensor_channel():
     silently loses everything after it (09 69 did, until 2026-10-15)."""
     from tools.lora_handler_concurrent import _encode_compressed_packet
     pkt = _encode_compressed_packet(dict(FULL_SENSOR_DATA))
-    js = ("const fs=require('fs');eval(fs.readFileSync(process.argv[1],'utf8'));"
-          "console.log(JSON.stringify(decodeUplink({bytes:JSON.parse(process.argv[2]),fPort:1}).data));")
-    out = json.loads(subprocess.check_output(["node", "-e", js, CODEC, json.dumps(list(pkt))], text=True))
+    out = _codec_decode(pkt)
     # The last fields of the packet decode only if every channel before them did
     assert out["camera_water_pct"] == 70
     assert out["sf_dropped"] == 3
@@ -142,3 +146,32 @@ def test_codec_decodes_every_sensor_channel():
     assert out["model_id"] == 320164049
     assert out["audio_recording_enabled"] == 1
     assert out["camera_flood_detected"] == 1
+    assert out["timestamp"] == 1792108958 and out["status_area_threshold"] == 10
+    # Compact forms (03 02, 05 02): same field names and units as before
+    assert out["tilt_roll_yaw"] == [0.0, 7.12, 85.06]
+    assert out["temperature_celsius"] == 22.2
+    # The Witty Pi temperature and output voltage aren't sent over LoRa
+    assert "wittypi_temperature" not in out and "wittypi_internal_voltage" not in out
+    assert len(pkt) == 84   # 104 with the float32 and Witty Pi channels
+
+
+def test_compact_fields_layout_and_limits():
+    from tools.lora_handler_concurrent import _encode_compressed_packet
+    pkt = _encode_compressed_packet({"tilt_roll_yaw": (359.999, -7.125, 400.0), "temperature_celsius": -12.345,
+                                     "wittypi_temperature": 30.625, "wittypi_internal_voltage": 4.88})
+    assert pkt == b"\x03\x02" + struct.pack(">Hhh", 0, -712, 32767) + b"\x05\x02" + struct.pack(">h", -1234)
+    assert struct.unpack(">H", _encode_compressed_packet({"tilt_roll_yaw": [-10.0, 0, 0]})[2:4])[0] == 35000
+    # No reading, or a partial one, is left out rather than failing the packet
+    assert _encode_compressed_packet({"tilt_roll_yaw": (None, 1.0, 2.0), "temperature_celsius": float("nan")}) == b""
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_codec_still_decodes_old_float_channels():
+    """Units on older code send 03 01, 05 01, 0A 01 and 0A 03 as float32."""
+    pkt = (b"\x00\x01" + struct.pack(">I", 1792108958) + b"\x03\x01" + struct.pack(">fff", 0.0, 7.125, 85.0625)
+           + b"\x05\x01" + struct.pack(">f", 22.25) + b"\x0a\x01" + struct.pack(">f", 30.625)
+           + b"\x0a\x03" + struct.pack(">f", 4.875) + b"\x07\x37\x46")
+    out = _codec_decode(pkt)
+    assert out["timestamp"] == 1792108958 and out["tilt_roll_yaw"] == [0.0, 7.125, 85.0625]
+    assert out["temperature_celsius"] == 22.25 and out["wittypi_temperature"] == 30.625
+    assert out["wittypi_internal_voltage"] == 4.875 and out["camera_water_pct"] == 70

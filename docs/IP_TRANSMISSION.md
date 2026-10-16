@@ -224,6 +224,32 @@ bitmap_bytes = b'\xff\x00\xff\x00'   # 8 pixels, alternating
 bitmap_bytes.hex()
 ```
 
+### LoRa sensor packet: compact channels
+
+The LoRa sensor packet (`_encode_compressed_packet` in
+`tools/lora_handler_concurrent.py`) is a different encoding from the IP channels
+above: `[channel][type][value]` with values sized to fit (u8 flags, a u32
+`00 01` capture time). Its orientation and temperature now go in 2-byte
+fixed-point form under new codes, and the Witty Pi temperature and output
+voltage are no longer sent over LoRa (the server never stored them; the IP
+uplink is unchanged). The old codes keep their sizes and are still decoded, for
+units on older software:
+
+| Old code (float32) | New code | Field | Encoding | Decoded value |
+|---|---|---|---|---|
+| `03 01` (12 B) | `03 02` (6 B) | `tilt_roll_yaw` (heading, roll, pitch) | u16 heading, i16 roll, i16 pitch, in 0.01° | value / 100; heading kept in 0–360 (mod 360), roll and pitch clamped to ±327.67 |
+| `05 01` (4 B) | `05 02` (2 B) | `temperature_celsius` (AHT20) | i16 in 0.01 °C | value / 100 |
+| `0A 01` (4 B) | not sent | `wittypi_temperature` | | |
+| `0A 03` (4 B) | not sent | `wittypi_internal_voltage` (Witty Pi Vout) | | |
+
+The ChirpStack codec (`config/chirpstack_device_profile_codec.js`) gives both
+forms the same field names and units, so the server's mapping is unchanged. A
+reading that is missing or not a number is left out. The compact channels come
+last in the packet: a decoder that predates them stops there and loses only
+these fields. Update the codec and the API before the nodes. The full sensor
+packet in `tests/test_lora_small_payloads.py` (`FULL_SENSOR_DATA`) goes from
+104 to 84 bytes.
+
 ---
 
 ## Server API Endpoints
