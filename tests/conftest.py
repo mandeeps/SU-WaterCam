@@ -239,6 +239,13 @@ def mock_lora_handler():
 
 
 @pytest.fixture(autouse=True)
+def _ip_fallback_state(monkeypatch, tmp_path):
+    """Keep tools/ip_fallback.py's state in the test's own directory."""
+    from tools import ip_fallback
+    monkeypatch.setattr(ip_fallback, "STATE_FILE", str(tmp_path / "ip_fallback.json"))
+
+
+@pytest.fixture(autouse=True)
 def _reset_singletons():
     """Reset module-level singletons before every test so tests are isolated."""
     # Import lazily to avoid triggering hardware init at collection time.

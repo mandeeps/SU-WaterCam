@@ -382,6 +382,8 @@ The other top-level fields control monitoring behavior. From
 | `emergency_frequency`              | minutes | 1–1440  | How often it reports once a threshold is exceeded (should be shorter than `monitoring_frequency`) |
 | `photo_interval`                   | seconds | 30–1440 | Time between captures while the unit is awake (default 60); applied to the running program        |
 | `neighborhood_emergency_frequency` | minutes | 1–1440  | Reporting frequency once a *neighboring* unit signals emergency                                   |
+| `ip_fallback_after_hours`          | hours   | 0–168   | One IP upload, even with `ip_upload.enabled` false, when no bitmap was delivered for this long and LoRa holds bitmaps back (default 12; 0 = off). About 90 KB per cellular wake (`tools/ip_fallback.py`) |
+| `ip_fallback_min_interval_hours`   | hours   | 0–168   | At most one such fallback upload this often, whether or not it got through (default 6) |
 
 Also confirm before deploying:
 
@@ -412,6 +414,12 @@ Also confirm before deploying:
 - **Transport order** (on by default): LoRa first, then WiFi, then cellular only if
   neither works. The modem is only kept off until needed once it is set up as in
   1.5.1 below.
+- **IP fallback** (on by default, `ip_fallback_after_hours` 12): when no bitmap was
+  delivered for 12 h because LoRa holds them back (DR0's 11 B fits none), one capture
+  goes over IP even with `ip_upload.enabled` false, at most every 6 h; the server can
+  also ask for uploads with `17 97 NN` (dashboard **Request IP upload**). It needs
+  `ip_upload.server_url`, `device_id` and `api_key` set. About 90 KB per cellular
+  wake ([IP_TRANSMISSION.md](IP_TRANSMISSION.md#ip-fallback-when-lora-cant-carry-bitmaps)).
 
 ### 1.5.1 Keep the cellular modem off unless LoRa and WiFi fail
 

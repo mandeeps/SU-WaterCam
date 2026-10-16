@@ -1855,6 +1855,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     Readings delivered over IP are removed from the LoRa store-and-forward
     queue, so they aren't sent twice once LoRa joins.
 
+    IP fallback (tools/ip_fallback.py): this capture goes over IP even with
+    ip_upload.enabled false or LoRa healthy when the server asked for it
+    (downlink 17 97 NN, one upload per wake) or when no bitmap was delivered for
+    ip_fallback_after_hours while LoRa holds bitmaps back. A cellular connection
+    brought up for it goes down again afterwards unless IP upload is enabled.
+
     After a reading is delivered, any pending command is collected: the uplink
     asks for it (want_command) and the reply carries it, or, from a server that
     predates that, a poll of /ip/downlink fetches it. The wake-start poll
@@ -1875,17 +1881,43 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
 
     tx = IPTransmitter()
 
-    if not tx.enabled:
+    # IP fallback: the server asked for an upload, or LoRa has held bitmaps back too long
+    fallback, fallback_source, boot_id = False, "", ""
+    try:
+        from tools import ip_fallback
+        from tools.config_io import current_boot_id
+        boot_id = current_boot_id() or ""
+        fallback, fallback_source, why = ip_fallback.plan(
+            have_bitmap=bool(bitmap), boot_id=boot_id,
+            lora_pending_bitmaps=_lsf.pending_bitmaps(),
+            after_hours=get_parameter('ip_fallback_after_hours', ip_fallback.DEFAULT_AFTER_HOURS),
+            min_interval_hours=get_parameter('ip_fallback_min_interval_hours',
+                                             ip_fallback.DEFAULT_MIN_INTERVAL_HOURS))
+        if fallback and not tx.configured:
+            fallback = False
+            why += "; no ip_upload.server_url set, so not sending"
+        print(f"📶 IP fallback: {'UPLOAD this capture: ' if fallback else ''}{why}")
+    except Exception as e:
+        print(f"⚠️ IP fallback check failed: {e}")
+
+    if not tx.enabled and not fallback:
         print("📡 IP uplink disabled (ip_upload.enabled=false) — skipping")
         tx.close()
         return {"status": "disabled", "success": False}
+
+    if fallback:
+        try:
+            from tools.wifi_policy import ensure_on
+            ensure_on()     # WiFi may be off while LoRa looks healthy
+        except Exception as e:
+            print(f"⚠️ IP fallback: WiFi radio check failed: {e}")
 
     cell = tx.cellular_connection
     cell_status = cellular_status(cell) if cell else {"exists": False, "active": False, "autoconnect": False}
     on_demand = cell_status["exists"] and not cell_status["autoconnect"]
     cellular_active = on_demand and cell_status["active"]
 
-    if tx.only_if_lora_unavailable:
+    if tx.only_if_lora_unavailable and not fallback:
         # Joined isn't enough: the saved session says joined with no gateway in
         # range. Skip IP only when a link check this boot showed LoRa works.
         try:
@@ -2151,8 +2183,19 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
 
         # ── Transmit live reading ──────────────────────────────────────────────
         # The reply carries any pending command (want_command), saving a poll
-        result = tx.send_uplink(channels, device_ts=ts_now, want_command=True)
+        result = tx.send_uplink(channels, device_ts=ts_now, want_command=True,
+                                ip_fallback=fallback)
         delivered = result["success"]
+        if delivered and (bitmap or fallback):
+            try:
+                if bitmap:
+                    ip_fallback.record_delivery("ip")
+                if fallback:
+                    left = ip_fallback.uploaded(fallback_source, boot_id)
+                    print(f"📶 IP fallback upload delivered ({fallback_source}"
+                          + (f", {left} requested wake(s) left)" if fallback_source == "request" else ")"))
+            except Exception as e:
+                print(f"⚠️ IP fallback: delivery not recorded: {e}")
 
         if result["success"]:
             print(f"✅ IP uplink OK: {len(channels)} channels sent "
@@ -2204,6 +2247,9 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                                           label="IP downlink after uplink")
             except Exception as exc:
                 print(f"⚠️ IP downlink after uplink failed: {exc}")
+        if fallback and cellular_started and not tx.enabled:
+            cellular_down(cell)     # brought up only for the fallback upload
+            print(f"📶 IP fallback done — {cell} taken down")
         tx.close()
         power.release()
 

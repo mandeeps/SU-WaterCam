@@ -24,6 +24,7 @@ in full, about 115 with sd; US915 DR2 allows 125, DR1 53, DR0 11):
     ct   CPU temperature, deg C
     th   Pi throttled register (vcgencmd get_throttled), raw integer
     em   emergency mode, 0/1
+    ipr  IP uploads the server requested (17 97) still to do; only when some are
     vi   WittyPi input voltage, V
     vo   WittyPi output voltage, V
     mp   memory used, %
@@ -129,6 +130,14 @@ def _sf_dropped() -> Optional[int]:
         return None
 
 
+def _ip_uploads_requested() -> Optional[int]:
+    try:
+        from tools.ip_fallback import pending_wakes
+        return pending_wakes() or None
+    except Exception:   # noqa: BLE001 - a status reply must never fail over this
+        return None
+
+
 def collect_compact_status(emergency_mode: Optional[bool] = None) -> List[Field]:
     """The reply's fields, in priority order, leaving out any that can't be read."""
     candidates: List[Field] = [
@@ -136,6 +145,9 @@ def collect_compact_status(emergency_mode: Optional[bool] = None) -> List[Field]
         # second: the server confirms emergency on/off from it, so it must survive
         # trimming to a small payload limit ({"dbg":1,"em":1} is 16 B)
         ("em", None if emergency_mode is None else int(bool(emergency_mode))),
+        # IP uploads the server asked for (17 97) still to do; only while some are
+        # (tools/ip_fallback.py), so the server can confirm the request arrived
+        ("ipr", _ip_uploads_requested()),
         # software release, e.g. "v2026.10.1-dirty" (tools/node_version.py)
         ("v", _software_version()),
         ("up", _uptime_hours()),

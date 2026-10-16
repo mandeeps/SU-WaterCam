@@ -2387,12 +2387,21 @@ class LoRaHandlerClient:
 
     def transmit(self, content, max_retries: int = 2) -> bool:
         try:
-            return bool(self._call(
+            sent = bool(self._call(
                 "transmit", self._LONG_TIMEOUT_S, content=content, max_retries=max_retries
             ))
         except Exception as e:
             print(f"⚠️ LoRa daemon unreachable (transmit): {e}")
             return False
+        if sent:
+            # A bitmap went out over LoRa, live or from the queue (tools/ip_fallback.py)
+            try:
+                from tools import ip_fallback
+                if ip_fallback.is_bitmap_packet(content):
+                    ip_fallback.record_delivery("lora")
+            except Exception as e:
+                print(f"⚠️ IP fallback: LoRa bitmap delivery not recorded: {e}")
+        return sent
 
     def get_queue_depth(self) -> int:
         try:

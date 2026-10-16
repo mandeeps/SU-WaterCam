@@ -143,6 +143,9 @@ class IPTransmitter:
         cfg = _load_ip_config(config_path)
 
         self.enabled: bool = cfg.get("enabled", False)
+        # A server to send to: the IP fallback (tools/ip_fallback.py) uses it
+        # even with enabled false, but never the localhost default
+        self.configured: bool = bool(override_url or cfg.get("server_url"))
         self.server_url: str = (override_url or cfg.get("server_url", "http://localhost:8000")).rstrip("/")
         self.api_key: str = cfg.get("api_key", "")
         self.device_id: str = override_device_id or cfg.get("device_id", "watercam-001")
@@ -178,6 +181,7 @@ class IPTransmitter:
         channels: List[Dict[str, str]],
         device_ts: Optional[int] = None,
         want_command: bool = False,
+        ip_fallback: bool = False,
     ) -> Dict[str, Any]:
         """POST sensor channel data to /ip/uplink.
 
@@ -198,6 +202,10 @@ class IPTransmitter:
             Ask the server to put the oldest pending downlink command in the
             reply (`reply_command()`), marked delivered, instead of the node
             polling for it. Only for a send whose reply is acted on.
+        ip_fallback:
+            This is a LoRa unit's IP fallback upload (tools/ip_fallback.py): the
+            server keeps sending its commands over LoRa rather than switching
+            the device to IP transport. A server that predates it ignores it.
 
         Returns
         -------
@@ -219,6 +227,8 @@ class IPTransmitter:
             payload["device_ts"] = device_ts
         if want_command:
             payload["want_command"] = True
+        if ip_fallback:
+            payload["ip_fallback"] = True
 
         url = f"{self.server_url}/ip/uplink"
         return self._post_with_retry(url, payload)
@@ -573,6 +583,7 @@ DOWNLINK_CODE_LENGTHS: Dict[str, int] = {
     "13 93": 1,    # emergency_freq_min index
     "14 94": 1,    # flood_code_freq_min index
     "16 96": 1,    # audio_recording_enabled
+    "17 97": 1,    # IP upload in each of the next NN wakes, 00 cancels (tools/ip_fallback.py)
     "18 98": 1,    # remote debug session: NN x 10 min, 0 = end (docs/REMOTE_DEBUG_SESSION.md)
     "18 99": 1,    # the same session over WiFi only, never cellular
     "18 9A": 1,    # the same session over WiFi if a known network answers, else cellular
@@ -763,6 +774,15 @@ def apply_downlink_command(
             set_param_fn("audio_recording_enabled", val)
             logger.info("Applied: audio_recording_enabled = %s", val)
             applied.append(f"audio_recording_enabled={val}")
+
+        elif code == "17 97":  # IP upload for the next NN wakes, even with ip_upload off
+            try:
+                from tools import ip_fallback
+            except ImportError:
+                import ip_fallback
+            done = ip_fallback.request(payload_bytes[0], "downlink")
+            logger.info("Applied: IP upload request %d: %s", payload_bytes[0], done)
+            applied.append(f"ip_upload_wakes={payload_bytes[0]}")
 
         elif code in ("18 98", "18 99", "18 9A"):  # remote access: cellular, WiFi only, WiFi then cellular
             # Run by remote-debug.timer, not here: starting a session stops
