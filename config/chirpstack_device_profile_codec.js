@@ -87,6 +87,15 @@ function decodeUplink(input) {
         result.model_id = view.getUint32(offset, false);
         offset += 4;
         break;
+      case '1-c':
+        // Store-and-forward entries dropped (LoRa + IP queues, since install)
+        result.sf_dropped = view.getUint32(offset, false);
+        offset += 4;
+        break;
+      case '1-d':
+        // 1 = captured before the clock was verified (network, GPS or server time)
+        result.clock_unverified = view.getUint8(offset++);
+        break;
       case '2-1':
         result.battery_percent = view.getUint8(offset++);
         break;
@@ -119,6 +128,10 @@ function decodeUplink(input) {
       case '7-27':
         result.camera_flood_growing = view.getUint8(offset++);
         break;
+      case '7-37':
+        // Share of the camera mask classed as water, 0-100 %
+        result.camera_water_pct = view.getUint8(offset++);
+        break;
       case '8-18': {
         const len = view.getUint16(offset, false);
         offset += 2;
@@ -144,6 +157,10 @@ function decodeUplink(input) {
       case '9-59':
         result.neighborhood_emergency_frequency = view.getUint16(offset, false);
         offset += 2;
+        break;
+      case '9-69':
+        // USB microphone recording on (1) or off (0)
+        result.audio_recording_enabled = view.getUint8(offset++);
         break;
       case 'a-1':
         result.wittypi_temperature = view.getFloat32(offset, false);

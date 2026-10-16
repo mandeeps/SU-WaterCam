@@ -107,3 +107,38 @@ def test_drain_does_not_resend_a_delivered_half(tmp_path):
     r = lsf.drain(h, queue_dir=str(tmp_path), size_limit=240)
     assert r["drained"] == 1 and h.sent == ["aa" * 30, "bb" * 40]   # the sensor half only once
     assert lsf.queue_depth(str(tmp_path)) == 0
+
+
+# Every field the node's sensor packet can carry, as ticktalk passes it (the
+# 2026-10-15 test wake on 005, plus the fields that only appear sometimes).
+FULL_SENSOR_DATA = {
+    'device_ts': 1792108958, 'emergency_status': 0, 'movement_threshold': 0,
+    'tilt_roll_yaw': (0.0, 7.125, 85.0625), 'temperature_celsius': 22.2,
+    'relative_humidity': 35, 'wittypi_temperature': 30.625,
+    'wittypi_internal_voltage': 4.88, 'wittypi_vin': 4.49, 'pi_throttled': 0,
+    'registration_status': 0, 'software_version': 5, 'model_id': 320164049,
+    'sf_dropped': 3, 'clock_unverified': 1, 'camera_water_pct': 70,
+    'camera_flood_detected': 1, 'camera_flood_growing': 0,
+    'area_threshold': 10, 'stage_threshold': 50, 'monitoring_frequency': 60,
+    'emergency_frequency': 30, 'neighborhood_emergency_frequency': 30,
+    'audio_recording_enabled': 1,
+}
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_codec_decodes_every_sensor_channel():
+    """The ChirpStack codec stops at the first channel it doesn't know and drops
+    the rest of the packet, so a channel added on the node without a codec case
+    silently loses everything after it (09 69 did, until 2026-10-15)."""
+    from tools.lora_handler_concurrent import _encode_compressed_packet
+    pkt = _encode_compressed_packet(dict(FULL_SENSOR_DATA))
+    js = ("const fs=require('fs');eval(fs.readFileSync(process.argv[1],'utf8'));"
+          "console.log(JSON.stringify(decodeUplink({bytes:JSON.parse(process.argv[2]),fPort:1}).data));")
+    out = json.loads(subprocess.check_output(["node", "-e", js, CODEC, json.dumps(list(pkt))], text=True))
+    # The last fields of the packet decode only if every channel before them did
+    assert out["camera_water_pct"] == 70
+    assert out["sf_dropped"] == 3
+    assert out["clock_unverified"] == 1
+    assert out["model_id"] == 320164049
+    assert out["audio_recording_enabled"] == 1
+    assert out["camera_flood_detected"] == 1
