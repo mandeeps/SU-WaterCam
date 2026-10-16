@@ -21,6 +21,8 @@
   "data_retention_days": 0,
   "backup_enabled": true,
   "audio_recording_enabled": false,
+  "ip_fallback_after_hours": 12,
+  "ip_fallback_min_interval_hours": 6,
 
   "ip_upload": {
     "enabled": false,

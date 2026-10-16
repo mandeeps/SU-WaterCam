@@ -98,6 +98,8 @@ class LoRaRuntimeManager:
         'emergency_max_hours':              (0, 168),     # 0 = no expiry
         'flood_baseline_water_pct':         (0, 100),     # tools/flood_baseline.py
         'bitmap_refresh_hours':             (0, 168),     # tools/bitmap_policy.py; 0 = every capture
+        'ip_fallback_after_hours':          (0, 168),     # tools/ip_fallback.py; 0 = off
+        'ip_fallback_min_interval_hours':   (0, 168),
     }
 
     # Parameters that must be stored as integers (not floats).
@@ -156,6 +158,10 @@ class LoRaRuntimeManager:
         'backup_enabled': True,         # Enable data backup
         'audio_recording_enabled': False,  # USB microphone recording; only some units have one
         'iteration_count': 0,           # Wake cycles since boot (atomic_increment_iteration_count)
+        # One IP upload, even with ip_upload off, when no bitmap was delivered for
+        # this long and LoRa is holding bitmaps back (tools/ip_fallback.py); 0 = off
+        'ip_fallback_after_hours': 12,
+        'ip_fallback_min_interval_hours': 6,  # at most one such upload this often
     }
 
     # Keys set_parameter() accepts: the defaults, the ranged keys, and the

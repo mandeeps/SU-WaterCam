@@ -460,6 +460,48 @@ stop sending over IP while their LoRa is joined.
 server doesn't respond, the function returns `{"status": "unreachable"}` without
 spending time on encoding.
 
+### IP fallback when LoRa can't carry bitmaps
+
+At DR0 the mDot's payload limit is 11 bytes and no bitmap fits: bitmaps wait in
+the LoRa store-and-forward queue for a data rate with room, and the server gets
+sensor packets but no bitmap. `tools/ip_fallback.py` then makes a capture go over
+IP, **even with `ip_upload.enabled` false and LoRa healthy**, with the usual
+WiFi-then-cellular order and power lock:
+
+- **The node's rule.** The last bitmap delivered, over LoRa (the mDot sent the
+  `08 18` packet, live or from the queue) or over IP (the server accepted it), is
+  older than `ip_fallback_after_hours` (runtime parameter, default 12, 0 = off),
+  and the LoRa queue is holding bitmaps back. A bitmap the LoRa send policy skips
+  isn't queued, so it doesn't count. At most one such upload every
+  `ip_fallback_min_interval_hours` (default 6), counted from the attempt, so a
+  link that fails isn't retried every wake. A unit that never delivered a bitmap
+  counts from the first time the rule ran.
+- **The server's request**, downlink `17 97 NN` (3 bytes, so it fits DR0's 11):
+  an IP upload in each of the next NN wakes, `17 97 00` cancels. One upload per
+  wake (boot); the count goes down once an upload is delivered, and a request
+  older than 7 days is dropped. The same NN again within 15 minutes is a resend
+  (the API resends until it hears back) and doesn't restart the count. While some
+  are left the node's status reply carries `"ipr":N`.
+
+Each capture logs one line, `📶 IP fallback: ...`, with the decision and why. At
+wake start `tools/wifi_policy.py` leaves WiFi on when an upload is likely, so it
+can join during the capture before cellular is tried; mid-wake (a request that
+just arrived over LoRa) the radio is turned on then. A cellular connection
+brought up for a fallback upload is taken down afterwards unless
+`ip_upload.enabled` is true. The uplink carries `"ip_fallback": true`, so the API
+keeps the device on LoRa transport for its commands.
+
+The upload needs `ip_upload.server_url`, `device_id` and `api_key` set; without a
+`server_url` it is skipped with a log line. State is in `data/ip_fallback.json`
+(written atomically under a lock): `lora_at`, `ip_at`, `first_seen`,
+`fallback_at` and the server's `request`.
+
+**Cellular data.** A wake that uploads over cellular costs about 90 KB, mostly
+Tailscale ([CELLULAR_DATA.md](CELLULAR_DATA.md)). Every delivered upload restarts
+the 12 hours, so the defaults mean at most about two uploads (~180 KB) a day
+while LoRa can't carry bitmaps; a unit with WiFi in range costs no SIM data. Raise
+`ip_fallback_after_hours` on a unit with little SIM data left, or set it to 0.
+
 ### `ip_downlink_poll_and_apply(lora_init)` (line ~1647)
 
 Polls `/ip/downlink/{device_id}` at the start of each wake cycle and applies
@@ -483,6 +525,7 @@ ip_downlink = ip_downlink_poll_and_apply(lora_init)  # NEW
 | `13 93` | `emergency_freq_min` | u8 index → `[2,5,10]` min | `emergency_frequency` |
 | `14 94` | `flood_code_freq_min` | u8 index → `[10,20,30,40,50,60]` min | `neighborhood_emergency_frequency` |
 | `16 96` | `audio_recording_enabled` | u8 bool | `audio_recording_enabled` |
+| `17 97` | IP upload in each of the next NN wakes, even with `ip_upload.enabled` false | u8 wakes, 0 = cancel ([below](#ip-fallback-when-lora-cant-carry-bitmaps)) | `data/ip_fallback.json` |
 | `18 98` | remote debug session | u8 × 10 min, 0 = end ([REMOTE_DEBUG_SESSION.md](REMOTE_DEBUG_SESSION.md)) | request for `remote-debug.timer` |
 | `18 99` | remote access over WiFi only | u8 × 10 min, 0 = end | request for `remote-debug.timer` |
 | `18 9A` | remote access over WiFi, else cellular | u8 × 10 min, 0 = end | request for `remote-debug.timer` |

@@ -216,3 +216,20 @@ def queue_depth(queue_dir: str = DEFAULT_QUEUE_DIR) -> int:
         return sum(1 for f in os.listdir(queue_dir) if f.endswith(".json"))
     except FileNotFoundError:
         return 0
+
+
+def pending_bitmaps(queue_dir: str = DEFAULT_QUEUE_DIR) -> int:
+    """Queued entries still holding a bitmap: LoRa is holding them back (tools/ip_fallback.py)."""
+    try:
+        entries = [f for f in os.listdir(queue_dir) if f.endswith(".json")]
+    except FileNotFoundError:
+        return 0
+    n = 0
+    for fname in entries:
+        try:
+            with open(os.path.join(queue_dir, fname)) as fh:
+                if json.load(fh).get("bitmap_hex"):
+                    n += 1
+        except (OSError, ValueError, AttributeError):
+            continue
+    return n
