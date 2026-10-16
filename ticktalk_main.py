@@ -1014,9 +1014,19 @@ def compress_bitmap(segmented_file):
         print(f"[compress_bitmap] mDot limit {max_bitmap_bytes + 4}B too small for a bitmap now: compressing at 238B to queue")
         max_bitmap_bytes = 238
 
-    print(f"Compressing {segmented_file} for transmission (max {max_bitmap_bytes}B)")
+    # Method 2 (lossless context model, up to 640 px) is the default; the API and
+    # dashboard must decode it (docs/BITMAP_DECODING_SPEC.md). bitmap_method2_enabled
+    # false goes back to methods 0/1 up to 160 px.
+    method2 = False
     try:
-        bitmap_dict = compress_image(segmented_file, max_bytes=max_bitmap_bytes)
+        from tools.lora_runtime_integration import get_parameter
+        method2 = get_parameter('bitmap_method2_enabled', True) is not False
+    except Exception as e:
+        print(f"[compress_bitmap] Could not read bitmap_method2_enabled ({e}): methods 0/1 only")
+
+    print(f"Compressing {segmented_file} for transmission (max {max_bitmap_bytes}B{', method 2 allowed' if method2 else ''})")
+    try:
+        bitmap_dict = compress_image(segmented_file, max_bytes=max_bitmap_bytes, method2=method2)
         if bitmap_dict.get('error'):
             # Not a binary water mask (tools/compress_segmented.py mask_format_error)
             print(f"⚠️ Not sending {segmented_file}: {bitmap_dict['error']}")
@@ -2104,9 +2114,25 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             channels.append({"code": "07 37",
                              "payload_hex": struct.pack(">B", flood['camera_water_pct']).hex()})
 
-        # 08 18 — flood bitmap (variable length, only if non-empty)
-        if bitmap:
-            channels.append({"code": "08 18", "payload_hex": bytes(bitmap).hex()})
+        # 08 18 — flood bitmap (variable length). Over IP the mask goes at its
+        # full resolution, lossless (methods 0/1); the LoRa-sized bitmap is the
+        # fallback when there is no mask or it compresses to more than
+        # FULL_RES_MAX_BYTES (tools/compress_segmented.py).
+        ip_bitmap = bitmap
+        try:
+            from tools.flood_baseline import mask_path
+            from tools.compress_segmented import compress_full_resolution
+            _mask = mask_path(dirname) if dirname else None
+            _full = compress_full_resolution(_mask) if _mask else None
+            if _full:
+                ip_bitmap = _full
+                print(f"📡 IP uplink: full-resolution bitmap {len(_full)} B")
+            elif _mask:
+                print("⚠️ IP uplink: full-resolution bitmap too large or not a mask — sending the LoRa bitmap")
+        except Exception as e:
+            print(f"⚠️ IP uplink: full-resolution bitmap failed ({e}) — sending the LoRa bitmap")
+        if ip_bitmap:
+            channels.append({"code": "08 18", "payload_hex": bytes(ip_bitmap).hex()})
 
         # 09 xx — status reports; clamped to uint32 range so struct.pack never raises
         _u32 = lambda v: max(0, min(0xFFFFFFFF, int(v)))

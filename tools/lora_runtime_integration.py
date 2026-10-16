@@ -132,6 +132,9 @@ class LoRaRuntimeManager:
         # once this many hours have passed; 0 sends it every capture
         # (tools/bitmap_policy.py). IP uploads send it every capture.
         'bitmap_refresh_hours': 24,
+        # LoRa bitmap method 2 (lossless context model, up to 640 px). Turn on only
+        # once the API and dashboard decode it (docs/BITMAP_DECODING_SPEC.md)
+        'bitmap_method2_enabled': True,
         # Reserved: kept and reported (09 29) but unused on the node; the
         # server applies its own thresholds to stream gauge readings.
         'stage_threshold': 50,          # Water stage threshold (cm)
