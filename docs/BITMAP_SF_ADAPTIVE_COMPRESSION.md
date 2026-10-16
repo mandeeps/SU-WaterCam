@@ -75,6 +75,38 @@ Using the same threshold, the function decides how to transmit:
 Both functions now guard against an empty bitmap (`if not bitmap: return early`) to avoid
 sending zero-byte payloads to the mDot.
 
+### When the bitmap goes out over LoRa (`tools/bitmap_policy.py`)
+
+A wake takes about two captures a minute apart, and a site's mask is usually
+unchanged for long periods (all water or all dry), so the ~230-byte bitmap for
+every capture mostly repeats the last one. The sensor packet already carries
+the capture's water % (07 37) and, with flood detection on, the flood flags
+(07 17 / 07 27). `lora_token_with_tracker()` therefore sends a capture's bitmap
+over LoRa only if any of these holds:
+
+- no bitmap has been sent before, or `data/lora_bitmap_state.json` is missing or unreadable;
+- the water % differs from the last bitmap sent by `max(1, area_threshold)` points or more;
+- `camera_flood_detected` or `camera_flood_growing` is 1, or either changed since the last bitmap sent;
+- emergency mode is on;
+- the last bitmap sent is `bitmap_refresh_hours` old or more (runtime parameter,
+  default 24, range 0–168; 0 sends every bitmap, the previous behaviour);
+- the capture's water % is unknown (no usable mask), so nothing is dropped silently.
+
+Otherwise the bitmap is skipped and the log has one line giving the reason, the
+last bitmap's water % and its age; the sensor packet goes out as usual. IP
+uploads send the bitmap every capture.
+
+The state is written (atomically, `tools/config_io.py`) when the bitmap is handed
+to the LoRa daemon or to the store-and-forward queue, never when it is skipped:
+
+```json
+{"water_pct": 12, "time": 1760000000, "capture": "20261015-120000",
+ "camera_flood_detected": 0, "camera_flood_growing": 0}
+```
+
+`time` is the capture time. A `time` in the future (the clock moved back) counts
+as due for a refresh.
+
 ## Payload Budget by SF (US915)
 
 | SF | LoRaWAN limit | Mode | Bitmap budget | Old behaviour |
