@@ -8,6 +8,11 @@ from PIL import Image
 import brotli
 from pathlib import Path
 
+try:
+    from tools import bitmap_cm
+except ImportError:  # run as a script from tools/ (tools/watercam.py)
+    import bitmap_cm
+
 # --- Utility functions ---
 #: Masks are single-channel 0/255, water bright (tools/segformer_daemon.py).
 #: A fixed threshold, not Otsu or the mean: those split a uniform image at its
@@ -56,28 +61,56 @@ def bitpack_rows(arr):
     packed = [np.packbits(arr[i])[:bpr].tobytes() for i in range(H)]
     return b''.join(packed)
 
-def rle(arr):
-    flat = arr.flatten()
-    out = bytearray()
-    prev, count = flat[0], 1
-    for v in flat[1:]:
-        if v == prev and count < 255:
-            count += 1
-        else:
-            out.extend([prev, count])
-            prev, count = v, 1
-    out.extend([prev, count])
-    return bytes(out)
+#: Long side cap of the LoRa bitmap: 160 px for methods 0/1 (what every decoder
+#: has accepted so far), 640 px once method 2 is enabled (runtime parameter
+#: bitmap_method2_enabled, see docs/BITMAP_DECODING_SPEC.md).
+MAX_SIZE = 160
+MAX_SIZE_METHOD2 = 640
+#: Largest full-resolution bitmap the IP uplink sends (channel 08 18). The TLV
+#: length is u16, and the API stores the bitmap as hex in one InfluxDB string
+#: field (64 KiB), so a bitmap must stay under 32 KiB; real masks measured up to
+#: ~28 kB. A larger one falls back to the LoRa-sized bitmap.
+FULL_RES_MAX_BYTES = 32000
+#: Brotli quality of the full-resolution bitmap. 11 (the default) is ~12x slower
+#: at 1296x972 (~0.3 s on a workstation, a few seconds on a Pi) for ~25 % fewer
+#: bytes (5.9 vs 8.0 kB median on real masks). Decoders don't depend on it.
+FULL_RES_BROTLI_QUALITY = 9
 
-def compress_methods(arr):
-    # Returns (compressed, method_id)
-    bitpacked = bitpack_rows(arr)
-    c1 = brotli.compress(bitpacked)  # default quality
-    c2 = brotli.compress(rle(arr))
-    if len(c1) <= len(c2):
-        return c1, 0
-    else:
-        return c2, 1
+def rle(arr):
+    """(value, count) byte pairs, count 1-255, row-major (method 1, before Brotli).
+    Vectorised: the per-pixel loop took seconds on a full-resolution mask."""
+    flat = np.asarray(arr, np.uint8).ravel()
+    starts = np.concatenate(([0], np.flatnonzero(flat[1:] != flat[:-1]) + 1))
+    lengths = np.diff(np.append(starts, flat.size))
+    # A run longer than 255 is split into pairs of 255 and the remainder
+    pairs = (lengths + 254) // 255
+    ends = np.cumsum(pairs) - 1
+    counts = np.full(int(pairs.sum()), 255, np.uint8)
+    counts[ends] = lengths - 255 * (pairs - 1)
+    out = np.empty(2 * counts.size, np.uint8)
+    out[0::2] = np.repeat(flat[starts], pairs)
+    out[1::2] = counts
+    return out.tobytes()
+
+def compress_brotli(arr, quality=11):
+    """(compressed, method) for the smaller of methods 0 and 1."""
+    c0 = brotli.compress(bitpack_rows(arr), quality=quality)  # 11 is the default
+    c1 = brotli.compress(rle(arr), quality=quality)
+    if len(c0) <= len(c1):
+        return c0, 0
+    return c1, 1
+
+def compress_methods(arr, method2=False):
+    """(compressed, method_id): the smallest of methods 0, 1 and, with method2,
+    2 (tools/bitmap_cm.py). Method 2 is only kept when strictly smaller, and its
+    encoder gives up as soon as it can't be, so trying it costs little."""
+    comp, method = compress_brotli(arr)
+    if method2:
+        try:
+            return bitmap_cm.encode(arr, max_bytes=len(comp) - 1), 2
+        except bitmap_cm.TooLarge:
+            pass
+    return comp, method
 
 def minimal_header(width, height, method):
     # 1 byte method, 2 bytes width, 2 bytes height (big endian)
@@ -97,20 +130,21 @@ def decompress(data):
             arr[i] = row
         return arr
     elif method == 1:
-        raw = brotli.decompress(payload)
-        flat = []
-        i = 0
-        while i < len(raw):
-            v, count = raw[i], raw[i+1]
-            flat.extend([v]*count)
-            i += 2
-        arr = np.array(flat, np.uint8).reshape((height, width))
-        return arr
+        raw = np.frombuffer(brotli.decompress(payload), np.uint8)
+        flat = np.repeat(raw[0::2], raw[1::2])
+        return flat.reshape((height, width))
+    elif method == 2:
+        return bitmap_cm.decode(payload, width, height)
     else:
         raise ValueError('Unknown method')
 
-def find_best_size(img, max_bytes, min_size=32):
-    low, high = min_size, 160
+def find_best_size(img, max_bytes, min_size=32, method2=False):
+    """(arr, compressed, method, header) at the largest long side that fits
+    max_bytes, or None. Without method2 exactly as before: methods 0/1, at most
+    MAX_SIZE px. With method2: methods 0-2, at most MAX_SIZE_METHOD2 px."""
+    if method2:
+        return _find_best_size_method2(img, max_bytes, min_size)
+    low, high = min_size, MAX_SIZE
     best = None
     while low <= high:
         mid = (low + high) // 2
@@ -126,7 +160,73 @@ def find_best_size(img, max_bytes, min_size=32):
             high = mid - 1
     return best
 
-def compress_image(input_path, max_bytes=228, min_size=32, output_path=None, save_images=False):
+def _find_best_size_method2(img, max_bytes, min_size):
+    # The same binary search, with cheaper probes. A probe only asks whether
+    # anything fits: method 2 first, with the budget as its limit so that it
+    # stops as soon as it is over, then RLE + Brotli, the one that can beat it
+    # (uniform scenes at large sizes). Bit-packed Brotli is left out of the
+    # probes: at 640 px it takes longer than the rest of a probe, and method 2
+    # is smaller wherever it would fit. The full cap is tried first, as smooth
+    # and uniform scenes fit there; above 256 px the search stops within ~3 %.
+    # Then the smallest of all methods at the size found.
+    budget = max_bytes - 5
+    probes = {}
+
+    def probe(size):
+        if size not in probes:
+            arr = to_binary(resize_keep_aspect(img, (size, size)))
+            try:
+                found = (bitmap_cm.encode(arr, max_bytes=budget), 2)
+            except bitmap_cm.TooLarge:
+                comp = brotli.compress(rle(arr))
+                found = (comp, 1) if len(comp) <= budget else None
+            probes[size] = (arr, found)
+        return probes[size][1] is not None
+
+    if probe(MAX_SIZE_METHOD2):
+        size = MAX_SIZE_METHOD2
+    else:
+        size = None
+        low, high = min_size, MAX_SIZE_METHOD2 - 1
+        while low <= high:
+            if size is not None and size >= 256 and high - low < size // 32:
+                break
+            mid = (low + high) // 2
+            if probe(mid):
+                size = mid
+                low = mid + 1
+            else:
+                high = mid - 1
+        if size is None:
+            return None
+    arr, (comp, method) = probes[size]
+    c, m = compress_brotli(arr)
+    if len(c) < len(comp) or (len(c) == len(comp) and method == 2):
+        comp, method = c, m
+    elif method != 2:
+        try:
+            comp, method = bitmap_cm.encode(arr, max_bytes=len(comp) - 1), 2
+        except bitmap_cm.TooLarge:
+            pass
+    return arr, comp, method, minimal_header(arr.shape[1], arr.shape[0], method)
+
+def compress_full_resolution(input_path, max_bytes=FULL_RES_MAX_BYTES):
+    """The mask at its own resolution, lossless, for the IP uplink: header +
+    methods 0/1 (Brotli; method 2 is too slow at full resolution on a Pi).
+    None when it is not a binary mask or the result is over max_bytes."""
+    with Image.open(input_path) as img:
+        if mask_format_error(img):
+            return None
+        arr = to_binary(img)
+    h, w = arr.shape
+    if w > 0xFFFF or h > 0xFFFF:
+        return None
+    comp, method = compress_brotli(arr, quality=FULL_RES_BROTLI_QUALITY)
+    data = minimal_header(w, h, method) + comp
+    return data if len(data) <= max_bytes else None
+
+def compress_image(input_path, max_bytes=228, min_size=32, output_path=None, save_images=False,
+                   method2=False):
     """
     Compress an image to binary format with size constraint.
     
@@ -136,6 +236,8 @@ def compress_image(input_path, max_bytes=228, min_size=32, output_path=None, sav
         min_size (int): Minimum image dimension (default: 32)
         output_path (str or Path, optional): Path for compressed output file
         save_images (bool): Whether to save intermediate images (default: True)
+        method2 (bool): Also try method 2 and allow up to 640 px (runtime
+            parameter bitmap_method2_enabled; only once the API decodes it)
     
     Returns:
         dict: Dictionary containing compression results:
@@ -157,7 +259,7 @@ def compress_image(input_path, max_bytes=228, min_size=32, output_path=None, sav
     if error:
         print(f"⚠️ {input_path}: {error}: not compressed")
         return {'success': False, 'error': error}
-    result = find_best_size(img, max_bytes, min_size)
+    result = find_best_size(img, max_bytes, min_size, method2=method2)
     
     if not result:
         return {'success': False}
@@ -213,6 +315,7 @@ def main():
     parser.add_argument('--min-size', type=int, default=32)
     parser.add_argument('--output', default=None)
     parser.add_argument('--no-images', action='store_true', help='Skip saving intermediate images')
+    parser.add_argument('--method2', action='store_true', help='Also try method 2 (context model), up to 640 px')
     args = parser.parse_args()
 
     result = compress_image(
@@ -220,7 +323,8 @@ def main():
         max_bytes=args.max_bytes,
         min_size=args.min_size,
         output_path=args.output,
-        save_images=not args.no_images
+        save_images=not args.no_images,
+        method2=args.method2,
     )
     
     if result['success']:

@@ -20,10 +20,10 @@ The **compressed bitmap** is a single byte string with this layout:
 
 | Offset | Size   | Name    | Description |
 |--------|--------|--------|-------------|
-| 0      | 1 byte | method | Compression method: `0` = bitpacking, `1` = RLE. |
+| 0      | 1 byte | method | Compression method: `0` = bitpacking + Brotli, `1` = RLE + Brotli, `2` = context model (§3.3, no Brotli). |
 | 1      | 2 bytes| width  | Image width in pixels, **big-endian** unsigned 16-bit. |
 | 3      | 2 bytes| height | Image height in pixels, **big-endian** unsigned 16-bit. |
-| 5      | N bytes| payload| Brotli-compressed payload (see §3). |
+| 5      | N bytes| payload| Brotli-compressed payload for methods 0 and 1, the range-coded stream for method 2 (see §3). Method 2 payload may be empty (all dry). |
 
 - **Total length**: `5 + len(payload)` bytes.  
 - **Semantics**: The decoded image is a **binary** (two-class) mask: each pixel is 0 (e.g. land) or 1 (e.g. water/flood). Dimensions are `width × height` (columns × rows).
@@ -32,7 +32,7 @@ The **compressed bitmap** is a single byte string with this layout:
 
 ## 3. Payload format by method
 
-After Brotli-decompressing the **payload** (bytes from offset 5 to end), you get **raw** bytes. Their layout depends on **method**.
+For methods 0 and 1, Brotli-decompressing the **payload** (bytes from offset 5 to end) gives **raw** bytes whose layout depends on **method**. Method 2 is not Brotli-compressed (§3.3).
 
 ### 3.1 Method 0 — Bitpacking
 
@@ -86,6 +86,38 @@ arr = np.array(flat, dtype=np.uint8).reshape((height, width))
 
 ---
 
+### 3.3 Method 2 — context model (lossless, no Brotli)
+
+JBIG-style adaptive coding (encoder and reference decoder: `tools/bitmap_cm.py`).
+Every pixel, in raster order (row 0 left to right, then row 1, ...), is one
+binary decision coded with a probability that depends on 10 neighbours already
+decoded. Neighbours outside the image are 0.
+
+- **Context** (10 bits, first listed = most significant): row `y-2` at `x-1, x, x+1`;
+  row `y-1` at `x-2, x-1, x, x+1, x+2`; row `y` at `x-2, x-1`.
+- **Model**: per context two counts `n0`, `n1`, both starting at 0.
+  `p0 = ((4*n0 + 1) << 16) // (4*(n0 + n1) + 2)` (integer division; always between
+  16 and 65535). After the pixel, add one to `n0` or `n1`; then, if `n0 + n1 > 1024`,
+  `n0 = (n0 + 1) >> 1` and `n1 = (n1 + 1) >> 1`.
+- **Range decoder** (unsigned 32-bit): `range = 0xFFFFFFFF`,
+  `code` = the first 4 payload bytes, big-endian. Bytes past the end of the
+  payload read as 0 (the encoder drops trailing zero bytes; an all-dry mask has
+  an empty payload). Per pixel:
+  ```
+  bound = (range >> 16) * p0
+  if code < bound: range = bound;               pixel = 0
+  else:            code -= bound; range -= bound; pixel = 1
+  while range < 2**24:
+      range = (range << 8) & 0xFFFFFFFF
+      code = ((code << 8) | next_byte()) & 0xFFFFFFFF
+  ```
+  In JavaScript keep `range`, `code` and `bound` unsigned (`>>> 0`); `bound` is
+  below 2^32, so `Math.imul` is not needed if it is computed in double precision
+  as `(range >>> 16) * p0`.
+
+Method 2 is about 0.6x the size of methods 0/1 on real masks, so a LoRa bitmap
+of the same size has about twice the pixels.
+
 ## 4. End-to-end decoding steps
 
 1. **Get the blob payload**  
@@ -97,13 +129,14 @@ arr = np.array(flat, dtype=np.uint8).reshape((height, width))
    - `height = (data[3] << 8) | data[4]` (big-endian)  
    - `payload = data[5:]`
 
-3. **Brotli-decompress**  
+3. **Brotli-decompress** (methods 0 and 1; method 2 goes straight to §3.3)  
    - `raw = brotli_decompress(payload)`  
    - Use a Brotli library for your language (e.g. `brotli` in Python, `brotli` or `brotli-wasm` in JS).
 
 4. **Decode to binary image**  
    - If `method == 0`: use bitpacking (§3.1).  
    - If `method == 1`: use RLE (§3.2).  
+   - If `method == 2`: run the context-model decoder on the payload (§3.3).  
    - Result: 2D array of shape `(height, width)` with values 0 or 1.
 
 5. **Display or export**  
@@ -115,7 +148,22 @@ arr = np.array(flat, dtype=np.uint8).reshape((height, width))
 ## 5. Constraints and notes
 
 - **Size**: Compressed bitmap (header + payload) is usually ≤ 228 bytes when sent with a TT token, or ≤ 242 bytes otherwise. TLV adds 4 bytes (channel + type + length).
-- **Dimensions**: Width and height are at least 32 and at most 160; they come from the encoder and are stored in the 5-byte header.
+- **Dimensions**: they come from the encoder and are stored in the 5-byte header.
+  - LoRa, methods 0/1: long side at most 160 (the size search starts at 32).
+  - LoRa with `bitmap_method2_enabled`: long side at most 640, methods 0, 1 or 2, whichever is smallest.
+  - IP uplink (`/ip/uplink`, channel `08 18`): the mask at full resolution (e.g. 1296x972), methods 0/1 only, at most `FULL_RES_MAX_BYTES` (32000 B, so the hex fits one InfluxDB string field); a larger one is replaced by the LoRa-sized bitmap.
+
+### Enabling method 2 (`bitmap_method2_enabled`)
+
+Nodes send method 2 only with the runtime parameter `bitmap_method2_enabled`
+set to `true` (default `false`: methods 0/1, at most 160 px, exactly as before).
+A decoder that predates method 2 can't show those bitmaps, so:
+
+1. Deploy the API version whose `app/bitmap.py` and dashboard decode method 2 (check `/health` shows the commit).
+2. On each node, set `"bitmap_method2_enabled": true` in `runtime_config.json`
+   (a JSON boolean; anything else leaves it off). It is read at every capture, so no restart is needed.
+
+The ChirpStack codec passes the `08 18` bytes through without looking at the method, so it needs no change.
 - **Byte order**: All multi-byte fields (width, height, and the 2-byte length in TLV) are **big-endian**.
 - **Reference implementation**: Python decoder is in `tools/compress_segmented.decompress()`; encoder is `compress_image()` in the same file.
 
@@ -129,5 +177,8 @@ arr = np.array(flat, dtype=np.uint8).reshape((height, width))
 | Compressed  | `[method 1B][width 2B BE][height 2B BE][brotli_payload]` |
 | Method 0    | Brotli payload = bitpacked rows, 8 px/byte, MSB first |
 | Method 1    | Brotli payload = RLE pairs (value, count), row-major |
+| Method 2    | payload = range-coded context model (§3.3), no Brotli |
 
-Decoding: strip TLV → read method, width, height, payload → Brotli decompress → interpret payload by method → reshape to `(height, width)` binary image.
+Decoding: strip TLV → read method, width, height, payload → Brotli decompress (methods 0/1) or context-model decode (method 2) → `(height, width)` binary image.
+
+Shared test vectors (all methods, synthetic masks): `tests/fixtures/bitmap_vectors.json`, also in the API repo; regenerate with `tests/make_bitmap_vectors.py`.
