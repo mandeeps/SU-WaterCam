@@ -294,6 +294,17 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     if 'timestamp' not in data:
         data['timestamp'] = int(captured_at)
 
+    # The bitmap goes out over LoRa only when the scene changed, a flood is on,
+    # or it is due for a refresh (tools/bitmap_policy.py); IP sends every one.
+    send_bitmap = bool(bitmap)
+    if bitmap:
+        from tools import bitmap_policy
+        try:
+            send_bitmap, bitmap_reason = bitmap_policy.lora_decision(data, captured_at, get_parameter)
+        except Exception as e:
+            send_bitmap, bitmap_reason = True, f"policy check failed: {e}"
+        print(f"🗺️ LoRa bitmap: {'send' if send_bitmap else 'skip'} ({bitmap_reason})")
+
     # Check sensor changes using tracker if available (unless always_transmit_sensors is set)
     always_transmit_sensors = get_parameter('always_transmit_sensors', False)
     if always_transmit_sensors:
@@ -361,7 +372,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         except Exception as _e:
             print(f"⚠️ S&F: sensor encode failed: {_e}")
         try:
-            if bitmap:
+            if send_bitmap:
                 _bitmap_hex = handler.compressed_encoding({'flood_bitmap_compressed': bitmap}).hex()
         except Exception as _e:
             print(f"⚠️ S&F: bitmap encode failed: {_e}")
@@ -369,9 +380,12 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
             _sensor_hex, _bitmap_hex, captured_at,
             max_depth=get_config_value('lora_sf_max_depth', 96),
             max_age_days=get_config_value('lora_sf_max_age_days', 7),
-        ) and _sensor_hex:
-            from tools.sensor_changes import mark_sent
-            mark_sent(_sf_data, full=full_send)
+        ):
+            if _sensor_hex:
+                from tools.sensor_changes import mark_sent
+                mark_sent(_sf_data, full=full_send)
+            if _bitmap_hex:
+                bitmap_policy.mark_sent(data, dirname, now=captured_at)
         print(f"📦 LoRa not joined — data queued (depth: {_lsf.queue_depth()})")
         return bitmap
 
@@ -439,7 +453,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
 
     if not bitmap:
         print("[lora_token_with_tracker] No bitmap data to transmit")
-    else:
+    elif send_bitmap:
         try:
             # TLV-wrap as channel 0x08 type 0x18 so ChirpStack codec can decode it.
             # compressed_encoding({'flood_bitmap_compressed': bitmap}) produces:
@@ -450,7 +464,9 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
             bitmap_packet = handler.compressed_encoding({'flood_bitmap_compressed': bitmap})
             if len(bitmap_packet) <= size_limit:
                 print(f"[lora_token_with_tracker] Bitmap: {len(bitmap)}B → TLV 08 18")
-                if not handler.transmit(bitmap_packet.hex()):
+                if handler.transmit(bitmap_packet.hex()):
+                    bitmap_policy.mark_sent(data, dirname, now=captured_at)
+                else:
                     print("⚠️ Bitmap not sent: queued for a later cycle")
                     deferred['bitmap_hex'] = bitmap_packet.hex()
             else:
@@ -465,6 +481,8 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
                         max_depth=get_config_value('lora_sf_max_depth', 96),
                         max_age_days=get_config_value('lora_sf_max_age_days', 7)):
             print(f"📦 Queued {', '.join(k[:-4] for k in deferred)} for later (depth: {_lsf.queue_depth()})")
+            if 'bitmap_hex' in deferred:
+                bitmap_policy.mark_sent(data, dirname, now=captured_at)
 
 
     # Store-and-forward: trickle-drain backlog after current data is sent

@@ -97,6 +97,7 @@ class LoRaRuntimeManager:
         'compression_level':                (1, 10),
         'emergency_max_hours':              (0, 168),     # 0 = no expiry
         'flood_baseline_water_pct':         (0, 100),     # tools/flood_baseline.py
+        'bitmap_refresh_hours':             (0, 168),     # tools/bitmap_policy.py; 0 = every capture
     }
 
     # Parameters that must be stored as integers (not floats).
@@ -112,6 +113,7 @@ class LoRaRuntimeManager:
         'compression_level',
         'emergency_max_hours',
         'flood_baseline_water_pct',
+        'bitmap_refresh_hours',
     })
 
     # The one list of runtime_config defaults (written on first run, merged under
@@ -123,6 +125,11 @@ class LoRaRuntimeManager:
         # captures that counts as growing (tools/flood_baseline.py)
         'area_threshold': 10,
         'camera_flood_detection_enabled': False,  # node-side flood flags 07 17 / 07 27
+        # LoRa sends the mask bitmap (08 18) when the water % moved by
+        # area_threshold, a flood flag is set or changed, in emergency mode, or
+        # once this many hours have passed; 0 sends it every capture
+        # (tools/bitmap_policy.py). IP uploads send it every capture.
+        'bitmap_refresh_hours': 24,
         # Reserved: kept and reported (09 29) but unused on the node; the
         # server applies its own thresholds to stream gauge readings.
         'stage_threshold': 50,          # Water stage threshold (cm)
