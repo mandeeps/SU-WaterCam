@@ -166,13 +166,13 @@ def test_compress_image_passes_the_gate(tmp_path):
     assert on["method"] == 2 and on["width"] > off["width"] and on["total_size"] <= 238
 
 
-def test_gate_parameter_defaults_off_and_is_settable(tmp_path):
+def test_gate_parameter_defaults_on_and_is_settable(tmp_path):
     from tools.lora_runtime_integration import LoRaRuntimeManager
-    assert LoRaRuntimeManager._DEFAULT_PARAMS["bitmap_method2_enabled"] is False
+    assert LoRaRuntimeManager._DEFAULT_PARAMS["bitmap_method2_enabled"] is True
     assert "bitmap_method2_enabled" in LoRaRuntimeManager._SETTABLE_PARAMS
 
 
-@pytest.mark.parametrize("value,expected", [(False, False), (True, True), (None, False), ("true", False)])
+@pytest.mark.parametrize("value,expected", [(False, False), (True, True), (None, True), ("false", True)])
 def test_compress_bitmap_reads_the_gate(value, expected):
     import ticktalk_main
     seen = {}

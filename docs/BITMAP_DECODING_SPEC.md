@@ -150,18 +150,20 @@ of the same size has about twice the pixels.
 - **Size**: Compressed bitmap (header + payload) is usually ≤ 228 bytes when sent with a TT token, or ≤ 242 bytes otherwise. TLV adds 4 bytes (channel + type + length).
 - **Dimensions**: they come from the encoder and are stored in the 5-byte header.
   - LoRa, methods 0/1: long side at most 160 (the size search starts at 32).
-  - LoRa with `bitmap_method2_enabled`: long side at most 640, methods 0, 1 or 2, whichever is smallest.
+  - LoRa with `bitmap_method2_enabled` (the default): long side at most 640, methods 0, 1 or 2, whichever is smallest.
   - IP uplink (`/ip/uplink`, channel `08 18`): the mask at full resolution (e.g. 1296x972), methods 0/1 only, at most `FULL_RES_MAX_BYTES` (32000 B, so the hex fits one InfluxDB string field); a larger one is replaced by the LoRa-sized bitmap.
 
-### Enabling method 2 (`bitmap_method2_enabled`)
+### Method 2 and `bitmap_method2_enabled`
 
-Nodes send method 2 only with the runtime parameter `bitmap_method2_enabled`
-set to `true` (default `false`: methods 0/1, at most 160 px, exactly as before).
-A decoder that predates method 2 can't show those bitmaps, so:
+Method 2 is on by default: the node tries methods 0, 1 and 2 and sends the
+smallest (on real masks it has always been method 2). A decoder that predates
+method 2 can't show those bitmaps, so deploy the API version whose
+`app/bitmap.py` and dashboard decode method 2 (check `/health` shows the commit)
+**before** updating nodes.
 
-1. Deploy the API version whose `app/bitmap.py` and dashboard decode method 2 (check `/health` shows the commit).
-2. On each node, set `"bitmap_method2_enabled": true` in `runtime_config.json`
-   (a JSON boolean; anything else leaves it off). It is read at every capture, so no restart is needed.
+To go back to methods 0/1 (at most 160 px, exactly as before) on a node, set
+`"bitmap_method2_enabled": false` in its `runtime_config.json` (a JSON boolean;
+anything else keeps method 2). It is read at every capture, so no restart is needed.
 
 The ChirpStack codec passes the `08 18` bytes through without looking at the method, so it needs no change.
 - **Byte order**: All multi-byte fields (width, height, and the 2-byte length in TLV) are **big-endian**.

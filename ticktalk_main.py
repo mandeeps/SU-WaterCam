@@ -1014,13 +1014,13 @@ def compress_bitmap(segmented_file):
         print(f"[compress_bitmap] mDot limit {max_bitmap_bytes + 4}B too small for a bitmap now: compressing at 238B to queue")
         max_bitmap_bytes = 238
 
-    # Method 2 (lossless context model, up to 640 px) only once the API and the
-    # dashboard decode it: runtime parameter bitmap_method2_enabled, default off
-    # (docs/BITMAP_DECODING_SPEC.md). Off, this is methods 0/1 up to 160 px as before.
+    # Method 2 (lossless context model, up to 640 px) is the default; the API and
+    # dashboard must decode it (docs/BITMAP_DECODING_SPEC.md). bitmap_method2_enabled
+    # false goes back to methods 0/1 up to 160 px.
     method2 = False
     try:
         from tools.lora_runtime_integration import get_parameter
-        method2 = get_parameter('bitmap_method2_enabled', False) is True
+        method2 = get_parameter('bitmap_method2_enabled', True) is not False
     except Exception as e:
         print(f"[compress_bitmap] Could not read bitmap_method2_enabled ({e}): methods 0/1 only")
 
