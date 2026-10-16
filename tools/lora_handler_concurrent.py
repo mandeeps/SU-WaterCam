@@ -33,9 +33,9 @@ from typing import Dict, Any, Optional
 # 09 39 monitoring freq
 # 09 49 emergency freq
 # 09 59 neighborhood emergency status freq
-# 0A 01 wittypi temperature (float, celsius)
+# 0A 01 wittypi temperature (float, celsius; no longer sent)
 # 0A 02 wittypi battery voltage (float, volts)
-# 0A 03 wittypi internal voltage (float, volts)
+# 0A 03 wittypi internal voltage (float, volts; no longer sent)
 
 # Reception Data Format
 # Format: [Channel][Command][Value]
@@ -263,7 +263,7 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
             print(f"DEBUG: Processing audio_recording_enabled: {data['audio_recording_enabled']}")
             add_u8(0x09, 0x69, data['audio_recording_enabled'])
 
-        # WittyPi battery voltage (temperature and internal voltage: compact, below)
+        # WittyPi battery voltage (its temperature and output voltage aren't sent over LoRa)
         if 'wittypi_battery_voltage' in data:
             print(f"DEBUG: Processing wittypi_battery_voltage: {data['wittypi_battery_voltage']}")
             add_f32(0x0A, 0x02, data['wittypi_battery_voltage'])
@@ -299,10 +299,12 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
             add_u8(0x07, 0x37, max(0, min(100, int(data['camera_water_pct']))))
 
         # Compact forms of the old float32 channels, 2 bytes a value instead of 4
-        # (03 01, 05 01, 0A 01, 0A 03 stay decodable for units on older code):
-        # 03 02 orientation in 0.01 deg (u16 heading 0-360, i16 roll, i16 pitch),
-        # 05 02 and 0A 11 temperatures as i16 0.01 C, 0A 13 Witty Pi Vout as u16 mV.
-        # Last for the same reason as 01 07; a missing or non-numeric reading is left out.
+        # (03 01 and 05 01 stay decodable for units on older code): 03 02 orientation
+        # in 0.01 deg (u16 heading 0-360, i16 roll, i16 pitch), 05 02 temperature as
+        # i16 0.01 C. Last for the same reason as 01 07; a missing or non-numeric
+        # reading is left out. The Witty Pi temperature and output voltage aren't sent
+        # over LoRa (the server doesn't store them); the decoders keep 0A 01/03 and
+        # 0A 11/13 for units on older code.
         tilt = data.get('tilt_roll_yaw')
         if isinstance(tilt, (list, tuple)) and len(tilt) == 3 and all(_finite(x) for x in tilt):
             packet.extend(bytes([0x03, 0x02]))
@@ -311,10 +313,6 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
                                       _scaled_int(tilt[2], 100, -32768, 32767)))
         if _finite(data.get('temperature_celsius')):
             packet.extend(b"\x05\x02" + struct.pack(">h", _scaled_int(data['temperature_celsius'], 100, -32768, 32767)))
-        if _finite(data.get('wittypi_temperature')):
-            packet.extend(b"\x0a\x11" + struct.pack(">h", _scaled_int(data['wittypi_temperature'], 100, -32768, 32767)))
-        if _finite(data.get('wittypi_internal_voltage')):
-            add_u16(0x0A, 0x13, _scaled_int(data['wittypi_internal_voltage'], 1000, 0, 0xFFFF))
 
         print(f"DEBUG: Final packet size: {len(packet)} bytes")
         return bytes(packet)

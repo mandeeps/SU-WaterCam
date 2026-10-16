@@ -25,11 +25,11 @@
  * Channel 09 Type 39: Monitoring frequency (minutes)
  * Channel 09 Type 49: Emergency frequency (minutes)
  * Channel 09 Type 59: Neighborhood emergency frequency (minutes)
- * Channel 0A Type 01: WittyPi temperature (float32, Celsius)
+ * Channel 0A Type 01: WittyPi temperature (float32, Celsius; older nodes, no longer sent)
  * Channel 0A Type 02: WittyPi battery voltage (float32, Volts)
- * Channel 0A Type 03: WittyPi internal voltage (float32, Volts; older nodes)
- * Channel 0A Type 11: WittyPi temperature in 0.01 Celsius (i16)
- * Channel 0A Type 13: WittyPi internal voltage in mV (u16)
+ * Channel 0A Type 03: WittyPi internal voltage (float32, Volts; older nodes, no longer sent)
+ * Channel 0A Type 11: WittyPi temperature in 0.01 Celsius (i16; decoded, not sent)
+ * Channel 0A Type 13: WittyPi internal voltage in mV (u16; decoded, not sent)
  * Channel 0B Type 01: Debug status message (JSON string)
  * Channel 0C Type 01: Compact packet (11 bytes in all, for DR0): u32 capture time, u8 flags
  *   (bit 0 emergency, 1 flood detected, 2 flood growing, 3 health fault, 4 moved, 5 under-voltage
@@ -103,14 +103,6 @@ function decodeUplink(input) {
       case '2-1':
         result.battery_percent = view.getUint8(offset++);
         break;
-      case '3-1':
-        result.tilt_roll_yaw = [
-          view.getFloat32(offset, false),
-          view.getFloat32(offset + 4, false),
-          view.getFloat32(offset + 8, false)
-        ];
-        offset += 12;
-        break;
       case '3-2':
         // Compact orientation, 0.01 deg: u16 heading, i16 roll, i16 pitch
         result.tilt_roll_yaw = [
@@ -127,10 +119,6 @@ function decodeUplink(input) {
           view.getFloat32(offset + 8, false)
         ];
         offset += 12;
-        break;
-      case '5-1':
-        result.temperature_celsius = view.getFloat32(offset, false);
-        offset += 4;
         break;
       case '5-2':
         result.temperature_celsius = view.getInt16(offset, false) / 100;
@@ -179,25 +167,9 @@ function decodeUplink(input) {
         // USB microphone recording on (1) or off (0)
         result.audio_recording_enabled = view.getUint8(offset++);
         break;
-      case 'a-1':
-        result.wittypi_temperature = view.getFloat32(offset, false);
-        offset += 4;
-        break;
       case 'a-2':
         result.wittypi_battery_voltage = view.getFloat32(offset, false);
         offset += 4;
-        break;
-      case 'a-3':
-        result.wittypi_internal_voltage = view.getFloat32(offset, false);
-        offset += 4;
-        break;
-      case 'a-11':
-        result.wittypi_temperature = view.getInt16(offset, false) / 100;
-        offset += 2;
-        break;
-      case 'a-13':
-        result.wittypi_internal_voltage = view.getUint16(offset, false) / 1000;
-        offset += 2;
         break;
       case 'b-1': {
         // Debug status message (JSON string)
@@ -239,6 +211,38 @@ function decodeUplink(input) {
         offset += 9;
         break;
       }
+      // Legacy forms (older nodes). Superseded on the node but still decoded:
+      // 03 01 / 05 01 float32 (now 03 02 / 05 02), and the Witty Pi temperature and
+      // output voltage, no longer sent over LoRa (0A 01 / 0A 03 float32, and their
+      // 0A 11 / 0A 13 compact forms).
+      case '3-1':
+        result.tilt_roll_yaw = [
+          view.getFloat32(offset, false),
+          view.getFloat32(offset + 4, false),
+          view.getFloat32(offset + 8, false)
+        ];
+        offset += 12;
+        break;
+      case '5-1':
+        result.temperature_celsius = view.getFloat32(offset, false);
+        offset += 4;
+        break;
+      case 'a-1':
+        result.wittypi_temperature = view.getFloat32(offset, false);
+        offset += 4;
+        break;
+      case 'a-3':
+        result.wittypi_internal_voltage = view.getFloat32(offset, false);
+        offset += 4;
+        break;
+      case 'a-11':
+        result.wittypi_temperature = view.getInt16(offset, false) / 100;
+        offset += 2;
+        break;
+      case 'a-13':
+        result.wittypi_internal_voltage = view.getUint16(offset, false) / 1000;
+        offset += 2;
+        break;
       default:
         offset = view.byteLength; // Stop on unknown
         break;

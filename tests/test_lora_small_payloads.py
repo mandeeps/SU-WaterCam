@@ -147,24 +147,22 @@ def test_codec_decodes_every_sensor_channel():
     assert out["audio_recording_enabled"] == 1
     assert out["camera_flood_detected"] == 1
     assert out["timestamp"] == 1792108958 and out["status_area_threshold"] == 10
-    # Compact forms (03 02, 05 02, 0A 11, 0A 13): same field names and units as before
+    # Compact forms (03 02, 05 02): same field names and units as before
     assert out["tilt_roll_yaw"] == [0.0, 7.12, 85.06]
     assert out["temperature_celsius"] == 22.2
-    assert out["wittypi_temperature"] == 30.62
-    assert out["wittypi_internal_voltage"] == 4.88
-    assert len(pkt) == 92   # 104 with the float32 channels
+    # The Witty Pi temperature and output voltage aren't sent over LoRa
+    assert "wittypi_temperature" not in out and "wittypi_internal_voltage" not in out
+    assert len(pkt) == 84   # 104 with the float32 and Witty Pi channels
 
 
 def test_compact_fields_layout_and_limits():
     from tools.lora_handler_concurrent import _encode_compressed_packet
     pkt = _encode_compressed_packet({"tilt_roll_yaw": (359.999, -7.125, 400.0), "temperature_celsius": -12.345,
-                                     "wittypi_temperature": 30.625, "wittypi_internal_voltage": 70.0})
-    assert pkt == (b"\x03\x02" + struct.pack(">Hhh", 0, -712, 32767) + b"\x05\x02" + struct.pack(">h", -1234)
-                   + b"\x0a\x11" + struct.pack(">h", 3062) + b"\x0a\x13" + struct.pack(">H", 65535))
+                                     "wittypi_temperature": 30.625, "wittypi_internal_voltage": 4.88})
+    assert pkt == b"\x03\x02" + struct.pack(">Hhh", 0, -712, 32767) + b"\x05\x02" + struct.pack(">h", -1234)
     assert struct.unpack(">H", _encode_compressed_packet({"tilt_roll_yaw": [-10.0, 0, 0]})[2:4])[0] == 35000
     # No reading, or a partial one, is left out rather than failing the packet
-    assert _encode_compressed_packet({"tilt_roll_yaw": (None, 1.0, 2.0), "temperature_celsius": None,
-                                      "wittypi_temperature": float("nan"), "wittypi_internal_voltage": None}) == b""
+    assert _encode_compressed_packet({"tilt_roll_yaw": (None, 1.0, 2.0), "temperature_celsius": float("nan")}) == b""
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
@@ -174,6 +172,8 @@ def test_codec_still_decodes_old_float_channels():
            + b"\x05\x01" + struct.pack(">f", 22.25) + b"\x0a\x01" + struct.pack(">f", 30.625)
            + b"\x0a\x03" + struct.pack(">f", 4.875) + b"\x07\x37\x46")
     out = _codec_decode(pkt)
+    compact_wittypi = _codec_decode(b"\x0a\x11" + struct.pack(">h", 3062) + b"\x0a\x13" + struct.pack(">H", 4880))
+    assert compact_wittypi == {"wittypi_temperature": 30.62, "wittypi_internal_voltage": 4.88}
     assert out["timestamp"] == 1792108958 and out["tilt_roll_yaw"] == [0.0, 7.125, 85.0625]
     assert out["temperature_celsius"] == 22.25 and out["wittypi_temperature"] == 30.625
     assert out["wittypi_internal_voltage"] == 4.875 and out["camera_water_pct"] == 70
