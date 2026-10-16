@@ -10,6 +10,7 @@ import serial
 import threading
 import queue
 import json
+import math
 import re
 import os
 from typing import Dict, Any, Optional
@@ -117,6 +118,15 @@ class LoRaSerialPortConflict(RuntimeError):
 # single flush only drains whatever's pending at that instant; this bounds
 # how many extra probe uplinks we're willing to send chasing a clean drain
 # before giving up and retrying the real payload anyway.
+def _finite(v) -> bool:
+    return isinstance(v, (int, float)) and math.isfinite(v)
+
+
+def _scaled_int(v, scale: float, lo: int, hi: int) -> int:
+    """round(v * scale), clamped to [lo, hi]."""
+    return max(lo, min(hi, int(round(float(v) * scale))))
+
+
 MAC_FLUSH_MAX_ROUNDS = 3
 
 
@@ -219,15 +229,9 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
         if data.get('battery_percent') is not None:
             print(f"DEBUG: Processing battery_percent: {data['battery_percent']}")
             add_u8(0x02, 0x01, data['battery_percent'])
-        if 'tilt_roll_yaw' in data:
-            print(f"DEBUG: Processing tilt_roll_yaw: {data['tilt_roll_yaw']}")
-            add_f32_3(0x03, 0x01, data['tilt_roll_yaw'])
         if 'lat_lon_z' in data:
             print(f"DEBUG: Processing lat_lon_z: {data['lat_lon_z']}")
             add_f32_3(0x04, 0x01, data['lat_lon_z'])
-        if 'temperature_celsius' in data:
-            print(f"DEBUG: Processing temperature_celsius: {data['temperature_celsius']}")
-            add_f32(0x05, 0x01, data['temperature_celsius'])
         if 'relative_humidity' in data:
             print(f"DEBUG: Processing relative_humidity: {data['relative_humidity']}")
             add_u8(0x06, 0x01, data['relative_humidity'])
@@ -259,16 +263,10 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
             print(f"DEBUG: Processing audio_recording_enabled: {data['audio_recording_enabled']}")
             add_u8(0x09, 0x69, data['audio_recording_enabled'])
 
-        # WittyPi voltage measurements for battery status
-        if 'wittypi_temperature' in data:
-            print(f"DEBUG: Processing wittypi_temperature: {data['wittypi_temperature']}")
-            add_f32(0x0A, 0x01, data['wittypi_temperature'])
+        # WittyPi battery voltage (temperature and internal voltage: compact, below)
         if 'wittypi_battery_voltage' in data:
             print(f"DEBUG: Processing wittypi_battery_voltage: {data['wittypi_battery_voltage']}")
             add_f32(0x0A, 0x02, data['wittypi_battery_voltage'])
-        if 'wittypi_internal_voltage' in data:
-            print(f"DEBUG: Processing wittypi_internal_voltage: {data['wittypi_internal_voltage']}")
-            add_f32(0x0A, 0x03, data['wittypi_internal_voltage'])
 
         # Pi throttled/under-voltage flags (tools/pi_power.py), packed to one byte.
         # Deliberately encoded LAST: decoders that predate this channel stop at the
@@ -299,6 +297,24 @@ def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
         # for the same reason as 01 07: an older decoder loses only this field.
         if data.get('camera_water_pct') is not None:
             add_u8(0x07, 0x37, max(0, min(100, int(data['camera_water_pct']))))
+
+        # Compact forms of the old float32 channels, 2 bytes a value instead of 4
+        # (03 01, 05 01, 0A 01, 0A 03 stay decodable for units on older code):
+        # 03 02 orientation in 0.01 deg (u16 heading 0-360, i16 roll, i16 pitch),
+        # 05 02 and 0A 11 temperatures as i16 0.01 C, 0A 13 Witty Pi Vout as u16 mV.
+        # Last for the same reason as 01 07; a missing or non-numeric reading is left out.
+        tilt = data.get('tilt_roll_yaw')
+        if isinstance(tilt, (list, tuple)) and len(tilt) == 3 and all(_finite(x) for x in tilt):
+            packet.extend(bytes([0x03, 0x02]))
+            packet.extend(struct.pack(">Hhh", int(round(float(tilt[0]) * 100)) % 36000,
+                                      _scaled_int(tilt[1], 100, -32768, 32767),
+                                      _scaled_int(tilt[2], 100, -32768, 32767)))
+        if _finite(data.get('temperature_celsius')):
+            packet.extend(b"\x05\x02" + struct.pack(">h", _scaled_int(data['temperature_celsius'], 100, -32768, 32767)))
+        if _finite(data.get('wittypi_temperature')):
+            packet.extend(b"\x0a\x11" + struct.pack(">h", _scaled_int(data['wittypi_temperature'], 100, -32768, 32767)))
+        if _finite(data.get('wittypi_internal_voltage')):
+            add_u16(0x0A, 0x13, _scaled_int(data['wittypi_internal_voltage'], 1000, 0, 0xFFFF))
 
         print(f"DEBUG: Final packet size: {len(packet)} bytes")
         return bytes(packet)
