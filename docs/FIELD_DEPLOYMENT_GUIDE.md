@@ -547,18 +547,34 @@ Each unit needs a unit config JSON for the tool (`unit_config_UFO<NNN>.json` in
 }
 ```
 
-`imu_magnetic_declination_deg` is negative for west: about -11.5 in the Syracuse
-area; take the site's value from NOAA's declination calculator. Then, outdoors:
+`imu_magnetic_declination_deg` is negative for west: about -11.9 in the Syracuse
+area. Compute the site's value from its surveyed position with NOAA's World
+Magnetic Model, offline, so the coordinates go nowhere (e.g. the `pygeomag`
+package with its `WMM_2025.COF`), or use NOAA's calculator.
 
-```bash
-cd ~/SU-WaterCam && venv/bin/python tools/bno055_calibration.py --unit-config unit_config_UFO006.json --mode calibrate
-```
+The calibration has three parts, and they can be done in two goes:
 
-It runs three stages (gyroscope still on a flat surface; accelerometer in six
-positions, base down, lid down and four 45-degree tilts, antennas clear;
-magnetometer by slow figure-eights) and waits for Enter at each. Verify
-`bno055_calibration.json` shows `"mag": 3` when done. Without it heading data
-will be unreliable and georeferencing will be difficult.
+- **Gyroscope and accelerometer: anywhere, indoors included.** They don't
+  depend on the magnetic field.
+  ```bash
+  cd ~/SU-WaterCam && venv/bin/python tools/bno055_calibration.py -u unit_config_UFO006.json --mode calibrate --stages gyro,accel
+  ```
+  Gyroscope: still on a flat surface. Accelerometer: six positions, base down,
+  lid down and four 45-degree tilts, antennas clear. The magnetometer is saved
+  as "not calibrated" (zeros, `"mag": null` under `components`), so whatever it
+  learned on the bench is never saved or loaded.
+- **Magnetometer: outdoors at a magnetically clean spot** (see above), at the
+  site if need be. It keeps the saved gyroscope and accelerometer offsets.
+  ```bash
+  cd ~/SU-WaterCam && venv/bin/python tools/bno055_calibration.py -u unit_config_UFO006.json --mode calibrate --stages mag
+  ```
+  Slow figure-eights for at least 30 s until `mag` reaches 3. It needs the
+  unit in hand, so at the site do it before mounting.
+
+Running without `--stages` does all three at once. Check that
+`bno055_calibration.json` lists all three parts under `components` when done.
+Until the magnetometer is calibrated, headings are unreliable (the node logs a
+warning at boot) and georeferencing will be difficult.
 
 After a reboot, check the offsets load and the status with the unit still
 (Ctrl-C to stop; see "Checking calibration status at any time" in
