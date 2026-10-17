@@ -40,6 +40,28 @@ jobs:
             opencv-python-headless SimpleITK pandas rasterio \
             onnx onnxruntime
 
+      # Nodes run the committed output/ticktalk_main.pickle, not the source.
+      # compile.py is deterministic, so a fresh build must match the committed
+      # pickle byte for byte (and its .sha256, which runrtm.py checks at start).
+      - name: Committed pickle matches ticktalk_main.py
+        run: |
+          out=$(mktemp -d)
+          if ! python compile.py ticktalk_main.py --out "$out" > "$out/compile.log" 2>&1; then
+            tail -n 40 "$out/compile.log"
+            echo "::error file=ticktalk_main.py::compile.py ticktalk_main.py failed"
+            exit 1
+          fi
+          fresh=$(sha256sum "$out/ticktalk_main.pickle" | cut -d' ' -f1)
+          committed=$(sha256sum output/ticktalk_main.pickle | cut -d' ' -f1)
+          recorded=$(cut -d' ' -f1 output/ticktalk_main.pickle.sha256)
+          echo "fresh build:      $fresh"
+          echo "committed pickle: $committed"
+          echo "committed sha256: $recorded"
+          if [ "$fresh" != "$committed" ] || [ "$committed" != "$recorded" ]; then
+            echo "::error file=output/ticktalk_main.pickle::output/ticktalk_main.pickle does not match ticktalk_main.py. Run 'python compile.py ticktalk_main.py --out output' and commit both output/ticktalk_main.pickle and output/ticktalk_main.pickle.sha256."
+            exit 1
+          fi
+
       # Discovers every tests/test_*.py, so a new test file is run without
       # touching this workflow. -rs lists every skip and its reason, so a
       # test that silently stops running shows up in the log.

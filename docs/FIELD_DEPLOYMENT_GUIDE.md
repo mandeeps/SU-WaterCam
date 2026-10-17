@@ -574,6 +574,17 @@ sudo systemctl enable --now wittypi-next-wake.service
 
 `ticktalk` and the WittyPi services start on the next boot.
 
+**Unit files change with releases.** The installed units are copies, so a
+`git checkout` of a new release does not update them. `ticktalk.service`,
+`lora_daemon.service` and `segformer_daemon.service` set
+`Environment=PYTHONUNBUFFERED=1`, so each `print()` reaches the journal when it
+happens (with buffered stdout, journal timestamps bunch together: two captures
+60 s apart are logged within the same second). On a unit installed before that,
+copy the three files again as above and run `sudo systemctl daemon-reload`;
+check with `systemctl show ticktalk.service -p Environment`. The new unit takes
+effect when the service next starts (next wake, or restart lora_daemon and
+segformer_daemon now).
+
 **Hard maximum awake time.** A wake is normally 10-15 minutes and `ticktalk`
 powers the Pi off at the end of it. `max-awake.timer` is the backstop for when
 that doesn't happen (a hung capture, a restart loop): every 5 minutes it checks
@@ -872,6 +883,11 @@ for the site:
       unauthenticated on the dashboard.
 - [ ] One full cycle (1.11) reached the dashboard, and `ticktalk.service` is
       enabled.
+- [ ] The dashboard shows the unit's transport as LoRa before it leaves the
+      bench. A routine IP upload switches it to `ip`; set it back in the device
+      panel's Transport section.
+- [ ] `systemctl show ticktalk.service -p Environment` includes
+      `PYTHONUNBUFFERED=1` (the unit file from this release, 1.9).
 - [ ] **Tailscale ACL:** diff the live ACL in the admin console against
       `config/tailscale-acl.txt` (they have diverged before) and update whichever
       is wrong.

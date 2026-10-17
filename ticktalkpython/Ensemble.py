@@ -595,6 +595,16 @@ class TTEnsemble():
                         # to the processor
                         phys_proc.process.join(timeout=5)
                         if not phys_proc.process.is_alive():
+                            # SU-WaterCam: exit status 0 is a requested stop
+                            # (an SQ called sys.exit(0), which the execute
+                            # process re-raises from its worker thread). Close
+                            # TTPython without an error; any other status is
+                            # a failure, as before.
+                            if phys_proc.process.exitcode == 0:
+                                self.logger.warning(
+                                    f'process {type(phys_proc.cls).__name__} '
+                                    'exited with status 0, closing TTPython')
+                                return
                             self.logger.critical(
                                 f'process {type(phys_proc.cls).__name__} has '
                                 'died, closing TTPython')

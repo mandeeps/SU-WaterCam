@@ -1019,8 +1019,14 @@ def call_shutdown(state):
             print(f"⚠️ {' '.join(cmd[:2])} shutdown failed: {rc}")
         else:
             print("🚨 Could not shut down: the Witty Pi will cut power at the end of the window")
-        # Fallback: terminate the TT runtime process
-        sys.exit("shutdown")
+            # Exit with an error: systemd restarts the runtime (Restart=on-failure),
+            # and the next cycle asks for shutdown again.
+            sys.exit("shutdown")
+        # The OS is going down: end the runtime with status 0. The execute
+        # process re-raises this from the SQ's worker thread and exits 0, and
+        # the ensemble (ticktalkpython/Ensemble.py) treats that as a requested
+        # stop, so runrtm.py exits without a ProcessError traceback.
+        sys.exit(0)
     else:
         print(f"✅ Continuing: count={new_count} < limit={shutdown_limit} or shutdown disabled")
 

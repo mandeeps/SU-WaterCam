@@ -7,6 +7,8 @@ User=pi
 Group=pi
 Type=idle
 WorkingDirectory=/home/pi/SU-WaterCam
+# Unbuffered stdout, so print() output reaches the journal as it happens.
+Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/pi/SU-WaterCam/venv/bin/python3 /home/pi/SU-WaterCam/button_hold_camera.py
 
 [Install]

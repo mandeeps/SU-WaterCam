@@ -82,8 +82,10 @@ def shutdown(tmp_path, tm):
 
     def run(returncodes):
         calls = MagicMock(side_effect=returncodes)
-        with patch("subprocess.call", calls), patch("sys.exit") as exit_:
-            tm.call_shutdown.__wrapped__(None)
+        with patch("subprocess.call", calls), \
+                patch("sys.exit", side_effect=SystemExit) as exit_:
+            with pytest.raises(SystemExit):
+                tm.call_shutdown.__wrapped__(None)
         return [c.args[0][0] for c in calls.call_args_list], exit_
     yield run
     lri._runtime_manager = None
@@ -92,17 +94,20 @@ def shutdown(tmp_path, tm):
 def test_shutdown_uses_doas_when_it_works(shutdown):
     cmds, exit_ = shutdown([0])
     assert cmds == ["doas"]
-    exit_.assert_called_once_with("shutdown")
+    # status 0: the runtime ends without an error (no ProcessError traceback)
+    exit_.assert_called_once_with(0)
 
 
 def test_shutdown_falls_back_to_sudo(shutdown):
-    cmds, _ = shutdown([1, 0])
+    cmds, exit_ = shutdown([1, 0])
     assert cmds == ["doas", "sudo"]
+    exit_.assert_called_once_with(0)
 
 
 def test_shutdown_survives_missing_doas(shutdown):
     cmds, exit_ = shutdown([FileNotFoundError("doas"), 1])
     assert cmds == ["doas", "sudo"]
+    # neither worked: exit with an error, so systemd restarts the runtime
     exit_.assert_called_once_with("shutdown")
 
 

@@ -10,6 +10,9 @@ User=pi
 Group=pi
 Type=simple
 WorkingDirectory=/home/pi/SU-WaterCam
+# Unbuffered stdout, so print() output reaches the journal as it happens
+# (lora_daemon.py also line-buffers stdout itself; this covers imports).
+Environment=PYTHONUNBUFFERED=1
 # RuntimeDirectory creates /run/lora/ owned by User=pi at 0750,
 # placing the socket outside world-writable /tmp.
 RuntimeDirectory=lora
