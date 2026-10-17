@@ -651,6 +651,22 @@ sudo systemctl enable quectel-gnss.service usb-power-off.service usb-power-on.ti
 grep uhubctl config/doas.conf | sudo tee -a /etc/doas.conf && sudo doas -C /etc/doas.conf
 ```
 
+Set the clock from the Witty Pi RTC at the start of each boot. Otherwise the
+system clock starts at the last shutdown's time (on a 30-minute schedule, about
+28 minutes behind) until the Witty Pi daemon corrects it, and `tailscaled`
+starts with that wrong time and may not connect for part of the wake.
+`rtc-early-clock.service` runs before `tailscaled`, the LoRa daemon and
+`ticktalk`; it only moves the clock forward, ignores an RTC that lost power or
+reads an implausible time, and gives up after 5 s without a Witty Pi. The clock
+still counts as unverified (`clock_unverified`) until network, GPS or server
+time confirms it.
+
+```bash
+sudo cp config/rtc-early-clock.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable rtc-early-clock.service
+```
+
 Install the clock helper. A unit with no WiFi at boot gets no network time, and
 without a GPS fix no GPS time either; after each IP upload it sets its clock and
 the Witty Pi RTC from the server's reply when they're more than 5 s off:
@@ -832,6 +848,9 @@ for the site:
       capture button on pin 29).
 - [ ] `systemctl is-enabled remote-debug.timer max-awake.timer` prints `enabled`
       twice (`/etc/watercam/hold-awake` must not exist).
+- [ ] `systemctl is-enabled rtc-early-clock.service` prints `enabled`, and after a
+      reboot `journalctl -b -u rtc-early-clock` shows `system clock ... -> RTC ...`
+      or a `skip:` reason (an RTC that lost power must be set before deploying).
 - [ ] `venv/bin/python tools/initial_health_check.py --no-alert` prints no
       `WARN` lines (GPS may fail indoors).
 - [ ] **IP token:** if `ip_upload.enabled` is true, the operator installs the
