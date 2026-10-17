@@ -68,6 +68,56 @@ def test_check_dry_run_and_session_and_hold(monkeypatch, tmp_path):
     assert calls == []
 
 
+def test_emergency_exempt_only_until_deadline():
+    now = 1_800_000_000.0
+    cfg = {"emergency_mode": True, "emergency_since": now - 3600, "emergency_max_hours": 2}
+    assert not max_awake.emergency_expired(cfg, now=now, uptime_min=90)
+    cfg["emergency_since"] = now - (2 * 3600 + 14 * 60)        # inside the 15 min margin
+    assert not max_awake.emergency_expired(cfg, now=now, uptime_min=90)
+    cfg["emergency_since"] = now - (2 * 3600 + 16 * 60)
+    assert max_awake.emergency_expired(cfg, now=now, uptime_min=90)
+    assert max_awake.decide(500, 60, False, False, True, emergency_over=True) == "shutdown"
+    # the session and the hold flag still keep it up
+    assert max_awake.decide(500, 60, True, False, True, emergency_over=True).startswith("stay")
+    assert max_awake.decide(500, 60, False, True, True, emergency_over=True).startswith("stay")
+    assert not max_awake.emergency_expired({"emergency_mode": False, "emergency_since": 1}, now=now)
+
+
+def test_emergency_default_hours_and_no_expiry():
+    now = 1_800_000_000.0
+    # 21 91 00 leaves emergency_max_hours unset: 24 h
+    cfg = {"emergency_mode": True, "emergency_since": now - 23 * 3600}
+    assert not max_awake.emergency_expired(cfg, now=now, uptime_min=90)
+    cfg["emergency_since"] = now - 25 * 3600
+    assert max_awake.emergency_expired(cfg, now=now, uptime_min=90)
+    cfg["emergency_max_hours"] = "x"                          # garbled: the default
+    assert max_awake.emergency_expired(cfg, now=now, uptime_min=90)
+    cfg["emergency_max_hours"] = 0                            # 0 = never, as call_shutdown()
+    assert not max_awake.emergency_expired(cfg, now=now, uptime_min=10 ** 6)
+
+
+@pytest.mark.parametrize("since", [None, "garbage", True, float("nan"), 1_800_000_000.0 + 86400])
+def test_emergency_bad_since_counts_from_boot(since):
+    now = 1_800_000_000.0
+    cfg = {"emergency_mode": True, "emergency_since": since, "emergency_max_hours": 1}
+    assert not max_awake.emergency_expired(cfg, now=now, uptime_min=70)
+    assert max_awake.emergency_expired(cfg, now=now, uptime_min=80)
+    assert not max_awake.emergency_expired(cfg, now=now, uptime_min=None)
+
+
+def test_check_shuts_down_expired_emergency_and_clears_it(monkeypatch, tmp_path):
+    import json
+    import time as _time
+    cfg = {"emergency_mode": True, "emergency_since": _time.time() - 30 * 3600, "x": 1}
+    calls = _setup_check(monkeypatch, tmp_path, 90, cfg=cfg)
+    assert max_awake.check(dry_run=True) == "shutdown"
+    assert calls == [] and json.loads((tmp_path / "rc.json").read_text())["emergency_mode"] is True
+    assert max_awake.check() == "shutdown"
+    assert calls == [["doas", "/usr/sbin/shutdown", "-h", "now"]]
+    saved = json.loads((tmp_path / "rc.json").read_text())
+    assert saved["emergency_mode"] is False and saved["emergency_since"] is None and saved["x"] == 1
+
+
 # --- startup health setup warnings -----------------------------------------
 
 def test_parse_pinctrl():

@@ -583,7 +583,13 @@ the uptime and, past `max_awake_minutes` (`runtime_config.json`, default 60,
 `wittypi-next-wake.service` arms the next slot. It never powers off while a
 remote debug session is active, while `/etc/watercam/hold-awake` exists
 (`sudo touch` it to keep a unit up on the bench, remove it afterwards), or in
-emergency mode. `tools/max_awake.py check --dry-run` says what it would do.
+emergency mode until that has run `emergency_max_hours` (default 24, `0` = no
+expiry) plus 15 minutes from `emergency_since`. The capture graph normally ends
+emergency mode at `emergency_max_hours`; this covers a hung graph, which would
+otherwise keep the unit up (its shutdown alarm cleared) until the battery is flat.
+Past that deadline it turns `emergency_mode` off and powers off as above. A
+missing or unusable `emergency_since` counts from boot. `tools/max_awake.py
+check --dry-run` says what it would do.
 
 ```bash
 sudo cp config/max-awake.service config/max-awake.timer /etc/systemd/system/

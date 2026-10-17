@@ -36,6 +36,9 @@ so the command arrives before the normal cycle ends.
 - It ends after `HH` hours (`emergency_since` + `emergency_max_hours`), on `99 99`,
   or when the dashboard turns it off. Ending it re-arms the installed
   `schedule.wpi` (it never rewrites the file).
+- If the capture graph is hung and can't end it, `max-awake.timer`
+  (`tools/max_awake.py`) does: 15 minutes past that deadline it turns
+  `emergency_mode` off and powers the unit off; the next slot is armed on the way down.
 
 ## Transition
 
