@@ -31,5 +31,28 @@ TimeoutStartSec=60
 # systemd killed a healthy daemon on every start.)
 ExecStartPost=/bin/bash -c 'for i in $(seq 1 60); do [ -S /run/lora/lora.sock ] && exit 0; sleep 0.5; done; exit 1'
 
+# Sandbox (same in lora_daemon, segformer_daemon and powerlog).
+# They need real devices (/dev/ttyAMA5, /dev/i2c-1, /dev/vcio) and share
+# /tmp and /run/lock files with ticktalk, so no PrivateDevices, PrivateTmp or
+# ProtectClock (which implies a device allow-list). They never call doas or
+# sudo, so they can drop privilege escalation and all capabilities.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ReadWritePaths=/home/pi /tmp /run/lock
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
 [Install]
 WantedBy=multi-user.target

@@ -575,7 +575,10 @@ sudo systemctl enable --now wittypi-next-wake.service
 `ticktalk` and the WittyPi services start on the next boot.
 
 **Unit files change with releases.** The installed units are copies, so a
-`git checkout` of a new release does not update them. `ticktalk.service`,
+`git checkout` of a new release does not update them. They also carry systemd sandbox settings
+(`ticktalk`, `lora_daemon`, `segformer_daemon`, `powerlog`): after copying,
+`systemd-analyze security lora_daemon` should read about 2.5 OK and `ticktalk` about 7.1 MEDIUM
+(it runs doas, so it can't drop privileges). `ticktalk.service`,
 `lora_daemon.service` and `segformer_daemon.service` set
 `Environment=PYTHONUNBUFFERED=1`, so each `print()` reaches the journal when it
 happens (with buffered stdout, journal timestamps bunch together: two captures
