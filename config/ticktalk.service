@@ -36,5 +36,19 @@ ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/runrtm.py -d
 Restart=on-failure
 RestartSec=10
 
+# Light sandbox for ticktalk. It runs doas (shutdown, set the clock, USB
+# power), and doas children inherit these settings, so no NoNewPrivileges,
+# capability limits, ProtectClock or read-only /sys. It also drives the
+# cameras, I2C, GPIO and SPI directly, and shares /tmp with the daemons.
+ProtectSystem=full
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+
 [Install]
 WantedBy=multi-user.target
