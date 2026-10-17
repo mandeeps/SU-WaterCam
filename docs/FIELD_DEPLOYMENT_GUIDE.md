@@ -520,13 +520,72 @@ I'd recommend using SSH at this point to connect to the Raspberry Pi instead of 
 
 ### 1.7 IMU Stage 1 calibration
 
-**Has to be done before the unit is installed outside**
+**Has to be done before the unit is installed outside.** It doesn't have to be
+at the site: any magnetically clean outdoor spot works, such as a lawn or open
+area at least 5-10 m from cars, buildings, metal fences and power lines. Not a
+workbench: computers, power supplies, steel furniture and building rebar bend
+the field and end up in the offsets. Why the site itself isn't needed: the
+offsets correct the unit's own field (the V75's steel-cased cells, screws,
+connectors, boards), which moves with the unit. Whatever the site adds (its
+pole, nearby metal) is fixed, and because a mounted camera never turns, it
+shows up as one constant heading offset, which Stage 2 measures at the site.
 
-```bash
-python tools/bno055_calibration.py --unit-config <unit_config_file>.json --mode calibrate
+Calibrate the unit fully assembled and powered as deployed: battery in place,
+antennas on, lid closed, BNO055 fixed in its final position. Remounting the
+sensor means recalibrating.
+
+Each unit needs a unit config JSON for the tool (`unit_config_UFO<NNN>.json` in
+`~/SU-WaterCam`, not in git):
+
+```json
+{
+  "unit_id": "UFO-006",
+  "imu_calibration_file": "/home/pi/SU-WaterCam/bno055_calibration.json",
+  "imu_mount_offset_deg": 0.0,
+  "imu_magnetic_declination_deg": -11.5,
+  "imu_heading_correction_deg": 0.0
+}
 ```
 
-Verify `bno055_calibration.json` shows `"mag": 3` when done. Without it heading data will be unreliable and georeferencing will be difficult.
+`imu_magnetic_declination_deg` is negative for west: about -11.9 in the Syracuse
+area. Compute the site's value from its surveyed position with NOAA's World
+Magnetic Model, offline, so the coordinates go nowhere (e.g. the `pygeomag`
+package with its `WMM_2025.COF`), or use NOAA's calculator.
+
+The calibration has three parts, and they can be done in two goes:
+
+- **Gyroscope and accelerometer: anywhere, indoors included.** They don't
+  depend on the magnetic field.
+  ```bash
+  cd ~/SU-WaterCam && venv/bin/python tools/bno055_calibration.py -u unit_config_UFO006.json --mode calibrate --stages gyro,accel
+  ```
+  Gyroscope: still on a flat surface. Accelerometer: six positions, base down,
+  lid down and four 45-degree tilts, antennas clear. The magnetometer is saved
+  as "not calibrated" (zeros, `"mag": null` under `components`), so whatever it
+  learned on the bench is never saved or loaded.
+- **Magnetometer: outdoors at a magnetically clean spot** (see above), at the
+  site if need be. It keeps the saved gyroscope and accelerometer offsets.
+  ```bash
+  cd ~/SU-WaterCam && venv/bin/python tools/bno055_calibration.py -u unit_config_UFO006.json --mode calibrate --stages mag
+  ```
+  Slow figure-eights for at least 30 s until `mag` reaches 3. It needs the
+  unit in hand, so at the site do it before mounting.
+
+Running without `--stages` does all three at once. Check that
+`bno055_calibration.json` lists all three parts under `components` when done.
+Until the magnetometer is calibrated, headings are unreliable (the node logs a
+warning at boot) and georeferencing will be difficult.
+
+After a reboot, check the offsets load and the status with the unit still
+(Ctrl-C to stop; see "Checking calibration status at any time" in
+`docs/IMU_CALIBRATION.md`):
+`venv/bin/python tools/bno055_calibration.py -u unit_config_UFO006.json --mode log --interval 2`.
+Watch `cal=sys/gyro/accel/mag`: `mag` may start below 2 for a few seconds after
+boot, then should reach 2-3 and stay there with the unit not moving. Stage 2
+needs `mag` at 2 or more.
+
+Stage 2 (`--mode mount` with a surveyed bearing, about a minute with the unit
+still) is done at the site after mounting: see `docs/IMU_CALIBRATION.md`.
 
 ### 1.7.1 Clear the learned mount position
 

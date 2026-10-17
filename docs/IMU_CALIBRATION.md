@@ -39,9 +39,13 @@ The BNO055 has no internal non-volatile memory. Calibration offsets must be save
 
 Run this **before** permanently mounting the unit. If the unit is already mounted, dismount it for this stage.
 
-### 1.1 Go to the deployment site (or a nearby outdoor area)
+### 1.1 Go to a magnetically clean outdoor spot
 
-Do not calibrate at a workbench or indoors near computers and power supplies. The hard-iron calibration captures the magnetic environment at the time of calibration — you want that environment to match where the unit will be deployed. Within 50 m of the deployment site is ideal.
+Do not calibrate at a workbench or indoors near computers, power supplies, steel furniture or rebar: their fields end up in the offsets. The site itself isn't required. Any open outdoor area at least 5-10 m from cars, buildings, metal fences and power lines works, for example near the lab.
+
+Why: the hard-iron offsets correct the unit's own field (battery cells, screws, connectors, boards), which goes wherever the unit goes. What the site adds (the pole, nearby metal) is fixed, and since a mounted camera never rotates, it appears as a single constant heading offset. Stage 2 measures that offset at the site and removes it.
+
+Calibrate the unit fully assembled and powered as deployed (battery in place, antennas on, lid closed).
 
 ### 1.2 Connect and run the calibration script
 
@@ -158,7 +162,9 @@ The script prints a result like:
 
 A **residual error < 2°** is good. Between 2–5° is acceptable but note it in the installation record. Above 5° indicates a problem — see Troubleshooting below.
 
-> **Copy the unit config to the Georeferencing repo.** The `imu_heading_correction_deg` value is also used by the Georeferencing pipeline's `resolve_heading()` function. Update `unit_config_UFO006.json` in the Georeferencing repository to match.
+> **Copy the values to where headings are corrected.** The node sends raw headings (`tools/bno055_imu.py` applies no offset or declination); corrections are applied downstream:
+> - **API:** the device's pose config (`PUT /devices/{id}/pose-config`; the dashboard's georeference page) takes `imu_mount_offset_deg`, `imu_magnetic_declination_deg` and `imu_heading_correction_deg` (`app/georef_math.py` adds the three). Enter the unit config's values there.
+> - **Georeferencing:** its pipeline's `resolve_heading()` uses the same values. Update `unit_config_UFO006.json` in the Georeferencing repository to match.
 
 ---
 
