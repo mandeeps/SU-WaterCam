@@ -883,6 +883,11 @@ for the site:
       unauthenticated on the dashboard.
 - [ ] One full cycle (1.11) reached the dashboard, and `ticktalk.service` is
       enabled.
+- [ ] The dashboard shows the unit's transport as LoRa before it leaves the
+      bench. A routine IP upload switches it to `ip`; set it back in the device
+      panel's Transport section.
+- [ ] `systemctl show ticktalk.service -p Environment` includes
+      `PYTHONUNBUFFERED=1` (the unit file from this release, 1.9).
 - [ ] **Tailscale ACL:** diff the live ACL in the admin console against
       `config/tailscale-acl.txt` (they have diverged before) and update whichever
       is wrong.
