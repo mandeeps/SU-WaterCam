@@ -99,11 +99,11 @@ def test_aht20_collection():
         return None
 
 def test_sensor_data_flow():
-    """Test complete sensor data flow like in lora_token function"""
+    """Test complete sensor data flow like in lora_token_with_tracker"""
     print("\n🔄 Testing Complete Sensor Data Flow")
     print("=" * 50)
     
-    # Simulate the data collection from lora_token function
+    # Simulate the data collection from lora_token_with_tracker
     data = {}
     
     # Get IMU data

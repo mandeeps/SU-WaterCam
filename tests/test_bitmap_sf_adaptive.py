@@ -1,9 +1,8 @@
 """Tests for bitmap compression budget and TLV transmission path.
 
 compress_bitmap() must pass max_bytes = lora_limit - 4 (TLV overhead) to
-compress_image() regardless of SF.  lora_token() must queue the bitmap via
-queue_transmit({'flood_bitmap_compressed': bitmap}) so compressed_encoding()
-wraps it as 08 18 [2B len] [bytes] — the format the ChirpStack codec expects.
+compress_image() regardless of SF.  The send path (lora_token_with_tracker) is
+covered in test_bitmap_queue_fit.py.
 
 All tests call the real production functions via __wrapped__ (SQify uses
 functools.wraps so __wrapped__ points to the original) with hardware
@@ -133,75 +132,3 @@ class TestCompressBitmapEdgeCases:
 
         assert captured["max_bytes"] == 238
         assert len(result) == 238
-
-
-# ---------------------------------------------------------------------------
-# lora_token bitmap path — call __wrapped__ with all dependencies patched
-# ---------------------------------------------------------------------------
-
-def _lora_token_patches(handler):
-    """Context-manager stack that patches every import inside lora_token."""
-    mock_token = MagicMock()
-    mock_lora_msg = MagicMock()
-    mock_lora_msg.encode_token.return_value = b"\xde\xad\xbe\xef"
-
-    return [
-        patch("tools.lora_handler_concurrent.get_lora_handler", return_value=handler),
-        patch("tools.lora_handler_concurrent.get_config_value", return_value=None),
-        patch("tools.lora_handler_concurrent.transmit_data", return_value=True),
-        patch("tools.lora_handler_concurrent.transmit_binary", return_value=True),
-        patch("tools.lora_handler_concurrent.compressed_encoding", return_value=b"\x00" * 8),
-        patch("tools.bno055_imu.get_orientation", return_value={}),
-        patch("tools.aht20_temperature.get_aht20", return_value={}),
-        patch("tools.get_gps.get_location_with_retry", return_value=({}, None)),
-        patch("tools.wittypi_control.get_wittypi_status",
-              return_value={"status": "unavailable"}),
-        patch("tools.battery_manager.get_battery_status",
-              return_value={"battery_pct": 80, "battery_source": "test"}),
-        patch("tools.lora_runtime_integration.get_parameter", return_value=False),
-        patch("ticktalkpython.TTToken.TTToken", return_value=mock_token),
-        patch("ticktalkpython.NetworkInterfaceLoRa.TTLoRaMessage",
-              return_value=mock_lora_msg),
-    ]
-
-
-class TestLoraTokenBitmapMode:
-
-    def _invoke(self, bitmap: bytes, lora_limit: int):
-        import ticktalk_main
-        handler = _make_lora_handler(lora_limit)
-        with contextlib.ExitStack() as stack:
-            for p in _lora_token_patches(handler):
-                stack.enter_context(p)
-            ticktalk_main.lora_token.__wrapped__(bitmap)
-        return handler
-
-    def test_bitmap_queued_as_tlv_sf7(self):
-        """SF7 (242B): bitmap sent via queue_transmit as flood_bitmap_compressed."""
-        bitmap = b"\x01" * 100
-        handler = self._invoke(bitmap, lora_limit=242)
-        handler.queue_transmit.assert_called_with({'flood_bitmap_compressed': bitmap})
-
-    def test_bitmap_queued_as_tlv_sf8(self):
-        """Former 'raw mode' SF8 (125B): also sent via queue_transmit, not queue_binary_transmit."""
-        bitmap = b"\x01" * 50
-        handler = self._invoke(bitmap, lora_limit=125)
-        handler.queue_transmit.assert_called_with({'flood_bitmap_compressed': bitmap})
-
-    def test_no_raw_binary_transmit_for_bitmap(self):
-        """Bitmap bytes must never be passed directly to queue_binary_transmit."""
-        bitmap = b"\x01" * 100
-        handler = self._invoke(bitmap, lora_limit=242)
-        raw_calls = [c for c in handler.queue_binary_transmit.call_args_list
-                     if c.args and c.args[0] == bitmap]
-        assert raw_calls == []
-
-    def test_empty_bitmap_skips_transmission(self):
-        """Empty bitmap b'' → lora_token returns without any bitmap queue_transmit call."""
-        handler = self._invoke(b"", lora_limit=242)
-        bitmap_calls = [
-            c for c in handler.queue_transmit.call_args_list
-            if c.args and isinstance(c.args[0], dict)
-            and 'flood_bitmap_compressed' in c.args[0]
-        ]
-        assert bitmap_calls == []

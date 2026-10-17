@@ -58,22 +58,11 @@ Two modes:
 dimension that produces a compressed payload within `max_bytes`. If even a 32×32 image
 exceeds the budget, `compress_bitmap()` returns `b''` and no transmission is attempted.
 
-### `lora_token()` / `lora_token_with_tracker()` — conditional TTToken wrapping
+### `lora_token_with_tracker()` — sending the bitmap
 
-Using the same threshold, the function decides how to transmit:
-
-**Raw mode** (`lora_limit ≤ 128`):
-- Sends bare bitmap bytes via `handler.queue_binary_transmit(bitmap)`.
-- No TTToken/TTLoRa header — saves 14 bytes for actual image data.
-- The server API's raw bitmap detection path handles this format
-  (`app/chirpstack.py` lines 645–670 in the WaterCam API repo).
-
-**Tokenized mode** (`lora_limit > 128`):
-- Sends TTToken-wrapped bitmap (14-byte TTLoRa header + bitmap).
-- Also sends bare bitmap bytes as before (dual transmission for redundancy).
-
-Both functions now guard against an empty bitmap (`if not bitmap: return early`) to avoid
-sending zero-byte payloads to the mDot.
+The bitmap goes out as a plain TLV packet, `08 18 [2B len] [bytes]`
+(`compressed_encoding({'flood_bitmap_compressed': bitmap})`), the format the
+ChirpStack codec expects. There is no TTToken header. An empty bitmap is not sent.
 
 ### When the bitmap goes out over LoRa (`tools/bitmap_policy.py`)
 
@@ -144,7 +133,7 @@ budget. The only missing piece was that `compress_bitmap()` was not passing the 
 
 `compress_image()` may return `{'success': False}` when no image fits (budget < 32 B
 minimum). This case is now handled explicitly: `compress_bitmap()` returns `b''` and
-`lora_token()` skips transmission with a log message.
+`lora_token_with_tracker()` skips transmission with a log message.
 
 ## UART Inter-Process Lock
 
