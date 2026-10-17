@@ -339,25 +339,39 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
             if k in data:
                 sensors_to_transmit[k] = {'current_value': data[k], 'reason': 'flood'}
 
+    daemon_down = None
     try:
         handler = get_lora_handler()
     except Exception as e:
-        print(f"⚠️ Failed to get LoRa handler: {e}")
-        return bitmap
-
-    if handler is None:
+        handler = None
+        daemon_down = f"failed to get LoRa handler: {e}"
+    if handler is None and daemon_down is None:
         # get_lora_handler() returns None when the LoRa daemon's socket is missing,
         # i.e. the daemon is not running; its contract requires callers to check
-        # before dereferencing. Skip this cycle instead of crashing on handler.is_joined().
+        # before dereferencing.
         from tools.lora_handler_concurrent import lora_unavailable_reason
-        print(f"⚠️ LoRa unavailable ({lora_unavailable_reason()}) — skipping transmission this cycle")
-        return bitmap
+        daemon_down = lora_unavailable_reason()
 
-    # Store-and-forward: if the mDot is not joined, queue the payloads and skip
-    # transmission.  The mDot will rejoin autonomously; the next cycle drains the
-    # backlog (trickle: 2 packets/cycle) after sending the current data first.
+    # Store-and-forward: if the daemon is down or the mDot is not joined, queue
+    # the payloads and skip transmission. The mDot rejoins autonomously (and
+    # systemd restarts the daemon); a later cycle drains the backlog (trickle:
+    # 2 packets/cycle) after sending its current data first.
     _sf_enabled = get_config_value('lora_sf_enabled', True)
-    if _sf_enabled and not handler.is_joined():
+    if daemon_down is None and _sf_enabled:
+        try:
+            _not_joined = not handler.is_joined()
+        except Exception as e:
+            print(f"⚠️ LoRa join state unknown ({e}): treating as not joined")
+            _not_joined = True
+    else:
+        _not_joined = False
+    if daemon_down is not None and not _sf_enabled:
+        print(f"⚠️ LoRa unavailable ({daemon_down}) and store-and-forward is off: nothing sent this cycle")
+        return bitmap
+    if daemon_down is not None or _not_joined:
+        # The packet encoding is pure, so it works without the daemon
+        from tools.lora_handler_concurrent import _encode_compressed_packet
+        _encode = handler.compressed_encoding if handler is not None else _encode_compressed_packet
         _sensor_hex = None
         _bitmap_hex = None
         try:
@@ -368,25 +382,33 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
                          if k in sensors_to_transmit or k == 'timestamp'}
                         if (sensor_tracker and sensors_to_transmit) else data)
             if always_transmit_sensors or not sensor_tracker or sensors_to_transmit:
-                _sensor_hex = handler.compressed_encoding(_sf_data).hex()
+                _sensor_hex = _encode(_sf_data).hex()
         except Exception as _e:
             print(f"⚠️ S&F: sensor encode failed: {_e}")
         try:
+            # only a bitmap the policy would send now (tools/bitmap_policy.py)
             if send_bitmap:
-                _bitmap_hex = handler.compressed_encoding({'flood_bitmap_compressed': bitmap}).hex()
+                _bitmap_hex = _encode({'flood_bitmap_compressed': bitmap}).hex()
         except Exception as _e:
             print(f"⚠️ S&F: bitmap encode failed: {_e}")
-        if _lsf.enqueue(
+        _queued = (_sensor_hex or _bitmap_hex) and _lsf.enqueue(
             _sensor_hex, _bitmap_hex, captured_at,
             max_depth=get_config_value('lora_sf_max_depth', 96),
             max_age_days=get_config_value('lora_sf_max_age_days', 7),
-        ):
+        )
+        if _queued:
             if _sensor_hex:
                 from tools.sensor_changes import mark_sent
                 mark_sent(_sf_data, full=full_send)
             if _bitmap_hex:
                 bitmap_policy.mark_sent(data, dirname, now=captured_at)
-        print(f"📦 LoRa not joined — data queued (depth: {_lsf.queue_depth()})")
+        if daemon_down is not None:
+            # Queued, not dropped: counted apart from sf_dropped (tools/drop_counter.py)
+            from tools import drop_counter
+            drop_counter.record_event('lora_daemon_unavailable')
+            print(f"⚠️ LoRa unavailable ({daemon_down}) — data queued (depth: {_lsf.queue_depth()})")
+        else:
+            print(f"📦 LoRa not joined — data queued (depth: {_lsf.queue_depth()})")
         return bitmap
 
     # Transmit sensor data if: no tracker, always_transmit_sensors, or changes detected

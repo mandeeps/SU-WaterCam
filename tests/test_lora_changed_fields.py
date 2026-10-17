@@ -3,6 +3,8 @@ past the threshold since they were last sent. No second, full sensor packet."""
 
 import os
 import sys
+
+import pytest
 from contextlib import ExitStack
 from unittest.mock import MagicMock, patch
 
@@ -49,8 +51,11 @@ class TestChangedFields:
 
 
 def _run_capture(tmp_path, temperature, joined=True, bitmap=b"\x01\x00\x40\x00\x30\x00", orientation=None,
-                 size_limit=242, transmit_ok=True):
-    """Run lora_token_with_tracker once; return the handler mock."""
+                 size_limit=242, transmit_ok=True, daemon=True, bitmap_send=None):
+    """Run lora_token_with_tracker once; return the handler mock.
+
+    daemon=False: get_lora_handler() returns None (LoRa daemon down);
+    "raise": it raises. bitmap_send forces the bitmap policy's decision."""
     import ticktalk_main
     handler = MagicMock()
     handler.is_joined.return_value = joined
@@ -63,7 +68,16 @@ def _run_capture(tmp_path, temperature, joined=True, bitmap=b"\x01\x00\x40\x00\x
     (cap / "capture_time").write_text("1791400000\n")
     with ExitStack() as st:
         st.enter_context(patch.object(sc, "DEFAULT_STATE_PATH", str(tmp_path / "last_sent.json")))
-        st.enter_context(patch("tools.lora_handler_concurrent.get_lora_handler", return_value=handler))
+        if daemon is True:
+            st.enter_context(patch("tools.lora_handler_concurrent.get_lora_handler", return_value=handler))
+        elif daemon == "raise":
+            st.enter_context(patch("tools.lora_handler_concurrent.get_lora_handler",
+                                   side_effect=OSError("socket gone")))
+        else:
+            st.enter_context(patch("tools.lora_handler_concurrent.get_lora_handler", return_value=None))
+        if bitmap_send is not None:
+            st.enter_context(patch("tools.bitmap_policy.lora_decision", return_value=(bitmap_send, "test")))
+        st.enter_context(patch("tools.drop_counter.DEFAULT_PATH", str(tmp_path / "sf_dropped.json")))
         st.enter_context(patch("tools.lora_handler_concurrent.get_config_value", side_effect=lambda k, d=None: d))
         st.enter_context(patch("tools.lora_runtime_integration.get_parameter", side_effect=lambda k, d=None: d))
         st.enter_context(patch("tools.bno055_imu.get_orientation",
@@ -81,6 +95,45 @@ def _run_capture(tmp_path, temperature, joined=True, bitmap=b"\x01\x00\x40\x00\x
             bitmap, {"change_threshold": 0.05, "previous_values": {}}, str(cap))
     handler.enqueue = enq
     return handler
+
+
+def _daemon_events(tmp_path):
+    from tools import drop_counter
+    return drop_counter.events(str(tmp_path / "sf_dropped.json"))["lora_daemon_unavailable"]
+
+
+class TestLoRaDaemonDown:
+    @pytest.mark.parametrize("daemon", [False, "raise"])
+    def test_cycle_is_queued_and_counted(self, tmp_path, daemon):
+        h = _run_capture(tmp_path, 20.0, daemon=daemon, bitmap_send=True)
+        h.enqueue.assert_called_once()
+        sensor_hex, bitmap_hex = h.enqueue.call_args.args[:2]
+        assert sensor_hex.startswith("0001") and bitmap_hex.startswith("0818")
+        h.transmit.assert_not_called()
+        assert _daemon_events(tmp_path) == 1
+        from tools import drop_counter
+        assert drop_counter.total(str(tmp_path / "sf_dropped.json")) == 0    # queued is not dropped
+
+    def test_bitmap_policy_is_respected(self, tmp_path):
+        h = _run_capture(tmp_path, 20.0, daemon=False, bitmap_send=False)
+        assert h.enqueue.call_args.args[1] is None
+
+    def test_queued_fields_count_as_sent(self, tmp_path):
+        _run_capture(tmp_path, 20.0, daemon=False, bitmap_send=False)
+        h = _run_capture(tmp_path, 20.0, daemon=False, bitmap_send=False)
+        h.enqueue.assert_not_called()           # nothing changed and no bitmap: nothing to queue
+        assert _daemon_events(tmp_path) == 2
+
+    def test_debug_status_reports_it(self, tmp_path):
+        from tools import drop_counter, lora_debug_integration as ldi
+        path = str(tmp_path / "sf_dropped.json")
+        with patch.object(drop_counter, "DEFAULT_PATH", path):
+            assert "du" not in dict(ldi.collect_compact_status())
+            drop_counter.record("lora", path=path)
+            drop_counter.record_event("lora_daemon_unavailable", path=path)
+            drop_counter.record("ip", path=path)        # keeps the event count
+            fields = dict(ldi.collect_compact_status())
+        assert fields["du"] == 1 and fields["sd"] == 2
 
 
 def _sensor_packets(handler):
