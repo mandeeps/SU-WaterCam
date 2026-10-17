@@ -5,6 +5,14 @@
 **Date:** 2026-04-19  
 **Reference:** https://blog.voltaicsystems.com/reading-charge-level-of-voltaic-usb-battery-packs/
 
+> **Update 2026-10-17 (new-design packs):** every current unit uses the
+> new-design Voltaic V75 (aluminium case). On it the charge signal is on the
+> **SBU pins (A8/B8)** of the USB-C PD port, not on D+, which now carries Power
+> Delivery. The D+ figures below are for old-design packs only, and units take
+> power from the USB-A ports (Always On), not through a USB-C cable. The current
+> plan reads the signal with the mDot's ADC: see `docs/POWER_ANALYSIS.md`,
+> "Battery state of charge".
+
 ---
 
 ## 1. Hardware Context
@@ -15,9 +23,10 @@
 Solar panel
     │  (solar input cable, ~6–20V)
     ▼
-Voltaic V50 battery pack
-    │  (regulated 5V USB-C output)
-    │  └─ D+ pin carries ½ × cell voltage (~1.5–2.1V, varies with SOC)
+Voltaic V50 (old design) / V75 (new design) battery pack
+    │  (regulated 5V; units use the two USB-A Always On ports)
+    │  └─ charge signal: D+ pin, ½ × cell voltage (old design);
+    │     SBU pins A8/B8 of the USB-C PD port (new design, scale to measure)
     ▼
 WittyPi 4 (USB-C input)
     │  (5V via GPIO header)
@@ -33,9 +42,9 @@ Raspberry Pi
 | `get_output_voltage` | 5V rail to RPi | **Limited / fallback only** — regulated by WittyPi DC/DC, but rail sag under load is a coarse indicator when no better signal exists (Path 3) |
 | `get_output_current` | Current to RPi | No — load current, not battery level |
 
-### Voltaic V50 D+ signal (key finding)
+### Voltaic D+ signal (old-design packs)
 
-Voltaic V25/V50/V75 battery packs output a **scaled cell voltage on the USB-C D+ data pin**:
+Old-design Voltaic V25/V50/V75 battery packs output a **scaled cell voltage on the USB-C D+ data pin** (new-design packs use the SBU pins instead; see the update at the top):
 
 ```
 D+ voltage ≈ cell_voltage / 2
