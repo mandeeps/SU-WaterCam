@@ -297,8 +297,15 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     # The bitmap goes out over LoRa only when the scene changed, a flood is on,
     # or it is due for a refresh (tools/bitmap_policy.py); IP sends every one.
     send_bitmap = bool(bitmap)
+    from tools import bitmap_policy, bitmap_fit
+    # The capture's mask: a queued bitmap is compressed again from it when it
+    # doesn't fit the room later (tools/bitmap_fit.py)
+    try:
+        from tools.flood_baseline import mask_path as _mask_path_for
+        _mask = _mask_path_for(dirname) if dirname else None
+    except Exception:
+        _mask = None
     if bitmap:
-        from tools import bitmap_policy
         try:
             send_bitmap, bitmap_reason = bitmap_policy.lora_decision(data, captured_at, get_parameter)
         except Exception as e:
@@ -391,17 +398,18 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
                 _bitmap_hex = _encode({'flood_bitmap_compressed': bitmap}).hex()
         except Exception as _e:
             print(f"⚠️ S&F: bitmap encode failed: {_e}")
+        # A queued bitmap replaces older queued ones; the bitmap policy records
+        # it only once it is transmitted (drain's on_bitmap_sent)
         _queued = (_sensor_hex or _bitmap_hex) and _lsf.enqueue(
             _sensor_hex, _bitmap_hex, captured_at,
             max_depth=get_config_value('lora_sf_max_depth', 96),
             max_age_days=get_config_value('lora_sf_max_age_days', 7),
+            mask_path=_mask, bitmap_policy=bitmap_policy.queue_fields(data, dirname),
         )
         if _queued:
             if _sensor_hex:
                 from tools.sensor_changes import mark_sent
                 mark_sent(_sf_data, full=full_send)
-            if _bitmap_hex:
-                bitmap_policy.mark_sent(data, dirname, now=captured_at)
         if daemon_down is not None:
             # Queued, not dropped: counted apart from sf_dropped (tools/drop_counter.py)
             from tools import drop_counter
@@ -484,14 +492,32 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
             # after the sensor packet (which carries the capture time), and the
             # API pairs the two by LoRaWAN frame counter.
             bitmap_packet = handler.compressed_encoding({'flood_bitmap_compressed': bitmap})
+            _method2 = bitmap_fit.method2_allowed(get_parameter)
+            if len(bitmap_packet) > size_limit and bitmap_fit.packet_budget(size_limit):
+                # Compressed for a larger room (the stored limit lags, or a MAC
+                # answer takes a few bytes now): compress again for the room now
+                _refit = bitmap_fit.refit_packet(_mask, size_limit, handler.compressed_encoding, _method2)
+                if _refit:
+                    print(f"📏 Bitmap packet {len(bitmap_packet)} B > {size_limit} B limit: "
+                          f"compressed again to {len(_refit)} B")
+                    bitmap_packet = _refit
             if len(bitmap_packet) <= size_limit:
-                print(f"[lora_token_with_tracker] Bitmap: {len(bitmap)}B → TLV 08 18")
+                print(f"[lora_token_with_tracker] Bitmap: {len(bitmap_packet) - bitmap_fit.TLV_OVERHEAD}B → TLV 08 18")
                 if handler.transmit(bitmap_packet.hex()):
                     bitmap_policy.mark_sent(data, dirname, now=captured_at)
+                    # Older bitmaps still queued would only show an older scene
+                    _lsf.supersede_bitmaps(captured_at)
                 else:
                     print("⚠️ Bitmap not sent: queued for a later cycle")
                     deferred['bitmap_hex'] = bitmap_packet.hex()
             else:
+                # No room for any bitmap now (DR0): queue one with headroom for
+                # MAC answers, since it goes out later at an unknown room
+                _queue_max = bitmap_fit.queue_budget() + bitmap_fit.TLV_OVERHEAD
+                if len(bitmap_packet) > _queue_max:
+                    _small = bitmap_fit.compress_mask(_mask, bitmap_fit.queue_budget(), _method2)
+                    if _small:
+                        bitmap_packet = handler.compressed_encoding({'flood_bitmap_compressed': _small})
                 print(f"📏 Bitmap packet {len(bitmap_packet)} B > {size_limit} B limit: queued for later")
                 deferred['bitmap_hex'] = bitmap_packet.hex()
         except Exception as e:
@@ -499,12 +525,13 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
 
     # Whatever didn't go out waits for a cycle with room (and isn't lost)
     if deferred and _sf_enabled:
+        # A queued bitmap replaces older queued ones; the bitmap policy records
+        # it only once it is transmitted (drain's on_bitmap_sent below)
         if _lsf.enqueue(deferred.get('sensor_hex'), deferred.get('bitmap_hex'), captured_at,
                         max_depth=get_config_value('lora_sf_max_depth', 96),
-                        max_age_days=get_config_value('lora_sf_max_age_days', 7)):
+                        max_age_days=get_config_value('lora_sf_max_age_days', 7),
+                        mask_path=_mask, bitmap_policy=bitmap_policy.queue_fields(data, dirname)):
             print(f"📦 Queued {', '.join(k[:-4] for k in deferred)} for later (depth: {_lsf.queue_depth()})")
-            if 'bitmap_hex' in deferred:
-                bitmap_policy.mark_sent(data, dirname, now=captured_at)
 
 
     # Store-and-forward: trickle-drain backlog after current data is sent
@@ -515,6 +542,12 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
                 max_packets=get_config_value('lora_sf_drain_per_cycle', 2),
                 max_age_days=get_config_value('lora_sf_max_age_days', 7),
                 size_limit=size_limit,
+                # a queued bitmap too large for the room now is compressed again
+                # from its capture's mask; one that goes out is recorded as sent
+                refit=lambda rec, lim: bitmap_fit.refit_packet(
+                    rec.get('mask_path'), lim, handler.compressed_encoding,
+                    bitmap_fit.method2_allowed(get_parameter)),
+                on_bitmap_sent=bitmap_policy.mark_sent_queued,
             )
             if _drain['drained']:
                 print(f"📤 S&F: drained {_drain['drained']} queued packet(s)")
@@ -1019,7 +1052,9 @@ def compress_bitmap(segmented_file):
     # thoroughly draining the MAC queue before retrying the same packet
     # (tools/lora_handler_concurrent.py's _flush_mac_commands(), looped up to
     # MAC_FLUSH_MAX_ROUNDS times), not by permanently shrinking every bitmap
-    # to reserve headroom that's usually unused.
+    # to reserve headroom that's usually unused. That holds for a bitmap sent
+    # now; one that has to be queued keeps headroom (below), and
+    # lora_token_with_tracker compresses again for the room at send time.
     max_bitmap_bytes = 238
     try:
         from tools.lora_handler_concurrent import get_size_limit
@@ -1030,11 +1065,13 @@ def compress_bitmap(segmented_file):
         print(f"[compress_bitmap] Could not query mDot limit ({e}), using {max_bitmap_bytes}B default")
 
     if max_bitmap_bytes < 32:
-        # Too small for any bitmap at this data rate (DR0: 11 B): compress at the
-        # full size instead; the LoRa step queues it for a cycle with room and
-        # the IP uplink sends it as it is.
-        print(f"[compress_bitmap] mDot limit {max_bitmap_bytes + 4}B too small for a bitmap now: compressing at 238B to queue")
-        max_bitmap_bytes = 238
+        # Too small for any bitmap at this data rate (DR0: 11 B): compress for
+        # the store-and-forward queue instead, with headroom for MAC command
+        # answers (226 B, tools/bitmap_fit.py), since it goes out later at an
+        # unknown room; draining compresses it again if it still doesn't fit.
+        from tools.bitmap_fit import queue_budget
+        max_bitmap_bytes = queue_budget()
+        print(f"[compress_bitmap] mDot limit {lora_limit}B too small for a bitmap now: compressing at {max_bitmap_bytes}B to queue")
 
     # Method 2 (lossless context model, up to 640 px) is the default; the API and
     # dashboard must decode it (docs/BITMAP_DECODING_SPEC.md). bitmap_method2_enabled
