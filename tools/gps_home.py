@@ -21,9 +21,13 @@ import json
 import math
 import os
 import sys
-import tempfile
 import time
 from typing import Optional
+
+try:
+    from tools import config_io
+except ImportError:     # run from tools/ as a script
+    import config_io
 
 HOME_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gps_home.json")
 DEFAULT_ALERT_M = 50.0
@@ -63,12 +67,9 @@ def load() -> dict:
 
 def _save(state: dict) -> None:
     try:
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(HOME_PATH), prefix=".gps_home.")
-        with os.fdopen(fd, "w") as f:
-            json.dump(state, f)
-        os.chmod(tmp, 0o600)   # it says where the unit is
-        os.replace(tmp, HOME_PATH)
-    except OSError as e:
+        # atomic and fsynced; 0o600 because it says where the unit is
+        config_io.write_json(HOME_PATH, state, mode=0o600)
+    except (OSError, TypeError, ValueError) as e:
         print(f"⚠️ GPS home: couldn't save: {e}")
 
 

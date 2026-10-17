@@ -583,7 +583,13 @@ the uptime and, past `max_awake_minutes` (`runtime_config.json`, default 60,
 `wittypi-next-wake.service` arms the next slot. It never powers off while a
 remote debug session is active, while `/etc/watercam/hold-awake` exists
 (`sudo touch` it to keep a unit up on the bench, remove it afterwards), or in
-emergency mode. `tools/max_awake.py check --dry-run` says what it would do.
+emergency mode until that has run `emergency_max_hours` (default 24, `0` = no
+expiry) plus 15 minutes from `emergency_since`. The capture graph normally ends
+emergency mode at `emergency_max_hours`; this covers a hung graph, which would
+otherwise keep the unit up (its shutdown alarm cleared) until the battery is flat.
+Past that deadline it turns `emergency_mode` off and powers off as above. A
+missing or unusable `emergency_since` counts from boot. `tools/max_awake.py
+check --dry-run` says what it would do.
 
 ```bash
 sudo cp config/max-awake.service config/max-awake.timer /etc/systemd/system/
@@ -645,6 +651,22 @@ sudo systemctl enable quectel-gnss.service usb-power-off.service usb-power-on.ti
 grep uhubctl config/doas.conf | sudo tee -a /etc/doas.conf && sudo doas -C /etc/doas.conf
 ```
 
+Set the clock from the Witty Pi RTC at the start of each boot. Otherwise the
+system clock starts at the last shutdown's time (on a 30-minute schedule, about
+28 minutes behind) until the Witty Pi daemon corrects it, and `tailscaled`
+starts with that wrong time and may not connect for part of the wake.
+`rtc-early-clock.service` runs before `tailscaled`, the LoRa daemon and
+`ticktalk`; it only moves the clock forward, ignores an RTC that lost power or
+reads an implausible time, and gives up after 5 s without a Witty Pi. The clock
+still counts as unverified (`clock_unverified`) until network, GPS or server
+time confirms it.
+
+```bash
+sudo cp config/rtc-early-clock.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable rtc-early-clock.service
+```
+
 Install the clock helper. A unit with no WiFi at boot gets no network time, and
 without a GPS fix no GPS time either; after each IP upload it sets its clock and
 the Witty Pi RTC from the server's reply when they're more than 5 s off:
@@ -679,6 +701,17 @@ survives one.
 sudo mkdir -p /etc/systemd/journald.conf.d
 sudo cp config/journald-volatile.conf /etc/systemd/journald.conf.d/
 sudo systemctl restart systemd-journald
+```
+
+Rotate the logs that otherwise only grow: the power log, the bench
+`~/throttle_log.csv`, ticktalk's `output.log` and `data/temp_humidity.csv`
+(each kept to four 5 MB compressed copies). `~/wittypi/wittyPi.log` is left
+alone: this boot's offset into it is how the unit tells this boot's lines from
+earlier ones.
+
+```bash
+sudo cp config/logrotate-watercam.conf /etc/logrotate.d/watercam
+sudo logrotate -d /etc/logrotate.d/watercam    # check it parses
 ```
 
 ### 1.9.1 LoRa health, WiFi only when needed, photo retention
@@ -721,7 +754,7 @@ card can't stop the unit. The photos aren't uploaded, so this is the only copy.
   filebrowser`), it costs cellular data ([1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
 - **Legacy, never install:** `watercam.service` (replaced by ticktalk; the unit file is gone from `config/`),
   `gps.service` (replaced by `quectel-gnss.service`), `button.service`,
-  `temperature.service`; `config/dhcpcd.conf` (NetworkManager is used) and
+  `temperature.service` (removed from `config/`); `config/dhcpcd.conf` (NetworkManager is used) and
   `config/avrdude_gpio.conf` (Witty Pi firmware flashing only).
 - **Bench-only:** the `throttle-log` service (logs `get_throttled` at boot and
   shutdown to `~/throttle_log.csv`), `~/test_wake.sh`, and any ticktalk drop-ins
@@ -779,6 +812,15 @@ sudo systemctl stop ticktalk.service
 - **Solar:** the panel goes into the V50's solar input (at most about 2 A).
 - Check after wiring: `get_throttled` is `0x0` after a capture cycle (1.11) and
   the Witty Pi reports Vout around 4.9 V (`~/powerlog/powerlog.csv`).
+- **Pass rule: Witty Pi input voltage at least 4.8 V under load**, during a wake:
+  the `vin` column of `~/powerlog/powerlog.csv` while the unit segments or
+  uploads, or the startup health check, which fails below 4.8 V
+  (`wittypi_input_voltage_low_*V`). The Pi's under-voltage threshold is about
+  4.63 V, so below 4.8 V there is no headroom for load peaks. About 4.49 V on a
+  wall adapter means a weak adapter or cable; it shows up as `get_throttled`
+  `0x50000` (under-voltage has occurred, and throttling has occurred) at
+  shutdown. Swap in a known-good 5.1 V supply and a short, thick USB-C cable,
+  then retest.
 
 ### 1.12 Weatherproofing
 
@@ -798,6 +840,8 @@ If you want to use one of the default schedules run `./wittypi/wittyPi.sh`
 
 If you need to customize the schedule you can write a `.wpi` file for this deployment: (https://github.com/uugear/Witty-Pi-4/tree/main/Software/wittypi/schedules)
 
+Whatever schedule you install, keep a copy as `schedule.wpi.deploy` (`cp /home/pi/wittypi/schedule.wpi /home/pi/wittypi/schedule.wpi.deploy`). If `schedule.wpi` is ever missing when emergency mode ends, the software puts that copy back (else the newest `schedule.wpi.deploy-*` or `schedule.wpi.bak-*`, else the daylight preset above) rather than generating a generic schedule (`tools/witty_pi_4.py` `fallback_schedule_sources`).
+
 Then install this repo's `beforeScript.sh`, which lets the WittyPi arm the next wake about 15 s after boot instead of about 55 s:
 
 ```bash
@@ -813,8 +857,14 @@ for the site:
       capture button on pin 29).
 - [ ] `systemctl is-enabled remote-debug.timer max-awake.timer` prints `enabled`
       twice (`/etc/watercam/hold-awake` must not exist).
+- [ ] `systemctl is-enabled rtc-early-clock.service` prints `enabled`, and after a
+      reboot `journalctl -b -u rtc-early-clock` shows `system clock ... -> RTC ...`
+      or a `skip:` reason (an RTC that lost power must be set before deploying).
 - [ ] `venv/bin/python tools/initial_health_check.py --no-alert` prints no
       `WARN` lines (GPS may fail indoors).
+- [ ] Witty Pi input voltage is at least 4.8 V under load: `vin` in
+      `~/powerlog/powerlog.csv` during a capture cycle, and no
+      `wittypi_input_voltage_low_*V` from the health check (1.11.1).
 - [ ] **IP token:** if `ip_upload.enabled` is true, the operator installs the
       unit's token from their own terminal with `tools/set_ip_token.py`
       ([IP_TRANSMISSION.md](IP_TRANSMISSION.md#installing-the-ip-token)); don't

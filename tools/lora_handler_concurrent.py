@@ -129,6 +129,19 @@ def _scaled_int(v, scale: float, lo: int, hi: int) -> int:
 
 MAC_FLUSH_MAX_ROUNDS = 3
 
+# LoRaHandler.transmit() gives up and returns False after this long in total
+# (waiting for the locks, every attempt, MAC flush rounds). It must stay well
+# below LoRaHandlerClient._LONG_TIMEOUT_S: a client that times out first defers
+# the packet to store-and-forward while the daemon may still send it, and the
+# gateway gets it twice. transmit() never starts an AT+SENDB or a MAC flush
+# that couldn't finish its response window inside the deadline, so a False
+# here means the packet was not handed to the mDot after that point.
+TRANSMIT_DEADLINE_S = 75
+# How long _attempt_transmission() waits for the mDot's answer to AT+SENDB
+SENDB_WINDOW_HEX_S = 15
+SENDB_WINDOW_BYTES_S = 20
+MAC_FLUSH_WINDOW_S = 20
+
 
 def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
     """Encode and compress sensor data into the TLV wire format for LoRa transmission.
@@ -352,7 +365,8 @@ class LoRaHandler:
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
                 bytesize=serial.EIGHTBITS,
-                timeout=1
+                timeout=1,
+                write_timeout=1   # a stuck UART must not block a write forever
             )
 
             if not self.ser.is_open:
@@ -678,14 +692,35 @@ class LoRaHandler:
                     traceback.print_exc()
                     time.sleep(1)  # Longer delay on error
     
-    def transmit(self, content: bytes, max_retries: int = 2) -> bool:
-        """Transmit data with thread safety and error recovery"""
-        with self.transmit_lock:
+    def transmit(self, content: bytes, max_retries: int = 2,
+                 deadline_s: float = TRANSMIT_DEADLINE_S) -> bool:
+        """Transmit data with thread safety and error recovery.
+
+        Returns False once deadline_s (TRANSMIT_DEADLINE_S) has passed, counting
+        the wait for the locks: no new attempt or MAC flush starts unless its
+        response window fits in the time left.
+        """
+        deadline = time.monotonic() + deadline_s
+        window = SENDB_WINDOW_HEX_S if isinstance(content, str) else SENDB_WINDOW_BYTES_S
+
+        def left() -> float:
+            return deadline - time.monotonic()
+
+        if not self.transmit_lock.acquire(timeout=max(0.0, left() - window)):
+            print(f"ERROR: LoRa transmit lock still held after {deadline_s - left():.0f} s; not sent")
+            return False
+        try:
             # Hold inter-process lock for entire TX sequence so concurrent processes
             # (e.g. lora_listener subprocess) cannot steal the SENDB response.
-            fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
+            if not self._lockf_until(deadline - window):
+                print(f"ERROR: LoRa UART lock still held after {deadline_s - left():.0f} s; not sent")
+                return False
             try:
                 for attempt in range(max_retries + 1):
+                    if left() < window:
+                        print(f"ERROR: Transmit deadline ({deadline_s:.0f} s) reached before attempt "
+                              f"{attempt + 1}: giving up")
+                        return False
                     try:
                         if attempt > 0:
                             print(f"DEBUG: Retry attempt {attempt}/{max_retries}")
@@ -706,6 +741,9 @@ class LoRaHandler:
                             size_limit = self.current_size_limit
                         print(f"DEBUG: Using stored size limit: {size_limit} bytes")
 
+                        if left() < window:
+                            print(f"ERROR: Transmit deadline ({deadline_s:.0f} s) reached: giving up")
+                            return False
                         success, error_message = self._attempt_transmission(content, size_limit)
 
                         if success:
@@ -725,6 +763,10 @@ class LoRaHandler:
                                     # after exactly one attempt.
                                     print("DEBUG: MAC buffer full — flushing LoRaWAN MAC queue with probe uplink...")
                                     for flush_round in range(1, MAC_FLUSH_MAX_ROUNDS + 1):
+                                        # leave room for the retry itself
+                                        if left() < MAC_FLUSH_WINDOW_S + window:
+                                            print("DEBUG: MAC flush skipped: not enough time left before the deadline")
+                                            break
                                         if self._flush_mac_commands():
                                             print(f"DEBUG: MAC queue confirmed clear after {flush_round} flush round(s)")
                                             break
@@ -750,9 +792,23 @@ class LoRaHandler:
                         else:
                             print(f"ERROR: All {max_retries + 1} transmission attempts failed due to exceptions")
                             return False
+                return False
             finally:
                 fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
-    
+        finally:
+            self.transmit_lock.release()
+
+    def _lockf_until(self, until_monotonic: float, poll_s: float = 0.1) -> bool:
+        """Take the inter-process UART lock, waiting until until_monotonic at most."""
+        while True:
+            try:
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
+            except OSError:
+                if time.monotonic() >= until_monotonic:
+                    return False
+                time.sleep(poll_s)
+
     def queue_transmit(self, data: Dict[str, Any]) -> bool:
         """Queue sensor data for transmission (thread-safe)"""
         try:
@@ -1634,7 +1690,7 @@ class LoRaHandler:
             print("DEBUG: MAC flush: sending 1-byte probe to drain MAC command queue...")
             self.ser.reset_input_buffer()
             self.ser.write(b'AT+SENDB=00\r\n')
-            deadline = time.time() + 20
+            deadline = time.time() + MAC_FLUSH_WINDOW_S
             while time.time() < deadline:
                 if self.ser.in_waiting > 0:
                     res = self.ser.read_until()
@@ -1769,7 +1825,7 @@ class LoRaHandler:
                 self.ser.write(at_command)
                 print("DEBUG: AT command sent, polling for response (up to 15 s)...")
 
-                success, error_message, final_responses = _read_mdot_response(15)
+                success, error_message, final_responses = _read_mdot_response(SENDB_WINDOW_HEX_S)
 
             else:
                 payload_size = len(content)
@@ -1789,7 +1845,7 @@ class LoRaHandler:
                 self.ser.write(f'AT+SENDB={hex_content}\r\n'.encode())
                 print("DEBUG: Data payload sent, polling for response (up to 20 s)...")
 
-                success, error_message, final_responses = _read_mdot_response(20)
+                success, error_message, final_responses = _read_mdot_response(SENDB_WINDOW_BYTES_S)
 
             if success:
                 print("Data sent to mDot successfully!")
@@ -2298,6 +2354,8 @@ class LoRaHandlerClient:
     # Generous budgets: transmit()/process_transmit_queue() can block on real
     # mDot retries for tens of seconds; queue_*/get_* calls are fast, in-memory
     # ops on the daemon side and should fail fast if the daemon is stuck.
+    # The daemon's transmit() gives up at TRANSMIT_DEADLINE_S (75 s), safely
+    # inside _LONG_TIMEOUT_S, so the two never disagree about a send.
     _SHORT_TIMEOUT_S = 8
     _LONG_TIMEOUT_S = 90
 

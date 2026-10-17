@@ -130,6 +130,15 @@ def _sf_dropped() -> Optional[int]:
         return None
 
 
+def _lora_daemon_unavailable() -> Optional[int]:
+    """Cycles whose LoRa packets were queued because the daemon was down; only when any."""
+    try:
+        from tools import drop_counter
+        return drop_counter.events().get("lora_daemon_unavailable") or None
+    except Exception:   # noqa: BLE001 - a status reply must never fail over this
+        return None
+
+
 def _ip_uploads_requested() -> Optional[int]:
     try:
         from tools.ip_fallback import pending_wakes
@@ -160,6 +169,8 @@ def collect_compact_status(emergency_mode: Optional[bool] = None) -> List[Field]
         ("ld", _load_1min()),
         ("ts", int(time.time())),
         ("sd", _sf_dropped()),
+        # cycles queued because the LoRa daemon was down (tools/drop_counter.py)
+        ("du", _lora_daemon_unavailable()),
     ]
     return [(k, v) for k, v in candidates if v is not None]
 

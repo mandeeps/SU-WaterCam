@@ -12,17 +12,30 @@ those defaults over its real config.
   restore <name>.bak and return that. Raises if neither is usable, so callers never
   mistake a damaged file for an empty one.
 - locked(): an exclusive flock on <name>.lock for read-modify-write. The lock is a
-  separate file because the config file itself is replaced on every write.
+  separate file because the config file itself is replaced on every write. It waits
+  at most LOCK_TIMEOUT_S (tools/lock_utils.flock_deadline) and then raises
+  ConfigLockTimeout: a holder that hung must not stall every later step.
 """
 import contextlib
-import fcntl
 import json
 import os
 import time
 
+try:
+    from tools.lock_utils import flock_deadline
+except ImportError:     # run from tools/ as a script
+    from lock_utils import flock_deadline
+
+# Writers hold the lock for a read and an atomic write, well under a second
+LOCK_TIMEOUT_S = 30
+
 
 class ConfigUnreadable(ValueError):
     """Neither the config file nor its backup could be parsed."""
+
+
+class ConfigLockTimeout(TimeoutError):
+    """Another process held the config's lock for longer than the timeout."""
 
 
 def _parse(path):
@@ -47,14 +60,22 @@ def _fsync_dir(dirpath):
 
 
 @contextlib.contextmanager
-def locked(path):
-    """Hold an exclusive lock for a read-modify-write of path."""
-    fd = os.open(path + ".lock", os.O_CREAT | os.O_RDWR, 0o664)
+def locked(path, timeout_s=None):
+    """Hold an exclusive lock for a read-modify-write of path.
+
+    Raises ConfigLockTimeout after timeout_s (LOCK_TIMEOUT_S) without the lock."""
+    timeout_s = LOCK_TIMEOUT_S if timeout_s is None else timeout_s
+    cm = flock_deadline(path + ".lock", timeout_s, poll_s=0.05)
     try:
-        fcntl.flock(fd, fcntl.LOCK_EX)
+        cm.__enter__()
+    except TimeoutError:
+        raise ConfigLockTimeout(
+            f"{path}: another process has held {path}.lock for {timeout_s:g} s; "
+            "not changing the file") from None
+    try:
         yield
     finally:
-        os.close(fd)                    # closing releases the lock
+        cm.__exit__(None, None, None)   # closing the fd releases the lock
 
 
 def read_json(path):

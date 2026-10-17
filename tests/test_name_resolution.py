@@ -165,6 +165,7 @@ class TestWittypiEmergencyControl:
             patch("tools.wittypi_control.set_schedule",
                   return_value="2026-01-01 08:00:00"),
             patch("tools.wittypi_control.installed_schedule_exists", return_value=False),
+            patch("tools.wittypi_control.install_fallback_schedule", return_value=None),
         ]
         if get_param_side is not None:
             patches.append(
@@ -224,6 +225,7 @@ class TestWittypiEmergencyControl:
         with patch("tools.wittypi_control.clear_shutdown_time"), \
              patch("tools.wittypi_control.set_schedule", return_value="next"), \
              patch("tools.wittypi_control.installed_schedule_exists", return_value=False), \
+             patch("tools.wittypi_control.install_fallback_schedule", return_value=None), \
              patch("tools.lora_runtime_integration.get_parameter",
                    side_effect=recording_get_param):
             ticktalk_main.wittypi_emergency_control.__wrapped__(False)

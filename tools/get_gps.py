@@ -4,8 +4,13 @@ import gpsd2 as gpsd  # using py-gpsd2
 from typing import List, Optional, Tuple, Any
 import json
 import os
-import tempfile
+import socket
 import time
+
+try:
+    from tools import config_io
+except ImportError:     # run from tools/ as a script
+    import config_io
 
 # The last good fix, for when there is no live one. A unit is stationary, and the
 # modem's GNSS takes 40-50 s to fix after USB comes on, so a wake's first LoRa
@@ -20,26 +25,80 @@ _REFRESH_S = 3600               # or when the cached fix is this old
 # when gpsd reports one. The IP uplink sends the age (channel 04 02).
 last_fix = {"source": "none", "age_s": None, "error_m": None}
 
-_gps_available = False
-try:
-    gpsd.connect()
+# gpsd connection. Every request (connect, welcome, ?WATCH, ?POLL) times out
+# after REQUEST_TIMEOUT_S: py-gpsd2's own connect() and get_current() block on a
+# readline with no timeout, so a gpsd that accepted the connection but stopped
+# answering hung the capture step. This is not a wait for a fix: gpsd answers
+# ?POLL straight away, fix or not, and waiting for a fix is
+# get_location_with_retry()'s retries plus the cached fix. A failed connect, or
+# any error on the connection, drops it, and the next call connects again.
+GPSD_HOST = "127.0.0.1"
+GPSD_PORT = 2947
+REQUEST_TIMEOUT_S = 10
+
+_gps_available = False      # connected to gpsd
+
+
+def _disconnect() -> None:
+    global _gps_available
+    _gps_available = False
+    for name in ("gpsd_stream", "gpsd_socket"):
+        obj = getattr(gpsd, name, None)
+        try:
+            if obj is not None:
+                obj.close()
+        except Exception:
+            pass
+        try:
+            setattr(gpsd, name, None)
+        except Exception:
+            pass
+
+
+def _connect() -> bool:
+    """gpsd2.connect() with a socket timeout on every read."""
+    global _gps_available
+    _disconnect()
+    try:
+        sock = socket.create_connection((GPSD_HOST, GPSD_PORT), timeout=REQUEST_TIMEOUT_S)
+        sock.settimeout(REQUEST_TIMEOUT_S)
+        stream = sock.makefile(mode="rw")
+        gpsd.gpsd_socket, gpsd.gpsd_stream = sock, stream
+        welcome = json.loads(stream.readline())
+        if welcome.get("class") != "VERSION":
+            raise RuntimeError("unexpected welcome from gpsd: is it a gpsd 3 server?")
+        stream.write('?WATCH={"enable":true}\n')
+        stream.flush()
+        for _ in range(2):
+            gpsd._parse_state_packet(json.loads(stream.readline()))
+    except Exception as e:
+        print(f"GPS: can't connect to gpsd ({e})")
+        _disconnect()
+        return False
     _gps_available = True
-except Exception:
-    pass
+    return True
+
+
+def _ensure_connected() -> bool:
+    return _gps_available or _connect()
 
 
 def _get_packet():
-    if not _gps_available:
+    if not _ensure_connected():
         return None
-    packet = gpsd.get_current()
+    try:
+        packet = gpsd.get_current()
+    except UserWarning:     # "GPS not active": gpsd answered; the connection is fine
+        raise
+    except Exception:
+        _disconnect()       # timeout or a broken stream: connect again next time
+        raise
     print(f'Current packet mode: {packet.mode}')
     if packet.mode < 2:
         return None
     return packet
 
 def get_location() -> List[str]:
-    if not _gps_available:
-        return []
     packet = _get_packet()
     if not packet:
         return []
@@ -66,8 +125,6 @@ def get_location() -> List[str]:
 
 def _get_lat_lon_alt_with_packet() -> Tuple[dict, Optional[Any]]:
     """Internal function that returns GPS data and packet."""
-    if not _gps_available:
-        return ({}, None)
     packet = _get_packet()
 
     if not packet:
@@ -132,12 +189,9 @@ def _save_fix(location: dict) -> None:
     entry = {"gps_lat": location["gps_lat"], "gps_lon": location["gps_lon"],
              "gps_alt": location.get("gps_alt"), "fix_time": now}
     try:
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(CACHE_PATH), prefix=".gps_last_fix.")
-        with os.fdopen(fd, "w") as f:
-            json.dump(entry, f)
-        os.chmod(tmp, 0o600)   # it says where the unit is
-        os.replace(tmp, CACHE_PATH)
-    except OSError as e:
+        # atomic and fsynced; 0o600 because it says where the unit is
+        config_io.write_json(CACHE_PATH, entry, mode=0o600)
+    except (OSError, TypeError, ValueError) as e:
         print(f"⚠️ GPS: couldn't save the last fix: {e}")
 
 
@@ -166,7 +220,7 @@ def get_location_with_retry(max_retries: int = 3, delay: float = 1.0,
         tuple: (dict, packet) where dict contains GPS data (or empty dict if unavailable)
                and packet is the raw GPS packet (or None if unavailable or cached)
     """
-    if _gps_available:
+    if _ensure_connected():
         for attempt in range(max_retries):
             try:
                 location, packet = _get_lat_lon_alt_with_packet()

@@ -1,17 +1,19 @@
 #!/usr/bin/env python
 # PiCamera2 streaming video example
 # We are using it to help focus the optical camera
-# Go to your web browser and enter the IP address or hostname of the Pi you are running this on with the port number: 8080
-# If you are using Tailscale you can use the IP/hostname it tells you
+# Open http://<the Pi's Tailscale IP or name>:8080/ in a browser.
+#
+# It listens on the Pi's Tailscale address only (`tailscale ip -4`), else on
+# 127.0.0.1 (reach it with `ssh -L 8080:127.0.0.1:8080`), never on every
+# interface: the stream is unauthenticated. --bind ADDRESS overrides that
+# (--bind 0.0.0.0 for a bench on a trusted network); --port changes the port.
 
+import argparse
 import io
 import socketserver
+import subprocess
 from http import server
 from threading import Condition
-
-from picamera2 import Picamera2
-from picamera2.encoders import JpegEncoder
-from picamera2.outputs import FileOutput
 
 # HTML page for the MJPEG streaming demo
 PAGE = """\
@@ -85,18 +87,52 @@ class StreamingServer(socketserver.ThreadingMixIn, server.HTTPServer):
     allow_reuse_address = True
     daemon_threads = True
 
-# Create Picamera2 instance and configure it
-picam2 = Picamera2()
-picam2.configure(picam2.create_video_configuration(main={"size": (640, 480)}))
-output = StreamingOutput()
-picam2.start_recording(JpegEncoder(), FileOutput(output))
+def tailscale_ipv4():
+    """The node's Tailscale IPv4 address, or None."""
+    try:
+        out = subprocess.run(["tailscale", "ip", "-4"], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    lines = out.stdout.split() if out.returncode == 0 else []
+    return lines[0] if lines else None
 
-try:
-    # Set up and start the streaming server
-    address = ('', 8080)
-    server = StreamingServer(address, StreamingHandler)
-    server.serve_forever()
-finally:
-    # Stop recording when the script is interrupted
-    picam2.stop_recording()
+
+def bind_address(override=None):
+    """--bind if given, else the Tailscale address, else loopback."""
+    return override or tailscale_ipv4() or "127.0.0.1"
+
+
+output = None
+
+
+def main(argv=None):
+    global output
+    parser = argparse.ArgumentParser(description="MJPEG stream from the optical camera, for focusing")
+    parser.add_argument("--bind", help="address to listen on (default: Tailscale IPv4, else 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8080)
+    args = parser.parse_args(argv)
+
+    from picamera2 import Picamera2
+    from picamera2.encoders import JpegEncoder
+    from picamera2.outputs import FileOutput
+
+    # Create Picamera2 instance and configure it
+    picam2 = Picamera2()
+    picam2.configure(picam2.create_video_configuration(main={"size": (640, 480)}))
+    output = StreamingOutput()
+    picam2.start_recording(JpegEncoder(), FileOutput(output))
+
+    try:
+        # Set up and start the streaming server
+        address = (bind_address(args.bind), args.port)
+        print(f"Streaming on http://{address[0]}:{address[1]}/")
+        httpd = StreamingServer(address, StreamingHandler)
+        httpd.serve_forever()
+    finally:
+        # Stop recording when the script is interrupted
+        picam2.stop_recording()
+
+
+if __name__ == "__main__":
+    main()
 

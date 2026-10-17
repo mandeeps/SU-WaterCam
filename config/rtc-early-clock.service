@@ -1,0 +1,18 @@
+[Unit]
+Description=Set the system clock from the Witty Pi RTC early in boot (tools/rtc_early_clock.py)
+# The clock otherwise starts at the last shutdown's time until the Witty Pi
+# daemon / syncTime.sh fix it, after tailscaled has already started with it.
+# Only moves the clock forward, only to a plausible RTC time; never fails or
+# holds up the boot (no Witty Pi: it waits at most 5 s for /dev/i2c-1).
+DefaultDependencies=no
+After=local-fs.target systemd-modules-load.service systemd-udev-trigger.service fake-hwclock.service
+Before=time-sync.target systemd-timesyncd.service tailscaled.service lora_daemon.service ticktalk.service powerlog.service wittypi.service sysinit.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+TimeoutStartSec=20
+ExecStart=/usr/bin/python3 /home/pi/SU-WaterCam/tools/rtc_early_clock.py
+
+[Install]
+WantedBy=sysinit.target

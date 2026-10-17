@@ -49,6 +49,16 @@ def installed_schedule_exists():
         from witty_pi_4 import SCHEDULE_FILE_PATH
     return os.path.exists(SCHEDULE_FILE_PATH)
 
+def install_fallback_schedule():
+    """Put back a schedule.wpi when none is installed (witty_pi_4.fallback_schedule_sources():
+    the backed-up deployment schedule, else the repo's daylight preset). Returns the
+    source path, or None."""
+    try:
+        from tools.witty_pi_4 import install_fallback_schedule as install
+    except ImportError:
+        from witty_pi_4 import install_fallback_schedule as install
+    return install()
+
 def rearm_schedule():
     """Re-arm the Witty Pi's alarms from the installed schedule.wpi (runScript.sh),
     without rewriting the file. Returns the next startup time, or "-"."""
@@ -60,8 +70,9 @@ def apply_emergency_schedule(emergency_mode: bool) -> dict:
 
     Emergency ON: clear the shutdown schedule so the device stays powered on
     (flood emergency in progress). Emergency OFF: re-arm the installed
-    schedule.wpi, or generate one from runtime_config.json only if none is
-    installed.
+    schedule.wpi. If none is installed, install the backed-up deployment
+    schedule or the repo's daylight preset (install_fallback_schedule()), and
+    only if that fails generate one from runtime_config.json.
 
     Plain-bool, not @SQify-decorated, so it can be called directly from any
     process (this repo's ticktalk_main.py graph node, or the LoRa daemon's
@@ -94,10 +105,28 @@ def apply_emergency_schedule(emergency_mode: bool) -> dict:
                 }
 
             # No schedule installed: without one the unit would never wake
-            # again, so generate one from config. Read the parameters via a
-            # local import -- module globals are not available when TTPython
-            # executes compiled pickles.
-            print("✅ EMERGENCY CLEARED: no schedule.wpi installed, generating one")
+            # again. Put back the deployment schedule (a backup of it, else the
+            # repo's daylight preset), and generate one from config only if none
+            # of those can be installed.
+            try:
+                source = install_fallback_schedule()
+            except Exception as e:
+                print(f"⚠️ Could not install a fallback schedule: {e}")
+                source = None
+            if source:
+                print(f"✅ EMERGENCY CLEARED: no schedule.wpi installed, installed {source}")
+                next_startup_time = rearm_schedule()
+                return {
+                    'status': 'wittypi_normal_schedule_restored',
+                    'action': 'schedule_installed',
+                    'source': source,
+                    'next_startup': next_startup_time,
+                    'message': f'No schedule installed; installed {source}, next startup: {next_startup_time}'
+                }
+
+            # Read the parameters via a local import -- module globals are not
+            # available when TTPython executes compiled pickles.
+            print("✅ EMERGENCY CLEARED: no schedule.wpi and no fallback, generating one")
             from tools.lora_runtime_integration import get_parameter
             start_hour = get_parameter('wittypi_start_hour', 8)
             start_minute = get_parameter('wittypi_start_minute', 0)

@@ -322,6 +322,8 @@ class TestIPUplinkTransmitIntegration:
                 "tools.lora_runtime_integration.get_parameter",
                 side_effect=lambda k, d: d,
             ),
+            # the GPS fix above must not teach the repo's real gps_home.json a home
+            "gps_home": patch("tools.gps_home.HOME_PATH", os.devnull + ".d/gps_home.json"),
         }
 
     def _run(self, tmp_path, queue_dir, extra_tx_kwargs=None, bitmap=None):

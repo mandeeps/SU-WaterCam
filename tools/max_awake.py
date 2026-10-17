@@ -17,8 +17,20 @@ Never shuts down while
   sessions end on their own, at most 240 min),
 - the hold flag exists: /etc/watercam/hold-awake (`sudo touch` it to keep a unit
   up for bench work, remove it to release; same directory as usb-on-at-boot), or
-- emergency mode is on (it keeps the unit awake on purpose and call_shutdown()
-  ends it after emergency_max_hours).
+- emergency mode is on, until its deadline: emergency_since + emergency_max_hours
+  (runtime_config; 24 h when unset, as `21 91 00` leaves it; 0 = no expiry) plus
+  EMERGENCY_MARGIN_MIN. call_shutdown() normally ends emergency mode at
+  emergency_max_hours, but only while the TickTalk graph runs; emergency mode
+  clears the Witty Pi shutdown alarm, so a hung graph would otherwise keep the
+  unit up until the battery is flat. Past the deadline this clears emergency_mode
+  in runtime_config and shuts down as below.
+
+  A missing or unusable emergency_since (not a number, or in the future, as after
+  a clock that was wrong when it was set) counts the emergency from this boot:
+  the deadline is then uptime > emergency_max_hours + margin. That can't strand
+  the unit (the next slot is armed on the way down whatever the state) and can't
+  keep it up forever (uptime only grows), where "started now" would restart the
+  clock on every check.
 
 The shutdown is the one call_shutdown() uses: `doas /usr/sbin/shutdown -h now`
 (sudo as the fallback). That is a normal OS shutdown, so the Witty Pi sees the Pi
@@ -27,17 +39,26 @@ halt and wittypi-next-wake.service arms the next slot on the way down.
 
 import argparse
 import json
+import math
 import os
 import subprocess
 import sys
 import time
 from typing import Optional
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 REPO = os.environ.get("WATERCAM_REPO", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RUNTIME_CONFIG = os.path.join(REPO, "runtime_config.json")
 SESSION_STATE = os.path.join(REPO, "data", "remote_debug.json")
 HOLD_FLAG = "/etc/watercam/hold-awake"
 DEFAULT_MAX_MINUTES = 60
+# Same default as RuntimeParameterManager.EMERGENCY_MAX_HOURS and call_shutdown()
+EMERGENCY_DEFAULT_HOURS = 24
+# Past the deadline the graph's own expiry (once per iteration) gets this long first
+EMERGENCY_MARGIN_MIN = 15
+# emergency_since this far ahead of the clock is treated as unusable
+CLOCK_SLACK_S = 300
 SHUTDOWN_COMMANDS = (["doas", "/usr/sbin/shutdown", "-h", "now"],
                      ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"])
 
@@ -68,9 +89,67 @@ def max_minutes(config: Optional[dict] = None) -> float:
     return value
 
 
+def _number(value) -> Optional[float]:
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return float(value)
+
+
+def emergency_elapsed_min(cfg: dict, now: float, uptime_min: Optional[float]) -> Optional[float]:
+    """Minutes emergency mode has run: from emergency_since, or from boot when
+    that is missing or unusable (see the module docstring). None if neither is known."""
+    since = _number(cfg.get("emergency_since"))
+    if since is not None and since > 0 and since <= now + CLOCK_SLACK_S:
+        return max(0.0, (now - since) / 60)
+    return uptime_min
+
+
+def emergency_limit_min(cfg: dict) -> Optional[float]:
+    """emergency_max_hours + margin in minutes; None for 0 (no expiry). A bad value
+    falls back to the 24 h default."""
+    hours = _number(cfg.get("emergency_max_hours", EMERGENCY_DEFAULT_HOURS))
+    if hours is None or hours < 0:
+        hours = EMERGENCY_DEFAULT_HOURS
+    if hours == 0:
+        return None
+    return hours * 60 + EMERGENCY_MARGIN_MIN
+
+
+def emergency_expired(cfg: dict, now: Optional[float] = None,
+                      uptime_min: Optional[float] = None) -> bool:
+    """True when emergency mode is on and has outlived its deadline."""
+    if not cfg.get("emergency_mode"):
+        return False
+    limit = emergency_limit_min(cfg)
+    if limit is None:
+        return False
+    elapsed = emergency_elapsed_min(cfg, time.time() if now is None else now, uptime_min)
+    return elapsed is not None and elapsed > limit
+
+
+def clear_emergency_mode(path: str = None) -> bool:
+    """Turn emergency_mode off in runtime_config, as call_shutdown() does at expiry,
+    so the next boot follows the schedule. Never raises."""
+    path = path or RUNTIME_CONFIG
+    try:
+        import config_io
+        with config_io.locked(path):
+            cfg = config_io.read_json(path)
+            cfg["emergency_mode"] = False
+            cfg["emergency_since"] = None
+            config_io.write_json(path, cfg)
+        return True
+    except Exception as exc:   # the shutdown must still happen
+        print(f"max_awake: could not clear emergency_mode: {exc}", flush=True)
+        return False
+
+
 def decide(uptime_min: Optional[float], limit_min: float, session_active: bool,
-           hold: bool, emergency: bool) -> str:
-    """'shutdown' or 'stay', with the reason: ('stay: ...')."""
+           hold: bool, emergency: bool, emergency_over: bool = False) -> str:
+    """'shutdown' or 'stay', with the reason: ('stay: ...').
+
+    emergency: emergency mode is on; emergency_over: it is past its deadline
+    (emergency_expired()), so it no longer keeps the unit up."""
     if limit_min <= 0:
         return "stay: backstop disabled (max_awake_minutes=0)"
     if uptime_min is None:
@@ -81,21 +160,29 @@ def decide(uptime_min: Optional[float], limit_min: float, session_active: bool,
         return "stay: remote debug session active"
     if hold:
         return f"stay: hold flag {HOLD_FLAG} present"
-    if emergency:
+    if emergency and not emergency_over:
         return "stay: emergency mode"
     return "shutdown"
 
 
 def check(dry_run: bool = False) -> str:
     cfg = _read_json(RUNTIME_CONFIG)
+    uptime = uptime_minutes()
+    emergency = bool(cfg.get("emergency_mode"))
+    over = emergency_expired(cfg, uptime_min=uptime)
     verdict = decide(
-        uptime_minutes(), max_minutes(cfg),
+        uptime, max_minutes(cfg),
         session_active=bool(_read_json(SESSION_STATE).get("active")),
         hold=os.path.exists(HOLD_FLAG),
-        emergency=bool(cfg.get("emergency_mode")),
+        emergency=emergency, emergency_over=over,
     )
     print(f"max_awake: {verdict}", flush=True)
+    if verdict == "shutdown" and emergency:
+        print("max_awake: emergency mode is past emergency_since + emergency_max_hours"
+              f" + {EMERGENCY_MARGIN_MIN} min", flush=True)
     if verdict == "shutdown" and not dry_run:
+        if emergency:
+            clear_emergency_mode()
         print("max_awake: awake past the limit, powering off", flush=True)
         for cmd in SHUTDOWN_COMMANDS:
             try:

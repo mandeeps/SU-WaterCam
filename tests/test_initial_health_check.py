@@ -26,6 +26,12 @@ def test_low_input_voltage_reported():
     assert r['failures'] == ['wittypi_input_voltage_low_4.49V']
 
 
+def test_input_voltage_threshold_is_4_8_v():
+    assert hc.evaluate_health(45.0, dict(GOOD_WITTYPI, wittypi_battery_voltage_v=4.8), GPS, IMU)['failures'] == []
+    r = hc.evaluate_health(45.0, dict(GOOD_WITTYPI, wittypi_battery_voltage_v=4.75), GPS, IMU)
+    assert r['failures'] == ['wittypi_input_voltage_low_4.75V']
+
+
 def test_main_prints_reasons_and_skips_alert(monkeypatch, capsys):
     monkeypatch.setattr(hc, 'read_cpu_temperature_c', lambda: 45.0)
     monkeypatch.setattr(hc, 'read_wittypi_voltages', lambda: GOOD_WITTYPI)

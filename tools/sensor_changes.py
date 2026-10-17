@@ -21,6 +21,11 @@ import os
 import time
 from typing import Any, Dict, Optional
 
+try:
+    from tools import config_io
+except ImportError:     # run from tools/ as a script
+    import config_io
+
 _REPO_ROOT = os.environ.get("WATERCAM_REPO", "/home/pi/SU-WaterCam")
 DEFAULT_STATE_PATH = os.path.join(_REPO_ROOT, "data", "lora_last_sent.json")
 SKIP = ("timestamp", "error")
@@ -137,9 +142,6 @@ def mark_sent(fields: Dict[str, Any], state_path: Optional[str] = None,
         state[LAST_FULL_KEY] = time.time() if now is None else now
     try:
         os.makedirs(os.path.dirname(state_path), exist_ok=True)
-        tmp = state_path + ".tmp"
-        with open(tmp, "w") as fh:
-            json.dump(state, fh)
-        os.replace(tmp, state_path)
+        config_io.write_json(state_path, state, mode=0o644)    # atomic and fsynced
     except (OSError, TypeError, ValueError):
         pass
