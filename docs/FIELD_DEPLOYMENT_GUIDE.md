@@ -812,6 +812,15 @@ sudo systemctl stop ticktalk.service
 - **Solar:** the panel goes into the V50's solar input (at most about 2 A).
 - Check after wiring: `get_throttled` is `0x0` after a capture cycle (1.11) and
   the Witty Pi reports Vout around 4.9 V (`~/powerlog/powerlog.csv`).
+- **Pass rule: Witty Pi input voltage at least 4.8 V under load**, during a wake:
+  the `vin` column of `~/powerlog/powerlog.csv` while the unit segments or
+  uploads, or the startup health check, which fails below 4.8 V
+  (`wittypi_input_voltage_low_*V`). The Pi's under-voltage threshold is about
+  4.63 V, so below 4.8 V there is no headroom for load peaks. About 4.49 V on a
+  wall adapter means a weak adapter or cable; it shows up as `get_throttled`
+  `0x50000` (under-voltage has occurred, and throttling has occurred) at
+  shutdown. Swap in a known-good 5.1 V supply and a short, thick USB-C cable,
+  then retest.
 
 ### 1.12 Weatherproofing
 
@@ -853,6 +862,9 @@ for the site:
       or a `skip:` reason (an RTC that lost power must be set before deploying).
 - [ ] `venv/bin/python tools/initial_health_check.py --no-alert` prints no
       `WARN` lines (GPS may fail indoors).
+- [ ] Witty Pi input voltage is at least 4.8 V under load: `vin` in
+      `~/powerlog/powerlog.csv` during a capture cycle, and no
+      `wittypi_input_voltage_low_*V` from the health check (1.11.1).
 - [ ] **IP token:** if `ip_upload.enabled` is true, the operator installs the
       unit's token from their own terminal with `tools/set_ip_token.py`
       ([IP_TRANSMISSION.md](IP_TRANSMISSION.md#installing-the-ip-token)); don't

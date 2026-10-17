@@ -95,9 +95,11 @@ def evaluate_health(
     # Thresholds (conservative defaults)
     max_cpu_temp_c = 80.0
     # wittypi_battery_voltage_v is the WittyPi VIN (regulated 5V USB from Voltaic V50).
-    # It stays near 5V until the pack dies, so the useful fault threshold is a cable/
-    # connection check (~4.5V) rather than a cell-voltage threshold.
-    min_input_voltage_v = 4.5
+    # It stays near 5V until the pack dies, so the useful fault threshold is a supply/
+    # cable check rather than a cell-voltage threshold: below 4.8 V the Pi has no
+    # headroom under load (its under-voltage threshold is about 4.63 V). A weak wall
+    # adapter or cable reads about 4.49 V (docs/FIELD_DEPLOYMENT_GUIDE.md 1.11.1).
+    min_input_voltage_v = 4.8
     min_internal_voltage_v = 4.7
 
     # CPU temp
