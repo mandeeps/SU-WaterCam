@@ -804,6 +804,8 @@ If you want to use one of the default schedules run `./wittypi/wittyPi.sh`
 
 If you need to customize the schedule you can write a `.wpi` file for this deployment: (https://github.com/uugear/Witty-Pi-4/tree/main/Software/wittypi/schedules)
 
+Whatever schedule you install, keep a copy as `schedule.wpi.deploy` (`cp /home/pi/wittypi/schedule.wpi /home/pi/wittypi/schedule.wpi.deploy`). If `schedule.wpi` is ever missing when emergency mode ends, the software puts that copy back (else the newest `schedule.wpi.deploy-*` or `schedule.wpi.bak-*`, else the daylight preset above) rather than generating a generic schedule (`tools/witty_pi_4.py` `fallback_schedule_sources`).
+
 Then install this repo's `beforeScript.sh`, which lets the WittyPi arm the next wake about 15 s after boot instead of about 55 s:
 
 ```bash

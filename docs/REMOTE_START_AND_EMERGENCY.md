@@ -35,7 +35,11 @@ so the command arrives before the normal cycle ends.
   cleared, so the unit keeps capturing.
 - It ends after `HH` hours (`emergency_since` + `emergency_max_hours`), on `99 99`,
   or when the dashboard turns it off. Ending it re-arms the installed
-  `schedule.wpi` (it never rewrites the file).
+  `schedule.wpi` (it never rewrites the file). With none installed it puts one
+  back: `~/wittypi/schedule.wpi.deploy`, else the newest `schedule.wpi.deploy-*`
+  (in `~/wittypi` or `~`), else the newest `~/wittypi/schedule.wpi.bak-*`, else
+  `config/wittypi/watercam_daylight_2h.wpi`; only if none can be installed does it
+  generate one from the `wittypi_*` settings.
 - If the capture graph is hung and can't end it, `max-awake.timer`
   (`tools/max_awake.py`) does: 15 minutes past that deadline it turns
   `emergency_mode` off and powers the unit off; the next slot is armed on the way down.

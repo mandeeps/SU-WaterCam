@@ -5,10 +5,106 @@
 '''A python module for interacting with the Witty Pi 4 board'''
 from subprocess import check_output, STDOUT
 from os import environ, path
+import glob
 import logging
+import os
+import tempfile
 
 WITTYPI_DIRECTORY = "/home/pi/wittypi"
 SCHEDULE_FILE_PATH = f"{WITTYPI_DIRECTORY}/schedule.wpi"
+_REPO = path.dirname(path.dirname(path.abspath(__file__)))
+# The preset installed by the deployment guide (docs/FIELD_DEPLOYMENT_GUIDE.md)
+DEFAULT_SCHEDULE = path.join(_REPO, "config", "wittypi", "watercam_daylight_2h.wpi")
+
+
+def write_schedule_file(text: str, dest: str = None) -> None:
+    """Replace schedule.wpi atomically: temp file in the same directory, fsync,
+    rename, fsync the directory. A power cut leaves the old file or the new one,
+    never an empty or half-written schedule (which would leave the unit unable
+    to wake)."""
+    dest = dest or SCHEDULE_FILE_PATH
+    dirpath = path.dirname(path.abspath(dest))
+    fd, tmp = tempfile.mkstemp(dir=dirpath, prefix=".schedule.wpi.")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, dest)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        dfd = os.open(dirpath, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
+
+
+def _usable_schedule(p: str) -> bool:
+    """A readable, non-empty file with BEGIN, END and at least one ON line."""
+    try:
+        with open(p, encoding="utf-8") as f:
+            words = [line.split()[0] for line in f if line.strip() and not line.lstrip().startswith("#")]
+    except (OSError, UnicodeDecodeError, IndexError):
+        return False
+    return "BEGIN" in words and "END" in words and "ON" in words
+
+
+def fallback_schedule_sources(wittypi_dir: str = None, repo_default: str = None) -> list:
+    """Where a missing schedule.wpi comes back from, most specific first.
+
+    1. <wittypi>/schedule.wpi.deploy: the deployment schedule set aside when a
+       unit is switched off or runs a test schedule.
+    2. The newest schedule.wpi.deploy-* in <wittypi> or its parent (home), as a
+       bench wake test leaves it.
+    3. The newest <wittypi>/schedule.wpi.bak-*.
+    4. The repo's default daylight preset (DEFAULT_SCHEDULE).
+    Test schedules (schedule.wpi.test-*) are never used.
+    """
+    wittypi_dir = wittypi_dir or WITTYPI_DIRECTORY
+    home = path.dirname(path.abspath(wittypi_dir))
+
+    def newest(patterns):
+        found = [p for pat in patterns for p in glob.glob(pat)]
+        return sorted(found, key=lambda p: os.stat(p).st_mtime if path.exists(p) else 0, reverse=True)
+
+    out = [path.join(wittypi_dir, "schedule.wpi.deploy")]
+    out += newest([path.join(wittypi_dir, "schedule.wpi.deploy-*"), path.join(home, "schedule.wpi.deploy*")])
+    out += newest([path.join(wittypi_dir, "schedule.wpi.bak-*")])
+    out.append(repo_default or DEFAULT_SCHEDULE)
+    seen, ordered = set(), []
+    for p in out:
+        if p not in seen:
+            seen.add(p)
+            ordered.append(p)
+    return ordered
+
+
+def install_fallback_schedule(wittypi_dir: str = None, repo_default: str = None):
+    """Install the first usable fallback_schedule_sources() entry as schedule.wpi.
+    Returns its path, or None if none is usable or it couldn't be written."""
+    wittypi_dir = wittypi_dir or WITTYPI_DIRECTORY
+    dest = path.join(wittypi_dir, "schedule.wpi")
+    for src in fallback_schedule_sources(wittypi_dir, repo_default):
+        if not _usable_schedule(src):
+            continue
+        try:
+            with open(src, encoding="utf-8") as f:
+                write_schedule_file(f.read(), dest)
+        except OSError as e:
+            logging.error("Could not install %s as %s: %s", src, dest, e)
+            return None
+        logging.warning("No schedule.wpi installed: installed %s", src)
+        return src
+    return None
 
 class WittyPi4:
     '''A class for interacting with the Witty Pi 4 board'''
@@ -215,21 +311,21 @@ class WittyPi4:
         if remaining_minutes > 0:
             schedule += f" M{remaining_minutes}"
 
+        old_schedule = None
         if path.exists(SCHEDULE_FILE_PATH):
-            with open(SCHEDULE_FILE_PATH, "r", encoding='utf-8') as f:
-                old_schedule = f.read()
-
-                # Write new schedule file if it changed
-                if old_schedule != schedule:
-                    logging.info("Schedule changed - writing new schedule file.")
-                    with open(SCHEDULE_FILE_PATH, "w", encoding='utf-8') as f:
-                        f.write(schedule)
-                else:
-                    logging.info("Schedule did not change.")
+            try:
+                with open(SCHEDULE_FILE_PATH, "r", encoding='utf-8') as f:
+                    old_schedule = f.read()
+            except (OSError, UnicodeDecodeError) as e:
+                logging.warning("Could not read %s (%s): rewriting it", SCHEDULE_FILE_PATH, e)
         else:
             logging.warning("Schedule file not found. Writing new schedule file.")
-            with open(SCHEDULE_FILE_PATH, "w", encoding='utf-8') as f:
-                f.write(schedule)
+        if old_schedule == schedule:
+            logging.info("Schedule did not change.")
+        else:
+            if old_schedule is not None:
+                logging.info("Schedule changed - writing new schedule file.")
+            write_schedule_file(schedule, SCHEDULE_FILE_PATH)
 
     def apply_schedule(self, max_retries: int = 5) -> str:
         '''Apply schedule to Witty Pi 4'''
