@@ -560,10 +560,13 @@ magnetometer by slow figure-eights) and waits for Enter at each. Verify
 `bno055_calibration.json` shows `"mag": 3` when done. Without it heading data
 will be unreliable and georeferencing will be difficult.
 
-After a reboot, check the offsets load (`BNO055` lines in the ticktalk journal;
-no "running uncalibrated") and the status with the unit still:
-`venv/bin/python tools/bno055_calibration.py -u unit_config_UFO006.json --mode validate`.
-Stage 2 needs `mag` at 2 or more on a unit that isn't moving.
+After a reboot, check the offsets load and the status with the unit still
+(Ctrl-C to stop; see "Checking calibration status at any time" in
+`docs/IMU_CALIBRATION.md`):
+`venv/bin/python tools/bno055_calibration.py -u unit_config_UFO006.json --mode log --interval 2`.
+Watch `cal=sys/gyro/accel/mag`: `mag` may start below 2 for a few seconds after
+boot, then should reach 2-3 and stay there with the unit not moving. Stage 2
+needs `mag` at 2 or more.
 
 Stage 2 (`--mode mount` with a surveyed bearing, about a minute with the unit
 still) is done at the site after mounting: see `docs/IMU_CALIBRATION.md`.
