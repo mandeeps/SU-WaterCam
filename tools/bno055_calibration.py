@@ -37,6 +37,7 @@ import smbus2
 import struct
 import time
 import json
+from typing import Optional
 import csv
 import os
 from datetime import datetime
@@ -258,9 +259,43 @@ class BNO055:
 
 CALIB_FILE = "./bno055_calibration.json"
 
+# The three calibrated parts and their bytes in the 22-byte offset block
+# (0x55-0x6A): accel XYZ 0-5 + accel radius 18-19; mag XYZ 6-11 + mag radius
+# 20-21; gyro XYZ 12-17. Calibrating some parts (--stages) keeps the others as
+# they were in the saved file. A part never calibrated is saved as zeros and
+# marked null under "components", and the loaders skip it, so bench-learned
+# magnetometer offsets never reach the file (calibrate the magnetometer at a
+# magnetically clean outdoor spot: --stages mag).
+STAGES = ("gyro", "accel", "mag")
+_SEGMENTS = {"accel": ((0, 6), (18, 20)), "mag": ((6, 12), (20, 22)), "gyro": ((12, 18),)}
+
+
+def merge_offsets(primary: bytes, secondary: Optional[bytes], from_primary: set,
+                  from_secondary: set) -> bytes:
+    """A 22-byte offset block taking each part from `primary`, from `secondary`,
+    or zeros when neither applies."""
+    out = bytearray(CALIB_OFFSET_LEN)
+    for part, ranges in _SEGMENTS.items():
+        for a, b in ranges:
+            if part in from_primary:
+                out[a:b] = primary[a:b]
+            elif part in from_secondary and secondary is not None:
+                out[a:b] = secondary[a:b]
+    return bytes(out)
+
+
+def calibrated_parts(data: dict) -> set:
+    """Parts a saved file holds real offsets for. Files written before
+    "components" existed count as fully calibrated (unchanged behaviour)."""
+    comps = data.get("components")
+    if not isinstance(comps, dict):
+        return set(STAGES)
+    return {p for p in STAGES if comps.get(p)}
+
 def save_calibration(imu: BNO055, path: str = CALIB_FILE,
                      node_id: str = "node_1",
-                     magnetic_declination_deg: float = 0.0):
+                     magnetic_declination_deg: float = 0.0,
+                     stages: tuple = STAGES):
     """
     Save calibration offsets and metadata to a JSON file.
 
@@ -276,13 +311,32 @@ def save_calibration(imu: BNO055, path: str = CALIB_FILE,
                   Add this value to BNO055 heading readings to get true North.
     """
     status  = imu.calibration_status()   # read BEFORE mode switch in read_offsets()
-    offsets = imu.read_offsets()
+    chip    = imu.read_offsets()
+
+    existing, existing_parts, components = None, set(), {}
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                old = json.load(f)
+            existing = bytes(old["offsets_bytes"])
+            existing_parts = calibrated_parts(old)
+            old_comps = old.get("components") if isinstance(old.get("components"), dict) else {}
+            for part in existing_parts:
+                components[part] = old_comps.get(part) or {"calibrated_at": old.get("timestamp")}
+        except (OSError, ValueError, KeyError, TypeError):
+            print(f"[CALIB] WARNING: {path} unreadable; only this run's parts are saved")
+    now = datetime.now().isoformat()
+    for part in stages:
+        components[part] = {"calibrated_at": now, "status": status[part]}
+    # this run's parts from the chip, earlier ones from the file, the rest zeros
+    offsets = merge_offsets(chip, existing, set(stages), existing_parts - set(stages))
 
     data = {
         "node_id":             node_id,
-        "timestamp":           datetime.now().isoformat(),
+        "timestamp":           now,
         "calibration_status":  status,
         "magnetic_declination_deg": magnetic_declination_deg,
+        "components":          {p: components.get(p) for p in STAGES},
         "offsets_hex":         offsets.hex(),
         "offsets_bytes":       list(offsets),
     }
@@ -291,6 +345,9 @@ def save_calibration(imu: BNO055, path: str = CALIB_FILE,
     print(f"[CALIB] Saved to {path}")
     print(f"  Status: sys={status['system']} gyro={status['gyro']} "
           f"accel={status['accel']} mag={status['mag']}")
+    missing = [p for p in STAGES if not data["components"].get(p)]
+    if missing:
+        print(f"  Not calibrated yet (saved as zeros, skipped when loading): {', '.join(missing)}")
 
 
 def load_calibration(imu: BNO055, path: str = CALIB_FILE) -> float:
@@ -318,6 +375,12 @@ def load_calibration(imu: BNO055, path: str = CALIB_FILE) -> float:
         data = json.load(f)
 
     offsets = bytes(data["offsets_bytes"])
+    parts = calibrated_parts(data)
+    if parts != set(STAGES):
+        # the file's parts; the chip keeps its own values for the others
+        offsets = merge_offsets(offsets, imu.read_offsets(), parts, set(STAGES) - parts)
+        print(f"[CALIB] Not in the file (left as the chip has them): "
+              f"{', '.join(p for p in STAGES if p not in parts)}")
     imu.write_offsets(offsets)
 
     age = (datetime.now() -
@@ -342,9 +405,12 @@ def load_calibration(imu: BNO055, path: str = CALIB_FILE) -> float:
 def run_calibration_procedure(imu: BNO055,
                                save_path: str = CALIB_FILE,
                                node_id: str = "node_1",
-                               magnetic_declination_deg: float = 0.0):
+                               magnetic_declination_deg: float = 0.0,
+                               stages: tuple = STAGES):
     """
-    Guided step-by-step calibration procedure.
+    Guided step-by-step calibration procedure, for the given stages (default
+    all three). Parts not run keep their saved offsets (see merge_offsets).
+    At the lab: stages=("gyro", "accel"); at a clean outdoor spot: ("mag",).
 
     Each stage waits for explicit user confirmation before starting.
     The accelerometer stage walks through all 6 positions with a countdown.
@@ -377,103 +443,114 @@ def run_calibration_procedure(imu: BNO055,
     print("  BNO055 CALIBRATION PROCEDURE")
     print("="*60)
     print(f"\n  Node  : {node_id}")
-    print(f"  Stages: Gyroscope -> Accelerometer -> Magnetometer")
+    names = {"gyro": "Gyroscope", "accel": "Accelerometer", "mag": "Magnetometer"}
+    print(f"  Stages: {' -> '.join(names[p] for p in stages)}")
     print(f"  Status: 0 = uncalibrated, 3 = fully calibrated\n")
+    n_stages = len(stages)
+    stage_no = {p: i + 1 for i, p in enumerate(stages)}
+    if "mag" in stages and len(stages) < len(STAGES) and os.path.exists(save_path):
+        try:
+            load_calibration(imu, save_path)   # saved gyro/accel offsets help the fusion
+        except Exception as e:
+            print(f"[CALIB] Could not load {save_path} first: {e}")
 
     try:
-        # ── STAGE 1: GYROSCOPE ────────────────────────────────────────────────
-        print("─"*60)
-        print("STAGE 1/3 -- GYROSCOPE (~5 seconds)")
-        print()
-        print("  Place the camera box on a flat, stable surface.")
-        print("  Do not touch or move the box during this stage.")
-        print()
-        input("  Press Enter when the box is placed and still > ")
-        print()
-
-        print("  Waiting for gyroscope calibration -- keep the box still...")
-        while True:
-            s = imu.calibration_status()
-            print(f"\r  gyro = {s['gyro']}/3  ", end="", flush=True)
-            if s["gyro"] == 3:
-                break
-            time.sleep(0.2)
-        print("\n  Gyroscope calibrated.\n")
-
-        # ── STAGE 2: ACCELEROMETER ────────────────────────────────────────────
-        print("─"*60)
-        print("STAGE 2/3 -- ACCELEROMETER (~2 minutes)")
-        print()
-        print("  You will be guided through 6 positions.")
-        print(f"  Hold the box still in each position for {HOLD_SECONDS} seconds.")
-        print("  Positions 1-2: rest box on base/lid.  Positions 3-6: prop at")
-        print("  ~45 degrees using a book or wedge -- do not rest on the sides.")
-        print("  Antennas must remain clear of any load-bearing surface.")
-        print()
-        input("  Press Enter to begin > ")
-
-        for label, description in ACCEL_POSITIONS:
+        if "gyro" in stages:
+            # ── STAGE 1: GYROSCOPE ────────────────────────────────────────────────
+            print("─"*60)
+            print(f"STAGE {stage_no['gyro']}/{n_stages} -- GYROSCOPE (~5 seconds)")
             print()
-            print(f"  Position {label}: {description}")
-            input("  Press Enter when the box is in position and stable > ")
-            for remaining in range(HOLD_SECONDS, 0, -1):
+            print("  Place the camera box on a flat, stable surface.")
+            print("  Do not touch or move the box during this stage.")
+            print()
+            input("  Press Enter when the box is placed and still > ")
+            print()
+
+            print("  Waiting for gyroscope calibration -- keep the box still...")
+            while True:
                 s = imu.calibration_status()
-                print(f"\r  Holding... {remaining}s   accel = {s['accel']}/3  ",
-                      end="", flush=True)
-                time.sleep(1)
+                print(f"\r  gyro = {s['gyro']}/3  ", end="", flush=True)
+                if s["gyro"] == 3:
+                    break
+                time.sleep(0.2)
+            print("\n  Gyroscope calibrated.\n")
+
+        if "accel" in stages:
+            # ── STAGE 2: ACCELEROMETER ────────────────────────────────────────────
+            print("─"*60)
+            print(f"STAGE {stage_no['accel']}/{n_stages} -- ACCELEROMETER (~2 minutes)")
+            print()
+            print("  You will be guided through 6 positions.")
+            print(f"  Hold the box still in each position for {HOLD_SECONDS} seconds.")
+            print("  Positions 1-2: rest box on base/lid.  Positions 3-6: prop at")
+            print("  ~45 degrees using a book or wedge -- do not rest on the sides.")
+            print("  Antennas must remain clear of any load-bearing surface.")
+            print()
+            input("  Press Enter to begin > ")
+
+            for label, description in ACCEL_POSITIONS:
+                print()
+                print(f"  Position {label}: {description}")
+                input("  Press Enter when the box is in position and stable > ")
+                for remaining in range(HOLD_SECONDS, 0, -1):
+                    s = imu.calibration_status()
+                    print(f"\r  Holding... {remaining}s   accel = {s['accel']}/3  ",
+                          end="", flush=True)
+                    time.sleep(1)
+                s = imu.calibration_status()
+                print(f"\r  Done.       accel = {s['accel']}/3               ")
+
             s = imu.calibration_status()
-            print(f"\r  Done.       accel = {s['accel']}/3               ")
+            if s["accel"] >= 2:
+                print(f"\n  Accelerometer at {s['accel']}/3 -- acceptable for this hardware.")
+            elif s["accel"] == 1:
+                print()
+                print("  WARNING: accel = 1/3. Pitch/roll readings will have larger offsets.")
+                print("  Proceeding -- heading (mag) accuracy is unaffected.")
+            else:
+                print()
+                print("  WARNING: accel = 0/3. Verify the box was held completely still")
+                print("  in each position. Proceeding anyway.")
+            print("  NOTE: accel=3 requires side-face positions blocked by the antennas.")
+            print("        2/3 is the expected ceiling on this hardware.\n")
 
-        s = imu.calibration_status()
-        if s["accel"] >= 2:
-            print(f"\n  Accelerometer at {s['accel']}/3 -- acceptable for this hardware.")
-        elif s["accel"] == 1:
+        if "mag" in stages:
+            # ── STAGE 3: MAGNETOMETER ─────────────────────────────────────────────
+            print("─"*60)
+            print(f"STAGE {stage_no['mag']}/{n_stages} -- MAGNETOMETER (~2 minutes)")
             print()
-            print("  WARNING: accel = 1/3. Pitch/roll readings will have larger offsets.")
-            print("  Proceeding -- heading (mag) accuracy is unaffected.")
-        else:
+            print("  Pick up the camera box and rotate it slowly through a")
+            print("  figure-eight pattern -- as if drawing a large '8' in the air.")
             print()
-            print("  WARNING: accel = 0/3. Verify the box was held completely still")
-            print("  in each position. Proceeding anyway.")
-        print("  NOTE: accel=3 requires side-face positions blocked by the antennas.")
-        print("        2/3 is the expected ceiling on this hardware.\n")
+            print("  Rules:")
+            print("    - Move SLOWLY and SMOOTHLY -- fast motion does not help")
+            print("    - Stay at least 30 cm away from metal objects and cables")
+            print("    - Do this outdoors, away from buildings and cars, not at a workbench")
+            print("    - Keep rotating for at least 30 seconds even if status hits 3 early")
+            print()
+            input("  Press Enter when you are ready to begin rotating > ")
+            print()
+            print("  Rotating -- keep moving in a figure-eight...")
 
-        # ── STAGE 3: MAGNETOMETER ─────────────────────────────────────────────
-        print("─"*60)
-        print("STAGE 3/3 -- MAGNETOMETER (~2 minutes)")
-        print()
-        print("  Pick up the camera box and rotate it slowly through a")
-        print("  figure-eight pattern -- as if drawing a large '8' in the air.")
-        print()
-        print("  Rules:")
-        print("    - Move SLOWLY and SMOOTHLY -- fast motion does not help")
-        print("    - Stay at least 30 cm away from metal objects and cables")
-        print("    - Do this at the deployment site, not at a workbench")
-        print("    - Keep rotating for at least 30 seconds even if status hits 3 early")
-        print()
-        input("  Press Enter when you are ready to begin rotating > ")
-        print()
-        print("  Rotating -- keep moving in a figure-eight...")
-
-        MIN_ROTATE_S = 30
-        rotate_start = time.monotonic()
-        while True:
-            s       = imu.calibration_status()
-            elapsed = time.monotonic() - rotate_start
-            remaining = max(0, MIN_ROTATE_S - elapsed)
-            print(f"\r  mag = {s['mag']}/3  sys = {s['system']}/3  "
-                  f"  elapsed = {elapsed:.0f}s  (min {remaining:.0f}s left)  ",
-                  end="", flush=True)
-            if s["mag"] == 3 and elapsed >= MIN_ROTATE_S:
-                break
-            time.sleep(0.2)
-        print("\n  Magnetometer calibrated.\n")
+            MIN_ROTATE_S = 30
+            rotate_start = time.monotonic()
+            while True:
+                s       = imu.calibration_status()
+                elapsed = time.monotonic() - rotate_start
+                remaining = max(0, MIN_ROTATE_S - elapsed)
+                print(f"\r  mag = {s['mag']}/3  sys = {s['system']}/3  "
+                      f"  elapsed = {elapsed:.0f}s  (min {remaining:.0f}s left)  ",
+                      end="", flush=True)
+                if s["mag"] == 3 and elapsed >= MIN_ROTATE_S:
+                    break
+                time.sleep(0.2)
+            print("\n  Magnetometer calibrated.\n")
 
         # ── COMPLETE ──────────────────────────────────────────────────────────
         print("─"*60)
         time.sleep(0.5)   # let sys flag catch up after final sub-system hits 3
         s = imu.calibration_status()
-        print(f"All sub-systems fully calibrated.")
+        print("Calibrated: " + ", ".join(names[p] for p in stages))
         print(f"  sys={s['system']}  gyro={s['gyro']}  "
               f"accel={s['accel']}  mag={s['mag']}")
 
@@ -482,11 +559,11 @@ def run_calibration_procedure(imu: BNO055,
         print(f"\n\nCalibration interrupted.")
         print(f"  Current status: sys={s['system']} gyro={s['gyro']} "
               f"accel={s['accel']} mag={s['mag']}")
-        if s["gyro"] < 3 or s["accel"] < 3 or s["mag"] < 3:
+        if any(s[p] < 3 for p in stages):
             print("  WARNING: Saving partial calibration. "
                   "Heading accuracy may be reduced.")
 
-    save_calibration(imu, save_path, node_id, magnetic_declination_deg)
+    save_calibration(imu, save_path, node_id, magnetic_declination_deg, stages)
     return imu.calibration_status()
 
 
@@ -677,12 +754,17 @@ Modes:
 
 Calibration workflow (see docs/IMU_CALIBRATION.md for full procedure):
   1. Before mounting: python bno055_calibration.py -u unit_config_UFO006.json --mode calibrate
+     (or in two goes: --stages gyro,accel indoors, then --stages mag outdoors)
   2. After mounting:  python bno055_calibration.py -u unit_config_UFO006.json --mode mount \\
                         --known-bearing 70.3 --save-correction
         """,
     )
     p.add_argument("--unit-config", "-u", default=None, metavar="JSON",
                    help="Path to unit config JSON (preferred over individual flags).")
+    p.add_argument("--stages", default=",".join(STAGES), metavar="LIST",
+                   help="calibrate mode: comma-separated stages to run, from "
+                        "gyro,accel,mag (default all). The others keep their saved "
+                        "offsets. Indoors: gyro,accel; outdoors at a clean spot: mag.")
     p.add_argument("--mode", choices=["calibrate", "mount", "validate", "log"],
                    default="log", help="Operating mode (default: log).")
     p.add_argument("--node-id", default=None,
@@ -733,7 +815,13 @@ Calibration workflow (see docs/IMU_CALIBRATION.md for full procedure):
     imu = BNO055(mount_heading_offset_deg=mount_offset)
 
     if args.mode == "calibrate":
-        run_calibration_procedure(imu, calib_file, node_id, declination)
+        stages = tuple(x.strip() for x in args.stages.split(",") if x.strip())
+        bad = [x for x in stages if x not in STAGES]
+        if bad or not stages:
+            print(f"ERROR: --stages takes some of {', '.join(STAGES)} (got {args.stages!r})")
+            sys.exit(2)
+        stages = tuple(x for x in STAGES if x in stages)   # always in procedure order
+        run_calibration_procedure(imu, calib_file, node_id, declination, stages)
 
     elif args.mode == "mount":
         if args.known_bearing is None:
