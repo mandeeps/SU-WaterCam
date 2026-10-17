@@ -11,6 +11,11 @@ User=pi
 Group=pi
 Type=simple
 WorkingDirectory=/home/pi/SU-WaterCam
+# Write print() output straight to the journal. Under systemd stdout is a
+# pipe, so Python block-buffers it and journal timestamps bunch together
+# (two captures 60 s apart logged within the same second). The graph's
+# worker processes inherit the setting.
+Environment=PYTHONUNBUFFERED=1
 # Don't start the cameras, modem and inference until the WittyPi daemon has
 # armed the next wake: a brownout before that leaves no startup alarm, and the
 # unit never wakes again on its own. The wait gives up after 120 s and always
