@@ -45,7 +45,7 @@ or compatible single board computer with GPIO, I2C, SPI etc.,
 
 - [Adafruit AHT20](https://www.adafruit.com/product/4566) Temperature and Humidity Sensor - for monitoring device health
 
-- [Voltaic V50 Battery](https://voltaicsystems.com/v50/) or V75 or other battery
+- [Voltaic V75 Battery](https://voltaicsystems.com/v75/) (new design; current units) or V50 or other battery with Always On USB-A outputs
 
         We are using Voltaic battery packs because they do not auto-shutdown during low power draw, which is important for this system as it will be in low-power mode most of the time and losing power then would prevent it from starting back up. They are intended to be directly charged from 6V solar panels using a barrel jack to usb-c (micro for older verions) adapter. If using a battery that is not always-on configure the WittyPi to draw more power when idle to avoid losing power.
 

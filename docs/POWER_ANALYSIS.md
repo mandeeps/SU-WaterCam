@@ -21,8 +21,9 @@ what still needs measuring.
 | MultiTech mDot | LoRaWAN, Class C (listens continuously), powered from the Witty Pi's always-on 3.3 V rail |
 | Quectel EC25 | LTE modem, on IP-transport units only (006 has one) |
 | AHT20, BNO055/BNO085 | Negligible draw |
-| Voltaic V50 | 48 Wh usable; A ports 2 A each (3 A combined); solar input capped at about 2 A |
-| Voltaic 20 W 6 V ETFE panel | Peaks at 23 W, but the V50 accepts only about 10 W of it |
+| Voltaic V75, new design (aluminium case) | All units since October 2026 (006 changed from a V50 on 2026-10-17). 72 Wh (20,100 mAh). Two USB-A Always On outputs, 2 A each (3 A combined). Own draw about 7 mA (26 mW). Solar input 5–6 V, at most 2 A, maximum power point 5.2 V, on the 3.5 × 1.1 mm jack or the side USB-C port. Stops charging below 0 °C and above 45 °C; cuts its output below −15 °C and above 60 °C ([Voltaic](https://voltaicsystems.com/v75)) |
+| Voltaic V50 (earlier units) | 48 Wh usable; A ports 2 A each (3 A combined); solar input capped at about 2 A |
+| Voltaic 20 W 6 V ETFE panel | Peaks at 23 W, but the pack accepts only about 10 W of it |
 
 ---
 
@@ -101,13 +102,14 @@ assumed 2–3 minutes. See
 ## Daily use by schedule
 
 *Estimates.* The off-state draw (0.05–0.1 W, unmeasured) is 1.2–2.4 Wh/day on
-its own, so it matters as much as the wakes do.
+its own, so it matters as much as the wakes do. The V75's own draw in Always On
+(about 26 mW, 0.6 Wh/day) comes on top; the totals below include it.
 
 | Schedule | Wakes/day | Wakes | Off-state | Total |
 |---|---|---|---|---|
-| `watercam_on15_off1h45_offnight.wpi` (every 2 h, 06:00–22:00) | 9 | 1.1 Wh | 1.2–2.4 Wh | **about 2.5–3.5 Wh/day** |
-| `watercam_10minutes_per_hour.wpi` | 24 | 2.9 Wh | 1.2–2.4 Wh | **about 4–5.5 Wh/day** |
-| `watercam_daylight_2h.wpi` (every 2 h, 08:00–16:00 EST, daylight only) | 5 | 0.6 Wh | 1.2–2.4 Wh | **about 2–3 Wh/day** |
+| `watercam_on15_off1h45_offnight.wpi` (every 2 h, 06:00–22:00) | 9 | 1.1 Wh | 1.8–3.0 Wh | **about 3–4 Wh/day** |
+| `watercam_10minutes_per_hour.wpi` | 24 | 2.9 Wh | 1.8–3.0 Wh | **about 4.5–6 Wh/day** |
+| `watercam_daylight_2h.wpi` (every 2 h, 08:00–16:00 EST, daylight only) | 5 | 0.6 Wh | 1.8–3.0 Wh | **about 2.5–3.5 Wh/day** |
 
 **These are best cases.** The schedules assume every wake ends with a clean
 shutdown.
@@ -124,18 +126,20 @@ limit, and the Witty Pi's shutdown schedule is cleared. It captures every
 
 - **Draw:** about 3–4.5 W continuously, idle plus a capture each minute, more with the modem. *Estimate.*
 - **Per day:** about 70–110 Wh.
-- **On the V50 alone:** 48 Wh lasts about **11–16 hours** with no sun.
+- **On the V75 alone:** 72 Wh lasts about **16–24 hours** with no sun (the V50's 48 Wh, about 11–16 hours).
 - **Solar can't sustain it:** a clear day's 20–30 Wh doesn't cover it. Emergency mode needs a time limit (see below).
 
 ---
 
 ## Solar input and storage
 
-- **The input is capped at about 10 W.** The 20 W panel peaks at 23 W (5.21 V, 4.46 A), but each V50 solar input accepts at most 2 A. *From the spec.*
+- **The input is capped at about 10 W.** The 20 W panel peaks at 23 W (5.21 V, 4.46 A), but the pack's solar input accepts at most 2 A (V75: 5–6 V, 2 A, maximum power point 5.2 V). *From the spec.* Deployed, the panel goes into the V75's 3.5 × 1.1 mm jack.
+- **Temperature limits (V75 spec):** no charging below 0 °C or above 45 °C, so no solar charge on freezing days, and a sun-heated enclosure can stop charging in summer. The output cuts below −15 °C or above 60 °C; the pack then recovers into Always On, and the Witty Pi's power-restore boot plus the recovery boot (#98) handle the restart. Not yet tested in the cold.
 - **Clear day:** about 20–30 Wh. **Overcast:** about 3–6 Wh. *Estimates* for Syracuse, NY (43°N), June–September; winter yield hasn't been measured.
-- **Storage:** 48 Wh usable.
-  - At 3–4 Wh/day that's about **12–16 days with no sun**, best case.
-  - At the field figure of 12–15 Wh/day, about **3 days**.
+- **Storage:** 72 Wh on the V75 (48 Wh on the V50).
+  - At 3–4 Wh/day that's about **18–24 days with no sun**, best case.
+  - At the field figure of 12–15 Wh/day, about **5 days**.
+- **Storage between deployments:** a switched-off unit left plugged into its V75 keeps the Witty Pi powered and the pack's own 7 mA running, and drains it in a month or two. Unplug the Y-cable; plugging it back in turns Always On on again.
 
 On current software, energy is not usually the limit. 006's failure came from:
 - **brownouts at wake time**, under fast current peaks
@@ -149,7 +153,7 @@ The fixes are #97 (arm the next wake before the load starts) and #98 (after a po
 
 - **Clocks:** stock clocks (`arm_freq=1800`) and no `initial_turbo`, which held the CPU at full speed for the first 30 s of boot, lower the peak current. On 006, 2000 MHz plus the modem browned out the Pi even on a healthy supply. The old advice that overclocking saves energy by finishing sooner no longer holds: inference takes 1.6 s.
 - **USB off through early boot:** `usb-power-off.service` cuts USB about 5 s into boot and `usb-power-on.timer` restores it 8 s after boot, so the modem's start-up current misses the kernel and early userspace. The modem's GPS then needs 40–50 s for a fix, so the wake's first LoRa step uses the last saved fix (`tools/get_gps.py`). USB still has power for about 2 s first, from when the kernel starts the USB controller; see the [guide](FIELD_DEPLOYMENT_GUIDE.md#19-enable-the-production-service). It can't help the cut-outs at the very first power-on, which happen before the kernel starts (006, 2026-10-13).
-- **Wiring:** keep the Y-adapter, so the load is spread across both V50 A ports. Never plug anything into the V50's top USB-C port while it powers a unit: it sags and resets the output, and it turns Always On off on the A ports. Charge on the bench through the side port, which keeps the pack full.
+- **Wiring:** keep the Y-adapter, so the load is spread across both A ports (3 A combined). Plugging a USB-A cable in presses a mechanical switch that puts the pack in Always On; unplugging returns it to Auto Off. Never plug anything into the top (end) USB-C port while the pack powers a unit: it turns Always On off on the A ports (and on the V50 it also sagged and reset the output). Charge on the bench through the side USB-C port, which keeps Always On; deployed, both USB-C ports stay empty and the panel uses the solar jack.
 - **Overlap:** within one capture iteration the IP upload runs after LoRa, once segmentation is done. Across the two iterations of a wake it can overlap: the next iteration's capture starts on the 60 s clock whether or not the previous upload has finished (006, 2026-10-14 20:45: iteration 1's upload started 20:45:58, iteration 2's photos 20:46:26 and segmentation 20:46:33). A WiFi upload ends within a second, but bringing cellular and Tailscale up can take tens of seconds (`cellular_up` allows 90 s), so a cellular upload can run during the next segmentation: the highest-draw case. On 006 the wake's peaks were the same with the modem attached or in low power, so an idle modem isn't what drives them at stock clocks.
 - **Single cable vs the Y-adapter (006, 2026-10-13/14, at WiFi-cycle currents):**
 
@@ -200,7 +204,7 @@ whole test used about 6.4 MB of cellular data.
 
 ### Powering the modem separately (split cable or powered hub)
 
-Feeding the modem from the V50 directly would take its bursts off the Pi's
+Feeding the modem from the battery pack directly would take its bursts off the Pi's
 input, but it has two real problems:
 
 - **Back-feeding the Pi.** A powered hub, or a split cable that keeps the VBUS
@@ -214,9 +218,9 @@ input, but it has two real problems:
   (or a cable with the Pi-side VBUS wire cut, which forum users report as
   unreliable) would be safe.
 - **An always-on load.** Today the modem loses power with the Pi, and USB is
-  off through early boot (`usb-power-off.service`). Powered from the V50 it
+  off through early boot (`usb-power-off.service`). Powered from the pack it
   would stay on between wakes, registered on the network, a continuous drain
-  on a 48 Wh pack, unless something switched it, and `uhubctl` would no longer
+  on a 48–72 Wh pack, unless something switched it, and `uhubctl` would no longer
   control its power.
 
 So the software fix is the better first step; a separately powered modem would
@@ -225,8 +229,8 @@ need a non-back-feeding switched supply.
 ### Is one USB-C cable enough without the overlap?
 
 With heavy work and cellular kept apart, the peaks were 1.97 A (segmentation,
-or all cores with WiFi) and 1.76 A (cellular alone): just under one V50 A
-port's 2 A rating. The single cable also drops less than the Y-adapter in our
+or all cores with WiFi) and 1.76 A (cellular alone): just under one A
+port's 2 A rating (V50 and V75 alike). The single cable also drops less than the Y-adapter in our
 earlier measurement (29 vs 59 mV/A, [UNIT006_POWER_FAILURE.md](UNIT006_POWER_FAILURE.md)),
 so on a unit with a low reading it would give a higher voltage, provided the
 port holds a 2 A peak. That's at the edge of the rating, so confirm it on a
@@ -243,7 +247,7 @@ power lock in place before taking the Y-adapter off any unit.
 | Battery-aware scheduling | Needs a real battery measurement first (see [Battery state of charge](#battery-state-of-charge)) |
 
 No longer relevant:
-- **Bigger panel:** the V50's 10 W input cap makes it pointless.
+- **Bigger panel:** the pack's 2 A (about 10 W) input cap makes it pointless.
 - **INT8 or ONNX for speed:** done.
 - **Powering the modem down between cycles:** the Pi and modem are fully off between wakes, and only on for about 2.5 minutes.
 - **Keeping the modem in low power during a wake:** measured, no saving (see [The LTE modem](#the-lte-modem)).
@@ -256,17 +260,25 @@ No longer relevant:
 **Today the units have no way to measure it.** Units 005 and 006 have neither
 of the sensors `tools/battery_manager.py` supports (ADS1115 at 0x48, INA260 at
 0x40). Until 2026-10-07 `battery_pct` was the Witty Pi's output voltage mapped
-from 4.75 V (0 %) to 5.10 V (100 %). But the V50's 5 V output is regulated, so
+from 4.75 V (0 %) to 5.10 V (100 %). But the pack's 5 V output is regulated, so
 the voltage moves with load and cabling, not charge: a wall-powered unit read
 37–54 % within minutes, and the noise set off LoRa sends. Since then no
 battery percentage is sent; the Witty Pi voltage is kept for diagnostics only.
 
-### Planned: read the V50's own charge signal through the mDot
+### Planned: read the pack's own charge signal through the mDot
 
-The V25, V50 and V75 put about half the cell voltage on the **USB-C D+ pin**
+The packs put a scaled cell voltage on a pin of their top USB-C port
 ([Voltaic](https://blog.voltaicsystems.com/reading-charge-level-of-voltaic-usb-battery-packs/)):
-roughly 1.85–2.1 V full, and about 1.73 V when the pack turns its USB output
-off. The mDot can read it with no new chips:
+
+- **New design (all current units' V75s):** on the **SBU pins (A8/B8)** of the
+  USB-C PD port. The redesign moved it there because D+ now carries Power
+  Delivery ([V75](https://voltaicsystems.com/v75)). The scale isn't published:
+  measure it on the bench against the cell voltage before using it.
+- **Old design (V25/V50/V75 before the refresh):** on the **D+ pin**, about half
+  the cell voltage: roughly 1.85–2.1 V full, about 1.73 V when the pack turns its
+  USB output off.
+
+The mDot can read it with no new chips:
 
 - **ADC pin:** `PB_0` is unconnected on the main-branch HAT and unused in
   mDot-AT-firmware. In use: `PB_1` (Witty Pi switch, heartbeat, emergency out),
@@ -274,33 +286,35 @@ off. The mDot can read it with no new chips:
   Spare ADC alternatives: `PA_1`, `PA_4`, `PA_0` (wake pin), `PA_7`.
 - **Always readable:** the mDot runs from the Witty Pi's always-on 3.3 V rail,
   so it can read the pack while the Pi is off (a resting voltage, more accurate
-  than one under load). Its ADC reference is about 3.0 V.
-- **Wiring:** a USB-C breakout in the V50's top port with **only D+ and GND**
-  connected (never VBUS; that port is the one that sagged when charging through
-  it). D+ to `PB_0` through about 10 kΩ, with 100 nF from the pin to GND, and
-  the V50's ground shared with the HAT.
+  than one under load). Its ADC reference is about 3.0 V; check the SBU scale
+  fits under it.
+- **Wiring:** a USB-C breakout in the pack's top port with **only the signal pin
+  (SBU on the new design) and GND** connected, never VBUS or CC. Signal to
+  `PB_0` through about 10 kΩ, with 100 nF from the pin to GND, and the pack's
+  ground shared with the HAT.
 - **Blocker to test first:** anything plugged into the top port turns Always On
-  off on the A ports (2026-10-13), and this wiring plugs into the top port.
-  Check on the bench whether a breakout with only D+ and GND (no VBUS, no CC
+  off on the A ports, and this wiring plugs into the top port. Check on the
+  bench whether a breakout with only the signal pin and GND (no VBUS, no CC
   resistors) still trips it: watch whether the pack's output stays on through a
-  long low-current idle. If it does trip, the D+ reading needs another route,
-  or Voltaic's guidance on reading it while Always On stays engaged.
+  long low-current idle. If it does trip, the reading needs another route, or
+  Voltaic's guidance on reading it while Always On stays engaged.
 - **Firmware:** a new AT command in mDot-AT-firmware that reads `AnalogIn(PB_0)`
-  and returns the voltage (built in Mbed Studio).
+  and returns the voltage.
 - **Node software:** a new first path in `battery_manager.py` that asks the
-  mDot through the LoRa daemon, with the D+ to cell-voltage scale (about 2×)
+  mDot through the LoRa daemon, with the signal to cell-voltage scale
   calibrated per pack.
-- **Calibration:** run the full drain test (below) with D+ logged once a
-  minute, to map D+ to charge and set the empty point. Fix `CELL_V_MIN` while
-  doing it: 3.0 V now, but the V50 cuts out at about 3.45 V per cell.
+- **Calibration:** run the full drain test (below) with the signal logged once a
+  minute, to map it to charge and set the empty point. Fix `CELL_V_MIN` while
+  doing it: 3.0 V now, but the V50 cut out at about 3.45 V per cell; find the
+  V75's point in the same test.
 - **Accuracy to expect:** about ±10–15 % of charge mid-range, where a Li-ion
   cell's voltage is flat. Better near empty, which is when it matters.
-- **v6 HAT:** add a connector for the D+ lead. The KiCad mDot symbol's pin
-  numbers don't match MultiTech's guide (PB0/PB1 are swapped, as are PA0/PA7),
-  so lay out by pin name and check the footprint.
-- **Always On:** every V50 has it. Anything plugged into a USB-A port presses a
-  mechanical switch that puts the pack in Always On mode, so a field unit, wired
-  to both A ports, is always in it.
+- **v6 HAT:** add a connector for the charge-signal lead. The KiCad mDot symbol's
+  pin numbers don't match MultiTech's guide (PB0/PB1 are swapped, as are
+  PA0/PA7), so lay out by pin name and check the footprint.
+- **Always On:** plugging anything into a USB-A port presses a mechanical
+  switch that puts the pack in Always On mode, so a field unit, wired to both A
+  ports, is always in it.
 
 Also in `battery_manager.py`: the INA260 path ignores charging and charges the
 whole off period at the current measured at boot. Fix it before anyone fits an
@@ -308,8 +322,9 @@ INA260.
 
 ## Still to measure
 
-1. **Off-state draw:** the Witty Pi plus the mDot listening in Class C, with the Pi off.
+1. **Off-state draw:** the Witty Pi plus the mDot listening in Class C, with the Pi off. A meter between the pack and the Witty Pi doesn't see the V75's own 7 mA; add it.
 2. **Energy per wake, boot and shutdown included:** the captures were sampled at 5 Hz on 2026-10-06; boot and shutdown weren't.
 3. **WiFi's draw:** idle looked about 0.3–0.6 W lower with WiFi disconnected, in one session.
-4. **Solar charging through the V50's side port:** a load test while it charges from the real panel in sun.
+4. **Solar charging through the V75's solar jack:** a load test while it charges from the real panel in sun.
 5. **Winter yield** at the 10 W input cap.
+6. **The V75 in the cold and the heat:** whether output and Always On come back by themselves after a cutoff below −15 °C or above 60 °C, and the enclosure temperature on a sunny day (charging stops above 45 °C).
