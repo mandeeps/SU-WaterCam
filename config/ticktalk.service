@@ -30,7 +30,9 @@ ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/runrtm.py -d
 # automatically from that class of crash. This does not interfere with the
 # intentional shutdown path (call_shutdown() -> doas shutdown -h now): the
 # whole OS is going down at that point, so systemd does not restart
-# services during an actual system shutdown/reboot.
+# services during an actual system shutdown/reboot. After the shutdown command
+# succeeds the runtime exits with status 0 (not restarted); if both doas and
+# sudo fail it exits with status 1, and Restart=on-failure runs another cycle.
 Restart=on-failure
 RestartSec=10
 

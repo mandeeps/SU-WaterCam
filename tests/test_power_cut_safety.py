@@ -157,11 +157,15 @@ def shutdown_env(tmp_path, monkeypatch):
         config_io.write_json(str(p), cfg)
         lri._runtime_manager = _manager(p)
         schedule = MagicMock(return_value={})
-        calls = MagicMock()
+        calls = MagicMock(return_value=0)        # the shutdown command works
         monkeypatch.setattr("tools.wittypi_control.apply_emergency_schedule", schedule)
         monkeypatch.setattr("subprocess.call", calls)
-        with patch("sys.exit") as exit_:
-            result = ticktalk_main.call_shutdown.__wrapped__(None)
+        result = None
+        with patch("sys.exit", side_effect=SystemExit) as exit_:
+            try:
+                result = ticktalk_main.call_shutdown.__wrapped__(None)
+            except SystemExit:
+                pass
         return result, schedule, calls, exit_, json.loads(p.read_text())
     yield run
     lri._runtime_manager = None
@@ -182,7 +186,7 @@ def test_expired_emergency_ends_and_shuts_down(shutdown_env):
         dict(IDENTITY, iteration_count=5, emergency_mode=True, emergency_since=time.time() - 25 * 3600))
     assert cfg["emergency_mode"] is False
     schedule.assert_called_once_with(False)
-    exit_.assert_called_once_with("shutdown")
+    exit_.assert_called_once_with(0)
 
 
 def test_emergency_max_hours_zero_never_expires(shutdown_env):
