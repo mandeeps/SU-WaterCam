@@ -96,8 +96,12 @@ Otherwise the bitmap is skipped and the log has one line giving the reason, the
 last bitmap's water % and its age; the sensor packet goes out as usual. IP
 uploads send the bitmap every capture.
 
-The state is written (atomically, `tools/config_io.py`) when the bitmap is handed
-to the LoRa daemon or to the store-and-forward queue, never when it is skipped:
+The state is written (atomically, `tools/config_io.py`) when the mDot transmits
+the bitmap, live or drained from the store-and-forward queue; never when it is
+only queued or skipped. While a bitmap waits in the queue, later captures are
+compared with the last one transmitted, and one the policy sends replaces the
+queued one (only the newest bitmap waits; an older one would only show the
+dashboard an older scene). Superseded bitmaps are not counted in `sf_dropped`.
 
 ```json
 {"water_pct": 12, "time": 1760000000, "capture": "20261015-120000",
@@ -106,6 +110,19 @@ to the LoRa daemon or to the store-and-forward queue, never when it is skipped:
 
 `time` is the capture time. A `time` in the future (the clock moved back) counts
 as due for a refresh.
+
+## Bitmaps that wait in the queue (`tools/bitmap_fit.py`)
+
+- Sent now: compressed for the full room now (`limit - 4`). If the bitmap was
+  compressed for a larger room (the stored limit lags, or a pending MAC answer
+  takes a few bytes: AT+TXS reports e.g. 240 B), it is compressed again from
+  the capture's mask for the room now and sent.
+- No room now (DR0, 11 B): compressed for the queue with 12 B of headroom for
+  MAC answers in FOpts (242 − 4 − 12 = 226 B), since it goes out later at an
+  unknown room. The queue entry keeps the mask path.
+- Draining: a queued bitmap larger than the room then is compressed again from
+  its mask at that room (method 2 per `bitmap_method2_enabled`); it waits only
+  when no bitmap fits at all (room < 36 B) or the mask is gone.
 
 ## Payload Budget by SF (US915)
 

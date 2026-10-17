@@ -18,8 +18,11 @@ when one of these holds (decide()):
 
 IP uploads send the bitmap every capture regardless.
 
-The last bitmap handed to the LoRa daemon or the store-and-forward queue is
-recorded in data/lora_bitmap_state.json:
+The last bitmap the mDot transmitted, live or drained from the store-and-forward
+queue, is recorded in data/lora_bitmap_state.json ("time" is that bitmap's
+capture time). A bitmap only queued is not: until it goes out, later captures
+are still compared with the last one transmitted, and one the policy sends
+replaces it in the queue (tools/lora_store_forward.py supersede_bitmaps()).
     {"water_pct": 12, "camera_flood_detected": 0, "camera_flood_growing": 0,
      "time": 1760000000, "capture": "20261015-120000"}
 """
@@ -99,22 +102,41 @@ def decide(water_pct, flags: dict, last: Optional[dict], now: float,
 
 def mark_sent(data: dict, dirname: str, now: Optional[float] = None,
               path: Optional[str] = None) -> None:
-    """Record a bitmap handed to the LoRa daemon or the store-and-forward queue.
+    """Record a bitmap the mDot transmitted (live or from the queue).
 
-    data holds the capture's uplink fields (camera_water_pct and the flags)."""
+    data holds the capture's uplink fields (camera_water_pct and the flags);
+    now is the capture time. A bitmap older than the one recorded (a queued one
+    drained after a newer one went out) doesn't replace it."""
     water_pct = data.get("camera_water_pct")
     capture = os.path.basename(os.path.normpath(dirname)) if dirname else None
     if not _number(water_pct):
         return    # without a water % there is nothing to compare later captures with
     path = path or DEFAULT_STATE_PATH
-    state = {"water_pct": water_pct, "time": int(time.time() if now is None else now),
-             "capture": capture}
+    when = int(time.time() if now is None else now)
+    last = load_state(path)
+    if last is not None and when < last["time"] <= time.time():
+        return
+    state = {"water_pct": water_pct, "time": when, "capture": capture}
     state.update({k: 1 if data.get(k) else 0 for k in FLAGS})
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         config_io.write_json(path, state)
     except OSError as e:
         print(f"⚠️ Bitmap policy: couldn't save {path}: {e}")
+
+
+def queue_fields(data: dict, dirname: str) -> dict:
+    """What mark_sent() needs, kept with a queued bitmap (tools/lora_store_forward.py)."""
+    fields = {k: data.get(k) for k in ("camera_water_pct",) + FLAGS}
+    fields["capture"] = os.path.basename(os.path.normpath(dirname)) if dirname else None
+    return fields
+
+
+def mark_sent_queued(record: dict, path: Optional[str] = None) -> None:
+    """mark_sent() for a bitmap drained from the store-and-forward queue."""
+    fields = record.get("bitmap_policy")
+    if isinstance(fields, dict):
+        mark_sent(fields, fields.get("capture") or "", now=record.get("captured_at"), path=path)
 
 
 def lora_decision(data: dict, now: float, get_parameter,
