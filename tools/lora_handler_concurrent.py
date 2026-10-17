@@ -365,7 +365,8 @@ class LoRaHandler:
                 parity=serial.PARITY_NONE,
                 stopbits=serial.STOPBITS_ONE,
                 bytesize=serial.EIGHTBITS,
-                timeout=1
+                timeout=1,
+                write_timeout=1   # a stuck UART must not block a write forever
             )
 
             if not self.ser.is_open:

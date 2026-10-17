@@ -5,8 +5,12 @@ from typing import List, Optional, Tuple, Any
 import json
 import os
 import socket
-import tempfile
 import time
+
+try:
+    from tools import config_io
+except ImportError:     # run from tools/ as a script
+    import config_io
 
 # The last good fix, for when there is no live one. A unit is stationary, and the
 # modem's GNSS takes 40-50 s to fix after USB comes on, so a wake's first LoRa
@@ -185,12 +189,9 @@ def _save_fix(location: dict) -> None:
     entry = {"gps_lat": location["gps_lat"], "gps_lon": location["gps_lon"],
              "gps_alt": location.get("gps_alt"), "fix_time": now}
     try:
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(CACHE_PATH), prefix=".gps_last_fix.")
-        with os.fdopen(fd, "w") as f:
-            json.dump(entry, f)
-        os.chmod(tmp, 0o600)   # it says where the unit is
-        os.replace(tmp, CACHE_PATH)
-    except OSError as e:
+        # atomic and fsynced; 0o600 because it says where the unit is
+        config_io.write_json(CACHE_PATH, entry, mode=0o600)
+    except (OSError, TypeError, ValueError) as e:
         print(f"⚠️ GPS: couldn't save the last fix: {e}")
 
 

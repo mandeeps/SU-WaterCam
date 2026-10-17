@@ -687,6 +687,17 @@ sudo cp config/journald-volatile.conf /etc/systemd/journald.conf.d/
 sudo systemctl restart systemd-journald
 ```
 
+Rotate the logs that otherwise only grow: the power log, the bench
+`~/throttle_log.csv`, ticktalk's `output.log` and `data/temp_humidity.csv`
+(each kept to four 5 MB compressed copies). `~/wittypi/wittyPi.log` is left
+alone: this boot's offset into it is how the unit tells this boot's lines from
+earlier ones.
+
+```bash
+sudo cp config/logrotate-watercam.conf /etc/logrotate.d/watercam
+sudo logrotate -d /etc/logrotate.d/watercam    # check it parses
+```
+
 ### 1.9.1 LoRa health, WiFi only when needed, photo retention
 
 **LoRa health.** Each boot the unit asks the network whether it hears it: a
@@ -727,7 +738,7 @@ card can't stop the unit. The photos aren't uploaded, so this is the only copy.
   filebrowser`), it costs cellular data ([1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
 - **Legacy, never install:** `watercam.service` (replaced by ticktalk; the unit file is gone from `config/`),
   `gps.service` (replaced by `quectel-gnss.service`), `button.service`,
-  `temperature.service`; `config/dhcpcd.conf` (NetworkManager is used) and
+  `temperature.service` (removed from `config/`); `config/dhcpcd.conf` (NetworkManager is used) and
   `config/avrdude_gpio.conf` (Witty Pi firmware flashing only).
 - **Bench-only:** the `throttle-log` service (logs `get_throttled` at boot and
   shutdown to `~/throttle_log.csv`), `~/test_wake.sh`, and any ticktalk drop-ins

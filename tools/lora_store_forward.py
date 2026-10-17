@@ -35,6 +35,23 @@ DEFAULT_MAX_DEPTH = 96
 DEFAULT_MAX_AGE_DAYS = 7
 
 
+def _write_atomic(tmp: str, final: str, record: dict) -> None:
+    """Write record to tmp, fsync it, rename it to final, fsync the directory."""
+    with open(tmp, "w") as fh:
+        json.dump(record, fh)
+        fh.flush()
+        os.fsync(fh.fileno())
+    os.replace(tmp, final)
+    try:
+        dfd = os.open(os.path.dirname(os.path.abspath(final)), os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
+
+
 def enqueue(
     sensor_hex: Optional[str],
     bitmap_hex: Optional[str],
@@ -67,9 +84,7 @@ def enqueue(
         fname = f"{int(captured_at)}_{len(existing):06d}.json"
         tmp = os.path.join(queue_dir, fname + ".tmp")
         final = os.path.join(queue_dir, fname)
-        with open(tmp, "w") as fh:
-            json.dump(record, fh)
-        os.replace(tmp, final)
+        _write_atomic(tmp, final, record)
         logger.info("LoRa S&F: queued %s", fname)
         return True
     except OSError as exc:
@@ -170,9 +185,7 @@ def drain(
 def _rewrite(path: str, record: dict) -> None:
     """Save a record with its delivered payload cleared (atomic; never raises)."""
     try:
-        with open(path + ".tmp", "w") as fh:
-            json.dump(record, fh)
-        os.replace(path + ".tmp", path)
+        _write_atomic(path + ".tmp", path, record)
     except OSError as exc:
         logger.warning("LoRa S&F: could not update %s: %s", path, exc)
 

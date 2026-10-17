@@ -19,9 +19,13 @@ IP uplink is needed (ip_uplink_transmit). It's kept for the rest of the boot in
 """
 import json
 import os
-import tempfile
 import time
 from typing import Any, Dict, Optional
+
+try:
+    from tools import config_io
+except ImportError:     # run from tools/ as a script
+    import config_io
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HISTORY_PATH = os.path.join(REPO, "data", "lora_health.json")
@@ -52,11 +56,8 @@ def _read(path: str) -> Any:
 def _write(path: str, data: Any) -> None:
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".lora_health.")
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f)
-        os.replace(tmp, path)
-    except OSError as e:
+        config_io.write_json(path, data, mode=0o644)    # atomic and fsynced
+    except (OSError, TypeError, ValueError) as e:
         print(f"⚠️ LoRa health: couldn't save {path}: {e}")
 
 
