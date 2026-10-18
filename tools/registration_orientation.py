@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/home/pi/SU-WaterCam/venv/bin/python
 """Flag captures taken after the node has turned since its registration was cached.
 
 coreg() solves the optical-to-thermal transform once, caches it in
@@ -38,6 +38,11 @@ flag, and so does
 (run from ~/SU-WaterCam) once the alignment has been checked by eye and found good.
 With no argument it prints the check without changing anything.
 """
+
+import os as _os, sys as _sys  # noqa: E401
+_REPO = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _REPO not in _sys.path:
+    _sys.path.insert(0, _REPO)   # so ./tools/registration_orientation.py can import the tools package
 
 import argparse
 import datetime

@@ -1,3 +1,4 @@
+#!/home/pi/SU-WaterCam/venv/bin/python
 """
 BNO055 Calibration & Orientation Logger
 =========================================

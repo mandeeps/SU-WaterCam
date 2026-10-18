@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/pi/SU-WaterCam/venv/bin/python
 """Snapshot what this node runs, as a CycloneDX SBOM, for vulnerability triage.
 
 When an advisory comes out (OpenSSL, Tailscale, onnxruntime, ...), the question is
@@ -18,6 +18,11 @@ too, so either can be scanned the same way, e.g. `grype sbom:<file>`.
     python -m tools.node_inventory                        # writes inventory-<host>-<date>.cdx.json
     python -m tools.node_inventory --mdot-version 4.1.21 --out -
 """
+
+import os as _os, sys as _sys  # noqa: E401
+_REPO = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _REPO not in _sys.path:
+    _sys.path.insert(0, _REPO)   # so ./tools/node_inventory.py can import the tools package
 
 import argparse
 import datetime

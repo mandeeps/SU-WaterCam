@@ -17,6 +17,11 @@ At a new installation site, reset it so the new position is learned:
     python tools/gps_home.py --reset
     python tools/gps_home.py --show
 """
+import os as _os, sys as _sys  # noqa: E401
+_REPO = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _REPO not in _sys.path:
+    _sys.path.insert(0, _REPO)   # so ./tools/gps_home.py can import the tools package
+
 import json
 import math
 import os

@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/home/pi/SU-WaterCam/venv/bin/python
 """Which node software and segmentation model this node runs, for the uplinks.
 
 Releases are CalVer git tags, vYYYY.MM.N (docs/RELEASES.md). The version comes

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/pi/SU-WaterCam/venv/bin/python
 
 """
 Initial system health check for SU-WaterCam
