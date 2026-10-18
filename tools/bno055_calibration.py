@@ -130,8 +130,22 @@ class BNO055:
         self._write_byte(REG_OPR_MODE, mode)
         time.sleep(0.012)   # 7 ms transition to fusion modes
 
-    def _verify_chip(self):
-        chip_id = self._read_byte(REG_CHIP_ID)
+    def _verify_chip(self, attempts: int = 5):
+        """The chip ID must read 0xA0. A Pi's I2C sometimes garbles a read from
+        the BNO055 (it stretches the clock, which the Pi handles badly: 006 read
+        0xD0 once on 2026-10-17), so a wrong ID is retried before giving up."""
+        seen = []
+        for _ in range(attempts):
+            try:
+                chip_id = self._read_byte(REG_CHIP_ID)
+            except OSError:
+                chip_id = -1
+            if chip_id == 0xA0:
+                break
+            seen.append(chip_id)
+            time.sleep(0.05)
+        if seen and chip_id == 0xA0:
+            print(f"[BNO055] Chip ID read wrong {len(seen)} time(s) before 0xA0 (I2C glitch, retried)")
         if chip_id != 0xA0:
             raise IOError(
                 f"BNO055 not found at 0x{self.address:02X} on bus {I2C_BUS}. "
@@ -225,29 +239,54 @@ class BNO055:
 
     # ── Calibration offsets ───────────────────────────────────────────────────
 
-    def read_offsets(self) -> bytes:
+    def read_offsets(self, attempts: int = 5) -> bytes:
         """
         Read the 22-byte calibration offset block from the sensor.
         Must be in CONFIG mode to read these registers accurately.
+
+        Read until two reads in a row agree (an I2C glitch, see _verify_chip,
+        must not end up in the saved calibration); IOError if they never do.
         """
         self._set_mode(MODE_CONFIG)
-        offsets = self._read_bytes(REG_CALIB_OFFSET_START, CALIB_OFFSET_LEN)
-        self._set_mode(MODE_NDOF)
-        return offsets
+        try:
+            previous = None
+            for _ in range(attempts):
+                try:
+                    offsets = self._read_bytes(REG_CALIB_OFFSET_START, CALIB_OFFSET_LEN)
+                except OSError:
+                    offsets = None
+                if offsets is not None and offsets == previous:
+                    return offsets
+                previous = offsets
+                time.sleep(0.02)
+            raise IOError("BNO055 calibration offsets read differently each time "
+                          f"({attempts} reads): I2C unreliable, not saving them")
+        finally:
+            self._set_mode(MODE_NDOF)
 
-    def write_offsets(self, offsets: bytes):
+    def write_offsets(self, offsets: bytes, attempts: int = 3):
         """
         Write previously saved calibration offsets back to the sensor.
         This restores calibration across power cycles without re-running
         the calibration procedure. Must be in CONFIG mode.
+
+        Reads the block back and writes it again if it differs (I2C glitch);
+        IOError if it never matches.
         """
         if len(offsets) != CALIB_OFFSET_LEN:
             raise ValueError(f"Expected {CALIB_OFFSET_LEN} bytes, got {len(offsets)}")
-        self._set_mode(MODE_CONFIG)
-        for i, byte in enumerate(offsets):
-            self._write_byte(REG_CALIB_OFFSET_START + i, byte)
-        self._set_mode(MODE_NDOF)
-        time.sleep(0.1)
+        for _ in range(attempts):
+            self._set_mode(MODE_CONFIG)
+            for i, byte in enumerate(offsets):
+                self._write_byte(REG_CALIB_OFFSET_START + i, byte)
+            self._set_mode(MODE_NDOF)
+            time.sleep(0.1)
+            try:
+                if self.read_offsets() == offsets:
+                    return
+            except IOError:
+                pass
+        raise IOError("BNO055 calibration offsets didn't read back as written: I2C unreliable")
 
     def close(self):
         self.bus.close()
@@ -425,17 +464,19 @@ def run_calibration_procedure(imu: BNO055,
           this sensor's physical position inside this camera box.
           If the sensor is ever remounted, recalibrate from scratch.
     """
-    # 6 stable orientations that avoid resting the box on its sides.
+    # 6 stable orientations that avoid resting the box on its sides. What matters
+    # is six different orientations, each held still: 3/4 and 5/6 are opposite
+    # pairs. 30-45 degrees is enough; one book is usually much less, so stack them.
     # Positions 3-6 use ~45° tilts propped against a support (book, wedge, wall)
     # so the antennas are never load-bearing. Each must be held stationary —
     # prop securely before pressing Enter.
     ACCEL_POSITIONS = [
         ("1/6", "Base down     — box sitting normally on its base"),
         ("2/6", "Lid down      — flip box completely upside-down on its lid"),
-        ("3/6", "Tilt forward  — prop front end down ~45° (e.g. front edge on a book); antennas clear"),
-        ("4/6", "Tilt backward — prop back end down ~45° (e.g. back edge on a book); antennas clear"),
-        ("5/6", "Tilt left     — prop left edge down ~45° on a wedge; antennas point up and away"),
-        ("6/6", "Tilt right    — prop right edge down ~45° on a wedge; antennas point up and away"),
+        ("3/6", "Tilt forward  — lens end DOWN ~45°: front edge on the table, back edge raised on books or a wedge; antennas clear"),
+        ("4/6", "Tilt backward — lens end UP ~45°: back edge on the table, front edge raised on books or a wedge; antennas clear"),
+        ("5/6", "Tilt left     — left side DOWN ~45°: left edge on the table, right edge raised on a wedge; antennas up and away"),
+        ("6/6", "Tilt right    — right side DOWN ~45°: right edge on the table, left edge raised on a wedge; antennas up and away"),
     ]
     HOLD_SECONDS = 5
 
