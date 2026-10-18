@@ -1,3 +1,4 @@
+#!/home/pi/SU-WaterCam/venv/bin/python
 """IP uplink/downlink transport for SU-WaterCam.
 
 Sends sensor channel data to the WaterCam FastAPI server over HTTP (WiFi or
@@ -44,6 +45,11 @@ Codes used by this device (from API CHANNEL_REGISTRY):
 """
 
 from __future__ import annotations
+
+import os as _os, sys as _sys  # noqa: E401
+_REPO = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+if _REPO not in _sys.path:
+    _sys.path.insert(0, _REPO)   # so ./tools/transmit_ip.py can import the tools package
 
 import json
 import logging

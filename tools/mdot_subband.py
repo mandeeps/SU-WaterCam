@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/pi/SU-WaterCam/venv/bin/python
 """Set the mDot's US915 frequency sub-band to the one our gateway listens on.
 
 Our gateway uses sub-band 1 (channels 0-7 plus 500 kHz channel 64; after a

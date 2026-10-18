@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/home/pi/SU-WaterCam/venv/bin/python
 
 """Multispectral Image Coregistration Script"""
 import argparse

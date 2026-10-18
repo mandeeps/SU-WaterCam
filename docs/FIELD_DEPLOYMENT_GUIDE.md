@@ -552,6 +552,11 @@ area. Compute the site's value from its surveyed position with NOAA's World
 Magnetic Model, offline, so the coordinates go nowhere (e.g. the `pygeomag`
 package with its `WMM_2025.COF`), or use NOAA's calculator.
 
+The tools this guide runs are executable and use the node venv's Python, so
+`./tools/bno055_calibration.py ...` (with tab completion) works as well as
+`venv/bin/python tools/bno055_calibration.py ...`. Plain `python3` (the system
+one) lacks their dependencies.
+
 The calibration has three parts, and they can be done in two goes:
 
 - **Gyroscope and accelerometer: anywhere, indoors included.** They don't

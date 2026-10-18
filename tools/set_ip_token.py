@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/pi/SU-WaterCam/venv/bin/python
 """Store this unit's IP API token in runtime_config.json (ip_upload.api_key).
 
 Generate the token on the dashboard (Management -> select the unit -> IP access

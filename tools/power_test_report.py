@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/home/pi/SU-WaterCam/venv/bin/python
 """
 Summarise a power CSV from tools/power_load_test.sh or tools/powerlog.py.
 
