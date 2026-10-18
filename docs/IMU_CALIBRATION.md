@@ -72,10 +72,22 @@ You will be guided through 6 positions. Hold the box still in each position for 
 
 1. Base down — box sitting normally
 2. Lid down — box flipped upside-down
-3. Tilt forward ~45° — front edge resting on a book or wedge
-4. Tilt backward ~45° — back edge resting on a book or wedge
-5. Tilt left ~45° — left edge resting on a wedge
-6. Tilt right ~45° — right edge resting on a wedge
+3. Tilt forward ~45° — lens end **down**: front edge on the table, back edge raised on books or a wedge
+4. Tilt backward ~45° — lens end **up**: back edge on the table, front edge raised
+5. Tilt left ~45° — left side **down**: left edge on the table, right edge raised on a wedge
+6. Tilt right ~45° — right side **down**: right edge on the table, left edge raised
+
+What matters is six different orientations, each held completely still for the
+whole countdown; 3/4 and 5/6 are opposite pairs. 30-45° is enough, but one book
+is usually much less, so stack them. Keep the antennas clear of every surface.
+
+If the unit loses power when tilted (it reboots, and the Witty Pi log says
+"power supply newly connected"), a connector or the battery is shifting: fix
+that first, since a pole-mounted camera tips forward too.
+
+The tool retries a chip-ID read the Pi's I2C garbled, and only saves offsets
+that read the same twice in a row; if they never do it refuses to save, so a
+glitch can't end up in the calibration.
 
 > **Note:** The antenna connectors block two of the six faces required for `accel=3`. `accel=2` is the expected ceiling on this hardware and is acceptable.
 
