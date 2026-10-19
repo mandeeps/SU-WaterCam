@@ -30,7 +30,8 @@ between **5V** and **GND**.
 
 ## Parts
 
-- The unit's existing Y-cable (two USB-A plugs into one USB-C plug).
+- A Y-cable with two USB-A plugs: the unit's own (USB-C end) or an older one
+  with a micro-USB end. The far end gets cut off, so its type doesn't matter.
 - Heat-shrink, solder and flux.
 - A cable tie and an adhesive tie mount, or a tie to a standoff, for strain relief.
 - Kapton or electrical tape to cover the USB-C socket.
@@ -39,7 +40,7 @@ between **5V** and **GND**.
   JST XH) instead of soldering the wires straight to the pads. It makes the
   Witty Pi easier to swap, but needs a crimp tool.
 
-If the Y-cable's power wires are thinner than 22 AWG, keep its USB-A ends and
+If the Y-cable's power wires are thinner than 22 AWG (common on micro-USB cables), keep its USB-A ends and
 join them to a short run of 20 AWG wire instead.
 
 ## Build
@@ -47,11 +48,14 @@ join them to a short run of 20 AWG wire instead.
 1. **Power off and disconnect.** Shut the unit down, then unplug both USB-A
    plugs from the battery. Remove the HAT and lift the Witty Pi off the Pi, so
    heat and flux stay away from the Pi.
-2. **Cut the USB-C plug off the Y-cable,** leaving enough cable to reach P2
+2. **Cut the far-end plug (USB-C or micro-USB) off the Y-cable,** leaving enough cable to reach P2
    with some slack.
 3. **Identify the wires with the meter,** not by colour. Plug the USB-A ends
    into the battery and measure: 5 V wire to ground wire should read about
-   +5.1 V. Unplug the battery again before going on.
+   +5.1 V. Then plug in **one USB-A leg at a time** and measure again: both
+   legs must carry 5 V. Some older Y-cables carry power on only one leg (the
+   other is data only), which would leave the unit on a single 2 A port.
+   Unplug the battery again before going on.
 4. **Insulate every other wire** (data lines, shield) individually with
    heat-shrink. Don't join them to each other or to anything else.
 5. **Check P2 is connected to the input.** With the meter on continuity, check
