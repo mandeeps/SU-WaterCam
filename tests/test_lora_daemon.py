@@ -310,3 +310,30 @@ class TestStdoutLineBuffering:
     def test_tolerates_a_stdout_without_reconfigure(self, monkeypatch):
         monkeypatch.setattr(daemon_mod.sys, "stdout", object())
         daemon_mod._line_buffer_stdout()
+
+
+# ---------------------------------------------------------------------------
+# mDot keep-alive (the firmware restarts on 30 min of serial silence)
+# ---------------------------------------------------------------------------
+
+class TestMdotKeepalive:
+    def test_sends_at_commands_until_stopped(self):
+        handler = MagicMock()
+        stop = daemon_mod.start_mdot_keepalive(handler, interval_s=0.02)
+        time.sleep(0.15)
+        stop.set()
+        calls = handler.is_joined.call_count
+        assert calls >= 3
+        time.sleep(0.1)
+        assert handler.is_joined.call_count <= calls + 1
+
+    def test_survives_a_failing_handler(self):
+        handler = MagicMock()
+        handler.is_joined.side_effect = OSError("port gone")
+        stop = daemon_mod.start_mdot_keepalive(handler, interval_s=0.02)
+        time.sleep(0.1)
+        stop.set()
+        assert handler.is_joined.call_count >= 2
+
+    def test_interval_well_inside_the_firmware_limit(self):
+        assert daemon_mod.MDOT_KEEPALIVE_S * 3 <= 30 * 60
