@@ -75,10 +75,28 @@ join them to a short run of 20 AWG wire instead.
     HAT on top, then plug the battery in. The Witty Pi's Default ON setting
     starts the Pi.
 
+## Secure the mDot wiring
+
+On units where the mDot is wired with jumper wires, those wires need the same
+care as the power harness. The mDot is powered from the Witty Pi's P3 header
+(3V3 and GND). If its GND jumper comes loose, the mDot resets (seen on 005),
+and while the ground is open its current flows through the Pi's GPIO pins.
+
+- **Check the grounds match:** with the meter on continuity, P2 **GND** and
+  P3 **GND** should be connected (both are the Witty Pi's board ground). Then
+  the harness doesn't change the mDot's ground.
+- **Replace the 3V3 and GND jumpers** with soldered wires, or crimp them into a
+  latching housing. If that has to wait, at least group the jumpers into a
+  multi-pin housing and fix it with a dab of hot glue.
+- **Expect an mDot reset** whenever power is disconnected for this work. It
+  rejoins LoRa afterwards.
+
 ## Test
 
 1. **Wiggle:** with the unit running, pull and bend the harness near P2 and at
    the battery end.
+   Give each mDot jumper a light tug too; an mDot reset shows up as a LoRa
+   rejoin in `journalctl -u lora_daemon`, not in the Witty Pi log.
 2. **Tilt:** with the lid closed, tip the box forward, backward and to each
    side, and hold it at the mounting angle for a minute.
 3. **Check for cuts:** after the test, look for a new boot:
