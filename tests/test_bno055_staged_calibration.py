@@ -132,3 +132,13 @@ def test_boot_loader_writes_all_parts_of_an_old_file(tmp_path, monkeypatch):
     sensor = _AdafruitLike()
     assert imu._apply_calibration(sensor) is True
     assert {"offsets_magnetometer", "radius_magnetometer", "offsets_accelerometer", "offsets_gyroscope"} <= set(sensor.set)
+
+
+def test_stages_without_calibrate_mode_is_refused(monkeypatch, capsys):
+    """--stages on its own used to run log mode and ignore the stages."""
+    monkeypatch.setattr(sys, "argv", ["bno055_calibration.py", "--stages", "accel"])
+    import runpy
+    with pytest.raises(SystemExit) as e:
+        runpy.run_path(cal.__file__, run_name="__main__")
+    assert e.value.code == 2
+    assert "--stages only applies to --mode calibrate" in capsys.readouterr().err

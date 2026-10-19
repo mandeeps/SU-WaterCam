@@ -803,7 +803,7 @@ Calibration workflow (see docs/IMU_CALIBRATION.md for full procedure):
     )
     p.add_argument("--unit-config", "-u", default=None, metavar="JSON",
                    help="Path to unit config JSON (preferred over individual flags).")
-    p.add_argument("--stages", default=",".join(STAGES), metavar="LIST",
+    p.add_argument("--stages", default=None, metavar="LIST",
                    help="calibrate mode: comma-separated stages to run, from "
                         "gyro,accel,mag (default all). The others keep their saved "
                         "offsets. Indoors: gyro,accel; outdoors at a clean spot: mag.")
@@ -828,6 +828,10 @@ Calibration workflow (see docs/IMU_CALIBRATION.md for full procedure):
     p.add_argument("--interval", type=float, default=1.0, metavar="SEC",
                    help="Log interval in seconds (log mode only, default: 1.0).")
     args = p.parse_args()
+    if args.stages is not None and args.mode != "calibrate":
+        # Without --mode calibrate the tool would run its default (log) mode and
+        # ignore the stages, which reads like a calibration that did nothing.
+        p.error(f"--stages only applies to --mode calibrate (mode is {args.mode})")
 
     # ── Load unit config (if provided) — read as plain JSON, no external deps ──
     ucfg: dict = {}
@@ -857,7 +861,7 @@ Calibration workflow (see docs/IMU_CALIBRATION.md for full procedure):
     imu = BNO055(mount_heading_offset_deg=mount_offset)
 
     if args.mode == "calibrate":
-        stages = tuple(x.strip() for x in args.stages.split(",") if x.strip())
+        stages = tuple(x.strip() for x in (args.stages or ",".join(STAGES)).split(",") if x.strip())
         bad = [x for x in stages if x not in STAGES]
         if bad or not stages:
             print(f"ERROR: --stages takes some of {', '.join(STAGES)} (got {args.stages!r})")
