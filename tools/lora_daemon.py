@@ -92,9 +92,11 @@ from tools.lora_handler_concurrent import (
 
 LOG_FORMAT = "%(asctime)s [lora_daemon] %(levelname)s: %(message)s"
 MAX_REQUEST_BYTES = 16384
-# The mDot firmware (4.1.5-wc2610-sw2 and later) restarts itself when the Pi
-# is on but no AT input has arrived for 30 minutes, to recover from a dead
-# serial input. Talk to it well inside that so an idle Pi doesn't trigger it.
+# The mDot firmware restarts itself when the Pi is on but no AT input has
+# arrived for an hour (AT+SILENCE), to recover from a dead serial input. From
+# 4.1.5-wc2610-sw3 that only arms after this keep-alive (AT+ALIVE) since the Pi
+# came on, so a unit without it never gets a silence restart. Every 5 minutes is
+# well inside the limit.
 MDOT_KEEPALIVE_S = 300
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
@@ -272,7 +274,7 @@ def serve(handler, socket_path: str) -> None:
 def _keepalive_loop(handler, stop: threading.Event, interval_s: float) -> None:
     while not stop.wait(interval_s):
         try:
-            handler.is_joined()             # AT+NJS?: cheap, no radio traffic
+            handler.keepalive()             # AT+ALIVE: no radio traffic
         except Exception:
             log.debug("mDot keep-alive failed", exc_info=True)
 

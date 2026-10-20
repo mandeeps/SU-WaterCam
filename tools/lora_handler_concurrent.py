@@ -522,6 +522,28 @@ class LoRaHandler:
             return False
 
 
+    def keepalive(self) -> bool:
+        """Send the mDot AT+ALIVE, the LoRa daemon's keep-alive; True on OK.
+
+        mDot firmware 4.1.5-wc2610-sw3 and later arm their serial-silence restart
+        only after this command (older firmware answers ERROR, which is harmless).
+        Holds the same locks as is_joined() so the listener can't take the reply.
+        """
+        try:
+            with self.transmit_lock:
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
+                try:
+                    self.ser.reset_input_buffer()
+                    self.ser.write(b'AT+ALIVE\r\n')
+                    time.sleep(0.5)
+                    n = self.ser.in_waiting
+                    raw = self.ser.read(n) if n else b''
+                finally:
+                    fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
+            return b'OK' in raw
+        except Exception:
+            return False
+
     def link_check(self, timeout_s: float = 20.0) -> Dict[str, Any]:
         """Ask the network whether it hears this node (AT+NLC, a LinkCheckReq).
 
