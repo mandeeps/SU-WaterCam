@@ -157,3 +157,23 @@ def test_runtime_manager_code_12_is_an_hours_index(tmp_path):
 def test_handler_code_12_is_an_hours_index_on_every_path(handler, payload):
     handler.decode(payload)
     assert handler.config["monitoring_frequency"] == 24 * 60
+
+
+def test_debug_status_typed_as_text_in_chirpstack(handler):
+    """006 got "5001" as ASCII text (35 30 30 31) and read it as channel 35/30; no reply."""
+    with patch("tools.lora_debug_integration.handle_debug_status_request",
+               return_value={"status": "failed", "error": "test"}) as dbg:
+        handler.current_size_limit = 51
+        handler.decode("35303031")
+    dbg.assert_called_once()
+
+
+def test_text_hex_emergency_off(handler):
+    handler.config["emergency_mode"] = True
+    handler.decode("39393939")          # "9999" as text
+    assert handler.config["emergency_mode"] is False
+
+
+@pytest.mark.parametrize("payload", ["5001", "9999", "109005", "2191", "189801", "21", "a1b2", "zz", ""])
+def test_real_commands_are_never_unwrapped(handler, payload):
+    assert handler._unwrap_text_hex(payload) == payload
