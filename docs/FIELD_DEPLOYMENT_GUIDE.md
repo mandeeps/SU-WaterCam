@@ -314,10 +314,10 @@ indexer like the other timers in 1.3.2: `sudo systemctl mask locate.timer`.
 **Firewall:** no host firewall beyond Tailscale's own rules and the cellular
 filter in 1.5.1, so no `ufw` and no stock `nftables.service`.
 
-**Tailscale:** the tailnet ACL (`config/tailscale-acl.txt`, applied in the
-Tailscale admin console, not on the node) limits the relays (DERP) to nyc, ord
-and iad, which cuts cellular data. The live ACL has diverged from the repo
-copy; check the admin console when changing it.
+**Tailscale:** the tailnet ACL lives in the Tailscale admin console, not on the
+node and not in this public repository (it names who can reach the units). It
+limits the relays (DERP) to nyc, ord and iad, which cuts cellular data. Ask the
+tailnet admin for changes.
 
 ### 1.4 Sync the clock
 
@@ -955,9 +955,9 @@ for the site:
       panel's Transport section.
 - [ ] `systemctl show ticktalk.service -p Environment` includes
       `PYTHONUNBUFFERED=1` (the unit file from this release, 1.9).
-- [ ] **Tailscale ACL:** diff the live ACL in the admin console against
-      `config/tailscale-acl.txt` (they have diverged before) and update whichever
-      is wrong.
+- [ ] **Tailscale:** the unit appears in the admin console with the
+      `tag:watercam` tag and no personal owner (the ACL itself is kept by the
+      tailnet admin, outside this repository).
 
 ## Phase 2: Field Installation
 
