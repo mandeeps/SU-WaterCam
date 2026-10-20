@@ -269,7 +269,7 @@ class TestReplyCommand:
     def test_send_uplink_sends_the_flag_only_when_asked(self):
         from tools.transmit_ip import IPTransmitter
         tx = IPTransmitter.__new__(IPTransmitter)
-        tx.device_id, tx.server_url = "watercam-006", "http://server:8000"
+        tx.device_id, tx.server_url = "watercam-006", "http://server.example.ts.net:8000"
         with patch.object(IPTransmitter, "_post_with_retry", return_value={"success": True}) as post:
             tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1, want_command=True)
             tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1)

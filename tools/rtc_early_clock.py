@@ -79,6 +79,9 @@ def decode(regs: Sequence[Optional[int]]) -> Optional[datetime]:
         return None
 
 
+RTC_UNTRUSTED = "/run/watercam-rtc-untrusted"   # read by tools/transmit_ip.py correct_clock
+
+
 def decide(rtc_ts: Optional[float], system_ts: float) -> str:
     """'set' or 'skip: <reason>'."""
     if rtc_ts is None:
@@ -141,6 +144,14 @@ def main(argv=None) -> int:
               f"RTC {datetime.fromtimestamp(rtc_ts):%Y-%m-%d %H:%M:%S} (+{rtc_ts - now:.0f} s)", flush=True)
     else:
         print(f"rtc_early_clock: {verdict}", flush=True)
+        if verdict.startswith(("skip: RTC unreadable", "skip: RTC time")):
+            # The RTC can't be trusted (lost power, failed read, implausible):
+            # tools/transmit_ip.py may then apply a large server correction
+            try:
+                with open(RTC_UNTRUSTED, "w") as f:
+                    f.write(verdict + "\n")
+            except OSError:
+                pass
     return 0                         # never fail the boot
 
 
