@@ -7,5 +7,16 @@ After=network-online.target
 Type=oneshot
 ExecStart=/bin/sh -c "mmcli -m 0 --location-enable-gps-unmanaged"
 
+# Sandbox (#207): one mmcli call over D-Bus.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+
 [Install]
 WantedBy=multi-user.target

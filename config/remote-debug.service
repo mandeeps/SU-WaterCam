@@ -9,3 +9,15 @@ WorkingDirectory=/home/pi/SU-WaterCam
 ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/tools/remote_debug.py tick
 # Starting a session waits up to ~3 min for cellular and Tailscale.
 TimeoutStartSec=300
+
+# Light sandbox (#207), as ticktalk: it runs doas (systemctl stop/start ticktalk), and doas children
+# inherit these settings, so no NoNewPrivileges or capability limits.
+ProtectSystem=full
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+LockPersonality=yes
+# nmcli and tailscale talk over D-Bus and a unix socket: no address-family limits.
