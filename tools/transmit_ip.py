@@ -51,6 +51,7 @@ _REPO = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
 if _REPO not in _sys.path:
     _sys.path.insert(0, _REPO)   # so ./tools/transmit_ip.py can import the tools package
 
+import ipaddress
 import json
 import logging
 import os
@@ -118,6 +119,30 @@ def _load_ip_config(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
     return ip_cfg
 
 
+# Commands and the clock are only taken from the server over a transport that
+# proves who answered (SU-WaterCam #203): the tailnet (WireGuard to the API's
+# tailnet address) or HTTPS with a verified certificate. Anything else still
+# gets the upload, but the node neither asks for nor applies commands from it,
+# and ignores its Date header.
+_TAILNET_NETS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
+
+
+def trusted_server(url: str) -> bool:
+    """True when replies from `url` can carry commands and the time."""
+    from urllib.parse import urlparse
+    parsed = urlparse(url or "")
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme == "https":
+        return True                     # requests verifies the certificate
+    if host.endswith(".ts.net") or host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or any(ip in net for net in _TAILNET_NETS)
+
+
 class IPTransmitter:
     """Handles uplink posting and downlink polling over HTTP.
 
@@ -139,6 +164,11 @@ class IPTransmitter:
     ``tx.enabled`` themselves if they want to respect the flag.
     """
 
+    @property
+    def trusted(self) -> bool:
+        """Whether this server's replies may carry commands and the time (trusted_server)."""
+        return trusted_server(self.server_url)
+
     def __init__(
         self,
         config_path: str = _DEFAULT_CONFIG_PATH,
@@ -153,6 +183,9 @@ class IPTransmitter:
         # even with enabled false, but never the localhost default
         self.configured: bool = bool(override_url or cfg.get("server_url"))
         self.server_url: str = (override_url or cfg.get("server_url", "http://localhost:8000")).rstrip("/")
+        if self.configured and not trusted_server(self.server_url):
+            logger.warning("server_url %s is neither a tailnet address nor https: uploads go, "
+                           "but commands and the server's time are ignored (#203)", self.server_url)
         self.api_key: str = cfg.get("api_key", "")
         self.device_id: str = override_device_id or cfg.get("device_id", "watercam-001")
         self.timeout_s: int = max(1, _coerce_int(cfg.get("timeout_s"), 15))
@@ -231,7 +264,7 @@ class IPTransmitter:
         }
         if device_ts is not None:
             payload["device_ts"] = device_ts
-        if want_command:
+        if want_command and self.trusted:     # the server marks it delivered: only ask when we'd apply it
             payload["want_command"] = True
         if ip_fallback:
             payload["ip_fallback"] = True
@@ -254,6 +287,11 @@ class IPTransmitter:
             "status_code": int or None
             "error"      : error message string or None
         """
+        if not self.trusted:
+            # Polling marks the command delivered, so don't poll a server whose
+            # commands would be ignored
+            return {"success": True, "command": None, "status_code": None, "error": None,
+                    "untrusted": True}
         url = f"{self.server_url}/ip/downlink/{self.device_id}"
 
         try:
@@ -493,7 +531,7 @@ class IPTransmitter:
                         "success": True,
                         "status_code": resp.status_code,
                         "response": body,
-                        "server_date": resp.headers.get("Date"),
+                        "server_date": resp.headers.get("Date") if self.trusted else None,
                         "rtt_s": rtt_s,
                         "error": None,
                         "attempts": attempt,
@@ -978,6 +1016,12 @@ def tailscale_online(host: str) -> Optional[bool]:
 
 SET_CLOCK = "/usr/local/sbin/watercam-set-clock"
 CLOCK_TOLERANCE_S = 5
+# A larger correction is only applied when the RTC is known to be bad
+# (rtc_early_clock.py leaves RTC_UNTRUSTED) or the clock is before 2026: a
+# server time a day or more off is more likely wrong than the RTC (#203).
+MAX_CLOCK_STEP_S = 24 * 3600
+RTC_UNTRUSTED = "/run/watercam-rtc-untrusted"
+CLOCK_FLOOR = 1767225600              # 2026-01-01, as watercam-set-clock
 # Set by syncTime.sh (network or GPS time at boot) or by SET_CLOCK; /run is cleared at boot
 TIME_SOURCE = "/run/watercam-time-source"
 # This boot's check, so it runs once: holds the boot id, so a /tmp that survives reboots is fine
@@ -1027,6 +1071,11 @@ def correct_clock(uplink_result: Dict[str, Any]) -> Optional[float]:
     except (TypeError, ValueError):
         return None
     offset = server - time.time()
+    if abs(offset) > MAX_CLOCK_STEP_S and not os.path.exists(RTC_UNTRUSTED) and time.time() >= CLOCK_FLOOR:
+        logger.warning("server time is %.1f h %s the clock: more than %d h, not applied "
+                       "(the RTC looks valid; #203)", abs(offset) / 3600,
+                       "ahead of" if offset > 0 else "behind", MAX_CLOCK_STEP_S // 3600)
+        return None
     if abs(offset) <= CLOCK_TOLERANCE_S:
         from tools.capture_time import mark_clock_verified
         mark_clock_verified()      # the clock agrees with the server: later captures are fine
