@@ -76,3 +76,14 @@ def test_default_is_warn(monkeypatch):
 def test_listener_uses_it():
     src = open(os.path.join(os.path.dirname(__file__), "..", "ticktalkpython", "NetworkManager.py")).read()
     assert "SafeUnpickle.loads(payload)" in src and "pickle.loads(payload)" not in src.replace("SafeUnpickle.loads(payload)", "")
+
+
+def test_what_a_real_wake_unpickled_is_allowed(monkeypatch):
+    """The three types a warn-mode wake on 005 logged (2026-10-20) load in enforce mode."""
+    monkeypatch.setenv("TT_PICKLE_POLICY", "enforce")
+    from intervaltree import IntervalTree
+    from ticktalkpython import Clock
+    tree = IntervalTree.from_tuples([(1, 5), (7, 9)])
+    out = SafeUnpickle.loads(pickle.dumps({"tree": tree, "read": Clock.default_read_time,
+                                           "fmt": Clock.default_convert_to_readable_time}))
+    assert sorted(out["tree"]) == sorted(tree) and out["read"] is Clock.default_read_time

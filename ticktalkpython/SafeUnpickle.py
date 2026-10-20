@@ -38,6 +38,12 @@ ALLOWED = {
     ("datetime", "datetime"), ("datetime", "date"), ("datetime", "time"),
     ("datetime", "timedelta"), ("datetime", "timezone"),
     ("pathlib", "PosixPath"), ("pathlib", "PurePosixPath"),
+    # the runtime's time intervals
+    ("intervaltree.intervaltree", "IntervalTree"), ("intervaltree.interval", "Interval"),
+    # TTClock keeps these two functions as attributes: they read and format the
+    # time. Named one by one: other ticktalkpython functions stay refused.
+    ("ticktalkpython.Clock", "default_read_time"),
+    ("ticktalkpython.Clock", "default_convert_to_readable_time"),
     # numpy arrays and scalars (numpy 1.x and 2.x module paths)
     ("numpy", "ndarray"), ("numpy", "dtype"),
     ("numpy.core.multiarray", "_reconstruct"), ("numpy._core.multiarray", "_reconstruct"),
