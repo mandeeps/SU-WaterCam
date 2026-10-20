@@ -599,7 +599,7 @@ Install systemd-resolved and the NetworkManager drop-in in `config/networkmanage
 
 `tailscale up --ssh`
 
-Make sure the device is [tagged](https://tailscale.com/kb/1068/tags) and not using a personal Tailscale account. See tailscale-acl.txt in config directory for an example of Access Control List rules to permit SSH into tagged devices. Forbid tagged devices from accessing other tagged devices for security. 
+Make sure the device is [tagged](https://tailscale.com/kb/1068/tags) and not using a personal Tailscale account. The tailnet's Access Control List (who may SSH into tagged devices; tagged devices kept from reaching each other) is maintained by the tailnet admin in the Tailscale admin console, not in this public repository. 
 
 Do not clone SD cards from Pis with Tailscale already configured so you can install that SD card on a new Pi. Each device should be connected to Tailscale individually and not share keys.
 
