@@ -49,6 +49,7 @@ from .TTToken import TTToken
 from . import Tag
 from .Port import TTMappedPort
 from . import DebugLogger
+from . import SafeUnpickle
 from .IPC import Message
 from .IPC import NetMsg
 from .IPC import Recipient
@@ -696,7 +697,7 @@ class TTNetworkManager():
             # something created in a custom namespace within an SQ? User could
             # fix be doing serialization/deserialization themselves in their
             # function.
-            payload = pickle.loads(payload)
+            payload = SafeUnpickle.loads(payload)    # not pickle.loads (#204)
             self.logger.debug("handle %d byte network message %s",
                               len(message.payload), payload)
 
