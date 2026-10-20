@@ -87,6 +87,18 @@ passwd
 Never reuse another unit's password or the image default. See
 [NODE_SECURITY.md](NODE_SECURITY.md), which also has what to do when a unit is lost.
 
+Loose header cables on the console pins with nothing at the other end let noise
+onto the Pi's RX line, and the login prompt (`agetty`) restarts on every "input
+overrun" (006 logged 11,556 in 41 hours). Tie off the free ends (RX to GND, or a
+cap), and install the drop-in that rate-limits those messages so they can't flood
+the journal (the prompt still comes back at once):
+
+```bash
+sudo install -D -m 644 config/serial-getty-noise.conf \
+  /etc/systemd/system/serial-getty@ttyAMA0.service.d/watercam-noise.conf
+sudo systemctl daemon-reload
+```
+
 ### 1.3 Confirm remote access (Tailscale)
 
 First switch DNS to systemd-resolved (run from `/home/pi/SU-WaterCam`):
