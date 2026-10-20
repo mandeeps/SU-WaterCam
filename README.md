@@ -231,12 +231,11 @@ Reboot, then run wittyPi.sh from the wittypi directory to configure the schedule
 
 Install doas with `sudo apt install doas -y`
 
-Create /etc/doas.conf and add:
+Install the project's rules: `sudo cp config/doas.conf /etc/doas.conf && sudo doas -C /etc/doas.conf`.
+Each passwordless rule names its exact arguments; the shutdown rule allows only
+`doas /usr/sbin/shutdown -h now`.
 
-`permit nopass <username> cmd reboot
-permit nopass <username> cmd shutdown`
-
-We will run `doas shutdown` to power down the Pi in a script that is run as a non-root user. This lets us save power by turning off the Pi after it has completed its tasks and we can turn it back on at a regular interval with the WittyPi schedule.
+The node runs `doas /usr/sbin/shutdown -h now` to power down the Pi from a non-root service. This lets us save power by turning off the Pi after it has completed its tasks and we can turn it back on at a regular interval with the WittyPi schedule.
 
 Remove uwi since we will not be using it: sudo systemctl disable uwi, then rm the uwi directory.
 
