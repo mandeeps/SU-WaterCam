@@ -322,18 +322,32 @@ class TestMdotKeepalive:
         stop = daemon_mod.start_mdot_keepalive(handler, interval_s=0.02)
         time.sleep(0.15)
         stop.set()
-        calls = handler.is_joined.call_count
+        calls = handler.keepalive.call_count
         assert calls >= 3
         time.sleep(0.1)
-        assert handler.is_joined.call_count <= calls + 1
+        assert handler.keepalive.call_count <= calls + 1
 
     def test_survives_a_failing_handler(self):
         handler = MagicMock()
-        handler.is_joined.side_effect = OSError("port gone")
+        handler.keepalive.side_effect = OSError("port gone")
         stop = daemon_mod.start_mdot_keepalive(handler, interval_s=0.02)
         time.sleep(0.1)
         stop.set()
-        assert handler.is_joined.call_count >= 2
+        assert handler.keepalive.call_count >= 2
 
     def test_interval_well_inside_the_firmware_limit(self):
-        assert daemon_mod.MDOT_KEEPALIVE_S * 3 <= 30 * 60
+        assert daemon_mod.MDOT_KEEPALIVE_S * 6 <= 60 * 60
+
+    def test_sends_at_alive(self):
+        handler = lhc.LoRaHandler.__new__(lhc.LoRaHandler)
+        handler.transmit_lock = threading.Lock()
+        handler._lock_fd = open(os.devnull, "w")
+        written = []
+        ser = MagicMock()
+        ser.write.side_effect = written.append
+        ser.in_waiting = 6
+        ser.read.return_value = b"\r\nOK\r\n"
+        handler.ser = ser
+        with patch.object(lhc.fcntl, "lockf"), patch.object(lhc.time, "sleep"):
+            assert handler.keepalive() is True
+        assert written == [b"AT+ALIVE\r\n"]
