@@ -11,20 +11,5 @@ WorkingDirectory=/home/pi/SU-WaterCam
 Environment=PYTHONUNBUFFERED=1
 ExecStart=/home/pi/SU-WaterCam/venv/bin/python3 /home/pi/SU-WaterCam/button_hold_camera.py
 
-# Sandbox (#207). It drives the cameras, GPIO and I2C, so no device or /sys
-# limits and no syscall filter (libcamera); it runs no doas.
-NoNewPrivileges=yes
-CapabilityBoundingSet=
-ProtectSystem=strict
-ReadWritePaths=/home/pi /tmp /run/lock
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
-ProtectControlGroups=yes
-ProtectHostname=yes
-RestrictNamespaces=yes
-RestrictRealtime=yes
-RestrictSUIDSGID=yes
-LockPersonality=yes
-
 [Install]
 WantedBy=multi-user.target

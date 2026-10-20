@@ -10,26 +10,5 @@ Type=idle
 WorkingDirectory=/home/pi
 ExecStart=/home/pi/filebrowser -r SU-WaterCam/images
 
-# Sandbox (#207), as lora_daemon: it serves files over the network, so it gets
-# the full set. It writes only under /home/pi (its database and the images).
-NoNewPrivileges=yes
-CapabilityBoundingSet=
-ProtectSystem=strict
-ReadWritePaths=/home/pi /tmp
-PrivateTmp=yes
-ProtectKernelTunables=yes
-ProtectKernelModules=yes
-ProtectKernelLogs=yes
-ProtectControlGroups=yes
-ProtectHostname=yes
-RestrictNamespaces=yes
-RestrictRealtime=yes
-RestrictSUIDSGID=yes
-LockPersonality=yes
-SystemCallArchitectures=native
-SystemCallFilter=@system-service
-SystemCallErrorNumber=EPERM
-RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
-
 [Install]
 WantedBy=multi-user.target
