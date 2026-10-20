@@ -1,4 +1,4 @@
-"""config/serial-getty-noise.conf: a minute between console-login restarts, messages rate-limited."""
+"""config/serial-getty-noise.conf: console-login messages rate-limited, no restart delay."""
 import configparser
 import os
 
@@ -10,8 +10,7 @@ def test_dropin_settings():
     cp.optionxform = str
     with open(PATH) as f:
         cp.read_string(f.read())
-    assert cp["Service"]["RestartSec"] == "60"
-    assert cp["Unit"]["StartLimitIntervalSec"] == "0"          # keep restarting, just slower
+    assert "RestartSec" not in cp["Service"]          # the prompt must come back at once
     assert cp["Service"]["LogRateLimitBurst"] and cp["Service"]["LogRateLimitIntervalSec"]
 
 
