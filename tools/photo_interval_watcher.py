@@ -1,8 +1,9 @@
 """Apply photo_interval (seconds) to the running capture loop.
 
 ticktalk_main's capture loop is the get_time STREAM SQ, compiled with a fixed
-TTPeriod of 60 s. photo_interval in runtime_config.json (set over LoRa
-command 14 / TLV 14 94, or by editing the file) is that period in seconds.
+TTPeriod of 60 s. photo_interval in runtime_config.json (edited on the unit;
+there is no remote command for it: 14 94 is the flood-code frequency since #134)
+is that period in seconds.
 runrtm.py starts this watcher next to the runtime manager: it polls the file
 and calls TTRuntimeManager.update_periodicity() when the value changes. A new
 period takes effect after the already-scheduled next capture.
@@ -21,8 +22,7 @@ from ticktalkpython.FiringRule import TTFiringRuleType
 # The compiled TTPeriod of get_time in ticktalk_main.py.
 COMPILED_PERIOD_S = 60
 # Below this a capture cycle (photo, co-registration, segmentation, transmit)
-# can't finish before the next one starts; also rejects the 0-5 index values
-# the API's "flood code frequency" command sends on 14 94.
+# can't finish before the next one starts.
 MIN_PERIOD_S = 30
 MAX_PERIOD_S = 1440
 ROOT_TICKS_PER_S = 1_000_000
