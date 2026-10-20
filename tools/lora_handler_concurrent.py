@@ -851,6 +851,19 @@ class LoRaHandler:
             return False
     
     @staticmethod
+    def _unwrap_text_hex(payload: str) -> str:
+        """'35303031' -> '5001' when the bytes are themselves hex-digit text; else unchanged."""
+        clean = (payload or "").strip()
+        hexdigits = '0123456789abcdefABCDEF'
+        if not clean or len(clean) % 4 or any(c not in hexdigits for c in clean):
+            return payload
+        text = bytes.fromhex(clean).decode('ascii', errors='replace')
+        if all(c in hexdigits for c in text):
+            print(f"ℹ️ Command arrived as hex text ({clean}); reading it as {text}")
+            return text
+        return payload
+
+    @staticmethod
     def _parse_server_frame(payload: str):
         """Parts for a server-encoded frame (tools/transmit_ip.parse_downlink_frame), or None."""
         clean = payload.strip()
@@ -1106,6 +1119,12 @@ class LoRaHandler:
             self.update_config('last_lora_command_time', datetime.now().isoformat())
             print(f"📡 LoRa command received at {datetime.now().strftime('%H:%M:%S')}")
             
+            # A command typed as text in ChirpStack's enqueue form ("5001" as ASCII)
+            # arrives hex-encoded twice ("35303031"). No real command consists only
+            # of ASCII hex-digit bytes (the codes are 10-21, 50, 99), so decode it once
+            # more instead of reading channel 35, command 30.
+            payload = self._unwrap_text_hex(payload)
+
             # A bare 21 is the remote start byte '!', which the mDot handles itself
             # and never forwards; emergency mode is 21 91 HH (_start_emergency).
             if payload == '21':
