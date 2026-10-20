@@ -162,6 +162,14 @@ If it isn't on the current release, or `.git` is larger than a few MB (`du -sh .
 follow [RELEASES.md](RELEASES.md#updating-a-node): update, or convert the full clone to
 a shallow one first. Check each release with `git verify-tag` before checking it out.
 
+After updating, install any system files the release notes list as changed. From
+v2026.10.4 the doas rules are stricter (passwordless `shutdown` only as `-h now`),
+so replace the whole file rather than appending lines:
+
+```bash
+sudo cp config/doas.conf /etc/doas.conf && sudo doas -C /etc/doas.conf
+```
+
 ### 1.3.2 Remove packages a node doesn't need
 
 Fewer packages means less to patch and less for an intruder to use. These have nothing
@@ -515,6 +523,27 @@ python3 tools/mdot_subband.py --check    # report only
 
 It stops and restarts `lora_daemon` around it. A gateway on another sub-band:
 `--sub-band N`, or `--from-mask` on a unit that has joined and sent an uplink.
+
+**mDot firmware.** Units run `4.1.5-wc2610-sw3` or later (`ATI`). It restarts
+the mDot by itself if its firmware stops, or if the Pi is on but the LoRa daemon's
+keep-alive (`AT+ALIVE`, every 5 minutes) stops for an hour. Put the unit on
+release v2026.10.4 or later (1.3.1) **before** flashing it, or the silence
+restart never arms. Flash with `tools/mdot_serial_flash.py` from the firmware
+repository (its `docs/BUILD_AND_FLASH.md`): it reads the sub-band, Pi watchdog,
+silence limit and join nonce before the flash and puts back any the flash
+changed. After any flash, with `lora_daemon` stopped, check by hand:
+
+- `AT+FSB?` is the gateway's sub-band (1). A flash on 005 once left it at 8, and
+  the mDot never joined until it was set back (`AT+FSB=1`, `AT&W`).
+- `AT+WDOG?` starts with 20 and `AT+SILENCE?` with 60.
+- Start `lora_daemon` and leave it at least 5 minutes, then stop it again
+  briefly: `AT+SILENCE?` now shows `60,1,…` (armed by the keep-alive). Start
+  the daemon again afterwards.
+
+**If every join fails** after a flash or several restarts, the network server is
+probably rejecting join nonces it has already seen. Ask the ChirpStack
+administrator to flush the device's OTAA nonces, then on the mDot `AT+JN=0,0`
+and `AT+JOIN`.
 
 I'd recommend using SSH at this point to connect to the Raspberry Pi instead of serial. On the Raspberry Pi run `tio /dev/ttyAMA5` to issue the commands to connect to the gateway when you know it is in range.
 
@@ -882,6 +911,17 @@ sudo systemctl stop ticktalk.service
   ([POWER_ANALYSIS.md](POWER_ANALYSIS.md#peaks-matter-more-than-averages),
   [UNIT006_POWER_FAILURE.md](UNIT006_POWER_FAILURE.md)). Use a short, thick USB-C
   cable and seat both ends firmly: a marginal cable dropped 006's power at wakes.
+- **Prefer the P2 power feed to the USB-C socket.** 006's Witty Pi socket cut
+  power whenever the plug was pushed or wiggled, and the box tilted, with two
+  different adapters and cables (logged as "power supply is newly connected",
+  with no voltage sag first). Wire the Y-cable to the Witty Pi's P2 header
+  instead ([WITTYPI_P2_POWER_HARNESS.md](WITTYPI_P2_POWER_HARNESS.md)). On a unit
+  still on USB-C, push and wiggle the plug while watching for a new boot
+  (`grep -a "System starts up because" ~/wittypi/wittyPi.log | tail -3`).
+- **Secure the mDot's wiring.** The mDot runs from the Witty Pi's own 3.3 V rail
+  (P3 header), so touching its jumper wires reset the whole unit on 005, and a
+  lifted mDot ground left the mDot hung. Solder or latch its VDD and GND, connect
+  PA_6 to GPIO5 (pin 29), and tug-test each wire during the wiggle test.
 - **The A ports are always on:** anything in a USB-A port presses the V50's
   Always On switch, so the pack never auto-shuts off under a light load.
 - **Never use the V50's top USB-C port** while it powers a unit: anything in it
@@ -940,6 +980,14 @@ for the site:
       or a `skip:` reason (an RTC that lost power must be set before deploying).
 - [ ] `venv/bin/python tools/initial_health_check.py --no-alert` prints no
       `WARN` lines (GPS may fail indoors).
+- [ ] **Power feed:** on the P2 harness, or the USB-C plug passed a push and
+      wiggle test with no new boot; then tilt the closed box in every direction,
+      including the mounting angle, again with no new boot (1.11.1).
+- [ ] **mDot:** `ATI` shows `4.1.5-wc2610-sw3` or later, `AT+FSB?` is 1,
+      `AT+WDOG?` starts with 20, and `AT+SILENCE?` shows `60,1,…` after the LoRa
+      daemon has run 5 minutes (stop it to query, then start it again; 1.6).
+- [ ] `sudo doas -C /etc/doas.conf` passes and `/etc/doas.conf` matches
+      `config/doas.conf` (`sudo diff config/doas.conf /etc/doas.conf`).
 - [ ] Witty Pi input voltage is at least 4.8 V under load: `vin` in
       `~/powerlog/powerlog.csv` during a capture cycle, and no
       `wittypi_input_voltage_low_*V` from the health check (1.11.1).
