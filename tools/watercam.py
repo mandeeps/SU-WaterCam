@@ -94,7 +94,7 @@ def main(autostart:bool = True):
     # Once the for loop has finished we should be able to trigger a shutdown
     # Use with a WittyPi schedule that turns the system on regularly
     # I am using "doas shutdown" with a /etc/doas.conf configured for user pi
-        call("doas /usr/sbin/shutdown", shell=True)
+        call(["doas", "/usr/sbin/shutdown", "-h", "now"])   # the only shutdown doas.conf allows
 
     # WittyPi suggests pulling GPIO-4 low to signal it to shutdown instead
 
