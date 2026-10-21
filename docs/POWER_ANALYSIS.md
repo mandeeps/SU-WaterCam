@@ -121,7 +121,8 @@ shutdown.
 ### Emergency mode
 
 Emergency mode keeps the unit on: `call_shutdown()` ignores the iteration
-limit, and the Witty Pi's shutdown schedule is cleared. It captures every
+limit, and the Witty Pi's scheduled shutdown is replaced by a backstop an hour
+after emergency mode's end. It captures every
 `photo_interval` for as long as it lasts.
 
 - **Draw:** about 3–4.5 W continuously, idle plus a capture each minute, more with the modem. *Estimate.*

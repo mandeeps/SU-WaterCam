@@ -954,9 +954,10 @@ def call_shutdown(state):
     except Exception as e:
         print(f"⚠️ Failed to update iteration count: {e}")
 
-    # Emergency mode keeps the unit awake and clears the Witty Pi shutdown
-    # alarm, so nothing else would ever end it: a stray or forgotten command
-    # would run the battery flat. End it after emergency_max_hours (0 = never).
+    # Emergency mode keeps the unit awake and moves the Witty Pi shutdown alarm
+    # to a backstop an hour after its end (tools/wittypi_control.py), so a stray
+    # or forgotten command can't run the battery flat. End it after
+    # emergency_max_hours (0 = never).
     try:
         expired = (emergency_mode and emergency_since and float(emergency_max_hours) > 0
                    and time.time() - float(emergency_since) > float(emergency_max_hours) * 3600)
@@ -977,6 +978,13 @@ def call_shutdown(state):
         emergency_mode = False
 
     if emergency_mode:
+        # Keep the hardware backstop in step with emergency mode's end (a resend
+        # restarts it): if this run hangs, the Witty Pi still powers the unit down
+        try:
+            from tools.wittypi_control import arm_emergency_backstop
+            arm_emergency_backstop(emergency_since, emergency_max_hours)
+        except Exception as e:
+            print(f"⚠️ Could not set the emergency shutdown backstop: {e}")
         print("🚨 EMERGENCY MODE ACTIVE - Ignoring shutdown limit, continuing data collection")
         return "emergency_mode_active"
 
