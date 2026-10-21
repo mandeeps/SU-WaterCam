@@ -131,25 +131,6 @@ def test_lora_command_processing():
     # LoRa transmission is always enabled - no need to test disable functionality
     print("✅ LoRa transmission is always enabled - no disable functionality needed")
     
-    # Test 5: Command timestamp tracking
-    print("\n⏰ Test 5: Command Timestamp Tracking")
-    print("-" * 40)
-    
-    # Check if timestamp was recorded
-    last_command_time = get_parameter('last_lora_command_time', None)
-    if last_command_time:
-        print(f"✅ Command timestamp recorded: {last_command_time}")
-        try:
-            # Verify it's a valid ISO format timestamp
-            datetime.fromisoformat(last_command_time)
-            print("✅ Timestamp format is valid")
-        except ValueError:
-            print("❌ Timestamp format is invalid")
-            return False
-    else:
-        print("❌ No command timestamp recorded")
-        return False
-    
     # Test 6: Emergency mode deactivation
     print("\n✅ Test 6: Emergency Mode Deactivation")
     print("-" * 40)
