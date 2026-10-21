@@ -1114,9 +1114,7 @@ class LoRaHandler:
             print(f"DEBUG: Payload hex: {payload.encode().hex()}")
             print(f"DEBUG: Payload repr: {repr(payload)}")
             
-            # Track command timestamp for frequency adjustment
             from datetime import datetime
-            self.update_config('last_lora_command_time', datetime.now().isoformat())
             print(f"📡 LoRa command received at {datetime.now().strftime('%H:%M:%S')}")
             
             # A command typed as text in ChirpStack's enqueue form ("5001" as ASCII)
