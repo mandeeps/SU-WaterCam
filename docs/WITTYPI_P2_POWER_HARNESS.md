@@ -88,9 +88,9 @@ and while the ground is open its current flows through the Pi's GPIO pins.
 - **Replace the 3V3 and GND jumpers** with soldered wires, or crimp them into a
   latching housing. If that has to wait, at least group the jumpers into a
   multi-pin housing and fix it with a dab of hot glue.
-- **Secure the switch MOSFET in place.** On jumper-wired units the MOSFET that
-  presses the Witty Pi switch (gate on the mDot's PB_1, a 10 kΩ pull-down from
-  gate to GND, source to GND) hangs on its leads and jumpers. Moving it, or the
+- **Units without the PCB: tape the switch MOSFET down.** Without the HAT, the
+  MOSFET that presses the Witty Pi switch (gate on the mDot's PB_1, a 10 kΩ
+  pull-down from gate to GND, source to GND) hangs on its leads and jumpers. Moving it, or the
   wires around it, cut 006's power three times on 2026-10-21: once as the PB_1
   wire was connected, twice when the wires at the Pi's GPIO header were touched.
   Each time the Witty Pi logged no shutdown, only "power supply is newly
