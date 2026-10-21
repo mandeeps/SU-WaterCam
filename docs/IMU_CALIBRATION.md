@@ -69,9 +69,10 @@ Place the box on a flat, stable surface and hold it completely still. Press Ente
 **Stage 2/3 — Accelerometer (~1-3 minutes)**
 
 You will be guided through 6 positions: each face of the box down, at 90°, held
-completely still until the chip counts it. The tool shows the accelerometer status and
-where gravity points ("gravity 97% along -z"), moves on once the status rises (after at
-least 5 s), or after 30 s if it doesn't:
+completely still. The tool shows the accelerometer status and where gravity points
+("gravity 97% along -z"), and moves on once the status rises (after at least 3 s) or
+after 10 s. The chip often finishes only on going back to a face it has seen, so the
+tool goes round the six faces again, up to three times, until `accel=3`:
 
 1. Base down — box sitting normally
 2. Lid down — box upside-down on its lid
@@ -253,7 +254,15 @@ second on 006 (2026-10-21, NDOF mode, the box in the case):
   side, fell back to 0 on another, and jumped from 1 to 3 only once all six
   axes had been covered. So a face that shows "Not counted" isn't wasted:
   keep going through all six.
-- **Hold each face still for 10-30 s.** The tool waits up to 30 s per face.
+- **A face counts within 2-3 s of being still,** or not at all on that visit:
+  holding longer doesn't help, so the tool waits at most 10 s per face. One
+  round of six faces with the tool ended at `accel=0` (006, 2026-10-21); the
+  diagnostic run reached 3 on going back to lid down, so the tool now goes
+  round up to three times.
+- **Offsets are saved only when the stage reached its minimum** (gyro 3,
+  accel 2, mag 2). Below that the file keeps the part's earlier offsets and
+  the tool says so: the first 90° run on 006 saved accelerometer offsets at
+  status 0 before this rule.
 - **The accelerometer itself is fine** when every steady pose reads about
   9.8 m/s² in total. If all three axes stay near 0 or don't change between
   faces, it's the sensor or its wiring, not the procedure.

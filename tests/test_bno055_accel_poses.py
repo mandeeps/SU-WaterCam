@@ -80,3 +80,34 @@ def test_the_six_poses_are_faces_at_90_degrees():
     src = inspect.getsource(bc.run_calibration_procedure)
     assert "ACCEL_POSITIONS = ACCEL_FACES" in src and "hold_accel_pose(imu)" in src
     assert "HOLD_SECONDS" not in inspect.getsource(bc)
+
+
+def test_holds_are_short_and_the_faces_go_round_again():
+    assert bc.POSE_MIN_S <= 3 and bc.POSE_MAX_S <= 10 and bc.ACCEL_ROUNDS >= 2
+    src = inspect.getsource(bc.run_calibration_procedure)
+    assert "for rnd in range(1, ACCEL_ROUNDS + 1):" in src
+
+
+def test_a_stage_below_its_minimum_keeps_the_earlier_offsets(tmp_path):
+    import json
+    from tests.test_bno055_staged_calibration import FakeIMU, _block, ACC, GYR
+    path = str(tmp_path / "bno055_calibration.json")
+    bc.save_calibration(FakeIMU(_block(10, 0, 30, 40, 0)), path, "UFO-006", 0.0, ("gyro", "accel"))
+    # a later run where the accelerometer never got past 0: gyro saved, accel kept
+    low = FakeIMU(_block(77, 0, 31, 41, 0), status={"system": 3, "gyro": 3, "accel": 0, "mag": 3})
+    bc.save_calibration(low, path, "UFO-006", 0.0, ("gyro", "accel"))
+    data = json.load(open(path))
+    saved = bytes(data["offsets_bytes"])
+    assert saved[ACC] == bytes([10] * 6) and saved[GYR] == bytes([31] * 6)
+    assert data["components"]["accel"]["status"] == 2      # the earlier run's record
+
+
+def test_a_first_run_below_the_minimum_saves_nothing_for_that_part(tmp_path, capsys):
+    import json
+    from tests.test_bno055_staged_calibration import FakeIMU, _block, ACC
+    path = str(tmp_path / "bno055_calibration.json")
+    low = FakeIMU(_block(77, 0, 31, 41, 0), status={"system": 3, "gyro": 3, "accel": 1, "mag": 0})
+    bc.save_calibration(low, path, "UFO-006", 0.0, ("gyro", "accel"))
+    data = json.load(open(path))
+    assert bytes(data["offsets_bytes"])[ACC] == bytes(6) and data["components"]["accel"] is None
+    assert "accel: status 1, below 2: not saved, left uncalibrated" in capsys.readouterr().out

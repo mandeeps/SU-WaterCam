@@ -338,6 +338,11 @@ def calibrated_parts(data: dict) -> set:
         return set(STAGES)
     return {p for p in STAGES if comps.get(p)}
 
+# A stage's offsets are saved only at this status or better; below it the file
+# keeps that part's earlier offsets (006 saved accel offsets at status 0 once).
+MIN_STATUS_TO_SAVE = {"gyro": 3, "accel": 2, "mag": 2}
+
+
 def save_calibration(imu: BNO055, path: str = CALIB_FILE,
                      node_id: str = "node_1",
                      magnetic_declination_deg: float = 0.0,
@@ -372,10 +377,12 @@ def save_calibration(imu: BNO055, path: str = CALIB_FILE,
         except (OSError, ValueError, KeyError, TypeError):
             print(f"[CALIB] WARNING: {path} unreadable; only this run's parts are saved")
     now = datetime.now().isoformat()
-    for part in stages:
+    reached = {p for p in stages if status[p] >= MIN_STATUS_TO_SAVE[p]}
+    for part in reached:
         components[part] = {"calibrated_at": now, "status": status[part]}
-    # this run's parts from the chip, earlier ones from the file, the rest zeros
-    offsets = merge_offsets(chip, existing, set(stages), existing_parts - set(stages))
+    # this run's parts that reached their minimum from the chip, earlier ones from
+    # the file, the rest zeros
+    offsets = merge_offsets(chip, existing, reached, existing_parts - reached)
 
     data = {
         "node_id":             node_id,
@@ -391,6 +398,9 @@ def save_calibration(imu: BNO055, path: str = CALIB_FILE,
     print(f"[CALIB] Saved to {path}")
     print(f"  Status: sys={status['system']} gyro={status['gyro']} "
           f"accel={status['accel']} mag={status['mag']}")
+    for p in sorted(set(stages) - reached):
+        kept = "kept its earlier offsets" if p in existing_parts else "left uncalibrated"
+        print(f"  {p}: status {status[p]}, below {MIN_STATUS_TO_SAVE[p]}: not saved, {kept}")
     missing = [p for p in STAGES if not data["components"].get(p)]
     if missing:
         print(f"  Not calibrated yet (saved as zeros, skipped when loading): {', '.join(missing)}")
@@ -457,8 +467,11 @@ ACCEL_FACES = [
     ("5/6", "Left side down  -- on its left side, at a table edge so the antennas hang clear"),
     ("6/6", "Right side down -- on its right side, likewise"),
 ]
-POSE_MIN_S = 5            # hold at least this long, even once the pose counts
-POSE_MAX_S = 30           # move on after this, counted or not
+POSE_MIN_S = 3            # hold at least this long, even once the pose counts
+POSE_MAX_S = 10           # move on after this: a pose that counts does so in 2-3 s
+ACCEL_ROUNDS = 3          # go round the six faces up to this many times
+# The status doesn't rise face by face: on 006 (2026-10-21) it reached 3 only on
+# going back to a face already done, after all six. One round ended at 0/3.
 POSE_AXIS_SHARE = 0.9     # gravity this share on one axis is within ~25 deg of 90
 
 
@@ -570,19 +583,28 @@ def run_calibration_procedure(imu: BNO055,
             print(f"STAGE {stage_no['accel']}/{n_stages} -- ACCELEROMETER (~1-3 minutes)")
             print()
             print("  You will be guided through 6 positions: each face of the box down,")
-            print("  at 90 degrees, held still until the chip counts it (5-30 s each).")
+            print("  at 90 degrees, held still for up to 10 s each. The chip often")
+            print("  finishes only on a second visit, so this may go round more than once.")
             print("  Never rest the box on an antenna: for the sides, set it at a table")
             print("  edge so the antennas hang clear, or prop it upright against books.")
             print()
             input("  Press Enter to begin > ")
 
-            for label, description in ACCEL_POSITIONS:
-                print()
-                print(f"  Position {label}: {description}")
-                input("  Press Enter when the box is in position and stable > ")
-                hold_accel_pose(imu)
-                if imu.calibration_status()["accel"] == 3:
-                    print("  Accelerometer fully calibrated; the other positions aren't needed.")
+            done = False
+            for rnd in range(1, ACCEL_ROUNDS + 1):
+                if rnd > 1:
+                    print(f"\n  accel = {imu.calibration_status()['accel']}/3 after round {rnd - 1}: "
+                          f"round {rnd} of {ACCEL_ROUNDS}, the same six faces again.")
+                for label, description in ACCEL_POSITIONS:
+                    print()
+                    print(f"  Position {label}: {description}")
+                    input("  Press Enter when the box is in position and stable > ")
+                    hold_accel_pose(imu)
+                    if imu.calibration_status()["accel"] == 3:
+                        print("  Accelerometer fully calibrated; the other positions aren't needed.")
+                        done = True
+                        break
+                if done:
                     break
 
             s = imu.calibration_status()
@@ -634,7 +656,8 @@ def run_calibration_procedure(imu: BNO055,
         print("─"*60)
         time.sleep(0.5)   # let sys flag catch up after final sub-system hits 3
         s = imu.calibration_status()
-        print("Calibrated: " + ", ".join(names[p] for p in stages))
+        reached = [p for p in stages if s[p] >= MIN_STATUS_TO_SAVE[p]]
+        print("Calibrated: " + (", ".join(names[p] for p in reached) or "nothing"))
         print(f"  sys={s['system']}  gyro={s['gyro']}  "
               f"accel={s['accel']}  mag={s['mag']}")
 
