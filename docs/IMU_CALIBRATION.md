@@ -239,6 +239,38 @@ EXIF/log rather than assuming calibration itself failed.
 
 ## Troubleshooting
 
+**`accel` stays at 0 or 1**
+
+What the BNO055 needs, from watching its status and raw accelerometer once a
+second on 006 (2026-10-21, NDOF mode, the box in the case):
+
+- **Only faces at 90° count.** A pose counts when gravity lies along one of
+  the chip's axes (±x, ±y, ±z): the tool's reading shows about 95% or more of
+  gravity on one axis ("gravity 97% along -z"). Lid up and lid down took it to
+  `accel=1`. Four tilts of 29-50°, each held 15-25 s, added nothing. With all
+  six faces at 90° it reached `accel=3`, and so did `sys`.
+- **The status doesn't rise one face at a time.** It went 0 → 1 on the first
+  side, fell back to 0 on another, and jumped from 1 to 3 only once all six
+  axes had been covered. So a face that shows "Not counted" isn't wasted:
+  keep going through all six.
+- **Hold each face still for 10-30 s.** The tool waits up to 30 s per face.
+- **The accelerometer itself is fine** when every steady pose reads about
+  9.8 m/s² in total. If all three axes stay near 0 or don't change between
+  faces, it's the sensor or its wiring, not the procedure.
+- **Odd readings near 0 on all three axes** (`-0.04 -0.01 -0.01`) are I2C
+  reads the Pi garbled, a few times a minute on 006. The tool shows them and
+  ignores them.
+- **The box's base isn't level for the sensor:** base down, 006's BNO055 saw
+  gravity 7-13° off its z axis (lid down, about 7°). That's the sensor's
+  mounting angle; Stage 2 measures it.
+- **Moving the box indoors also raises `mag`** (to 3 on 006). Don't keep
+  that: bench magnetometer offsets are wrong outdoors. Run the bench stages
+  as `--stages gyro,accel`, which saves only those parts, and do `--stages
+  mag` outdoors.
+- **The calibration lives in the chip until it is reset.** The tool resets
+  the chip when it starts, so calibrate with the tool, not by moving the box
+  while another program reads it.
+
 **`mag` stays at 0 after loading offsets**
 
 First check whether it's just slow to reconfirm rather than genuinely broken
