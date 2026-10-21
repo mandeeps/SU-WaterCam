@@ -35,6 +35,15 @@ ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/runrtm.py -d
 # sudo fail it exits with status 1, and Restart=on-failure runs another cycle.
 Restart=on-failure
 RestartSec=10
+# A graph that stops making progress (a dead persistent worker, a wedged read)
+# leaves a process systemd thinks is healthy. call_shutdown() sends a heartbeat
+# each capture iteration (tools/systemd_watchdog.py, from the graph's child
+# processes: NotifyAccess=all); with none for 15 min systemd kills ticktalk and
+# Restart=on-failure starts it again (#208). Iterations run about a minute apart
+# (005, 2026-10-21: start to first iteration 40-52 s, gaps up to 73 s), so 15
+# min leaves room for a fresh co-registration or a cellular upload.
+WatchdogSec=15min
+NotifyAccess=all
 
 # Light sandbox for ticktalk. It runs doas (shutdown, set the clock, USB
 # power), and doas children inherit these settings, so no NoNewPrivileges,

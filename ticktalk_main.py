@@ -942,6 +942,13 @@ def call_shutdown(state):
     emergency_since = None
     emergency_max_hours = 24
 
+    # One heartbeat per iteration for ticktalk.service's WatchdogSec (#208)
+    try:
+        from tools.systemd_watchdog import heartbeat
+        heartbeat()
+    except Exception:
+        pass
+
     try:
         result = get_runtime_manager().atomic_increment_iteration_count()
         new_count = result['iteration_count']
