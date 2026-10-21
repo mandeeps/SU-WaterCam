@@ -218,6 +218,36 @@ failed, and the dashboard shows the node as installed with those noted, so a
 partial install (no RTK, a failed transport test) is visible rather than
 silent.
 
+**Bench phase: before going to the site.** The same pages, opened at the bench,
+also walk an installer through the bench work in `FIELD_DEPLOYMENT_GUIDE.md`
+Phase 1, so a non-technical installer doesn't need the guide or a terminal.
+Steps that need team credentials are done by an admin first; the page shows
+them as done, or as waiting for the team, and doesn't let the installer skip
+past them.
+
+| Bench step | What the page does | Who | Guide / backed by |
+|---|---|---|---|
+| B1. Identity | Hostname, a unit-specific `pi` password, a unique machine ID | admin | 1.2, 1.2.1 |
+| B2. Remote access | Tailscale joined with the node tag; the dashboard sees the node | admin | 1.3 |
+| B3. Software | Current release, verified signature, pickle matches; packages and boot settings checked | installer (one button) | 1.3.1-1.3.3, `docs/RELEASES.md` |
+| B4. Credentials | The node's IP token installed; the LoRa device registered in ChirpStack | admin | 1.5, 1.6, `tools/set_ip_token.py` |
+| B5. mDot | Firmware version and sub-band checked and corrected; watchdog and Class C settings; a join | installer (one button) | `tools/mdot_subband.py`, the flash tool |
+| B6. Power wiring | Photos and a checklist for the P2 feed, the mDot wiring and, on units without the PCB, the taped MOSFET and its pull-down; then a live trace while the installer tugs and tilts (as field step 5) | installer | 1.11.1, `docs/WITTYPI_P2_POWER_HARNESS.md` |
+| B7. IMU gyro and accelerometer | The six faces at 90°, one per screen, with live bars and where gravity points; saved only when good enough (#229) | installer | 1.7, `tools/bno055_calibration.py --stages gyro,accel` |
+| B8. Camera | Lens calibration present; a test photo in focus | installer | 1.8 |
+| B9. Full cycle | Health check, then one capture cycle with the shutdown held off: captures, segmentation, an uplink the server saw | installer | 1.10, 1.11 |
+| B10. Site prep | If the unit has been deployed before: back up and clear the old site's learned values (field step 2 can do it at the site instead) | installer | 1.7.1 |
+| B11. Pack | Save the team's setup network (phone hotspot) with a higher priority; weatherproofing done; a packing list (serial adapter, meter, tape, RTK, towel) | installer | 1.12 |
+
+The bench summary must be all green, or show only the admin steps as pending,
+before the page offers to switch to the field steps.
+
+**Opening the page.** When the node runs its own setup hotspot (maintenance
+mode, #117), it answers DNS for every name with its own address, so a phone
+joining the hotspot pops the page up as a captive portal and the installer
+never types an address. Over the team's phone hotspot or Tailscale, it's a
+bookmark the dashboard links to.
+
 A provisional pose shows as such on the dashboard until it is verified, either
 by a return visit with RTK or by matching the saved photo against reference
 imagery later. A node never silently runs on an unverified heading.
