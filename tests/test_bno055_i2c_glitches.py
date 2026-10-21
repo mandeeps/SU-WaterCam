@@ -88,8 +88,7 @@ def test_write_that_never_reads_back_fails(monkeypatch):
         imu.write_offsets(GOOD)
 
 
-def test_tilt_instructions_say_which_end_goes_down():
-    import inspect
-    src = inspect.getsource(cal.run_calibration_procedure)
-    assert "lens end DOWN" in src and "back edge raised" in src
-    assert "lens end UP" in src
+def test_pose_instructions_say_which_face_goes_down():
+    faces = " | ".join(d for _, d in cal.ACCEL_FACES)
+    for face in ("Base down", "Lid down", "Lens end down", "Lens end up", "Left side down", "Right side down"):
+        assert face in faces, face

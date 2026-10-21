@@ -66,20 +66,28 @@ The script guides you through each stage interactively.
 
 Place the box on a flat, stable surface and hold it completely still. Press Enter when ready. The gyroscope reaches `status=3` in about 5 seconds.
 
-**Stage 2/3 — Accelerometer (~2 minutes)**
+**Stage 2/3 — Accelerometer (~1-3 minutes)**
 
-You will be guided through 6 positions. Hold the box still in each position for 5 seconds:
+You will be guided through 6 positions: each face of the box down, at 90°, held
+completely still. The tool shows the accelerometer status and where gravity points
+("gravity 97% along -z"), and moves on once the status rises (after at least 3 s) or
+after 10 s. The chip often finishes only on going back to a face it has seen, so the
+tool goes round the six faces again, up to three times, until `accel=3`:
 
 1. Base down — box sitting normally
-2. Lid down — box flipped upside-down
-3. Tilt forward ~45° — lens end **down**: front edge on the table, back edge raised on books or a wedge
-4. Tilt backward ~45° — lens end **up**: back edge on the table, front edge raised
-5. Tilt left ~45° — left side **down**: left edge on the table, right edge raised on a wedge
-6. Tilt right ~45° — right side **down**: right edge on the table, left edge raised
+2. Lid down — box upside-down on its lid
+3. Lens end down — box standing on its front (lens) end, on a folded towel
+4. Lens end up — box standing on its back end
+5. Left side down — on its left side, at a table edge so the antennas hang clear
+6. Right side down — on its right side, likewise
 
-What matters is six different orientations, each held completely still for the
-whole countdown; 3/4 and 5/6 are opposite pairs. 30-45° is enough, but one book
-is usually much less, so stack them. Keep the antennas clear of every surface.
+The chip counts a pose only when gravity lies along one of its axes (±x, ±y, ±z),
+so each face must be close to 90°: the tool flags a reading with less than 90% of
+gravity on one axis ("not near 90 degrees"). Tilts of 30-50° count for nothing; on
+006 (2026-10-21) lid up and lid down reached `accel=1`, and four 45° tilts added
+nothing. Never rest the box on an antenna: for the sides, set it at a table edge so
+the antennas hang over it, or prop it upright against a stack of books. Once
+`accel=3`, the remaining positions are skipped.
 
 If the unit loses power when tilted (it reboots, and the Witty Pi log says
 "power supply newly connected"), a connector or the battery is shifting: fix
@@ -89,7 +97,7 @@ The tool retries a chip-ID read the Pi's I2C garbled, and only saves offsets
 that read the same twice in a row; if they never do it refuses to save, so a
 glitch can't end up in the calibration.
 
-> **Note:** The antenna connectors block two of the six faces required for `accel=3`. `accel=2` is the expected ceiling on this hardware and is acceptable.
+> **Note:** `accel=3` needs all six faces. If a face can't be reached without loading an antenna, `accel=2` is acceptable: it leaves a little more pitch and roll error.
 
 **Stage 3/3 — Magnetometer (~2 minutes)**
 
@@ -211,7 +219,7 @@ This loads offsets and prints live calibration status alongside heading output. 
                                                                sys gyro accel mag
 ```
 
-Expected when fully calibrated: `cal=3/3/2/3` (sys=3, gyro=3, accel=2, mag=3).  
+Expected when fully calibrated: `cal=3/3/3/3` (sys, gyro, accel, mag); `accel=2` is acceptable.  
 If `mag < 2` immediately after boot but climbs to 3 within a few seconds on its
 own: that's normal — see the note below. If it stays below 2 for longer than
 that, the calibration file is missing or corrupted — re-run Stage 1.
@@ -231,6 +239,49 @@ EXIF/log rather than assuming calibration itself failed.
 ---
 
 ## Troubleshooting
+
+**`accel` stays at 0 or 1**
+
+What the BNO055 needs, from watching its status and raw accelerometer once a
+second on 006 (2026-10-21, NDOF mode, the box in the case):
+
+- **Only faces at 90° count.** A pose counts when gravity lies along one of
+  the chip's axes (±x, ±y, ±z): the tool's reading shows about 95% or more of
+  gravity on one axis ("gravity 97% along -z"). Lid up and lid down took it to
+  `accel=1`. Four tilts of 29-50°, each held 15-25 s, added nothing. With all
+  six faces at 90° it reached `accel=3`, and so did `sys`.
+- **The status doesn't rise one face at a time.** It went 0 → 1 on the first
+  side, fell back to 0 on another, and jumped from 1 to 3 only once all six
+  axes had been covered. So a face that shows "Not counted" isn't wasted:
+  keep going through all six.
+- **A face counts within 2-3 s of being still,** or not at all on that visit:
+  holding longer doesn't help, so the tool waits at most 10 s per face. One
+  round of six faces with the tool ended at `accel=0` (006, 2026-10-21); the
+  diagnostic run reached 3 on going back to lid down, so the tool now goes
+  round up to three times. With that, 006 reached `accel=3` in round two, at
+  the third face (lens end down), and saved accelerometer offsets of
+  (-25, 138, -34): its y axis reads about 1.4 m/s² high uncorrected. The
+  status can also rise while the box is being moved into the next face.
+- **Offsets are saved only when the stage reached its minimum** (gyro 3,
+  accel 2, mag 2). Below that the file keeps the part's earlier offsets and
+  the tool says so: the first 90° run on 006 saved accelerometer offsets at
+  status 0 before this rule.
+- **The accelerometer itself is fine** when every steady pose reads about
+  9.8 m/s² in total. If all three axes stay near 0 or don't change between
+  faces, it's the sensor or its wiring, not the procedure.
+- **Odd readings near 0 on all three axes** (`-0.04 -0.01 -0.01`) are I2C
+  reads the Pi garbled, a few times a minute on 006. The tool shows them and
+  ignores them.
+- **The box's base isn't level for the sensor:** base down, 006's BNO055 saw
+  gravity 7-13° off its z axis (lid down, about 7°). That's the sensor's
+  mounting angle; Stage 2 measures it.
+- **Moving the box indoors also raises `mag`** (to 3 on 006). Don't keep
+  that: bench magnetometer offsets are wrong outdoors. Run the bench stages
+  as `--stages gyro,accel`, which saves only those parts, and do `--stages
+  mag` outdoors.
+- **The calibration lives in the chip until it is reset.** The tool resets
+  the chip when it starts, so calibrate with the tool, not by moving the box
+  while another program reads it.
 
 **`mag` stays at 0 after loading offsets**
 
