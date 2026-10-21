@@ -104,7 +104,7 @@ The shipped `battery_manager` does not immediately declare unavailable when ADS1
 3. **WittyPi output voltage** — coarse estimate from the 5V rail sag; no extra hardware required
 4. **Unavailable** — `battery_pct = None`, `battery_source = "unavailable"`; channel `02 01` omitted from packets so the receiver treats battery state as unknown
 
-WittyPi VIN (`get_input_voltage`) is **not** used for SOC — it reads a regulated 5V rail and is logged only as a cable-fault diagnostic.
+WittyPi VIN (`get_input_voltage`) is **not** used for SOC — it reads a regulated 5V rail — and not for supply checks either: it reads 0.4-0.5 V low on several boards, so it is only logged, and the health check judges the Witty Pi's output voltage instead.
 
 ---
 

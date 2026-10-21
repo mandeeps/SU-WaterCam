@@ -94,12 +94,12 @@ def evaluate_health(
 
     # Thresholds (conservative defaults)
     max_cpu_temp_c = 80.0
-    # wittypi_battery_voltage_v is the WittyPi VIN (regulated 5V USB from Voltaic V50).
-    # It stays near 5V until the pack dies, so the useful fault threshold is a supply/
-    # cable check rather than a cell-voltage threshold: below 4.8 V the Pi has no
-    # headroom under load (its under-voltage threshold is about 4.63 V). A weak wall
-    # adapter or cable reads about 4.49 V (docs/FIELD_DEPLOYMENT_GUIDE.md 1.11.1).
-    min_input_voltage_v = 4.8
+    # Only the Witty Pi's OUTPUT (wittypi_internal_voltage_v, what the Pi gets) is
+    # judged: below 4.7 V the Pi has little headroom over its under-voltage threshold
+    # (about 4.63 V). The INPUT reading (wittypi_battery_voltage_v) reads 0.4-0.5 V
+    # low on several boards (005 on wall power: 4.49 in, 4.82 out; 006 on a 5.1 V
+    # feed: 4.49-4.55 in, 4.94 out; output can't exceed input on this path), so it
+    # is reported but never fails the check.
     min_internal_voltage_v = 4.7
 
     # CPU temp
@@ -113,12 +113,7 @@ def evaluate_health(
     if not wittypi or wittypi.get('wittypi_temperature_c') == -273.15:
         failures.append('wittypi_unavailable')
     else:
-        bv = wittypi.get('wittypi_battery_voltage_v', math.nan)
         iv = wittypi.get('wittypi_internal_voltage_v', math.nan)
-        if math.isnan(bv):
-            failures.append('wittypi_input_voltage_unavailable')
-        elif bv < min_input_voltage_v:
-            failures.append(f'wittypi_input_voltage_low_{bv:.2f}V')
         if math.isnan(iv):
             failures.append('internal_voltage_unavailable')
         elif iv < min_internal_voltage_v:

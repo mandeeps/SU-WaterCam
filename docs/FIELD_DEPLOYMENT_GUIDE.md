@@ -902,7 +902,7 @@ venv/bin/python tools/initial_health_check.py --no-alert; echo "exit code: $?"
 It prints `Health check: OK` or `FAIL` with each reason, then every reading.
 Without `--no-alert`, a failure also queues a LoRa alert.
 
-Exit code `0` means everything passed. If it fails, read the printed failure reasons (`gps_unavailable`, `imu_unavailable`, `wittypi_input_voltage_low_*V`,
+Exit code `0` means everything passed. If it fails, read the printed failure reasons (`gps_unavailable`, `imu_unavailable`, `internal_voltage_low_*V`,
 etc.) and resolve them before moving on. GPS will very likely fail indoors, re-check it outdoors in Phase 2.
 
 After the readings it prints `WARN` lines for setup mistakes (they don't change
@@ -953,15 +953,16 @@ sudo systemctl stop ticktalk.service
 - **Solar:** the panel goes into the V50's solar input (at most about 2 A).
 - Check after wiring: `get_throttled` is `0x0` after a capture cycle (1.11) and
   the Witty Pi reports Vout around 4.9 V (`~/powerlog/powerlog.csv`).
-- **Pass rule: Witty Pi input voltage at least 4.8 V under load**, during a wake:
-  the `vin` column of `~/powerlog/powerlog.csv` while the unit segments or
-  uploads, or the startup health check, which fails below 4.8 V
-  (`wittypi_input_voltage_low_*V`). The Pi's under-voltage threshold is about
-  4.63 V, so below 4.8 V there is no headroom for load peaks. About 4.49 V on a
-  wall adapter means a weak adapter or cable; it shows up as `get_throttled`
-  `0x50000` (under-voltage has occurred, and throttling has occurred) at
-  shutdown. Swap in a known-good 5.1 V supply and a short, thick USB-C cable,
-  then retest.
+- **Pass rule: Witty Pi output voltage at least 4.7 V under load, and
+  `get_throttled` `0x0`**, during a wake: the `vout` column of
+  `~/powerlog/powerlog.csv` while the unit segments or uploads, or the startup
+  health check, which fails below 4.7 V (`internal_voltage_low_*V`). The Pi's
+  under-voltage threshold is about 4.63 V. A weak supply or cable shows up as a
+  low `vout` and as `get_throttled` `0x50000` (under-voltage has occurred, and
+  throttling has occurred) at shutdown: swap in a known-good 5.1 V supply and a
+  short, thick USB-C cable, then retest. Don't judge by `vin`: the Witty Pi's
+  input reading is 0.4-0.5 V low on several boards (about 4.5 V from a 5.0 V
+  supply, below its own output reading), so it is only logged.
 
 ### 1.12 Weatherproofing
 
@@ -1011,9 +1012,9 @@ for the site:
       daemon has run 5 minutes (stop it to query, then start it again; 1.6).
 - [ ] `sudo doas -C /etc/doas.conf` passes and `/etc/doas.conf` matches
       `config/doas.conf` (`sudo diff config/doas.conf /etc/doas.conf`).
-- [ ] Witty Pi input voltage is at least 4.8 V under load: `vin` in
-      `~/powerlog/powerlog.csv` during a capture cycle, and no
-      `wittypi_input_voltage_low_*V` from the health check (1.11.1).
+- [ ] Witty Pi output voltage is at least 4.7 V under load: `vout` in
+      `~/powerlog/powerlog.csv` during a capture cycle, `get_throttled` `0x0`,
+      and no `internal_voltage_low_*V` from the health check (1.11.1).
 - [ ] **IP token:** if `ip_upload.enabled` is true, the operator installs the
       unit's token from their own terminal with `tools/set_ip_token.py`
       ([IP_TRANSMISSION.md](IP_TRANSMISSION.md#installing-the-ip-token)); don't
