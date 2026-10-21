@@ -21,15 +21,16 @@ def test_unreadable_wittypi_is_unavailable_not_low_voltage():
     assert r['failures'] == ['wittypi_unavailable']
 
 
-def test_low_input_voltage_reported():
-    r = hc.evaluate_health(45.0, dict(GOOD_WITTYPI, wittypi_battery_voltage_v=4.49), GPS, IMU)
-    assert r['failures'] == ['wittypi_input_voltage_low_4.49V']
+def test_input_voltage_is_reported_but_never_fails():
+    # the Witty Pi's input reading is 0.4-0.5 V low on several boards
+    for vin in (4.49, 4.2, 0.0):
+        assert hc.evaluate_health(45.0, dict(GOOD_WITTYPI, wittypi_battery_voltage_v=vin), GPS, IMU)['failures'] == []
 
 
-def test_input_voltage_threshold_is_4_8_v():
-    assert hc.evaluate_health(45.0, dict(GOOD_WITTYPI, wittypi_battery_voltage_v=4.8), GPS, IMU)['failures'] == []
-    r = hc.evaluate_health(45.0, dict(GOOD_WITTYPI, wittypi_battery_voltage_v=4.75), GPS, IMU)
-    assert r['failures'] == ['wittypi_input_voltage_low_4.75V']
+def test_output_voltage_threshold_is_4_7_v():
+    assert hc.evaluate_health(45.0, dict(GOOD_WITTYPI, wittypi_internal_voltage_v=4.7), GPS, IMU)['failures'] == []
+    r = hc.evaluate_health(45.0, dict(GOOD_WITTYPI, wittypi_internal_voltage_v=4.65), GPS, IMU)
+    assert r['failures'] == ['internal_voltage_low_4.65V']
 
 
 def test_main_prints_reasons_and_skips_alert(monkeypatch, capsys):
