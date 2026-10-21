@@ -693,6 +693,16 @@ check with `systemctl show ticktalk.service -p Environment`. The new unit takes
 effect when the service next starts (next wake, or restart lora_daemon and
 segformer_daemon now).
 
+**ticktalk watchdog.** `ticktalk.service` sets `WatchdogSec=15min`: each capture
+iteration sends systemd a heartbeat (`tools/systemd_watchdog.py`, from
+`call_shutdown`), and if none arrives for 15 minutes, because the graph has
+stalled (a dead worker, a wedged read), systemd kills ticktalk and
+`Restart=on-failure` starts it again 10 s later. Iterations are about a minute
+apart, so a normal wake never comes near it. `systemctl show ticktalk -p
+WatchdogUSec -p WatchdogTimestamp` shows the setting and the last heartbeat; a
+restart shows as `Watchdog timeout` in `journalctl -u ticktalk`. Copy the unit
+again on units installed before it (as above).
+
 **Hard maximum awake time.** A wake is normally 10-15 minutes and `ticktalk`
 powers the Pi off at the end of it. `max-awake.timer` is the backstop for when
 that doesn't happen (a hung capture, a restart loop): every 5 minutes it checks
