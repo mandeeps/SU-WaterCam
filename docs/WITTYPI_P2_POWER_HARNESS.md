@@ -88,6 +88,21 @@ and while the ground is open its current flows through the Pi's GPIO pins.
 - **Replace the 3V3 and GND jumpers** with soldered wires, or crimp them into a
   latching housing. If that has to wait, at least group the jumpers into a
   multi-pin housing and fix it with a dab of hot glue.
+- **Units without the PCB: tape the switch MOSFET down.** Without the HAT, the
+  MOSFET that presses the Witty Pi switch (gate on the mDot's PB_1, a 10 kΩ
+  pull-down from gate to GND, source to GND) hangs on its leads and jumpers. Moving it, or the
+  wires around it, cut 006's power three times on 2026-10-21: once as the PB_1
+  wire was connected, twice when the wires at the Pi's GPIO header were touched.
+  Each time the Witty Pi logged no shutdown, only "power supply is newly
+  connected" at the next start, so the whole board lost power, most likely from a
+  contact making and breaking at a jumper. Tape or hot-glue the MOSFET to the
+  board or case, put heat-shrink over its leads and the resistor's joints, and
+  keep its wires from moving. Taped in place, 006 then stayed up through half an
+  hour of handling in every orientation (the IMU calibration's six faces).
+- **Connect and disconnect the mDot's wires only with the unit off,** and
+  check for a short before powering it: with the meter on resistance, the Pi's
+  5V pins (2, 4) to GND (pin 6) should never read near 0 Ω, even while you
+  wiggle the wires. If a wire must go on live, connect GND first and 3V3 last.
 - **Expect an mDot reset** whenever power is disconnected for this work. It
   rejoins LoRa afterwards.
 
@@ -95,8 +110,9 @@ and while the ground is open its current flows through the Pi's GPIO pins.
 
 1. **Wiggle:** with the unit running, pull and bend the harness near P2 and at
    the battery end.
-   Give each mDot jumper a light tug too; an mDot reset shows up as a LoRa
-   rejoin in `journalctl -u lora_daemon`, not in the Witty Pi log.
+   Give each mDot jumper a light tug too, and nudge the MOSFET; an mDot reset
+   shows up as a LoRa rejoin in `journalctl -u lora_daemon`, not in the Witty Pi
+   log, while a lost supply shows up there as "power supply is newly connected".
 2. **Tilt:** with the lid closed, tip the box forward, backward and to each
    side, and hold it at the mounting angle for a minute.
 3. **Check for cuts:** after the test, look for a new boot:

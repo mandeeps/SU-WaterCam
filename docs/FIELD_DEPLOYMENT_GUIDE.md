@@ -945,6 +945,13 @@ sudo systemctl stop ticktalk.service
   (P3 header), so touching its jumper wires reset the whole unit on 005, and a
   lifted mDot ground left the mDot hung. Solder or latch its VDD and GND, connect
   PA_6 to GPIO5 (pin 29), and tug-test each wire during the wiggle test.
+- **Units without the PCB: tape the switch MOSFET down.** Without the HAT, the
+  MOSFET that presses the Witty Pi switch (gate on the mDot's PB_1, a 10 kΩ
+  pull-down to GND) hangs loose on its leads and jumpers, and moving it or the
+  wires near it cut 006's power three times. Tape it (or hot-glue it) down to the
+  board or case, put heat-shrink over its leads and the resistor's joints, and
+  connect or disconnect any of these wires only with the unit off
+  ([WITTYPI_P2_POWER_HARNESS.md](WITTYPI_P2_POWER_HARNESS.md#secure-the-mdot-wiring)).
 - **The A ports are always on:** anything in a USB-A port presses the V50's
   Always On switch, so the pack never auto-shuts off under a light load.
 - **Never use the V50's top USB-C port** while it powers a unit: anything in it
@@ -997,6 +1004,9 @@ for the site:
 
 - [ ] `pinctrl get 5` shows `op` and `| hi` (mDot units only; not on a handheld with the
       capture button on pin 29).
+- [ ] Units without the PCB: the switch MOSFET is taped down, its leads and the
+      pull-down resistor are insulated, and nudging them doesn't restart the unit
+      (no new "System starts up" line in `~/wittypi/wittyPi.log`) (1.11.1).
 - [ ] `systemctl is-enabled remote-debug.timer max-awake.timer` prints `enabled`
       twice (`/etc/watercam/hold-awake` must not exist).
 - [ ] `systemctl is-enabled rtc-early-clock.service` prints `enabled`, and after a
