@@ -199,12 +199,24 @@ the existing Python tools rather than reimplementing them.
 
 | Step | What the collaborator sees | Backed by |
 |---|---|---|
-| 1. Check the node | Battery, radio, GPS fix, IMU and camera status | existing health checks |
-| 2. Aim the camera | Low-resolution live preview with a horizon line and range rings from the current IMU pitch/roll and mount height; warns when the view does not reach the area it should cover | Picamera2 MJPEG stream, `camera_geometry.py` / `geo_core.py` |
-| 3. IMU on the pole | The existing step-gated procedure, one instruction per screen, live 0-3 calibration bars, automatic advance | `tools/bno055_calibration.py` stage 2 |
-| 4. Markers | Capture a still; tap each marker on the screen and name it; at least 4 required | port of Georeferencing `label_gcp.py` to touch |
-| 5. Pose | **With RTK:** import the marker survey, refine the pose on the node, show per-marker residuals and pass/fail. **Without RTK:** save the photo, labels and IMU readings; the pose is marked *provisional* | Georeferencing `refine_pose_from_gcps`, vendored as `camera_calibration.py` already is |
-| 6. Save | Writes the node's `unit_config`, sends it to the API, marks setup complete and leaves maintenance mode | `unit_config` loader |
+| 0. Connect | The page over the setup network (the team's phone hotspot, saved on the node with a higher priority than the site's network beforehand), or Tailscale over the site network; serial console as the fallback | NetworkManager profiles, `tailscale status` |
+| 1. Check the node | Battery, radio, GPS fix, IMU and camera status; `get_throttled`, Witty Pi output voltage (pass ≥ 4.7 V; the input reading is not used, #228), the software release | `tools/initial_health_check.py`, `tools/node_version.py` |
+| 2. New site or new angle | If the node is moving, or being re-aimed at the same site: back up, then clear what it learned at the old position (GPS home, registration orientation reference, flood baseline). The camera-to-camera registration stays | `tools/gps_home.py --reset`, `tools/registration_orientation --reset`, `tools/flood_baseline.py --reset` |
+| 3. Magnetometer, before mounting | At a magnetically clean spot near the site (away from vehicles, the pole, fences): the figure-eight with live 0-3 bars, then a short log showing `cal=3/3/3/3` (accel 2 acceptable). Gyro and accelerometer stay from the bench | `tools/bno055_calibration.py --stages mag`, `--mode log` |
+| 4. Mount and record | Mount height, a compass heading, pole material and nearby magnetic sources; the RTK camera position and ground control points (private: to the API, never the repo) | form, RTK import |
+| 5. Power at the mount | A live trace of Witty Pi output and throttle flags while the collaborator tugs the power cable, nudges the mDot wiring and tilts the box; any restart or dip is flagged | Witty Pi registers, `vcgencmd`, the Witty Pi log |
+| 6. Connectivity | Each path on its own, with a pass/fail and what it means: **LoRa** sub-band and a link check (margin, gateways; healthy needs ≥ 5 dB, `lora_health`), **site WiFi** (signal, the server reachable through Tailscale, no captive portal), **cellular** (one bring-up and reachability check, data noted). Summary: which transport the node will mostly use there | `tools/mdot_subband.py --check`, `lora_health.assess(force=True)`, NetworkManager, `transmit_ip.is_reachable` |
+| 7. Aim the camera | Low-resolution live preview with a horizon line and range rings from the current IMU pitch/roll and mount height; warns when the view does not reach the area it should cover | Picamera2 MJPEG stream, `camera_geometry.py` / `geo_core.py` |
+| 8. IMU on the pole | The existing step-gated procedure, one instruction per screen, live 0-3 calibration bars, automatic advance; the known bearing computed from the RTK camera position to a marker near the centre of the view (recomputed whenever the aim changes) | `tools/bno055_calibration.py --mode mount --known-bearing --save-correction`, then `--mode validate` |
+| 9. Markers | Capture a still; tap each marker on the screen and name it; at least 4 required | port of Georeferencing `label_gcp.py` to touch |
+| 10. Pose | **With RTK:** import the marker survey, refine the pose on the node, show per-marker residuals and pass/fail. **Without RTK:** save the photo, labels and IMU readings; the pose is marked *provisional* | Georeferencing `refine_pose_from_gcps`, vendored as `camera_calibration.py` already is |
+| 11. First capture | One capture cycle with the shutdown held off (as `~/test_wake.sh` does on the bench): the mask and water %, the registration reference adopted at the new pose, an uplink seen by the server. The collaborator confirms normal conditions and sets the flood baseline from it | the capture graph, `tools/flood_baseline.py --set-from-latest` |
+| 12. Save and deploy | Writes the node's `unit_config` and sends it (and the pose) to the API; installs the wake schedule and re-arms the Witty Pi; enables the capture service (and recovery boot, if the site wants it); lowers the setup network's priority so the site network is used for reporting; copies the session's logs; marks setup complete and leaves maintenance mode | `unit_config` loader, `runScript.sh`, systemd, NetworkManager |
+
+Every step records its result. The summary page lists anything skipped or
+failed, and the dashboard shows the node as installed with those noted, so a
+partial install (no RTK, a failed transport test) is visible rather than
+silent.
 
 A provisional pose shows as such on the dashboard until it is verified, either
 by a return visit with RTK or by matching the saved photo against reference
@@ -214,9 +226,13 @@ imagery later. A node never silently runs on an unverified heading.
 position. They go to the private API and stay on the node; they are never
 committed to this repository.
 
-**Bench work stays at the bench.** Lens calibration and IMU stage 1 are done
-before shipping, so nodes reach the field already calibrated and collaborators
-only do the on-pole steps.
+**Bench work stays at the bench, except the magnetometer.** Lens calibration
+and the IMU's gyroscope and accelerometer (the six faces at 90°, #229) are done
+before shipping. The magnetometer can't be: bench offsets are wrong outdoors, so
+it is calibrated at a clean spot near the site (step 3), before mounting.
+
+The steps follow the bench-tested manual procedure used for 006 (2026-10-21/22);
+until the wizard exists, that procedure is the field checklist.
 
 ## 9. Implementation order
 
@@ -226,8 +242,11 @@ only do the on-pole steps.
    dashboard control (WaterCam-Team/API#109). Works within today's wake latency.
 3. Maintenance wake and downlink replay in the mDot firmware
    (WaterCam-Team/mDot-AT-firmware#3).
-4. Wizard pages, starting with the live view (step 2) and the IMU wizard
-   (step 3), then markers and pose (steps 4-5). (#119)
+4. Wizard pages, starting with the checks the manual field procedure already
+   runs by hand (node, power and connectivity: steps 1, 5 and 6) and the
+   magnetometer (step 3), then the live view (step 7) and the IMU on the pole
+   (step 8), then markers and pose (steps 9-10), first capture and save (steps
+   11-12). (#119)
 
 ## 10. Open questions
 
@@ -240,6 +259,6 @@ only do the on-pole steps.
   battery levels seen in the field? Measure on a bench unit.
 - Client Wi-Fi outside setup is settled: it is the second reporting transport,
   joined during each wake, so it follows the wake schedule and needs no duty
-  cycle of its own. Still open: whether the setup session's client network (for
-  example a team phone hotspot) should stay among the networks used for
-  reporting afterwards.
+  cycle of its own. The setup session's network (a team phone hotspot) is saved
+  with a higher priority for the visit and lowered at step 12, so the site's
+  network is the one used for reporting afterwards.
