@@ -111,3 +111,9 @@ def test_a_first_run_below_the_minimum_saves_nothing_for_that_part(tmp_path, cap
     data = json.load(open(path))
     assert bytes(data["offsets_bytes"])[ACC] == bytes(6) and data["components"]["accel"] is None
     assert "accel: status 1, below 2: not saved, left uncalibrated" in capsys.readouterr().out
+
+
+def test_a_face_that_starts_at_3_says_so():
+    c, lines = Clock(), []
+    r = hold(FakeIMU(c, [(0, 3)]), c, lines)
+    assert r["accel"] == 3 and lines[-1].strip().startswith("Fully calibrated: accel = 3/3")

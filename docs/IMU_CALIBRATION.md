@@ -258,7 +258,10 @@ second on 006 (2026-10-21, NDOF mode, the box in the case):
   holding longer doesn't help, so the tool waits at most 10 s per face. One
   round of six faces with the tool ended at `accel=0` (006, 2026-10-21); the
   diagnostic run reached 3 on going back to lid down, so the tool now goes
-  round up to three times.
+  round up to three times. With that, 006 reached `accel=3` in round two, at
+  the third face (lens end down), and saved accelerometer offsets of
+  (-25, 138, -34): its y axis reads about 1.4 m/s² high uncorrected. The
+  status can also rise while the box is being moved into the next face.
 - **Offsets are saved only when the stage reached its minimum** (gyro 3,
   accel 2, mag 2). Below that the file keeps the part's earlier offsets and
   the tool says so: the first 90° run on 006 saved accelerometer offsets at

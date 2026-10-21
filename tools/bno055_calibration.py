@@ -507,7 +507,10 @@ def hold_accel_pose(imu, clock=time.monotonic, sleep=time.sleep, out=print) -> d
         if (counted and elapsed >= POSE_MIN_S) or status == 3 or elapsed >= POSE_MAX_S:
             break
         sleep(0.5)
-    out(f"\r  {'Counted' if counted else 'Not counted'}: accel = {status}/3"
+    # the status can rise while the box is being moved into place: a face that
+    # starts at 3 is done, not "not counted"
+    result = "Fully calibrated" if status == 3 else "Counted" if counted else "Not counted"
+    out(f"\r  {result}: accel = {status}/3"
         f" ({where})                    ")
     return {"accel": status, "counted": counted, "axis": axis, "share": share}
 
