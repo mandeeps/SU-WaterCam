@@ -63,6 +63,7 @@ REG_CALIB_STAT      = 0x35   # calibration status (read-only)
 REG_SYS_STATUS      = 0x39
 REG_SYS_ERR         = 0x3A
 REG_TEMP            = 0x34   # on-chip temperature (°C)
+REG_ACC_DATA_X_LSB  = 0x08   # accelerometer x, y, z (int16 LE; 1 LSB = 0.01 m/s² in m/s² units)
 
 # Euler angle output (heading, roll, pitch) — 3× 2-byte signed int16
 REG_EUL_HEADING_LSB = 0x1A
@@ -192,10 +193,15 @@ class BNO055:
         }
 
     def is_fully_calibrated(self) -> bool:
-        # accel=2 is the realistic ceiling on hardware with side-blocked antennas
-        # (only ±Z covered); gyro and mag must still reach 3.
+        # accel=2 is acceptable (a pose or two short of 3 leaves little tilt error);
+        # gyro and mag must reach 3.
         s = self.calibration_status()
         return s["gyro"] == 3 and s["accel"] >= 2 and s["mag"] == 3
+
+    def acceleration(self) -> tuple:
+        """Accelerometer x, y, z in m/s² (gravity plus any motion)."""
+        data = self._read_bytes(REG_ACC_DATA_X_LSB, 6)
+        return tuple(v / 100.0 for v in struct.unpack('<hhh', data))
 
     # ── Euler angles ──────────────────────────────────────────────────────────
 
@@ -442,6 +448,57 @@ def load_calibration(imu: BNO055, path: str = CALIB_FILE) -> float:
 # SECTION 4: GUIDED CALIBRATION PROCEDURE
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Six faces at 90 degrees for the accelerometer stage (see hold_accel_pose()).
+ACCEL_FACES = [
+    ("1/6", "Base down       -- box sitting normally on its base"),
+    ("2/6", "Lid down        -- box upside-down on its lid"),
+    ("3/6", "Lens end down   -- box standing on its front (lens) end, on a folded towel"),
+    ("4/6", "Lens end up     -- box standing on its back end"),
+    ("5/6", "Left side down  -- on its left side, at a table edge so the antennas hang clear"),
+    ("6/6", "Right side down -- on its right side, likewise"),
+]
+POSE_MIN_S = 5            # hold at least this long, even once the pose counts
+POSE_MAX_S = 30           # move on after this, counted or not
+POSE_AXIS_SHARE = 0.9     # gravity this share on one axis is within ~25 deg of 90
+
+
+def gravity_axis(vec) -> tuple:
+    """(axis like '+z', share of |g| on it, |g|) for an accelerometer reading, or
+    (None, 0, |g|) for a reading the Pi's I2C garbled (|g| far from 9.8)."""
+    import math
+    mag = math.sqrt(sum(v * v for v in vec))
+    if not 6.0 <= mag <= 14.0:
+        return None, 0.0, mag
+    k = max(range(3), key=lambda i: abs(vec[i]))
+    return ("+" if vec[k] >= 0 else "-") + "xyz"[k], abs(vec[k]) / mag, mag
+
+
+def hold_accel_pose(imu, clock=time.monotonic, sleep=time.sleep, out=print) -> dict:
+    """Wait while one accelerometer pose is held: until the chip's accel status
+    rises (after at least POSE_MIN_S), or POSE_MAX_S. Shows the status and where
+    gravity points, and says so when the box isn't near 90 degrees. Returns
+    {'accel': status at the end, 'counted': rose during the pose, 'axis', 'share'}."""
+    start = clock()
+    first = imu.calibration_status()["accel"]
+    while True:
+        elapsed = clock() - start
+        status = imu.calibration_status()["accel"]
+        try:
+            axis, share, _ = gravity_axis(imu.acceleration())
+        except Exception:
+            axis, share = None, 0.0
+        where = f"gravity {share:4.0%} along {axis}" if axis else "gravity reading garbled"
+        hint = "  <- not near 90 degrees" if axis and share < POSE_AXIS_SHARE and elapsed >= POSE_MIN_S else ""
+        out(f"\r  {elapsed:4.0f}s  accel = {status}/3  {where}{hint}      ", end="", flush=True)
+        counted = status > first
+        if (counted and elapsed >= POSE_MIN_S) or status == 3 or elapsed >= POSE_MAX_S:
+            break
+        sleep(0.5)
+    out(f"\r  {'Counted' if counted else 'Not counted'}: accel = {status}/3"
+        f" ({where})                    ")
+    return {"accel": status, "counted": counted, "axis": axis, "share": share}
+
+
 def run_calibration_procedure(imu: BNO055,
                                save_path: str = CALIB_FILE,
                                node_id: str = "node_1",
@@ -465,21 +522,11 @@ def run_calibration_procedure(imu: BNO055,
           this sensor's physical position inside this camera box.
           If the sensor is ever remounted, recalibrate from scratch.
     """
-    # 6 stable orientations that avoid resting the box on its sides. What matters
-    # is six different orientations, each held still: 3/4 and 5/6 are opposite
-    # pairs. 30-45 degrees is enough; one book is usually much less, so stack them.
-    # Positions 3-6 use ~45° tilts propped against a support (book, wedge, wall)
-    # so the antennas are never load-bearing. Each must be held stationary —
-    # prop securely before pressing Enter.
-    ACCEL_POSITIONS = [
-        ("1/6", "Base down     — box sitting normally on its base"),
-        ("2/6", "Lid down      — flip box completely upside-down on its lid"),
-        ("3/6", "Tilt forward  — lens end DOWN ~45°: front edge on the table, back edge raised on books or a wedge; antennas clear"),
-        ("4/6", "Tilt backward — lens end UP ~45°: back edge on the table, front edge raised on books or a wedge; antennas clear"),
-        ("5/6", "Tilt left     — left side DOWN ~45°: left edge on the table, right edge raised on a wedge; antennas up and away"),
-        ("6/6", "Tilt right    — right side DOWN ~45°: right edge on the table, left edge raised on a wedge; antennas up and away"),
-    ]
-    HOLD_SECONDS = 5
+    # The chip counts an accelerometer pose only when gravity lies along one of its
+    # axes (+-x, +-y, +-z) and the box is still: six faces at 90 degrees. Tilts of
+    # 30-50 degrees count for nothing (006, 2026-10-21: lid up and lid down gave
+    # accel 1/3, four tilts added nothing). hold_accel_pose() waits for each.
+    ACCEL_POSITIONS = ACCEL_FACES
 
     print("\n" + "="*60)
     print("  BNO055 CALIBRATION PROCEDURE")
@@ -520,13 +567,12 @@ def run_calibration_procedure(imu: BNO055,
         if "accel" in stages:
             # ── STAGE 2: ACCELEROMETER ────────────────────────────────────────────
             print("─"*60)
-            print(f"STAGE {stage_no['accel']}/{n_stages} -- ACCELEROMETER (~2 minutes)")
+            print(f"STAGE {stage_no['accel']}/{n_stages} -- ACCELEROMETER (~1-3 minutes)")
             print()
-            print("  You will be guided through 6 positions.")
-            print(f"  Hold the box still in each position for {HOLD_SECONDS} seconds.")
-            print("  Positions 1-2: rest box on base/lid.  Positions 3-6: prop at")
-            print("  ~45 degrees using a book or wedge -- do not rest on the sides.")
-            print("  Antennas must remain clear of any load-bearing surface.")
+            print("  You will be guided through 6 positions: each face of the box down,")
+            print("  at 90 degrees, held still until the chip counts it (5-30 s each).")
+            print("  Never rest the box on an antenna: for the sides, set it at a table")
+            print("  edge so the antennas hang clear, or prop it upright against books.")
             print()
             input("  Press Enter to begin > ")
 
@@ -534,27 +580,23 @@ def run_calibration_procedure(imu: BNO055,
                 print()
                 print(f"  Position {label}: {description}")
                 input("  Press Enter when the box is in position and stable > ")
-                for remaining in range(HOLD_SECONDS, 0, -1):
-                    s = imu.calibration_status()
-                    print(f"\r  Holding... {remaining}s   accel = {s['accel']}/3  ",
-                          end="", flush=True)
-                    time.sleep(1)
-                s = imu.calibration_status()
-                print(f"\r  Done.       accel = {s['accel']}/3               ")
+                hold_accel_pose(imu)
+                if imu.calibration_status()["accel"] == 3:
+                    print("  Accelerometer fully calibrated; the other positions aren't needed.")
+                    break
 
             s = imu.calibration_status()
             if s["accel"] >= 2:
-                print(f"\n  Accelerometer at {s['accel']}/3 -- acceptable for this hardware.")
+                print(f"\n  Accelerometer at {s['accel']}/3 -- {'fully calibrated' if s['accel'] == 3 else 'acceptable'}.")
             elif s["accel"] == 1:
                 print()
                 print("  WARNING: accel = 1/3. Pitch/roll readings will have larger offsets.")
                 print("  Proceeding -- heading (mag) accuracy is unaffected.")
             else:
                 print()
-                print("  WARNING: accel = 0/3. Verify the box was held completely still")
-                print("  in each position. Proceeding anyway.")
-            print("  NOTE: accel=3 requires side-face positions blocked by the antennas.")
-            print("        2/3 is the expected ceiling on this hardware.\n")
+                print("  WARNING: accel = 0/3. Each face must be held still at 90 degrees:")
+                print("  check the readings above showed ~95% of gravity on one axis. Proceeding anyway.")
+            print()
 
         if "mag" in stages:
             # ── STAGE 3: MAGNETOMETER ─────────────────────────────────────────────
