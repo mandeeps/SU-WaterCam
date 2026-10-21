@@ -357,6 +357,24 @@ class WittyPi4:
         # Return error if max retries reached
         return "-"
 
+    def _set_alarm(self, which: str, day: int, hour: int, minute: int, second: int) -> bool:
+        if not (1 <= day <= 31 and 0 <= hour <= 23 and 0 <= minute <= 59 and 0 <= second <= 59):
+            raise ValueError(f"bad {which} time {day} {hour}:{minute}:{second}")
+        out = self.run_command(f"set_{which}_time {day} {hour} {minute} {second}")
+        if out == "ERROR":
+            return False
+        logging.info("%s time set to day %02d %02d:%02d:%02d", which.capitalize(), day, hour, minute, second)
+        return True
+
+    def set_shutdown_time(self, day: int, hour: int, minute: int, second: int) -> bool:
+        '''Arm the shutdown alarm (alarm 2) for day-of-month/hour/minute/second in
+        the system's local time, as runScript.sh does. True if the command ran.'''
+        return self._set_alarm("shutdown", day, hour, minute, second)
+
+    def set_startup_time(self, day: int, hour: int, minute: int, second: int) -> bool:
+        '''Arm the startup alarm (alarm 1), like set_shutdown_time.'''
+        return self._set_alarm("startup", day, hour, minute, second)
+
     def clear_shutdown_time(self) -> None:
         '''Clear the shutdown time from the Witty Pi 4'''
         try:

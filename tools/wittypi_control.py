@@ -40,6 +40,80 @@ def clear_shutdown_time():
     _require_wittypi()
     witty_pi_4.clear_shutdown_time()
 
+def _alarm_parts(epoch: float):
+    import time
+    t = time.localtime(epoch)
+    return t.tm_mday, t.tm_hour, t.tm_min, t.tm_sec
+
+
+def set_shutdown_at(epoch: float) -> bool:
+    """Arm the Witty Pi's shutdown alarm for a moment less than 28 days ahead
+    (the alarm holds only day-of-month and time)."""
+    _require_wittypi()
+    return witty_pi_4.set_shutdown_time(*_alarm_parts(epoch))
+
+
+def set_startup_at(epoch: float) -> bool:
+    """Arm the Witty Pi's startup alarm, like set_shutdown_at."""
+    _require_wittypi()
+    return witty_pi_4.set_startup_time(*_alarm_parts(epoch))
+
+# Emergency mode keeps the unit on, so the shutdown alarm would otherwise be cleared.
+# Its software end (emergency_max_hours, checked each iteration in ticktalk_main's
+# call_shutdown) needs the graph to keep running; this hardware backstop powers the
+# unit down this long after that end if the run hangs instead (#209). A normal end
+# re-arms the deployed schedule, which replaces it. The startup alarm is set for
+# shortly after, so a unit powered down this way comes back by itself (its
+# schedule's next start passed during emergency mode, and the mDot's power
+# watchdog may be off) and, finding emergency mode expired, restores the schedule.
+EMERGENCY_BACKSTOP_MARGIN_S = 3600
+EMERGENCY_BACKSTOP_RESTART_S = 600
+_backstop_armed_for = {'deadline': None}
+
+
+def emergency_backstop_deadline(since, max_hours, now=None):
+    """When the backstop should fire: the emergency's end plus the margin, or None
+    when emergency mode never expires (max_hours 0). A start time from an earlier,
+    already ended emergency (or none) counts from now, so it is never in the past."""
+    import time
+    now = time.time() if now is None else float(now)
+    try:
+        hours = float(max_hours)
+    except (TypeError, ValueError):
+        hours = 24.0
+    if hours <= 0:
+        return None
+    try:
+        start = float(since)
+    except (TypeError, ValueError):
+        start = now
+    if start + hours * 3600 <= now or start > now:
+        start = now
+    return start + hours * 3600 + EMERGENCY_BACKSTOP_MARGIN_S
+
+
+def arm_emergency_backstop(since=None, max_hours=None):
+    """Set the shutdown alarm for the current emergency, and the startup alarm
+    shortly after it (or, for an emergency that never expires, clear the shutdown). Reads emergency_since / emergency_max_hours when not
+    given. Writes the alarm only when the deadline changes. Returns the deadline."""
+    if since is None or max_hours is None:
+        from tools.lora_runtime_integration import get_parameter
+        since = get_parameter('emergency_since', None) if since is None else since
+        max_hours = get_parameter('emergency_max_hours', 24) if max_hours is None else max_hours
+    deadline = emergency_backstop_deadline(since, max_hours)
+    if deadline is None:
+        if _backstop_armed_for['deadline'] is not False:
+            clear_shutdown_time()
+            _backstop_armed_for['deadline'] = False
+        return None
+    # within a minute counts as unchanged (each iteration recomputes it)
+    last = _backstop_armed_for['deadline']
+    if not (isinstance(last, float) and abs(last - deadline) < 60):
+        if set_shutdown_at(deadline) and set_startup_at(deadline + EMERGENCY_BACKSTOP_RESTART_S):
+            _backstop_armed_for['deadline'] = deadline
+    return deadline
+
+
 def installed_schedule_exists():
     """True if a schedule.wpi is installed in the Witty Pi folder."""
     import os
@@ -68,8 +142,9 @@ def rearm_schedule():
 def apply_emergency_schedule(emergency_mode: bool) -> dict:
     """Clear or restore the WittyPi hardware shutdown schedule for emergency mode.
 
-    Emergency ON: clear the shutdown schedule so the device stays powered on
-    (flood emergency in progress). Emergency OFF: re-arm the installed
+    Emergency ON: move the shutdown alarm to an hour after emergency mode should
+    end (arm_emergency_backstop), so the device stays on but a hung run is still
+    powered down; with no time limit, clear it. Emergency OFF: re-arm the installed
     schedule.wpi. If none is installed, install the backed-up deployment
     schedule or the repo's daylight preset (install_fallback_schedule()), and
     only if that fails generate one from runtime_config.json.
@@ -82,14 +157,27 @@ def apply_emergency_schedule(emergency_mode: bool) -> dict:
     """
     try:
         if emergency_mode:
-            print("🚨 EMERGENCY MODE: Clearing WittyPi shutdown schedule")
-            clear_shutdown_time()
+            # The schedule's shutdown would end emergency mode: replace it with the
+            # backstop, which fires only if the run hangs past emergency mode's end
+            deadline = arm_emergency_backstop()
+            if deadline is None:
+                print("🚨 EMERGENCY MODE: no time limit, WittyPi shutdown schedule cleared")
+                return {
+                    'status': 'wittypi_emergency_activated',
+                    'action': 'shutdown_schedule_cleared',
+                    'message': 'WittyPi shutdown schedule cleared for emergency mode (no time limit)'
+                }
+            import time
+            when = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(deadline))
+            print(f"🚨 EMERGENCY MODE: WittyPi shutdown alarm moved to {when} (backstop)")
             return {
                 'status': 'wittypi_emergency_activated',
-                'action': 'shutdown_schedule_cleared',
-                'message': 'WittyPi shutdown schedule cleared for emergency mode'
+                'action': 'shutdown_backstop_set',
+                'backstop': when,
+                'message': f'WittyPi shutdown moved to {when}, an hour after emergency mode ends, in case the run hangs'
             }
         else:
+            _backstop_armed_for['deadline'] = None
             # Re-arm the schedule the unit was deployed with. This used to
             # regenerate schedule.wpi from the wittypi_* config values (default
             # 08:00, eight 30-minute slots), silently replacing an installed

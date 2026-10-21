@@ -203,15 +203,33 @@ class TestWittypiEmergencyControl:
             ) from exc
         assert result['status'] == 'wittypi_normal_schedule_restored'
 
-    def test_emergency_on_clears_schedule(self):
-        """Emergency ON calls clear_shutdown_time exactly once."""
+    def test_emergency_on_moves_the_shutdown_alarm_to_the_backstop(self):
+        """Emergency ON sets the backstop shutdown alarm instead of clearing it (#209)."""
         import ticktalk_main
+        from tools import wittypi_control as wc
+        wc._backstop_armed_for['deadline'] = None
+        mock_clear, mock_down = MagicMock(), MagicMock(return_value=True)
+        with patch("tools.wittypi_control.clear_shutdown_time", mock_clear), \
+             patch("tools.wittypi_control.set_shutdown_at", mock_down), \
+             patch("tools.wittypi_control.set_startup_at", return_value=True), \
+             patch("tools.lora_runtime_integration.get_parameter", return_value=8):
+            result = ticktalk_main.wittypi_emergency_control.__wrapped__(True)
+        mock_down.assert_called_once()
+        mock_clear.assert_not_called()
+        assert result['action'] == 'shutdown_backstop_set'
+
+    def test_emergency_on_without_a_time_limit_clears_the_schedule(self):
+        """emergency_max_hours 0 (never expires): the shutdown alarm is cleared, as before."""
+        import ticktalk_main
+        from tools import wittypi_control as wc
+        wc._backstop_armed_for['deadline'] = None
         mock_clear = MagicMock()
         with patch("tools.wittypi_control.clear_shutdown_time", mock_clear), \
-             patch("tools.wittypi_control.set_schedule", return_value=""), \
-             patch("tools.lora_runtime_integration.get_parameter", return_value=8):
-            ticktalk_main.wittypi_emergency_control.__wrapped__(True)
+             patch("tools.lora_runtime_integration.get_parameter",
+                   side_effect=lambda k, d=None: 0 if k == 'emergency_max_hours' else d):
+            result = ticktalk_main.wittypi_emergency_control.__wrapped__(True)
         mock_clear.assert_called_once()
+        assert result['action'] == 'shutdown_schedule_cleared'
 
     def test_emergency_off_reads_params_from_get_parameter(self):
         """Emergency OFF reads schedule config via get_parameter, not a global fn."""
@@ -252,7 +270,9 @@ class TestWittypiEmergencyControl:
     def test_wittypi_unavailable_returns_error_dict(self):
         """ImportError from wittypi_control → status 'wittypi_unavailable', no crash."""
         import ticktalk_main
-        with patch("tools.wittypi_control.clear_shutdown_time",
+        from tools import wittypi_control as wc
+        wc._backstop_armed_for['deadline'] = None
+        with patch("tools.wittypi_control.set_shutdown_at",
                    side_effect=ImportError("no WittyPi")):
             result = ticktalk_main.wittypi_emergency_control.__wrapped__(True)
         assert result['status'] == 'wittypi_unavailable'

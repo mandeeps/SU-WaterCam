@@ -705,7 +705,8 @@ remote debug session is active, while `/etc/watercam/hold-awake` exists
 emergency mode until that has run `emergency_max_hours` (default 24, `0` = no
 expiry) plus 15 minutes from `emergency_since`. The capture graph normally ends
 emergency mode at `emergency_max_hours`; this covers a hung graph, which would
-otherwise keep the unit up (its shutdown alarm cleared) until the battery is flat.
+otherwise keep the unit up until the battery is flat. (The Witty Pi's shutdown
+alarm, moved to an hour after that end, is the last resort if the Pi itself hangs.)
 Past that deadline it turns `emergency_mode` off and powers off as above. A
 missing or unusable `emergency_since` counts from boot. `tools/max_awake.py
 check --dry-run` says what it would do.

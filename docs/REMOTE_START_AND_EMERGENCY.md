@@ -15,7 +15,7 @@ emergency mode, because the mDot doesn't forward `!` and its log line about it i
 printed before the Pi is up. A Pi that was already on read that log line and
 **turned emergency mode on**. So "Enable Emergency Mode" on the dashboard did nothing
 lasting for a sleeping node, and waking a node that happened to be on put it into
-emergency mode, which clears its Witty Pi shutdown alarm.
+emergency mode, which takes its Witty Pi shutdown alarm out of the schedule.
 
 Now the node only logs the mDot's `EMERGENCY: PA_6 pin state: N` line. A bare
 `21` payload, which reaches the Pi when the mDot's Class C processor is off
@@ -31,8 +31,15 @@ so the command arrives before the normal cycle ends.
 
 ## While in emergency mode
 
-- `call_shutdown` skips the iteration limit and the Witty Pi shutdown alarm is
-  cleared, so the unit keeps capturing.
+- `call_shutdown` skips the iteration limit, and the Witty Pi's shutdown alarm moves
+  from the schedule to a backstop an hour after emergency mode should end, with
+  the startup alarm 10 minutes after that, so the unit keeps capturing.
+  `call_shutdown` re-arms the backstop each iteration, so a resend moves it out
+  too. Three layers end emergency mode: the graph at the time limit,
+  `max_awake.py` 15 minutes later if the graph hangs, and the Witty Pi's backstop
+  an hour later if the Pi itself is stuck (#209); the startup alarm then brings
+  the unit back by itself. With `emergency_max_hours` 0 (no limit) the shutdown
+  alarm is cleared instead.
 - It ends after `HH` hours (`emergency_since` + `emergency_max_hours`), on `99 99`,
   or when the dashboard turns it off. Ending it re-arms the installed
   `schedule.wpi` (it never rewrites the file). With none installed it puts one
