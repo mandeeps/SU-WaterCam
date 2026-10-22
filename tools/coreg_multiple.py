@@ -13,6 +13,12 @@ import pandas as pd
 import rasterio
 from rasterio.transform import from_origin
 
+try:
+    from tools import capture_status
+except ImportError:                      # run as a script from tools/
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from tools import capture_status
+
 class CoregistrationConfig:
     MAX_IMAGE_SIZE = 1000
     SCALE_PERCENT = 50
@@ -41,6 +47,18 @@ class CoregistrationConfig:
     TRANSFORM_FILE_FILENAME = "registration_transform.tfm"
     CALIBRATION_FILE = "camera_calibration.json"
     FORCE_RECALCULATE_TRANSFORM = False
+    #: A fresh solve is cached (and so reused by every later capture) only if
+    #: the final metric is at least this good AND the transform stays within
+    #: MAX_TRANSFORM_DRIFT_PX of the one already cached. Mattes mutual
+    #: information is negative and more negative is better; a failed solve sits
+    #: near 0. -0.10 is a first guess to be tuned from the "Final metric value"
+    #: lines of good captures. A metric absent from the map is not gated.
+    MIN_ACCEPT_METRIC = {"mutual_information": -0.10, "correlation": -0.10}
+    #: Largest movement of any point of the (resized) fixed frame between the
+    #: cached transform and a new solve. The cameras are bolted together, so the
+    #: true transform is a constant; the same scene has solved 100 px apart.
+    #: None disables the check (a camera remounted on purpose: --no-drift-check).
+    MAX_TRANSFORM_DRIFT_PX = 25.0
     ENABLE_MULTIPLE_STRATEGIES = False
     FAST_MODE = False
     PARALLEL_PROCESSING = False
@@ -109,20 +127,15 @@ def _default_calibration_path() -> str:
     return os.path.join(repo_root, "config", config.CALIBRATION_FILE)
 
 
-def _undistort_if_calibrated(image: np.ndarray, calib_path: str) -> np.ndarray:
-    """Apply lens undistortion using camera_calibration.json if it exists; otherwise return image unchanged.
-
-    Only valid for OV5647 (NIR) frames — the Lepton (LWIR) camera has different optics
-    and has no calibration data of its own, so it must never be passed through this.
-    """
+def _load_intrinsics(calib_path: str, w: int, h: int):
+    """(K scaled to w x h, D) from camera_calibration.json, or None when it can't be used."""
     if not calib_path or not os.path.exists(calib_path):
-        return image
+        return None
     try:
         with open(calib_path) as f:
             cal = json.load(f)
         mtx = np.array(cal["K"], dtype=np.float64)
         dist = np.array(cal["D"], dtype=np.float64).reshape(-1, 1)
-        h, w = image.shape[:2]
 
         # K is only valid at the resolution it was calibrated at: fx, fy, cx and
         # cy are all in pixels. Applied to a differently sized frame it silently
@@ -134,16 +147,49 @@ def _undistort_if_calibrated(image: np.ndarray, calib_path: str) -> np.ndarray:
             if abs(sx - sy) > 1e-3:
                 print(f"Warning: calibration {cal_w}x{cal_h} has a different aspect ratio "
                       f"than the {w}x{h} frame; skipping undistort")
-                return image
+                return None
             print(f"Scaling calibration from {cal_w}x{cal_h} to {w}x{h} (factor {sx:.3f})")
             mtx = mtx.copy()
             mtx[0, 0] *= sx; mtx[0, 2] *= sx
             mtx[1, 1] *= sy; mtx[1, 2] *= sy
+        return mtx, dist
+    except Exception as e:
+        print(f"Warning: calibration load failed ({e}), skipping undistort")
+        return None
 
+
+def undistorted_camera_matrix(calib_path: str, w: int, h: int) -> Optional[np.ndarray]:
+    """The camera matrix of a frame that went through _undistort_if_calibrated.
+
+    cv2.undistort(..., new_mtx) leaves the pixels described by the matrix from
+    getOptimalNewCameraMatrix, not by the calibrated K: with alpha=1 the focal
+    length shrinks to keep every source pixel. Anything downstream that needs
+    intrinsics for these frames (georeferencing) must use this one.
+    """
+    loaded = _load_intrinsics(calib_path, w, h)
+    if loaded is None:
+        return None
+    mtx, dist = loaded
+    new_mtx, _ = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
+    return new_mtx
+
+
+def _undistort_if_calibrated(image: np.ndarray, calib_path: str) -> np.ndarray:
+    """Apply lens undistortion using camera_calibration.json if it exists; otherwise return image unchanged.
+
+    Only valid for OV5647 (NIR) frames — the Lepton (LWIR) camera has different optics
+    and has no calibration data of its own, so it must never be passed through this.
+    """
+    h, w = image.shape[:2]
+    loaded = _load_intrinsics(calib_path, w, h)
+    if loaded is None:
+        return image
+    mtx, dist = loaded
+    try:
         new_mtx, _ = cv2.getOptimalNewCameraMatrix(mtx, dist, (w, h), 1, (w, h))
         return cv2.undistort(image, mtx, dist, None, new_mtx)
     except Exception as e:
-        print(f"Warning: calibration load failed ({e}), skipping undistort")
+        print(f"Warning: undistort failed ({e}), skipping")
         return image
 
 
@@ -185,7 +231,7 @@ def get_image_info(image_path: str) -> dict:
         return {"error": str(e)}
 
 
-def validate_input_files(directory: str) -> Tuple[str, str, str]:
+def validate_input_files(directory: str, allow_missing_thermal: bool = False) -> Tuple[str, str, Optional[str]]:
     if not os.path.exists(directory):
         raise ValueError(f"Directory not found: {directory}")
     if not os.path.isdir(directory):
@@ -212,7 +258,7 @@ def validate_input_files(directory: str) -> Tuple[str, str, str]:
         missing_files.append("*-NIR-OFF.jpg")
     if not nir_on_image:
         missing_files.append("*-NIR-ON.jpg")
-    if not lwir_image:
+    if not lwir_image and not allow_missing_thermal:
         missing_files.append("*.pgm")
     if missing_files:
         error_msg = f"Missing required files in {directory}: {', '.join(missing_files)}"
@@ -221,7 +267,6 @@ def validate_input_files(directory: str) -> Tuple[str, str, str]:
         raise ValueError(error_msg)
     assert nir_off_image is not None
     assert nir_on_image is not None
-    assert lwir_image is not None
     return nir_off_image, nir_on_image, lwir_image
 
 
@@ -392,6 +437,28 @@ def apply_cached_transform(fixed_image_path: str, moving_image_path: str, cached
     return cached_transform, output, four_band_with_thermal
 
 
+def to_uint8(image: np.ndarray, low_pct: float = 1.0, high_pct: float = 99.0) -> np.ndarray:
+    """An 8-bit view of `image` that keeps its contrast.
+
+    uint8 passes through. Anything wider is stretched between robust percentiles
+    (a lone hot pixel must not set the scale) and clipped. A plain
+    `astype(np.uint8)` wraps modulo 256, which is what the Lepton's PGM does to
+    the registration input whenever its span exceeds 255: tools/capture.c
+    writes maxval = max - min, so almost every real frame is 16-bit.
+    """
+    if image.dtype == np.uint8:
+        return image
+    data = image.astype(np.float32)
+    if data.size == 0:
+        return data.astype(np.uint8)
+    lo, hi = np.percentile(data, [low_pct, high_pct])
+    if hi <= lo:
+        lo, hi = float(data.min()), float(data.max())
+    if hi <= lo:
+        return np.full(image.shape, 128, dtype=np.uint8)
+    return np.clip((data - lo) / (hi - lo) * 255.0, 0, 255).astype(np.uint8)
+
+
 def preprocess_image_for_registration(image: np.ndarray, image_type: str = "optical") -> np.ndarray:
     if not config.ENABLE_PREPROCESSING:
         return image
@@ -402,10 +469,11 @@ def preprocess_image_for_registration(image: np.ndarray, image_type: str = "opti
             gray = image[:, :, 0] if image.shape[2] > 1 else image
     else:
         gray = image
+    gray = to_uint8(gray)
     if config.FAST_MODE:
-        gray = cv2.equalizeHist(gray.astype(np.uint8))
+        gray = cv2.equalizeHist(gray)
     else:
-        gray = cv2.equalizeHist(gray.astype(np.uint8))
+        gray = cv2.equalizeHist(gray)
         gray = cv2.GaussianBlur(gray, (3, 3), 0.5)
         kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
         gray = cv2.filter2D(gray, -1, kernel)
@@ -494,7 +562,41 @@ def try_multiple_registration_strategies(fixed_image_path: str, moving_image_pat
     return best_result
 
 
+#: What the last fresh solve decided, for coreg() to record in the capture's
+#: coregistration_metadata.json. Reset by mutual_information_registration.
+last_solve: dict = {}
+
+
+def transform_drift_px(a: sitk.Transform, b: sitk.Transform, width: int, height: int, n: int = 5) -> float:
+    """Largest distance, in pixels, between where two transforms send a grid of points."""
+    worst = 0.0
+    for y in np.linspace(0, height - 1, n):
+        for x in np.linspace(0, width - 1, n):
+            pa, pb = a.TransformPoint((float(x), float(y))), b.TransformPoint((float(x), float(y)))
+            worst = max(worst, float(np.hypot(pa[0] - pb[0], pa[1] - pb[1])))
+    return worst
+
+
+def judge_solve(metric_value: float, solved: sitk.Transform, previous: Optional[sitk.Transform], width: int, height: int) -> dict:
+    """Decide whether a fresh solve may be cached; see MIN_ACCEPT_METRIC and MAX_TRANSFORM_DRIFT_PX."""
+    verdict = {"accepted": True, "reasons": [], "metric": float(metric_value), "drift_px": None}
+    limit = config.MIN_ACCEPT_METRIC.get(config.REGISTRATION_METRIC)
+    if limit is not None and not metric_value <= limit:   # also rejects NaN
+        verdict["reasons"].append(f"metric {metric_value:.4f} is worse than {limit}")
+    if previous is not None and config.MAX_TRANSFORM_DRIFT_PX is not None:
+        try:
+            drift = transform_drift_px(previous, solved, width, height)
+            verdict["drift_px"] = round(drift, 1)
+            if drift > config.MAX_TRANSFORM_DRIFT_PX:
+                verdict["reasons"].append(f"moved {drift:.1f} px from the cached transform (limit {config.MAX_TRANSFORM_DRIFT_PX})")
+        except Exception as e:
+            print(f"Could not compare with the cached transform: {e}")
+    verdict["accepted"] = not verdict["reasons"]
+    return verdict
+
+
 def mutual_information_registration(fixed_image_path: str, moving_image_path: str, directory: str = "", position_changed: bool = False, moving_image_data: Optional[np.ndarray] = None, calibration_file: str = "") -> Tuple[sitk.Transform, np.ndarray, np.ndarray]:
+    last_solve.clear()
     if directory and not position_changed:
         cached = load_transform_parameters(directory)
         if cached is not None:
@@ -574,9 +676,27 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
     if hasattr(final_transform, "GetParameters"):
         params = final_transform.GetParameters()
         print(f"Transform parameters: {params}")
+    use_transform = final_transform
     if directory:
-        metadata = {"fixed_image": os.path.basename(fixed_image_path), "moving_image": os.path.basename(moving_image_path), "transform_type": config.TRANSFORM_TYPE, "metric": config.REGISTRATION_METRIC, "image_size": fixed_image_cv_resized.shape[:2]}
-        save_transform_parameters(final_transform, directory, metadata)
+        height, width = fixed_image_cv_resized.shape[:2]
+        previous = None
+        cached = load_transform_parameters(directory)
+        if cached is not None and cached[0].GetDimension() == 2 and validate_transform_compatibility(cached[0], fixed_image_path, moving_image_path, cached[2]):
+            previous = cached[0]
+        verdict = judge_solve(registration_method.GetMetricValue(), final_transform, previous, width, height)
+        last_solve.update(verdict)
+        if verdict["accepted"]:
+            metadata = {"fixed_image": os.path.basename(fixed_image_path), "moving_image": os.path.basename(moving_image_path), "transform_type": config.TRANSFORM_TYPE, "metric": config.REGISTRATION_METRIC, "metric_value": verdict["metric"], "image_size": fixed_image_cv_resized.shape[:2]}
+            save_transform_parameters(final_transform, directory, metadata)
+            print(f"Registration accepted and cached (metric {verdict['metric']:.4f}, drift {verdict['drift_px']} px)")
+        else:
+            print(f"Registration REJECTED, not cached: {'; '.join(verdict['reasons'])}")
+            if previous is not None:
+                print("Using the previous cached transform for this capture")
+                last_solve["used"] = "previous_cached"
+                return apply_cached_transform(fixed_image_path, moving_image_path, previous, calibration_file=calibration_file)
+            print("No previous cached transform: using the rejected solve for this capture only")
+            last_solve["used"] = "rejected_solve"
     original_thermal_sitk = sitk.GetImageFromArray(original_thermal_image.astype(np.float32))
     moving_resampled = sitk.Resample(original_thermal_sitk, fixed_image_sitk, final_transform, sitk.sitkLinear, 0.0, original_thermal_sitk.GetPixelID())
     moving_resampled_np = sitk.GetArrayFromImage(moving_resampled)
@@ -592,13 +712,38 @@ def mutual_information_registration(fixed_image_path: str, moving_image_path: st
     return final_transform, output, four_band_with_thermal
 
 
-def extract_nir_band(nir_on_path: str, nir_off_path: str, target_size: Tuple[int, int]) -> np.ndarray:
+def rgb_only_registration(fixed_image_path: str, calibration_file: str = "") -> Tuple[None, np.ndarray, np.ndarray]:
+    """Stand-in for registration when the capture has no thermal frame.
+
+    Same undistortion and resizing as the registered path, with an all-zero
+    thermal band, so the TIFFs keep their five-band layout. Only a model that
+    reads the RGB bands alone may be run on the result (tools/segformer_daemon.py
+    refuses anything else when asked for rgb_only).
+    """
+    fixed = cv2.imread(fixed_image_path, cv2.IMREAD_UNCHANGED)
+    if fixed is None:
+        raise ValueError(f"Could not load fixed image: {fixed_image_path}")
+    fixed = _undistort_if_calibrated(fixed, calibration_file or _default_calibration_path())
+    if fixed.shape[0] > config.MAX_IMAGE_SIZE or fixed.shape[1] > config.MAX_IMAGE_SIZE:
+        fixed = cv2.resize(fixed, (int(fixed.shape[1] * config.SCALE_PERCENT / 100), int(fixed.shape[0] * config.SCALE_PERCENT / 100)))
+    overlay = fixed.astype(np.float32)
+    thermal = np.zeros(fixed.shape[:2], dtype=np.uint8)
+    return None, np.clip(fixed, 0, 255).astype(np.uint8), np.dstack((overlay, thermal))
+
+
+def extract_nir_band(nir_on_path: str, nir_off_path: str, target_size: Tuple[int, int], calibration_file: str = "") -> np.ndarray:
     nir_on = cv2.imread(nir_on_path)
     nir_off = cv2.imread(nir_off_path)
     if nir_on is None:
         raise ValueError(f"Could not load NIR-ON image: {nir_on_path}")
     if nir_off is None:
         raise ValueError(f"Could not load NIR-OFF image: {nir_off_path}")
+    # Same undistortion as the frame the other bands are registered to
+    # (the NIR-OFF image in registration), so the NIR band lines up with them.
+    # Both frames come from the same OV5647, so the same calibration applies.
+    calib_path = calibration_file or _default_calibration_path()
+    nir_on = _undistort_if_calibrated(nir_on, calib_path)
+    nir_off = _undistort_if_calibrated(nir_off, calib_path)
     nir_on_rgb = cv2.cvtColor(nir_on, cv2.COLOR_BGR2RGB)
     nir_off_rgb = cv2.cvtColor(nir_off, cv2.COLOR_BGR2RGB)
     red_channel_nir = nir_on_rgb[:, :, 0]
@@ -722,6 +867,19 @@ def save_metadata_summary(directory: str, output_paths: dict, image_info: dict) 
     print(f"Saved metadata summary: {metadata_file}")
 
 
+def _intrinsics_for(image_path: str, calibration_file: str = ""):
+    """The camera matrix of `image_path` after undistortion, as nested lists, or None."""
+    try:
+        frame = cv2.imread(image_path)
+        if frame is None:
+            return None
+        h, w = frame.shape[:2]
+        k = undistorted_camera_matrix(calibration_file or _default_calibration_path(), w, h)
+        return None if k is None else [[float(v) for v in row] for row in k]
+    except Exception:
+        return None
+
+
 def apply_thread_setting() -> Optional[int]:
     """Run SimpleITK single-threaded when COREG_SINGLE_THREAD=1 (bench units only).
 
@@ -743,14 +901,19 @@ def apply_thread_setting() -> Optional[int]:
 
 def coreg(directory: str, position_changed: bool = False, calibration_file: str = "") -> str:
     try:
+        last_solve.clear()
         if apply_thread_setting():
             print("Co-registration: SimpleITK single-threaded (COREG_SINGLE_THREAD=1)")
-        nir_off_path, nir_on_path, lwir_path = validate_input_files(directory)
-        # Loading LWIR image
-        lwir_image = cv2.imread(lwir_path, cv2.IMREAD_UNCHANGED)
-        if lwir_image is None:
-            raise RuntimeError(f"Could not load LWIR image: {lwir_path}")
-        lwir_normalized = normalize_image(lwir_image, 0, 255)
+        nir_off_path, nir_on_path, lwir_path = validate_input_files(directory, allow_missing_thermal=True)
+        lwir_normalized = None
+        if lwir_path is None:
+            print("⚠️ No thermal frame in this capture: building the RGB and NIR bands only (thermal band zero)")
+            capture_status.mark(directory, thermal="missing")
+        else:
+            lwir_image = cv2.imread(lwir_path, cv2.IMREAD_UNCHANGED)
+            if lwir_image is None:
+                raise RuntimeError(f"Could not load LWIR image: {lwir_path}")
+            lwir_normalized = normalize_image(lwir_image, 0, 255)
         output_filenames = {"registered": "registered.jpg", "nir_band": "NIR_band.png", "five_band": "final_5_band.tiff", "color_preserved": "color_preserved_5_band.tiff", "metadata": "coregistration_metadata.json"}
         output_paths = {name: os.path.join(directory, filename) for name, filename in output_filenames.items()}
         five_band_stale = False
@@ -766,7 +929,10 @@ def coreg(directory: str, position_changed: bool = False, calibration_file: str 
             # Performing image registration
             print(get_thermal_colormap_info())
             try:
-                transform, output, four_band = try_multiple_registration_strategies(nir_off_path, lwir_path, directory, position_changed, lwir_normalized, calibration_file)
+                if lwir_path is None:
+                    transform, output, four_band = rgb_only_registration(nir_off_path, calibration_file)
+                else:
+                    transform, output, four_band = try_multiple_registration_strategies(nir_off_path, lwir_path, directory, position_changed, lwir_normalized, calibration_file)
                 cv2.imwrite(output_paths["registered"], output)
                 # Registered output saved
             except Exception as e:
@@ -774,7 +940,7 @@ def coreg(directory: str, position_changed: bool = False, calibration_file: str 
             # Extracting NIR band
             try:
                 width, height = four_band.shape[1], four_band.shape[0]
-                nir_band = extract_nir_band(nir_on_path, nir_off_path, (width, height))
+                nir_band = extract_nir_band(nir_on_path, nir_off_path, (width, height), calibration_file)
                 cv2.imwrite(output_paths["nir_band"], nir_band)
                 # NIR band saved
             except Exception as e:
@@ -808,7 +974,7 @@ def coreg(directory: str, position_changed: bool = False, calibration_file: str 
                 raise RuntimeError(f"Failed to create/save color-preserved image: {e}")
             # Saving metadata summary
             try:
-                image_info = {"nir_off": get_image_info(nir_off_path), "nir_on": get_image_info(nir_on_path), "lwir": get_image_info(lwir_path), "output_shape": four_band.shape, "registration_transform": list(transform.GetParameters()) if hasattr(transform, "GetParameters") else None}
+                image_info = {"nir_off": get_image_info(nir_off_path), "nir_on": get_image_info(nir_on_path), "lwir": get_image_info(lwir_path) if lwir_path else None, "output_shape": four_band.shape, "registration_transform": list(transform.GetParameters()) if hasattr(transform, "GetParameters") else None, "registration_solve": dict(last_solve) or None, "undistorted_camera_matrix": _intrinsics_for(nir_off_path, calibration_file)}
                 save_metadata_summary(directory, output_paths, image_info)
                 # Metadata summary saved
             except Exception as e:
@@ -832,11 +998,14 @@ def main():
     parser.add_argument("--fast", action="store_true", help="Enable fast mode with reduced iterations and preprocessing")
     parser.add_argument("--single-strategy", action="store_true", help="Use only the best registration strategy (faster)")
     parser.add_argument("--multiple-strategies", action="store_true", help="Try multiple registration strategies (slower but potentially better)")
+    parser.add_argument("--no-drift-check", action="store_true", help="Cache a new solve even if it moved far from the cached transform (camera remounted on purpose)")
     parser.add_argument("--calibration-file", default="", help="Path to camera_calibration.json (default: config/camera_calibration.json in repo root)")
     args = parser.parse_args()
     directory = args.directory
     position_changed = args.position_changed
     calibration_file = args.calibration_file
+    if args.no_drift_check:
+        config.MAX_TRANSFORM_DRIFT_PX = None
     if args.fast:
         config.FAST_MODE = True
         print("Fast mode enabled")
