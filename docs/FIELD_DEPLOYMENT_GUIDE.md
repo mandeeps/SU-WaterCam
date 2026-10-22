@@ -400,8 +400,8 @@ The other top-level fields control monitoring behavior. From
 | `bitmap_method2_enabled`           | bool    |         | LoRa bitmap method 2 (lossless context model, up to 640 px, about twice the pixels in the same bytes); default `true`. `false` goes back to methods 0/1 up to 160 px. Needs an API that decodes it (docs/BITMAP_DECODING_SPEC.md) |
 | `stage_threshold`                  | cm      | 0–65535 | Reserved: kept and reported, but unused on the node (the server applies its own stream gauge thresholds) |
 | `monitoring_frequency`             | minutes | 1–10080 | How often the unit checks/reports under normal conditions                                         |
-| `emergency_frequency`              | minutes | 1–1440  | How often it reports once a threshold is exceeded (should be shorter than `monitoring_frequency`) |
-| `photo_interval`                   | seconds | 30–1440 | Time between captures while the unit is awake (default 60); applied to the running program        |
+| `emergency_frequency`              | minutes | 1–240   | Time between captures (and uploads) in emergency mode and while a remote access session holds the unit awake after its wake's captures (default 10); applied to the running program from the next capture |
+| `photo_interval`                   | seconds | 30–1440 | Time between captures during a normal wake (default 60; three captures, then shutdown); applied to the running program |
 | `neighborhood_emergency_frequency` | minutes | 1–1440  | Reporting frequency once a *neighboring* unit signals emergency                                   |
 | `ip_fallback_after_hours`          | hours   | 0–168   | One IP upload, even with `ip_upload.enabled` false, when no bitmap was delivered for this long and LoRa holds bitmaps back (default 12; 0 = off). About 90 KB per cellular wake (`tools/ip_fallback.py`) |
 | `ip_fallback_min_interval_hours`   | hours   | 0–168   | At most one such fallback upload this often, whether or not it got through (default 6) |
@@ -698,7 +698,11 @@ iteration sends systemd a heartbeat (`tools/systemd_watchdog.py`, from
 `call_shutdown`), and if none arrives for 15 minutes, because the graph has
 stalled (a dead worker, a wedged read), systemd kills ticktalk and
 `Restart=on-failure` starts it again 10 s later. Iterations are about a minute
-apart, so a normal wake never comes near it. `systemctl show ticktalk -p
+apart, so a normal wake never comes near it. In emergency mode the interval is
+`emergency_frequency` (10 minutes by default, up to 240), so the capture-loop
+watcher (`tools/photo_interval_watcher.py`) sends the heartbeat between
+iterations, for as long as the last iteration is no older than the current
+period plus 15 minutes. `systemctl show ticktalk -p
 WatchdogUSec -p WatchdogTimestamp` shows the setting and the last heartbeat; a
 restart shows as `Watchdog timeout` in `journalctl -u ticktalk`. Copy the unit
 again on units installed before it (as above).

@@ -123,9 +123,11 @@ shutdown.
 Emergency mode keeps the unit on: `call_shutdown()` ignores the iteration
 limit, and the Witty Pi's scheduled shutdown is replaced by a backstop an hour
 after emergency mode's end. It captures every
-`photo_interval` for as long as it lasts.
+`emergency_frequency` minutes (default 10, 1-240) for as long as it lasts, the first
+capture within a minute of it starting; `photo_interval` applies to normal wakes
+only (`tools/photo_interval_watcher.py`).
 
-- **Draw:** about 3–4.5 W continuously, idle plus a capture each minute, more with the modem. *Estimate.*
+- **Draw:** about 3–4.5 W continuously, idle plus a capture every 10 minutes (it was every minute before the interval was applied), more with the modem. *Estimate.*
 - **Per day:** about 70–110 Wh.
 - **On the V75 alone:** 72 Wh lasts about **16–24 hours** with no sun (the V50's 48 Wh, about 11–16 hours).
 - **Solar can't sustain it:** a clear day's 20–30 Wh doesn't cover it. Emergency mode needs a time limit (see below).
