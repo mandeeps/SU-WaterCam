@@ -145,8 +145,8 @@ def get_battery_status(wittypi_data: Optional[dict] = None) -> dict:
     if wittypi_reading is not None:
         output_v, output_a = wittypi_reading
         logging.info(
-            "Battery: no state-of-charge sensor; WittyPi output %.3fV, %.3fA",
-            output_v, output_a,
+            "Battery: no state-of-charge sensor; WittyPi output %.3fV, %s A",
+            output_v, "?" if output_a is None else f"{output_a:.3f}",
         )
         return {
             "battery_pct": None,
@@ -156,7 +156,7 @@ def get_battery_status(wittypi_data: Optional[dict] = None) -> dict:
             "current_ma": None,
             "mah_remaining": None,
             "output_voltage_v": round(output_v, 3),
-            "output_current_a": round(output_a, 3),
+            "output_current_a": round(output_a, 3) if output_a is not None else None,
         }
 
     # ── Path 4: unavailable ───────────────────────────────────────────────
@@ -293,10 +293,11 @@ def _save_state(state: dict) -> None:
 # WittyPi output-voltage interface
 # ---------------------------------------------------------------------------
 
-def _read_wittypi_output(prefetched: Optional[dict] = None) -> Optional[tuple[float, float]]:
+def _read_wittypi_output(prefetched: Optional[dict] = None) -> Optional[tuple[float, Optional[float]]]:
     """Read output voltage (V) and current (A) from the WittyPi 4.
 
-    Returns (output_voltage_v, output_current_a), or None if unavailable.
+    Returns (output_voltage_v, output_current_a), or None if the voltage is
+    unavailable; the current is None when only it could not be read.
     The output voltage is the 5V rail delivered to the Raspberry Pi and droops
     gradually as the Voltaic V50 depletes, providing a rough SOC signal.
 
@@ -313,10 +314,11 @@ def _read_wittypi_output(prefetched: Optional[dict] = None) -> Optional[tuple[fl
         if data.get("status") != "wittypi_data_retrieved":
             return None
         output_v = data.get("internal_voltage")
-        output_a = data.get("internal_current", 0.0)
+        output_a = data.get("internal_current")
         if output_v is None or output_v <= 0:
             return None
-        return float(output_v), float(output_a)
+        # A current the board didn't give stays None; the voltage is still good
+        return float(output_v), (float(output_a) if output_a is not None else None)
     except Exception as e:
         logging.debug("WittyPi output read failed: %s", e)
         return None

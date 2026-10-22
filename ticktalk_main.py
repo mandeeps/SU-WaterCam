@@ -164,13 +164,16 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     bitmap. If the mDot isn't joined, both are queued for store-and-forward.
     """
 
-    from tools.lora_handler_concurrent import get_lora_handler, get_config_value, encode_compact_packet, COMPACT_PACKET_SIZE
+    from tools.lora_handler_concurrent import (get_lora_handler, get_config_value, encode_compact_packet,
+                                               encode_sensor_chunks, COMPACT_PACKET_SIZE, CHUNK_MIN_LIMIT,
+                                               QUEUE_CHUNK_LIMIT)
+    from tools.lora_send import WakeSender
     from tools import lora_store_forward as _lsf
 
     from tools.bno055_imu import get_orientation
     from tools.aht20_temperature import get_aht20
     from tools.get_gps import get_location_with_retry
-    from tools.lora_runtime_integration import get_parameter
+    from tools.lora_runtime_integration import get_parameter, DEFAULT_EMERGENCY_FREQUENCY
     # Helper functions are now imported at module level
 
     # LoRa transmission is always enabled
@@ -212,13 +215,15 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         from tools.wittypi_control import get_wittypi_status
         wittypi_data = get_wittypi_status()
         if wittypi_data.get('status') == 'wittypi_data_retrieved':
-            data.update({
-                'wittypi_temperature': wittypi_data.get('temperature', 0.0),
-                'wittypi_internal_voltage': wittypi_data.get('internal_voltage', 0.0),
-                # Witty Pi input (the V50's 5 V): only the compact packet carries it
-                'wittypi_vin': wittypi_data.get('battery_voltage')
-            })
-            print(f"WittyPi data: temp={wittypi_data.get('temperature', 0.0)}°C, internal={wittypi_data.get('internal_voltage', 0.0)}V")
+            # A reading the board didn't give is None: leave the field out
+            # rather than send a made-up value
+            for key, source in (('wittypi_temperature', 'temperature'),
+                                ('wittypi_internal_voltage', 'internal_voltage'),
+                                # Witty Pi input (the V50's 5 V): only the compact packet carries it
+                                ('wittypi_vin', 'battery_voltage')):
+                if wittypi_data.get(source) is not None:
+                    data[key] = wittypi_data[source]
+            print(f"WittyPi data: temp={wittypi_data.get('temperature')}°C, internal={wittypi_data.get('internal_voltage')}V")
         else:
             print(f"⚠️ WittyPi data unavailable: {wittypi_data.get('status', 'unknown')}")
     except Exception as e:
@@ -285,7 +290,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         'status_area_threshold': area_threshold,
         'stage_threshold': stage_threshold,
         'monitoring_frequency': get_parameter('monitoring_frequency', 60),
-        'emergency_frequency': get_parameter('emergency_frequency', 5),
+        'emergency_frequency': get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY),
         'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30),
         'audio_recording_enabled': 1 if get_parameter('audio_recording_enabled', False) else 0,
     })
@@ -389,7 +394,8 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
                          if k in sensors_to_transmit or k == 'timestamp'}
                         if (sensor_tracker and sensors_to_transmit) else data)
             if always_transmit_sensors or not sensor_tracker or sensors_to_transmit:
-                _sensor_hex = _encode(_sf_data).hex()
+                # Chunks small enough for the lower data rates; the queue holds them
+                _sensor_hex = [c.hex() for c in encode_sensor_chunks(_sf_data, QUEUE_CHUNK_LIMIT)] or None
         except Exception as _e:
             print(f"⚠️ S&F: sensor encode failed: {_e}")
         try:
@@ -426,7 +432,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     # until ADR raises it, and the stored value lags. A packet that doesn't fit,
     # or fails, waits in the store-and-forward queue (drained below only once it
     # fits, so the gateway never sees sends that can't work), and a sensor
-    # packet that doesn't fit is replaced by the 11-byte compact one.
+    # packet is sent as chunks that do (or as the 11-byte compact one at DR0).
     try:
         size_limit = handler.size_limit_now()
     except Exception as e:
@@ -434,7 +440,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         size_limit = handler.get_size_limit()
     print(f"📏 LoRa payload limit now: {size_limit} B")
     deferred = {}
-    sensor_sent = False
+    sender = WakeSender(handler)
 
     if always_transmit_sensors or not sensor_tracker or sensors_to_transmit:
         try:
@@ -451,35 +457,37 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
                 transmission_result['transmitted_sensors'] = list(data.keys())
                 print(f"📡 Transmitting all sensor data (no tracker, always_transmit_sensors, or all sensors qualify)")
             
-            sensor_packet = handler.compressed_encoding(filtered_data)
-            if len(sensor_packet) <= size_limit:
-                sensor_sent = handler.transmit(sensor_packet.hex())
-                if not sensor_sent:
-                    print("⚠️ Sensor packet not sent: queued for a later cycle")
+            if size_limit < CHUNK_MIN_LIMIT:
+                # DR0: no room for a useful chunk, so the 11-byte compact packet
+                # of the key readings stands in for the sensor packet. Before the
+                # bitmap, which the API pairs with the packet just before it. The
+                # baseline stays where it was: the full fields go when there is room.
+                compact = encode_compact_packet(data)
+                if sender.transmit(compact.hex()):
+                    print(f"📡 Compact packet sent ({len(compact)} B): {compact.hex()}")
+                else:
+                    print("⚠️ Compact packet not sent")
             else:
-                print(f"📏 Sensor packet {len(sensor_packet)} B > {size_limit} B limit: queued for later")
-            if not sensor_sent:
-                deferred['sensor_hex'] = sensor_packet.hex()
-            # Sent or queued: either way the tracker's baseline moves on
-            from tools.sensor_changes import mark_sent
-            mark_sent(filtered_data, full=full_send)
-            
+                # Chunks of at most the limit, each starting with the capture time;
+                # one that fails (and every later one) is queued
+                chunks = encode_sensor_chunks(filtered_data, size_limit)
+                print(f"📡 Sensor packet in {len(chunks)} chunk(s) of at most {size_limit} B: "
+                      f"{[len(c) for c in chunks]}")
+                unsent = []
+                for chunk in chunks:
+                    if unsent or not sender.transmit(chunk.hex()):
+                        unsent.append(chunk.hex())
+                if unsent:
+                    print(f"⚠️ {len(unsent)} sensor chunk(s) not sent: queued for a later cycle")
+                    deferred['sensor_hex'] = unsent
+                # Sent or queued: either way the tracker's baseline moves on
+                from tools.sensor_changes import mark_sent
+                mark_sent(filtered_data, full=full_send)
+
         except Exception as e:
             print(f"⚠️ Failed to transmit sensor data: {e}")
     else:
         print(f"📊 No sensor changes detected - skipping sensor data transmission")
-
-    # The full sensor packet didn't go out: send the key readings in 11 bytes
-    # now. Before the bitmap, which the API pairs with the packet just before it.
-    if 'sensor_hex' in deferred and size_limit >= COMPACT_PACKET_SIZE:
-        try:
-            compact = encode_compact_packet(data)
-            if handler.transmit(compact.hex()):
-                print(f"📡 Compact packet sent ({len(compact)} B): {compact.hex()}")
-            else:
-                print("⚠️ Compact packet not sent either")
-        except Exception as e:
-            print(f"⚠️ Compact packet failed: {e}")
 
     if not bitmap:
         print("[lora_token_with_tracker] No bitmap data to transmit")
@@ -503,7 +511,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
                     bitmap_packet = _refit
             if len(bitmap_packet) <= size_limit:
                 print(f"[lora_token_with_tracker] Bitmap: {len(bitmap_packet) - bitmap_fit.TLV_OVERHEAD}B → TLV 08 18")
-                if handler.transmit(bitmap_packet.hex()):
+                if sender.transmit(bitmap_packet.hex()):
                     bitmap_policy.mark_sent(data, dirname, now=captured_at)
                     # Older bitmaps still queued would only show an older scene
                     _lsf.supersede_bitmaps(captured_at)
@@ -538,7 +546,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     if _sf_enabled:
         try:
             _drain = _lsf.drain(
-                handler,
+                sender,
                 max_packets=get_config_value('lora_sf_drain_per_cycle', 2),
                 max_age_days=get_config_value('lora_sf_max_age_days', 7),
                 size_limit=size_limit,
@@ -727,13 +735,13 @@ def validate_configuration(trigger):
     """
     Validate that all required configuration parameters are properly set
     """
-    from tools.lora_runtime_integration import get_parameter
+    from tools.lora_runtime_integration import get_parameter, DEFAULT_EMERGENCY_FREQUENCY
     
     required_params = {
         'area_threshold': (10, 'default flood detection threshold'),
         'stage_threshold': (50, 'default stage height threshold'),
         'monitoring_frequency': (60, 'default monitoring interval'),
-        'emergency_frequency': (5, 'default emergency monitoring interval'),
+        'emergency_frequency': (DEFAULT_EMERGENCY_FREQUENCY, 'default emergency capture interval (minutes)'),
         # transmission_enabled and gps_enabled removed (always-on policy)
         
         'shutdown_iteration_limit': (3, 'default shutdown limit'),
@@ -798,7 +806,21 @@ def get_time(trigger):
         return directory
     except Exception as e:
         print(f"Failed to create directory: {e}")
-        return path.join(repo_root, "images", "fallback")
+        # A fresh, timestamped directory every time. A shared "fallback" directory
+        # kept the previous failure's outputs, and co-registration skips work
+        # when its outputs already exist, so stale results were sent as new.
+        now = datetime.now()
+        fallback = path.join(repo_root, "images", now.strftime('%Y%m%d-%H%M%S') + "-fallback")
+        try:
+            makedirs(fallback, exist_ok=True)
+            try:
+                from tools.capture_time import write_capture_time
+                write_capture_time(fallback, now.timestamp())
+            except Exception as time_exc:
+                print(f"Could not record the capture time in {fallback}: {time_exc}")
+        except Exception as fallback_exc:
+            print(f"Could not create fallback directory {fallback}: {fallback_exc}")
+        return fallback
 
 @SQify
 def record_audio(trigger, directory):
@@ -902,15 +924,33 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
         print(f"⚠️ Skipping segmentation: no co-registered image ({tiff_path})")
         return None
 
+    # No thermal frame this capture (tt_take_photos.flir): the TIFF's thermal band
+    # is zeros. Only a model that reads the RGB bands alone may run on it, and only
+    # the daemon can say whether the loaded one does. Otherwise skip, and say so
+    # (capture_status.json, this log): no mask, so no camera_water_pct either.
+    from tools import capture_status
+    no_thermal = capture_status.thermal_missing(filepath)
+
     try:
         # Prefer the persistent daemon — no cold-start, model stays loaded.
         # Not while a cellular upload runs: together they pull the Pi under-voltage.
         if os.path.exists(socket_path):
             with power_exclusive("segmentation", 120):
-                ok = segformer_via_daemon(tiff_path, output_path, socket_path)
+                ok = segformer_via_daemon(tiff_path, output_path, socket_path, rgb_only=no_thermal)
             if ok:
+                if no_thermal:
+                    print("⚠️ No thermal frame: segmented with the RGB-only model")
+                    capture_status.mark(filepath, segmentation="rgb_only")
                 return output_path
+            if no_thermal:
+                print("⚠️ No thermal frame and no RGB-only model: segmentation skipped for this capture")
+                capture_status.mark(filepath, segmentation="skipped_no_thermal")
+                return None
             print("⚠️ Daemon call failed, falling back to subprocess")
+        elif no_thermal:
+            print("⚠️ No thermal frame and no segmentation daemon: segmentation skipped for this capture")
+            capture_status.mark(filepath, segmentation="skipped_no_thermal")
+            return None
 
         # Legacy fallback: spawn a fresh Python process each cycle.
         segformer_location = os.environ.get("SEGFORMER_DIR", "/home/pi/segformer_5band")
@@ -931,21 +971,22 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
 def call_shutdown(state):
     import sys
     from subprocess import call
-    from tools.lora_runtime_integration import get_runtime_manager
+    from tools.lora_runtime_integration import get_runtime_manager, DEFAULT_SHUTDOWN_LIMIT
 
     import time
 
     new_count = 1
     auto_shutdown_enabled = True
-    shutdown_limit = 3
+    shutdown_limit = DEFAULT_SHUTDOWN_LIMIT
     emergency_mode = False
     emergency_since = None
     emergency_max_hours = 24
 
     # One heartbeat per iteration for ticktalk.service's WatchdogSec (#208)
     try:
-        from tools.systemd_watchdog import heartbeat
+        from tools.systemd_watchdog import heartbeat, note_progress
         heartbeat()
+        note_progress()
     except Exception:
         pass
 
@@ -1046,15 +1087,6 @@ def call_shutdown(state):
         print(f"✅ Continuing: count={new_count} < limit={shutdown_limit} or shutdown disabled")
 
     return "continue"
-
-@SQify
-def flir_planb(dummy):
-    from tools.lepton_reset_gpiozero import reset
-    print("\n reset lepton \n")
-    try:
-        reset()
-    except Exception as e:
-        print(f"⚠️ Failed to reset lepton: {e}")
 
 @SQify
 def compress_bitmap(segmented_file):
@@ -1256,7 +1288,7 @@ def emergency_workflow(trigger, monitoring_params, dirname, photo, lepton_file, 
     # Photos, lepton data, coregistration, segmentation, compression, LoRa transmission, and shutdown check are now passed as parameters from GRAPH level
     
     # LoRa monitoring and parameter management
-    from tools.lora_runtime_integration import get_parameter, set_parameter
+    from tools.lora_runtime_integration import get_parameter, set_parameter, DEFAULT_EMERGENCY_FREQUENCY
     
     # Get current parameters directly
     try:
@@ -1268,7 +1300,6 @@ def emergency_workflow(trigger, monitoring_params, dirname, photo, lepton_file, 
         if emergency_mode:
             # Set faster monitoring frequency for emergency
             set_parameter('monitoring_frequency', 5)  # 5 minutes instead of 60
-            set_parameter('emergency_frequency', 1)   # 1 minute for critical monitoring
             print("🚨 Emergency parameters set: Fast monitoring (5min), continuous transmission")
         
         # Return comprehensive status with emergency indicators
@@ -1278,7 +1309,7 @@ def emergency_workflow(trigger, monitoring_params, dirname, photo, lepton_file, 
             'emergency_mode': emergency_mode,
             'area_threshold': area_threshold,
             'monitoring_frequency': get_parameter('monitoring_frequency', 5),  # Use updated value
-            'emergency_frequency': get_parameter('emergency_frequency', 1),   # Use updated value
+            'emergency_frequency': get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY),   # Use updated value
             'bitmap_compressed': True,
             'lora_transmitted': True,
             'photos_captured': True,
@@ -1342,12 +1373,12 @@ def emergency_status_monitor(trigger):
     Monitor and report emergency status for system visibility
     """
     from datetime import datetime
-    from tools.lora_runtime_integration import get_parameter
+    from tools.lora_runtime_integration import get_parameter, DEFAULT_EMERGENCY_FREQUENCY
     
     try:
         emergency_mode = get_parameter('emergency_mode', False)
         monitoring_freq = get_parameter('monitoring_frequency', 60)
-        emergency_freq = get_parameter('emergency_frequency', 5)
+        emergency_freq = get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY)
         
         if emergency_mode:
             print(f"🚨 EMERGENCY STATUS ({datetime.now().strftime('%H:%M:%S')}):")
@@ -1380,7 +1411,7 @@ def lora_parameter_monitor(trigger):
     This function runs periodically and checks for parameter changes
     """
     from datetime import datetime
-    from tools.lora_runtime_integration import get_parameter, sync_lora_parameters
+    from tools.lora_runtime_integration import get_parameter, sync_lora_parameters, DEFAULT_EMERGENCY_FREQUENCY
     from tools.lora_handler_concurrent import get_lora_handler
     
     # Sync runtime parameters with LoRa config to ensure consistency
@@ -1397,7 +1428,7 @@ def lora_parameter_monitor(trigger):
             'area_threshold': get_parameter('area_threshold', 10),
             'stage_threshold': get_parameter('stage_threshold', 50),
             'monitoring_frequency': get_parameter('monitoring_frequency', 60),
-            'emergency_frequency': get_parameter('emergency_frequency', 5),
+            'emergency_frequency': get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY),
             'debug_mode': get_parameter('debug_mode', False),
             
             'photo_interval': get_parameter('photo_interval', 60),
@@ -1411,7 +1442,7 @@ def lora_parameter_monitor(trigger):
             'area_threshold': 10,
             'stage_threshold': 50,
             'monitoring_frequency': 60,
-            'emergency_frequency': 5,
+            'emergency_frequency': DEFAULT_EMERGENCY_FREQUENCY,
             'debug_mode': False,
             
             'photo_interval': 60,
@@ -1442,7 +1473,7 @@ def lora_emergency_handler(trigger, lora_status):
     This function is triggered when emergency mode changes
     """
     from datetime import datetime
-    from tools.lora_runtime_integration import get_parameter
+    from tools.lora_runtime_integration import get_parameter, DEFAULT_EMERGENCY_FREQUENCY
     
     if lora_status and lora_status.get('emergency_mode', False):
         print("🚨 EMERGENCY MODE DETECTED - Taking immediate action!")
@@ -1454,7 +1485,7 @@ def lora_emergency_handler(trigger, lora_status):
                 'emergency_triggered': True,
                 'timestamp': datetime.now().isoformat(),
                 'actions_taken': ['emergency_logging', 'increased_monitoring'],
-                'monitoring_frequency': get_parameter('emergency_frequency', 5)
+                'monitoring_frequency': get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY)
             }
             return emergency_actions
         except Exception as e:
@@ -1768,8 +1799,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     IP fallback (tools/ip_fallback.py): this capture goes over IP even with
     ip_upload.enabled false or LoRa healthy when the server asked for it
     (downlink 17 97 NN, one upload per wake) or when no bitmap was delivered for
-    ip_fallback_after_hours while LoRa holds bitmaps back. A cellular connection
-    brought up for it goes down again afterwards unless IP upload is enabled.
+    ip_fallback_after_hours while LoRa holds bitmaps back.
+
+    A cellular connection this wake brought up goes down again once the upload and
+    the command poll are done (or on any failure). It isn't brought up when WiFi is
+    connected and Tailscale shows the server online: only the server is down then.
+    On cellular only a few queued readings are sent per wake (tools/transmit_ip.py).
 
     After a reading is delivered, any pending command is collected: the uplink
     asks for it (want_command) and the reply carries it, or, from a server that
@@ -1787,7 +1822,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                                    cellular_down, handle_downlink_reply, reply_commands,
                                    wifi_connected, wifi_in_range)
     from tools import lora_store_forward as _lsf
-    from tools.lora_runtime_integration import get_parameter, set_parameter
+    from tools.lora_runtime_integration import get_parameter, set_parameter, DEFAULT_EMERGENCY_FREQUENCY
 
     tx = IPTransmitter()
 
@@ -1929,95 +1964,97 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         data['area_threshold']                    = get_parameter('area_threshold', 10)
         data['stage_threshold']                   = get_parameter('stage_threshold', 50)
         data['monitoring_frequency']              = get_parameter('monitoring_frequency', 60)
-        data['emergency_frequency']               = get_parameter('emergency_frequency', 5)
+        data['emergency_frequency']               = get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY)
         data['neighborhood_emergency_frequency']  = get_parameter('neighborhood_emergency_frequency', 30)
         data['audio_recording_enabled']           = 1 if get_parameter('audio_recording_enabled', False) else 0
 
         # ── Build channel list ─────────────────────────────────────────────────
+        # Every channel is built on its own: a value that can't be encoded (None,
+        # NaN, out of range) drops that channel and nothing else.
         channels = []
 
+        def _add(code, build):
+            try:
+                channels.append(dict(code=code, **build()))
+            except Exception as e:
+                print(f"⚠️ IP uplink: channel {code} skipped: {e}")
+
+        def _hex(fmt, *values):
+            return lambda: {"payload_hex": struct.pack(fmt, *values).hex()}
+
+        # Clamped to the uint32 range so struct.pack never raises; NaN and non-numbers raise
+        _u32 = lambda v: max(0, min(0xFFFFFFFF, int(v)))
+
         # 00 01 — device timestamp (8-byte uint64)
-        channels.append({"code": "00 01", "payload_hex": struct.pack(">Q", ts_now).hex()})
+        _add("00 01", _hex(">Q", ts_now))
+
+        # 01 04 — emergency status (uint32 0/1), in every upload; the same runtime
+        # flag the LoRa packet's 01 04 carries
+        _add("01 04", lambda: {"payload_hex": struct.pack(">I", 1 if get_parameter('emergency_mode', False) else 0).hex()})
 
         # 02 01 — battery percent from battery_manager (source varies by hardware); omitted when unavailable
         batt_pct = data.get('battery_percent')
         if batt_pct is not None:
-            channels.append({"code": "02 01", "payload_hex": struct.pack(">I", batt_pct).hex()})
+            _add("02 01", lambda: {"payload_hex": struct.pack(">I", _u32(batt_pct)).hex()})
 
         # 01 07 — raw Pi throttled register (uint32, vcgencmd layout); omitted when unreadable
         pi_throttled = data.get('pi_throttled')
         if pi_throttled is not None:
-            channels.append({"code": "01 07", "payload_hex": struct.pack(">I", pi_throttled).hex()})
+            _add("01 07", lambda: {"payload_hex": struct.pack(">I", _u32(pi_throttled)).hex()})
         # 01 08 — registration orientation check (tools/registration_orientation.py); omitted when absent
         registration_status = data.get('registration_status')
         if registration_status is not None:
-            channels.append({"code": "01 08", "payload_hex": struct.pack(">I", registration_status).hex()})
+            _add("01 08", lambda: {"payload_hex": struct.pack(">I", _u32(registration_status)).hex()})
         # 01 09 / 01 0A / 01 0B — software release, commit and model (tools/node_version.py)
         for code, key in (("01 09", "software_version"), ("01 0A", "software_commit"),
                           ("01 0B", "model_id")):
             if data.get(key) is not None:
-                channels.append({"code": code, "payload_hex": struct.pack(">I", data[key]).hex()})
+                _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(data[key])).hex()})
         # 01 0C — store-and-forward entries dropped unsent (tools/drop_counter.py), u32
         # 01 0D — 1 if this capture was taken before the clock was verified, u8
         if data.get('sf_dropped') is not None:
-            channels.append({"code": "01 0C", "payload_hex": struct.pack(">I", min(data['sf_dropped'], 0xFFFFFFFF)).hex()})
+            _add("01 0C", lambda: {"payload_hex": struct.pack(">I", _u32(data['sf_dropped'])).hex()})
         if data.get('clock_unverified') is not None:
-            channels.append({"code": "01 0D", "payload_hex": struct.pack(">B", 1 if data['clock_unverified'] else 0).hex()})
+            _add("01 0D", lambda: {"payload_hex": struct.pack(">B", 1 if data['clock_unverified'] else 0).hex()})
 
         # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
         lat = data.get('gps_lat')
         lon = data.get('gps_lon')
         if lat is not None and lon is not None:
-            try:
-                channels.append({
-                    "code": "04 01",
-                    "payload_hex": struct.pack(">ii",
-                        int(round(lat * 1_000_000)),
-                        int(round(lon * 1_000_000)),
-                    ).hex(),
-                })
-            except struct.error as e:
-                print(f"⚠️ IP uplink: GPS encoding error (lat={lat}, lon={lon}): {e}")
+            _add("04 01", lambda: {"payload_hex": struct.pack(
+                ">ii", int(round(lat * 1_000_000)), int(round(lon * 1_000_000))).hex()})
             # 04 02 — age of that fix in seconds: 0 live, more when it's the saved
             # fix (tools/get_gps.py), so the server can tell a stale position
-            channels.append({"code": "04 02",
-                             "payload_hex": struct.pack(">I", max(0, min(data.get('gps_fix_age_s', 0), 0xFFFFFFFF))).hex()})
+            _add("04 02", lambda: {"payload_hex": struct.pack(">I", _u32(data.get('gps_fix_age_s', 0))).hex()})
         # 01 06 — moved from the mount position (tools/gps_home.py), and 04 03 how far, in metres
         if data.get('movement_threshold') is not None:
-            channels.append({"code": "01 06", "payload_hex": struct.pack(">I", 1 if data['movement_threshold'] else 0).hex()})
+            _add("01 06", lambda: {"payload_hex": struct.pack(">I", 1 if data['movement_threshold'] else 0).hex()})
         if move_info.get("distance_m") is not None:
-            channels.append({"code": "04 03",
-                             "payload_hex": struct.pack(">I", int(min(move_info["distance_m"], 0xFFFFFFFF))).hex()})
+            _add("04 03", lambda: {"payload_hex": struct.pack(">I", _u32(move_info["distance_m"])).hex()})
 
         # 05 01 — temperature (int16, value × 100)
         temp = data.get('temperature_celsius')
         if temp is not None:
-            try:
-                channels.append({"code": "05 01",
-                                  "payload_hex": struct.pack(">h", int(round(temp * 100))).hex()})
-            except struct.error as e:
-                print(f"⚠️ IP uplink: temperature encoding error (temp={temp}): {e}")
+            _add("05 01", lambda: {"payload_hex": struct.pack(">h", int(round(temp * 100))).hex()})
 
         # 06 01 — humidity (uint8, 0–100 %)
         hum = data.get('relative_humidity')
         if hum is not None:
-            channels.append({"code": "06 01",
-                             "payload_hex": struct.pack(">B", max(0, min(100, int(round(hum))))).hex()})
+            _add("06 01", lambda: {"payload_hex": struct.pack(">B", max(0, min(100, int(round(hum))))).hex()})
 
         # 07 17 / 07 27 — flood detected / growing (tools/flood_baseline.py), only
         # when detection is on and a baseline is set; 07 37 — water % of the mask
         # (uint8, 0-100) whenever the capture has one
         for code, key in (("07 17", "camera_flood_detected"), ("07 27", "camera_flood_growing")):
             if key in flood:
-                channels.append({"code": code, "payload_hex": struct.pack(">I", flood[key]).hex()})
+                _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(flood[key])).hex()})
         if flood.get('camera_water_pct') is not None:
-            channels.append({"code": "07 37",
-                             "payload_hex": struct.pack(">B", flood['camera_water_pct']).hex()})
+            _add("07 37", lambda: {"payload_hex": struct.pack(">B", flood['camera_water_pct']).hex()})
 
-        # 08 18 — flood bitmap (variable length). Over IP the mask goes at its
-        # full resolution, lossless (methods 0/1); the LoRa-sized bitmap is the
-        # fallback when there is no mask or it compresses to more than
-        # FULL_RES_MAX_BYTES (tools/compress_segmented.py).
+        # 08 18 — flood bitmap (variable length), sent as base64 (a third smaller on
+        # the wire than hex). Over IP the mask goes at its full resolution, lossless
+        # (methods 0/1); the LoRa-sized bitmap is the fallback when there is no mask
+        # or it compresses to more than FULL_RES_MAX_BYTES (tools/compress_segmented.py).
         ip_bitmap = bitmap
         try:
             from tools.flood_baseline import mask_path
@@ -2032,25 +2069,16 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         except Exception as e:
             print(f"⚠️ IP uplink: full-resolution bitmap failed ({e}) — sending the LoRa bitmap")
         if ip_bitmap:
-            channels.append({"code": "08 18", "payload_hex": bytes(ip_bitmap).hex()})
+            import base64
+            _add("08 18", lambda: {"payload_b64": base64.b64encode(bytes(ip_bitmap)).decode("ascii")})
 
-        # 09 xx — status reports; clamped to uint32 range so struct.pack never raises
-        _u32 = lambda v: max(0, min(0xFFFFFFFF, int(v)))
-        channels.append({"code": "09 19",
-                         "payload_hex": struct.pack(">I", _u32(data['area_threshold'])).hex()})
+        # 09 xx — status reports
         # stage_threshold is reserved: reported, but nothing on the node uses it
-        channels.append({"code": "09 29",
-                         "payload_hex": struct.pack(">I", _u32(data['stage_threshold'])).hex()})
-        channels.append({"code": "09 39",
-                         "payload_hex": struct.pack(">I", _u32(data['monitoring_frequency'])).hex()})
-        channels.append({"code": "09 49",
-                         "payload_hex": struct.pack(">I", _u32(data['emergency_frequency'])).hex()})
-        channels.append({"code": "09 59",
-                         "payload_hex": struct.pack(">I",
-                             _u32(data['neighborhood_emergency_frequency'])).hex()})
-        channels.append({"code": "09 69",
-                         "payload_hex": struct.pack(">I",
-                             _u32(data['audio_recording_enabled'])).hex()})
+        for code, key in (("09 19", "area_threshold"), ("09 29", "stage_threshold"),
+                          ("09 39", "monitoring_frequency"), ("09 49", "emergency_frequency"),
+                          ("09 59", "neighborhood_emergency_frequency"),
+                          ("09 69", "audio_recording_enabled")):
+            _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(data[key])).hex()})
 
         # ── Reachability check (after data is ready so we can queue on failure) ─
         # WiFi first; cellular only as the last resort.  A cellular session
@@ -2072,6 +2100,11 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             reachable = tx.wait_reachable(tx.wifi_grace_s)
             if reachable:
                 print("📶 Server reachable over WiFi — cellular not needed")
+        if not reachable and on_demand and not cellular_active and tx.server_only_down():
+            # WiFi is up and Tailscale shows the server's peer online (or no peer
+            # to check): the server itself is failing, and cellular wouldn't help
+            print(f"⚠️ IP uplink: WiFi is up but the server isn't answering — not spending {cell} data")
+            on_demand = False
         if not reachable and on_demand and not cellular_active:
             print(f"📶 IP uplink: server unreachable — bringing up {cell}")
             power.acquire("cellular upload", 60)
@@ -2089,7 +2122,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             return {"status": "queued", "success": False, "channels_queued": len(channels)}
 
         # ── Drain any previously queued readings ───────────────────────────────
-        drain = tx._drain_queue()
+        # On cellular each wake sends only a few queued readings (tools/transmit_ip.py)
+        drain = tx._drain_queue(metered=cellular_started or cellular_active)
         delivered_ts = list(drain.get("drained_ts", []))
         if drain["drained"]:
             print(f"✅ IP uplink: drained {drain['drained']} queued reading(s)")
@@ -2098,8 +2132,6 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                 _lsf.remove_delivered(delivered_ts)
             print(f"⚠️ IP uplink: drain failed on {drain['failed_file']} — queuing live reading")
             tx._enqueue(channels, ts_now)
-            if cellular_started and not delivered_ts:
-                cellular_down(cell)   # never reached the server: stop Tailscale using data
             return {
                 "status": "queued_drain_failed",
                 "success": False,
@@ -2143,8 +2175,6 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             print(f"⚠️ IP uplink failed after {result.get('attempts', '?')} attempt(s): "
                   f"{result.get('error', 'unknown error')} — queuing reading")
             tx._enqueue(channels, ts_now)
-            if cellular_started and not delivered_ts:
-                cellular_down(cell)   # never reached the server: stop Tailscale using data
             if tx.fallback_to_lora:
                 print("📡 LoRa fallback is enabled — data may also be sent via the LoRa path")
 
@@ -2173,9 +2203,14 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                                           label="IP downlink after uplink", ack_fn=tx.post_acks)
             except Exception as exc:
                 print(f"⚠️ IP downlink after uplink failed: {exc}")
-        if fallback and cellular_started and not tx.enabled:
-            cellular_down(cell)     # brought up only for the fallback upload
-            print(f"📶 IP fallback done — {cell} taken down")
+        if cellular_started:
+            # This wake brought cellular up: it goes down now the upload and the
+            # command poll are done, or on any failure, so Tailscale stops using data
+            try:
+                cellular_down(cell)
+                print(f"📶 IP uplink done — {cell} taken down")
+            except Exception as exc:
+                print(f"⚠️ IP uplink: could not take {cell} down: {exc}")
         tx.close()
         power.release()
 
@@ -2254,17 +2289,7 @@ def ttmain(trigger):
         # Take photos and capture lepton data at GRAPH level
         from tt_take_photos import flir, take_two_photos
         photo = take_two_photos(trigger, dirname)
-        deadline_time = READ_TTCLOCK(token, TTClock=root_clock) + 30_000_000
-        
         lepton_file = flir(dirname)
-        lepton = TTFinishByOtherwise(lepton_file, TTTimeDeadline=deadline_time, TTPlanB=TTSingleRunTimeout(flir_planb(token), TTTimeout=3_000_000), TTWillContinue=False) 
-        
-        #lepton_file = TTFinishByOtherwise(
-        #    flir(dirname, TTClock=root_clock, TTPeriod=60_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000),
-        #    TTTimeDeadline=deadline_time,
-        #    TTPlanB=TTSingleRunTimeout(flir_planb(token), TTTimeout=10_000_000),
-        #    TTWillContinue=True
-        #)
         
         # Coregistration and segmentation at GRAPH level
         coreg_state = coregistration(dirname, lepton_file, photo)

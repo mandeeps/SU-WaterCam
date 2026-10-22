@@ -53,12 +53,14 @@ def read_wittypi_voltages() -> Dict[str, float]:
     try:
         from tools.wittypi_control import get_data
         temperature_c, battery_voltage_v, internal_voltage_v, internal_current_a = get_data()
-        return {
-            'wittypi_temperature_c': float(temperature_c),
-            'wittypi_battery_voltage_v': float(battery_voltage_v),
-            'wittypi_internal_voltage_v': float(internal_voltage_v),
-            'wittypi_internal_current_a': float(internal_current_a),
+        readings = {
+            'wittypi_temperature_c': temperature_c,
+            'wittypi_battery_voltage_v': battery_voltage_v,
+            'wittypi_internal_voltage_v': internal_voltage_v,
+            'wittypi_internal_current_a': internal_current_a,
         }
+        # A reading the board didn't give (None) is left out, not reported as 0
+        return {k: float(v) for k, v in readings.items() if v is not None}
     except Exception:
         return {}
 
@@ -109,8 +111,9 @@ def evaluate_health(
         failures.append(f'cpu_temp_high_{cpu_temp_c:.1f}C')
 
     # WittyPi voltages
-    # witty_pi_4 returns -273.15 C and 0 V when it can't read the board, not an error
-    if not wittypi or wittypi.get('wittypi_temperature_c') == -273.15:
+    # witty_pi_4 returns None for a reading it can't get, so those keys are missing;
+    # no readings at all means the board didn't answer
+    if not wittypi:
         failures.append('wittypi_unavailable')
     else:
         iv = wittypi.get('wittypi_internal_voltage_v', math.nan)
@@ -202,7 +205,20 @@ def remote_debug_timer_enabled() -> bool:
         return False
 
 
-def setup_warnings(mdot: bool, gpio5: Dict[str, str], wittypi_fw, timer_enabled: bool) -> List[str]:
+def ip_server_untrusted() -> bool:
+    """True when IP upload has a server configured that readings won't be sent to:
+    not https and not a tailnet address (tools/transmit_ip.trusted_server)."""
+    try:
+        from tools.transmit_ip import _DEFAULT_CONFIG_PATH, _load_ip_config, trusted_server
+        cfg = _load_ip_config(_DEFAULT_CONFIG_PATH)
+        url = cfg.get('server_url')
+        return bool(url) and not trusted_server(url)
+    except Exception:
+        return False
+
+
+def setup_warnings(mdot: bool, gpio5: Dict[str, str], wittypi_fw, timer_enabled: bool,
+                   untrusted_server: bool = False) -> List[str]:
     """Setup mistakes that don't stop a cycle but lose remote start or remote access."""
     warnings: List[str] = []
     if mdot:
@@ -213,6 +229,9 @@ def setup_warnings(mdot: bool, gpio5: Dict[str, str], wittypi_fw, timer_enabled:
             warnings.append('wittypi_l3v7_daemon_reconfigures_gpio5 (firmware ID 0x37)')
     if not timer_enabled:
         warnings.append('remote_debug_timer_not_enabled (systemctl enable --now remote-debug.timer)')
+    if untrusted_server:
+        warnings.append('ip_server_untrusted (server_url is neither https nor a tailnet address, '
+                        'or Tailscale is down: IP readings stay queued)')
     return warnings
 
 
@@ -278,7 +297,7 @@ def main(argv=None) -> int:
     mdot = has_mdot()
     for w in setup_warnings(mdot, read_gpio5() if mdot else {},
                             read_wittypi_firmware_id() if mdot else None,
-                            remote_debug_timer_enabled()):
+                            remote_debug_timer_enabled(), ip_server_untrusted()):
         print(f"  WARN  {w}", flush=True)
 
     if result['status'] == 'fail':

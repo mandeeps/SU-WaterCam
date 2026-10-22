@@ -117,3 +117,27 @@ def test_record_model_adds_name_and_version(tmp_path):
     assert rec["name"] == "m.onnx" and len(rec["sha256"]) == 64
     daemon.record_model(str(model), str(info))               # old model: unchanged shape
     assert set(json.loads(info.read_text())) == {"name", "path", "sha256"}
+
+
+def test_model_hash_is_recorded_after_the_socket_is_serving(tmp_path, monkeypatch):
+    """Hashing the model reads the whole file; it must not delay the socket."""
+    events = []
+    monkeypatch.setattr(daemon, "parse_args", lambda: type("A", (), {
+        "model": "m.onnx", "fallback_fp32": None, "socket": str(tmp_path / "s.sock")})())
+    monkeypatch.setattr(daemon, "load_first_usable", lambda c: ("m.onnx", object()))
+    monkeypatch.setattr(daemon, "model_metadata", lambda s: {})
+    done = daemon.threading.Event()
+
+    def record(*a, **k):
+        events.append("hash")
+        done.set()
+
+    def serve(session, sock, on_listening=None):
+        events.append("listening")
+        on_listening()
+        done.wait(5)
+
+    monkeypatch.setattr(daemon, "record_model", record)
+    monkeypatch.setattr(daemon, "serve", serve)
+    daemon.main()
+    assert events == ["listening", "hash"]

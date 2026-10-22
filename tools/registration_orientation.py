@@ -126,6 +126,21 @@ def rotation_deg(q1: List[float], q2: List[float]) -> float:
     return math.degrees(2.0 * math.acos(max(-1.0, min(1.0, dot / n))))
 
 
+def solve_rejected(capture_dir: str) -> bool:
+    """True if co-registration refused to cache this capture's fresh solve.
+
+    coreg() records its verdict in coregistration_metadata.json
+    (image_info.registration_solve). A rejected solve left the cache as it was,
+    so nothing was adopted for it.
+    """
+    try:
+        with open(os.path.join(capture_dir, "coregistration_metadata.json")) as f:
+            solve = json.load(f).get("image_info", {}).get("registration_solve")
+        return isinstance(solve, dict) and solve.get("accepted") is False
+    except (OSError, ValueError, AttributeError):
+        return False
+
+
 def _now() -> str:
     return datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
@@ -151,7 +166,13 @@ def check(capture_dir: str, reading: Any,
       no_imu    the reading is unusable
     """
     pose = pose_from_reading(reading)
+    rejected = solve_rejected(capture_dir)
+    if rejected:
+        # This capture's solve was not cached: a pose recorded now would be
+        # adopted for a transform that was never stored. Compare, never adopt.
+        adopt = False
     result: Dict[str, Any] = {
+        "solve_rejected": rejected,
         "status": None,
         "checked_at": _now(),
         "current": pose,

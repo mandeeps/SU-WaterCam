@@ -93,7 +93,7 @@ class Node:
 
     def queued(self):
         out = []
-        for f in sorted(os.listdir(self.q)) if os.path.isdir(self.q) else []:
+        for f in sorted(x for x in os.listdir(self.q) if x.endswith(".json")) if os.path.isdir(self.q) else []:
             with open(os.path.join(self.q, f)) as fh:
                 out.append(json.load(fh))
         return out
@@ -186,7 +186,7 @@ def test_newer_bitmap_replaces_stale_queued_ones(tmp_path):
     lsf.enqueue(None, "0818" + "cc" * 20, T0 + 60, queue_dir=q)
     lsf.enqueue("dd" * 10, "0818" + "ee" * 20, T0 + 120, queue_dir=q)
     entries = []
-    for f in sorted(os.listdir(q)):
+    for f in sorted(x for x in os.listdir(q) if x.endswith(".json")):
         with open(os.path.join(q, f)) as fh:
             entries.append(json.load(fh))
     # the oldest keeps its sensor packet, the bitmap-only entry is gone

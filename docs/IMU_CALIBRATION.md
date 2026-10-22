@@ -310,6 +310,41 @@ The unit is being vibrated by wind or nearby activity. Wait for calm conditions 
 
 ---
 
+## What each photo records about orientation
+
+`tools/add_metadata.py` writes these into every JPEG, as XMP properties (in the
+`dc` namespace, like the existing ones) and, in the same order, as `Key value`
+words in the EXIF `UserComment`:
+
+| Field | Meaning |
+|---|---|
+| `Roll`, `Pitch`, `Yaw` | Mean of 20 Euler samples (about 300 ms). Yaw (heading) and roll use a circular mean, because they wrap at 0/360 and at +/-180; pitch stays within +/-90, so its plain mean is right |
+| `HeadingStdDev` / `HeadingStd` | Circular standard deviation of the heading samples, degrees |
+| `HeadingRawSensorFrame` | `true`: heading is raw, with no mount offset or declination |
+| `CalibSys`, `CalibGyro`, `CalibAccel`, `CalibMag` | BNO055 calibration status, 0-3 each (UserComment: `CalibMag` only). Trust the heading at `CalibMag` 2 or more |
+| `QuaternionW`, `QuaternionX`, `QuaternionY`, `QuaternionZ` | Orientation quaternion, BNO055 order (w, x, y, z), sensor frame. UserComment: `Quaternion w,x,y,z` |
+| `GravityX`, `GravityY`, `GravityZ` | Gravity vector, m/s^2, sensor frame. UserComment: `Gravity x,y,z` |
+| `PoseReadTime` | When the quaternion and gravity were read, ISO 8601 with UTC offset. UserComment: `PoseTime` |
+
+Euler angles cannot be compared one by one near +/-90 degrees pitch (gimbal lock:
+a small tilt swings heading and roll a long way) and cameras are mounted near
+there, so use the quaternion and gravity vector to compare two captures. The pose
+is read just after the Euler average, so it can differ from it by a few hundred
+milliseconds of motion. All of these are absent when the IMU gives no complete
+reading, and the Euler fields are written only when roll, pitch and yaw are all
+present.
+
+GPS in the EXIF `GPS` block comes from the live fix, or, with no live fix, from
+the last saved fix (`gps_cache_max_age_h`). A saved fix has
+`GPSProcessingMethod` = `CACHED` (a live one `GPS`), and the XMP properties
+`GPSFixSource` (`live` or `cached`) and, for a saved fix, `GPSFixAgeSeconds`; the
+UserComment gets `GPSFix CACHED AgeS n`. `GPSTrack` is never written: it is the
+course over the ground, which means nothing for a fixed camera, and it was being
+mistaken for the direction the camera points. The camera's direction is `Yaw`
+with the unit config corrections below.
+
+---
+
 ## How the corrections are applied
 
 The full heading correction chain, from raw sensor to georeferencing pipeline:

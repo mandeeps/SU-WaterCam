@@ -253,3 +253,19 @@ def test_get_sensor_no_calibration_file_uses_short_timeout_and_old_warning(tmp_p
 
     assert clock.now < 3.0  # short (2s) timeout, not the 5s calibrated-path one
     assert any("fusion not yet initialised" in r.message for r in caplog.records)
+
+
+def test_roll_circular_mean_wraps_at_180(monkeypatch):
+    """Roll of +179/-179 is about 180, not 0 (the arithmetic mean puts it on the other side)."""
+    import tools.bno055_imu as imu
+    sensor = _FakeSensor([(10.0, 179.0, 5.0), (10.0, -179.0, 5.0)] * 10)
+    monkeypatch.setattr(imu, "_get_sensor", lambda: sensor)
+    roll = imu.get_euler_stable(n=20)["roll_mean"]
+    assert abs(abs(roll) - 180.0) < 0.01
+
+
+def test_pitch_near_90_stays_arithmetic(monkeypatch):
+    import tools.bno055_imu as imu
+    sensor = _FakeSensor([(10.0, 0.0, 88.0), (10.0, 0.0, 90.0)] * 10)
+    monkeypatch.setattr(imu, "_get_sensor", lambda: sensor)
+    assert imu.get_euler_stable(n=20)["pitch_mean"] == 89.0

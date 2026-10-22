@@ -39,12 +39,16 @@ so the command arrives before the normal cycle ends.
 
 ## While in emergency mode
 
+- It captures every `emergency_frequency` minutes (default 10, 1-240; `13 93`), the
+  first within a minute of starting, and uploads each capture. A remote access session
+  holds the unit the same way once its wake's captures are done. A change of
+  `emergency_frequency` applies from the next capture.
 - `call_shutdown` skips the iteration limit, and the Witty Pi's shutdown alarm moves
   from the schedule to a backstop an hour after emergency mode should end, with
   the startup alarm 10 minutes after that, so the unit keeps capturing.
   `call_shutdown` re-arms the backstop each iteration, so a resend moves it out
   too. Three layers end emergency mode: the graph at the time limit,
-  `max_awake.py` 15 minutes later if the graph hangs, and the Witty Pi's backstop
+  `max_awake.py` 15 minutes plus one capture interval later if the graph hangs, and the Witty Pi's backstop
   an hour later if the Pi itself is stuck (#209); the startup alarm then brings
   the unit back by itself. With `emergency_max_hours` 0 (no limit) the shutdown
   alarm is cleared instead.
@@ -56,7 +60,7 @@ so the command arrives before the normal cycle ends.
   `config/wittypi/watercam_daylight_2h.wpi`; only if none can be installed does it
   generate one from the `wittypi_*` settings.
 - If the capture graph is hung and can't end it, `max-awake.timer`
-  (`tools/max_awake.py`) does: 15 minutes past that deadline it turns
+  (`tools/max_awake.py`) does: 15 minutes plus one `emergency_frequency` past that deadline it turns
   `emergency_mode` off and powers the unit off; the next slot is armed on the way down.
 
 ## Older nodes

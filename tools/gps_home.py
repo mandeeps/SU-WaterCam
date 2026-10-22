@@ -4,7 +4,11 @@
 A unit is installed in one place, so a live GPS fix well away from it means the
 unit was taken or came off its mount. The position is learned, not configured:
 after installation, the first HOME_FIXES live fixes that agree within
-HOME_SPREAD_M become the home position (gps_home.json, mode 600).
+HOME_SPREAD_M become the home position (gps_home.json, mode 600). Only a fix
+whose error gpsd reports, at most HOME_MAX_ERROR_M, counts, and the fixes must
+be at least HOME_GAP_S apart: three reads in one wake are one sample of one
+bad moment, not three. A unit whose gpsd gives no error estimate never learns
+a home.
 
 check_movement() is called with every GPS read. A live fix more than
 gps_move_alert_m (runtime parameter, default 50 m) from home, and beyond the
@@ -38,6 +42,8 @@ HOME_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file_
 DEFAULT_ALERT_M = 50.0
 HOME_FIXES = 3          # live fixes that must agree before they become home
 HOME_SPREAD_M = 25.0    # ... within this distance of their mean
+HOME_MAX_ERROR_M = 15.0  # a fix counts as a candidate only if gpsd reports its error and it is this small
+HOME_GAP_S = 30          # ... and at least this long after the previous candidate (not one burst of reads)
 CONFIRM = 2             # consecutive live fixes to set or clear "moved"
 CONFIRM_GAP_S = 30      # ... at least this far apart, so a glitch lasting seconds doesn't count
 
@@ -78,7 +84,14 @@ def _save(state: dict) -> None:
         print(f"⚠️ GPS home: couldn't save: {e}")
 
 
-def _learn(state: dict, lat: float, lon: float) -> None:
+def _learn(state: dict, lat: float, lon: float, error_m: Optional[float] = None) -> None:
+    if (not isinstance(error_m, (int, float)) or isinstance(error_m, bool)
+            or not 0 <= error_m <= HOME_MAX_ERROR_M):
+        return
+    now = time.time()
+    if now - state.get("candidate_t", -HOME_GAP_S) < HOME_GAP_S:
+        return
+    state["candidate_t"] = now
     cands = state.setdefault("candidates", [])
     cands.append([lat, lon])
     del cands[:-HOME_FIXES]
@@ -89,6 +102,7 @@ def _learn(state: dict, lat: float, lon: float) -> None:
     if all(distance_m(mlat, mlon, c[0], c[1]) <= HOME_SPREAD_M for c in cands):
         state.update(home=[mlat, mlon], home_set=time.time(), moved=False, away=0, back=0)
         state.pop("candidates", None)
+        state.pop("candidate_t", None)
         print(f"📍 GPS home position learned from {HOME_FIXES} fixes")
 
 
@@ -102,7 +116,7 @@ def check_movement(location: dict, live: bool, error_m: Optional[float] = None) 
     dist = distance_m(home[0], home[1], lat, lon) if (home and have) else None
     if live and have:
         if not home:
-            _learn(state, lat, lon)
+            _learn(state, lat, lon, error_m)
         else:
             limit = max(_alert_m(), 3 * (error_m or 0))
             now = time.time()

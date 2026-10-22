@@ -3,6 +3,7 @@
 # minor edit to add network check before syncing time
 
 '''A python module for interacting with the Witty Pi 4 board'''
+from typing import Optional
 from subprocess import check_output, STDOUT
 from os import environ, path
 import glob
@@ -153,8 +154,8 @@ class WittyPi4:
         else:
             logging.error("No internet detected")
 
-    def get_temperature(self) -> float:
-        '''Gets the current temperature reading from the Witty Pi 4 in °C'''
+    def get_temperature(self) -> Optional[float]:
+        '''Gets the current temperature reading from the Witty Pi 4 in °C; None if it can't be read'''
         try:
             temperature = self.run_command("get_temperature")
             temperature = temperature.split("/", maxsplit = 1)[0] # Remove the Farenheit reading
@@ -164,10 +165,10 @@ class WittyPi4:
             return temperature
         except Exception as e:
             logging.error("Could not get temperature: %s", str(e))
-            return -273.15
+            return None
 
-    def get_battery_voltage(self) -> float:
-        '''Gets the battery voltage reading from the Witty Pi 4 in V'''
+    def get_battery_voltage(self) -> Optional[float]:
+        '''Gets the battery voltage reading from the Witty Pi 4 in V; None if it can't be read'''
         try:
             battery_voltage = self.run_command("get_input_voltage")
             battery_voltage = float(battery_voltage) # Remove V
@@ -175,10 +176,10 @@ class WittyPi4:
             return battery_voltage
         except Exception as e:
             logging.error("Could not get battery voltage: %s", str(e))
-            return 0.0
+            return None
 
-    def get_internal_voltage(self) -> float:
-        '''Gets the internal (5V) voltage from the Witty Pi 4 in V'''
+    def get_internal_voltage(self) -> Optional[float]:
+        '''Gets the internal (5V) voltage from the Witty Pi 4 in V; None if it can't be read'''
         try:
             internal_voltage = self.run_command("get_output_voltage")
             internal_voltage = float(internal_voltage)
@@ -186,10 +187,10 @@ class WittyPi4:
             return internal_voltage
         except Exception as e:
             logging.error("Could not get Raspberry Pi voltage: %s", str(e))
-            return 0.0
+            return None
 
-    def get_internal_current(self) -> float:
-        '''Gets the internal (5V) current reading from the Witty Pi 4 in A'''
+    def get_internal_current(self) -> Optional[float]:
+        '''Gets the internal (5V) current reading from the Witty Pi 4 in A; None if it can't be read'''
         try:
             internal_current = self.run_command("get_output_current")
             internal_current = float(internal_current)
@@ -197,7 +198,7 @@ class WittyPi4:
             return internal_current
         except Exception as e:
             logging.error("Could not get Raspberry Pi current: %s", str(e))
-            return 0.0
+            return None
 
     def get_low_voltage_threshold(self) -> float:
         '''Gets the low threshold from the Witty Pi 4'''

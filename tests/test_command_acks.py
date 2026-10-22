@@ -250,13 +250,14 @@ class TestHandleDownlinkReply:
 
 # ── IPTransmitter: post_acks, send_uplink, poll_downlink ─────────────────────
 
-TRUSTED = "http://node-test.example.ts.net:8000"
+TRUSTED = "http://100.101.102.103:8000"   # a tailnet address: trusted without DNS
 
 
 def _tx(url=TRUSTED):
     tx = tip.IPTransmitter.__new__(tip.IPTransmitter)
     tx.device_id, tx.server_url = "watercam-005", url
     tx.timeout_s, tx.retry_attempts, tx.retry_backoff_s = 5, 1, 0
+    tx.api_key = ""
     tx._session = MagicMock()
     return tx
 
@@ -276,7 +277,7 @@ ACKS = [{"id": 41, "result": 0}, {"id": 42, "result": 2}]
 class TestIPTransmitterAcks:
     def test_post_acks_2xx(self):
         tx = _tx()
-        tx._session.post.return_value = _resp(204)
+        tx._session.post.return_value = _resp(200, {"device_id": "watercam-005", "acked": 2})
         assert tx.post_acks(ACKS) is True
         url = tx._session.post.call_args.args[0]
         assert url == f"{TRUSTED}/ip/ack"
@@ -308,7 +309,7 @@ class TestIPTransmitterAcks:
     def test_send_uplink_carries_pending_acks_and_clears_them_after_success(self):
         command_log.add_pending_acks(ACKS)
         tx = _tx()
-        tx._session.post.return_value = _resp(200, {"decoded": {}})
+        tx._session.post.return_value = _resp(200, {"device_id": "watercam-005", "decoded": {}})
         out = tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1)
         assert out["success"]
         assert tx._session.post.call_args.kwargs["json"]["acks"] == ACKS
@@ -329,13 +330,36 @@ class TestIPTransmitterAcks:
         tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1)
         assert "acks" not in tx._session.post.call_args.kwargs["json"]
 
-    def test_untrusted_uplink_sends_no_acks(self):
+    def test_untrusted_server_gets_no_upload(self):
         command_log.add_pending_acks(ACKS)
         tx = _tx("http://192.168.1.20:8000")
-        tx._session.post.return_value = _resp(200, {})
-        tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1)
-        assert "acks" not in tx._session.post.call_args.kwargs["json"]
+        out = tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1)
+        assert not out["success"] and out["untrusted"]
+        tx._session.post.assert_not_called()
         assert command_log.pending_acks() == ACKS
+
+    def test_a_captive_portal_page_is_not_delivery(self):
+        tx = _tx()
+        r = _resp(200)
+        r.json.side_effect = ValueError("not JSON")
+        r.text = "<html>Sign in to the WiFi</html>"
+        tx._session.post.return_value = r
+        out = tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1)
+        assert not out["success"] and "captive portal" in out["error"]
+
+    def test_another_devices_reply_is_not_delivery(self):
+        tx = _tx()
+        tx._session.post.return_value = _resp(200, {"device_id": "someone-else", "decoded": {}})
+        assert not tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1)["success"]
+
+    def test_health_needs_the_apis_json(self):
+        tx = _tx()
+        page = _resp(200)
+        page.json.side_effect = ValueError("not JSON")
+        tx._session.get.return_value = page
+        assert not tx.is_reachable()
+        tx._session.get.return_value = _resp(200, {"status": "ok"})
+        assert tx.is_reachable()
 
 
 class TestPollDownlink:

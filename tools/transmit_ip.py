@@ -55,13 +55,14 @@ import ipaddress
 import json
 import logging
 import os
+import socket
 import subprocess
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
-from tools import drop_counter
+from tools import config_io, drop_counter
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +75,17 @@ _DEFAULT_CONFIG_PATH = os.path.join(
 _DEFAULT_QUEUE_DIR = os.path.join(
     os.path.dirname(__file__), "..", "data", "ip_uplink_pending"
 )
+
+# On cellular a wake drains at most this many queued readings, or this many bytes of
+# them (WiFi: all), so a long backlog doesn't cost a month's data in one wake.
+CELLULAR_DRAIN_MAX_ENTRIES = 5
+CELLULAR_DRAIN_MAX_BYTES = 200_000
+# A .tmp file left by a write that never finished, older than this, is removed
+ORPHAN_TMP_AGE_S = 300
+# The channel code of the flood bitmap: only the newest one stays queued
+BITMAP_CODE = "08 18"
+# A 4xx other than these says the entry itself is wrong; these say try again later
+_RETRY_STATUSES = (401, 403, 429)
 
 
 def _coerce_int(value: Any, default: int) -> int:
@@ -127,6 +139,20 @@ def _load_ip_config(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
 _TAILNET_NETS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
 
 
+def _resolves_into_tailnet(host: str) -> bool:
+    """True when every address `host` resolves to is a tailnet address (100.64.0.0/10)."""
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except OSError:
+        return False
+    addrs = {i[4][0].split("%")[0] for i in infos}
+    try:
+        return bool(addrs) and all(any(ipaddress.ip_address(a) in net for net in _TAILNET_NETS)
+                                   for a in addrs)
+    except ValueError:
+        return False
+
+
 def trusted_server(url: str) -> bool:
     """True when replies from `url` can carry commands and the time."""
     from urllib.parse import urlparse
@@ -134,8 +160,12 @@ def trusted_server(url: str) -> bool:
     host = (parsed.hostname or "").lower()
     if parsed.scheme == "https":
         return True                     # requests verifies the certificate
-    if host.endswith(".ts.net") or host == "localhost":
+    if host == "localhost":
         return True
+    if host.endswith(".ts.net"):
+        # A tailnet name proves nothing by itself: over plain http the traffic is only
+        # protected if it resolves into the tailnet (WireGuard), so check where it goes
+        return _resolves_into_tailnet(host)
     try:
         ip = ipaddress.ip_address(host)
     except ValueError:
@@ -164,10 +194,28 @@ class IPTransmitter:
     ``tx.enabled`` themselves if they want to respect the flag.
     """
 
+    _key_refused_logged = False
+    _untrusted_logged = False
+
     @property
     def trusted(self) -> bool:
         """Whether this server's replies may carry commands and the time (trusted_server)."""
         return trusted_server(self.server_url)
+
+    def _auth_headers(self) -> Dict[str, str]:
+        """The API key header, only for a server it may go to: https, or a tailnet
+        address (a *.ts.net name must resolve into 100.64.0.0/10). Checked per
+        request, as the name only resolves once the link is up. Otherwise the key
+        stays home and the server will refuse the request."""
+        if not self.api_key:
+            return {}
+        if trusted_server(self.server_url):
+            return {"Authorization": f"Bearer {self.api_key}"}
+        if not self._key_refused_logged:
+            logger.warning("Not sending the API key to %s: not https and not a tailnet address",
+                           self.server_url)
+            self._key_refused_logged = True
+        return {}
 
     def __init__(
         self,
@@ -184,8 +232,9 @@ class IPTransmitter:
         self.configured: bool = bool(override_url or cfg.get("server_url"))
         self.server_url: str = (override_url or cfg.get("server_url", "http://localhost:8000")).rstrip("/")
         if self.configured and not trusted_server(self.server_url):
-            logger.warning("server_url %s is neither a tailnet address nor https: uploads go, "
-                           "but commands and the server's time are ignored (#203)", self.server_url)
+            logger.warning("server_url %s is neither https nor (yet) a tailnet address: uploads go "
+                           "without the API key, and commands and the server's time are ignored (#203)",
+                           self.server_url)
         self.api_key: str = cfg.get("api_key", "")
         self.device_id: str = override_device_id or cfg.get("device_id", "watercam-001")
         self.timeout_s: int = max(1, _coerce_int(cfg.get("timeout_s"), 15))
@@ -207,9 +256,9 @@ class IPTransmitter:
         self._queue_dir: str = os.path.abspath(queue_dir or _DEFAULT_QUEUE_DIR)
 
         self._session = requests.Session()
-        if self.api_key:
-            self._session.headers.update({"Authorization": f"Bearer {self.api_key}"})
         self._session.headers.update({"Content-Type": "application/json"})
+        self._key_refused_logged = False
+        self._untrusted_logged = False
 
     # ------------------------------------------------------------------ #
     # Public API                                                           #
@@ -288,10 +337,14 @@ class IPTransmitter:
             try:
                 resp = self._session.post(f"{self.server_url}/ip/ack",
                                           json={"device_id": self.device_id, "acks": acks},
-                                          timeout=self.timeout_s)
-                ok = 200 <= resp.status_code < 300
+                                          timeout=self.timeout_s, headers=self._auth_headers())
+                try:
+                    body = resp.json()
+                except ValueError:
+                    body = None
+                ok = 200 <= resp.status_code < 300 and isinstance(body, dict) and "acked" in body
                 if not ok:
-                    logger.warning("POST /ip/ack: HTTP %s", resp.status_code)
+                    logger.warning("POST /ip/ack: HTTP %s, not the API's reply", resp.status_code)
             except requests.exceptions.RequestException as exc:
                 logger.warning("POST /ip/ack failed: %s", exc)
         if not ok:
@@ -323,7 +376,7 @@ class IPTransmitter:
         url = f"{self.server_url}/ip/downlink/{self.device_id}"
 
         try:
-            resp = self._session.get(url, timeout=self.timeout_s)
+            resp = self._session.get(url, timeout=self.timeout_s, headers=self._auth_headers())
         except requests.exceptions.ConnectionError as exc:
             return {"success": False, "commands": [], "status_code": None,
                     "error": f"Connection error: {exc}"}
@@ -364,9 +417,12 @@ class IPTransmitter:
         """
         t = timeout_s if timeout_s is not None else self.timeout_s
         try:
-            resp = self._session.get(f"{self.server_url}/health", timeout=t)
-            return resp.status_code == 200
-        except requests.exceptions.RequestException:
+            resp = self._session.get(f"{self.server_url}/health", timeout=t)  # no key needed
+            if resp.status_code != 200:
+                return False
+            body = resp.json()          # a captive portal's 200 page is not our server
+            return isinstance(body, dict) and body.get("status") == "ok"
+        except (requests.exceptions.RequestException, ValueError):
             return False
 
     def wait_reachable(self, deadline_s: float, probe_timeout_s: float = 5) -> bool:
@@ -403,6 +459,17 @@ class IPTransmitter:
                 return False
             time.sleep(2)
 
+    def server_only_down(self) -> bool:
+        """True when WiFi is connected and Tailscale shows the server's peer online
+        (``tailscale status``, nothing sent): the server isn't answering over a
+        working path, so cellular wouldn't reach it either and would only cost
+        data. False when that can't be told (not a tailnet name, peer unknown)."""
+        from urllib.parse import urlparse
+        host = (urlparse(self.server_url).hostname or "").lower()
+        if not host.endswith(".ts.net") or not wifi_connected():
+            return False
+        return tailscale_online(host) is True
+
     def close(self) -> None:
         """Close the underlying requests.Session and release pooled connections."""
         self._session.close()
@@ -411,18 +478,60 @@ class IPTransmitter:
     # Store-and-forward queue                                              #
     # ------------------------------------------------------------------ #
 
+    def _queued_files(self) -> List[str]:
+        """The queue's entries, oldest first; orphaned .tmp files are cleaned up on the way."""
+        try:
+            names = os.listdir(self._queue_dir)
+        except FileNotFoundError:
+            return []
+        now = time.time()
+        for f in names:
+            if f.endswith(".tmp") or ".tmp." in f:
+                path = os.path.join(self._queue_dir, f)
+                try:
+                    if now - os.path.getmtime(path) > ORPHAN_TMP_AGE_S:
+                        os.unlink(path)
+                except OSError:
+                    pass
+        return sorted(f for f in names if f.endswith(".json"))
+
+    def _drop_older_bitmaps(self, device_ts: int) -> int:
+        """Remove the bitmap channel from queued readings taken at or before
+        `device_ts`: a newer one is queued, and an older scene would only be
+        sent over cellular to show the dashboard something out of date (as the
+        LoRa queue does, tools/lora_store_forward.py). Returns how many lost it."""
+        cleared = 0
+        for fname in self._queued_files():
+            path = os.path.join(self._queue_dir, fname)
+            try:
+                with open(path) as f:
+                    record = json.load(f)
+                channels = record["channels"]
+                if (not any(isinstance(c, dict) and c.get("code") == BITMAP_CODE for c in channels)
+                        or record.get("device_ts", 0) > device_ts):
+                    continue
+                record["channels"] = [c for c in channels
+                                      if not (isinstance(c, dict) and c.get("code") == BITMAP_CODE)]
+                config_io.write_json(path, record, mode=0o644)
+                cleared += 1
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        return cleared
+
     def _enqueue(self, channels: List[Dict[str, str]], device_ts: int) -> bool:
         """Persist a failed uplink to the pending queue for retry next cycle.
 
-        Writes an atomic JSON file to ``self._queue_dir``.  If the queue is
-        already at ``max_queue_depth``, the oldest entry is dropped to make
-        room.  Returns True on success, False on I/O error.
+        Writes an atomic, fsynced JSON file to ``self._queue_dir``.  If the queue
+        is already at ``max_queue_depth``, the oldest entry is dropped to make
+        room.  Only the newest bitmap stays queued: queuing one removes the
+        bitmap channel from older entries.  Returns True on success, False on
+        I/O error.
         """
         try:
             os.makedirs(self._queue_dir, exist_ok=True)
-            existing = sorted(
-                f for f in os.listdir(self._queue_dir) if f.endswith(".json")
-            )
+            if any(isinstance(c, dict) and c.get("code") == BITMAP_CODE for c in channels):
+                self._drop_older_bitmaps(device_ts)
+            existing = self._queued_files()
             while len(existing) >= self.max_queue_depth:
                 try:
                     os.unlink(os.path.join(self._queue_dir, existing.pop(0)))
@@ -435,75 +544,90 @@ class IPTransmitter:
                 "enqueued_at": time.time(),
             }
             fname = f"{device_ts}_{len(existing):06d}.json"
-            tmp_path = os.path.join(self._queue_dir, fname + ".tmp")
-            final_path = os.path.join(self._queue_dir, fname)
-            with open(tmp_path, "w") as f:
-                json.dump(record, f)
-            os.replace(tmp_path, final_path)
+            while os.path.exists(os.path.join(self._queue_dir, fname)):
+                fname = f"{device_ts}_{int(time.time() * 1000) % 1000000:06d}.json"
+            config_io.write_json(os.path.join(self._queue_dir, fname), record, mode=0o644)
             logger.info("Queued uplink to %s (%d channels)", fname, len(channels))
             return True
         except OSError as exc:
             logger.warning("Failed to enqueue uplink: %s", exc)
             return False
 
-    def _drain_queue(self) -> Dict[str, Any]:
+    def _drop_entry(self, path: str, why: str) -> None:
+        logger.warning("Dropping queue entry %s: %s", os.path.basename(path), why)
+        try:
+            os.unlink(path)
+            drop_counter.record("ip", path=drop_counter.path_for(self._queue_dir))
+        except OSError:
+            pass
+
+    def _drain_queue(self, metered: bool = False) -> Dict[str, Any]:
         """Send queued entries oldest-first; stop on first send failure.
+
+        ``metered`` (on cellular) caps the wake at CELLULAR_DRAIN_MAX_ENTRIES
+        entries or CELLULAR_DRAIN_MAX_BYTES bytes, whichever comes first; the rest
+        waits for the next wake. An entry the server refuses as wrong (a 4xx other
+        than 401/403/429) or that can't be read is dropped, not left to block the
+        queue.
 
         Returns a dict with keys:
             "drained"    : int            — number of entries successfully sent
             "failed"     : bool           — True if a send failed mid-drain
             "failed_file": Optional[str]  — filename of the entry that failed
             "drained_ts" : List[int]      — device_ts of each entry sent
+            "limited"    : bool           — stopped at the metered cap
         """
-        result: Dict[str, Any] = {"drained": 0, "failed": False, "failed_file": None, "drained_ts": []}
-        try:
-            entries = sorted(
-                f for f in os.listdir(self._queue_dir) if f.endswith(".json")
-            )
-        except FileNotFoundError:
-            return result
-
+        result: Dict[str, Any] = {"drained": 0, "failed": False, "failed_file": None,
+                                  "drained_ts": [], "limited": False}
         cutoff = time.time() - self.max_queue_age_days * 86400
+        sent_bytes = 0
 
-        for fname in entries:
+        for fname in self._queued_files():
             path = os.path.join(self._queue_dir, fname)
+            if metered and (result["drained"] >= CELLULAR_DRAIN_MAX_ENTRIES
+                            or sent_bytes >= CELLULAR_DRAIN_MAX_BYTES):
+                result["limited"] = True
+                break
             try:
+                size = os.path.getsize(path)
                 with open(path) as f:
                     record = json.load(f)
-            except (OSError, ValueError):
-                logger.warning("Dropping corrupt queue file: %s", fname)
-                try:
-                    os.unlink(path)
-                    drop_counter.record("ip", path=drop_counter.path_for(self._queue_dir))
-                except OSError:
-                    pass
+                channels = record["channels"]
+                if not channels or not isinstance(channels, list):
+                    raise ValueError("no channels")
+            except FileNotFoundError:
+                continue
+            except (OSError, ValueError, KeyError, TypeError):
+                self._drop_entry(path, "unreadable or malformed")
                 continue
 
             if record.get("enqueued_at", 0) < cutoff:
-                logger.info("Evicting stale queue entry: %s", fname)
-                try:
-                    os.unlink(path)
-                    drop_counter.record("ip", path=drop_counter.path_for(self._queue_dir))
-                except OSError:
-                    pass
+                self._drop_entry(path, "stale")
                 continue
+            if metered and result["drained"] and sent_bytes + size > CELLULAR_DRAIN_MAX_BYTES:
+                result["limited"] = True
+                break
 
-            send_result = self.send_uplink(
-                record["channels"], device_ts=record.get("device_ts")
-            )
+            send_result = self.send_uplink(channels, device_ts=record.get("device_ts"))
             if send_result["success"]:
                 try:
                     os.unlink(path)
                 except OSError:
                     pass
                 result["drained"] += 1
+                sent_bytes += size
                 if record.get("device_ts") is not None:
                     result["drained_ts"].append(record["device_ts"])
-            else:
-                logger.warning("Drain failed on %s: %s", fname, send_result.get("error"))
-                result["failed"] = True
-                result["failed_file"] = fname
-                break
+                continue
+            status = send_result.get("status_code")
+            if isinstance(status, int) and 400 <= status < 500 and status not in _RETRY_STATUSES:
+                # The server won't take this entry whatever we do: don't let it block the rest
+                self._drop_entry(path, f"rejected by the server (HTTP {status})")
+                continue
+            logger.warning("Drain failed on %s: %s", fname, send_result.get("error"))
+            result["failed"] = True
+            result["failed_file"] = fname
+            break
 
         return result
 
@@ -523,11 +647,22 @@ class IPTransmitter:
         last_error: str = "unknown error"
         last_status: Optional[int] = None
 
+        if not self.trusted:
+            # Plain http to an address that isn't the tailnet: whoever answers could
+            # read the reading (with its position) and, by answering 2xx, make the
+            # node drop it from its queue. Keep it queued until the server is trusted.
+            if not self._untrusted_logged:
+                logger.warning("Not uploading to %s: not https and not a tailnet address; "
+                               "readings stay queued", self.server_url)
+                self._untrusted_logged = True
+            return {"success": False, "status_code": None, "response": None, "untrusted": True,
+                    "error": "untrusted server (not https, not a tailnet address)", "attempts": 0}
+
         for attempt in range(1, self.retry_attempts + 1):
             try:
                 sent_at = time.monotonic()
                 resp = self._session.post(
-                    url, json=payload, timeout=self.timeout_s
+                    url, json=payload, timeout=self.timeout_s, headers=self._auth_headers()
                 )
                 rtt_s = time.monotonic() - sent_at
                 last_status = resp.status_code
@@ -536,7 +671,14 @@ class IPTransmitter:
                     try:
                         body = resp.json()
                     except ValueError:
-                        body = {"raw": resp.text}
+                        body = None
+                    if not _is_api_reply(body, self.device_id):
+                        # A captive portal or another server answering 200 with its own
+                        # page: not delivered, so the reading stays queued
+                        logger.warning("IP uplink: HTTP %s but not the API's reply (%s); not delivered",
+                                       resp.status_code, resp.text[:80].replace("\n", " "))
+                        return _err_result("reply is not the API's (captive portal?)",
+                                           status_code=resp.status_code, attempts=attempt)
                     logger.info(
                         "IP uplink OK (attempt %d/%d): %s",
                         attempt, self.retry_attempts, resp.status_code,
@@ -628,6 +770,11 @@ def poll_downlink(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
         return tx.poll_downlink()
     finally:
         tx.close()
+
+
+def _is_api_reply(body: Any, device_id: str) -> bool:
+    """True for the API's /ip/uplink reply about this device (app/models.IPUplinkResponse)."""
+    return isinstance(body, dict) and body.get("device_id") == device_id and "decoded" in body
 
 
 def post_acks(acks: List[Dict[str, Any]], config_path: str = _DEFAULT_CONFIG_PATH) -> bool:
