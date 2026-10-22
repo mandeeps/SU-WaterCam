@@ -186,8 +186,19 @@ def get_values() -> dict:
             "Linear": sensor.linear_acceleration,
             "Gravity": sensor.gravity}
 
+def _circular_mean_deg(values_deg):
+    """Mean of angles in degrees that wrap (heading 0-360, roll +/-180), in (-180, 180]."""
+    sin_sum = sum(math.sin(math.radians(v)) for v in values_deg)
+    cos_sum = sum(math.cos(math.radians(v)) for v in values_deg)
+    return math.degrees(math.atan2(sin_sum, cos_sum))
+
+
 def get_euler_stable(n: int = 20, interval_s: float = 0.015) -> dict:
-    """Return circular-mean heading and mean pitch/roll averaged over n samples.
+    """Return circular-mean heading and roll, and mean pitch, averaged over n samples.
+
+    Heading wraps at 0/360 and roll at +/-180, so both use a circular mean (an
+    arithmetic mean of +179 and -179 is 0, the opposite side). Pitch stays within
+    +/-90 and has no wrap, so its plain mean is right even near +/-90.
 
     Collecting 20 samples at 15 ms intervals adds ~300 ms per call.
     Returns keys: heading_mean, pitch_mean, roll_mean, heading_std, n_samples.
@@ -223,7 +234,7 @@ def get_euler_stable(n: int = 20, interval_s: float = 0.015) -> dict:
     return {
         "heading_mean": round(mean_heading, 2),
         "pitch_mean":   round(sum(pitches) / len(pitches), 2) if pitches else None,
-        "roll_mean":    round(sum(rolls)   / len(rolls),   2) if rolls   else None,
+        "roll_mean":    round(_circular_mean_deg(rolls), 2) if rolls else None,
         "heading_std":  round(heading_std, 2),
         "n_samples":    len(headings),
     }

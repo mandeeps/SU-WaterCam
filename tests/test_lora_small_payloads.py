@@ -90,12 +90,13 @@ def test_drain_sends_once_the_limit_allows(tmp_path):
     assert lsf.queue_depth(str(tmp_path)) == 1
 
 
-def test_drain_keeps_order_behind_an_oversize_entry(tmp_path):
+def test_drain_skips_an_oversize_entry_and_sends_smaller_ones(tmp_path):
     _queue(tmp_path, 1, sensor_len=59, bitmap_len=200)   # oldest: bitmap needs a high data rate
     _queue(tmp_path, 1, sensor_len=20)
     h = FakeHandler()
     r = lsf.drain(h, queue_dir=str(tmp_path), size_limit=125)
-    assert r["deferred"] and h.sent == []
+    assert r["deferred"] and h.sent == ["aa" * 20] and r["drained"] == 1
+    assert lsf.queue_depth(str(tmp_path)) == 1          # the big one stays queued
 
 
 def test_drain_does_not_resend_a_delivered_half(tmp_path):
@@ -152,7 +153,7 @@ def test_codec_decodes_every_sensor_channel():
     assert out["temperature_celsius"] == 22.2
     # The Witty Pi temperature and output voltage aren't sent over LoRa
     assert "wittypi_temperature" not in out and "wittypi_internal_voltage" not in out
-    assert len(pkt) == 84   # 104 with the float32 and Witty Pi channels
+    assert len(pkt) == 85   # 104 with the float32 and Witty Pi channels
 
 
 def test_compact_fields_layout_and_limits():

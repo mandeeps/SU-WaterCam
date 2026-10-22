@@ -47,6 +47,7 @@ import signal
 import socket
 import stat
 import sys
+import threading
 import time
 
 import numpy as np
@@ -56,7 +57,7 @@ from segformer_preprocess import (ModelContractError, band_order_problem,
                                   model_band_indices, model_metadata, normalization_mode,
                                   resize_interpolation,
                                   normalization_spec, preprocess_bands,
-                                  water_class_index)
+                                  tiff_band_order, water_class_index)
 
 SOCKET_PATH = "/run/segformer/segformer.sock"
 LOG_FORMAT = "%(asctime)s [segformer_daemon] %(levelname)s: %(message)s"
@@ -175,7 +176,7 @@ def input_geometry(input_shape, ori_h: int, ori_w: int) -> tuple[int, int, int, 
 _band_warning = [""]
 
 
-def run_inference(session, tiff_path: str, output_path: str) -> float:
+def run_inference(session, tiff_path: str, output_path: str, rgb_only: bool = False) -> float:
     import cv2
     import rasterio
     from PIL import Image
@@ -191,6 +192,13 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
     # Band order is the one mismatch that still produces a plausible mask, so
     # say so loudly and keep going — a metadata disagreement should not take a
     # field node offline.
+    bands = model_band_indices(session, descriptions, tiff_tags)
+    if rgb_only:
+        # The thermal band of this TIFF is a placeholder. Only a model that
+        # reads its three optical bands by name may be run on it.
+        got = tiff_band_order(descriptions, tiff_tags)
+        if bands is None or any(got[b] not in ("red", "green", "blue") for b in bands):
+            raise ValueError("this model reads the thermal or NIR band and the capture has no thermal frame")
     problem = band_order_problem(session, descriptions, tiff_tags)
     if problem and problem != _band_warning[0]:
         _band_warning[0] = problem
@@ -207,7 +215,7 @@ def run_inference(session, tiff_path: str, output_path: str) -> float:
     # An RGB model reads its three bands out of the five-band TIFF by name.
     arr = load_and_preprocess(tiff_path, expected_h, expected_w,
                               spec=normalization_spec(session),
-                              bands=model_band_indices(session, descriptions, tiff_tags),
+                              bands=bands,
                               interpolation=resize_interpolation(session))
 
     # Pad symbolic axes up to SIZE_DIVISOR so the graph's scale_factor upsample
@@ -286,7 +294,8 @@ def handle_connection(conn: socket.socket, session) -> None:
         if not os.path.exists(tiff_path):
             raise FileNotFoundError(f"TIFF not found: {tiff_path}")
 
-        elapsed_ms = run_inference(session, tiff_path, output_path)
+        elapsed_ms = run_inference(session, tiff_path, output_path,
+                                   rgb_only=req.get("rgb_only") is True)
         log.info("Segmented %s in %.0f ms → %s", tiff_path, elapsed_ms, output_path)
 
         resp = json.dumps({"status": "ok", "inference_ms": round(elapsed_ms)}) + "\n"
@@ -303,7 +312,7 @@ def handle_connection(conn: socket.socket, session) -> None:
         conn.close()
 
 
-def serve(session, socket_path: str) -> None:
+def serve(session, socket_path: str, on_listening=None) -> None:
     if os.path.exists(socket_path):
         # lstat avoids following a symlink planted in /tmp by another user.
         if not stat.S_ISSOCK(os.lstat(socket_path).st_mode):
@@ -334,6 +343,8 @@ def serve(session, socket_path: str) -> None:
         os.umask(old_umask)
     server.listen(4)
     log.info("Listening on %s", socket_path)
+    if on_listening is not None:
+        on_listening()
 
     def _shutdown(sig, frame):
         log.info("Received signal %s, shutting down", sig)
@@ -444,9 +455,15 @@ def main():
     if args.fallback_fp32 and args.fallback_fp32 != args.model:
         candidates.append(args.fallback_fp32)
     model_path, session = load_first_usable(candidates)
-    record_model(model_path, os.path.join(os.path.dirname(args.socket), MODEL_INFO_NAME),
-                 model_metadata(session))
-    serve(session, args.socket)
+    # Hashing the model reads the whole file, which on a Pi's SD card delays the
+    # socket by seconds. The model id is only needed for uplinks, so do it in the
+    # background once the socket is serving.
+    info_path = os.path.join(os.path.dirname(args.socket), MODEL_INFO_NAME)
+    meta = model_metadata(session)
+    serve(session, args.socket,
+          on_listening=lambda: threading.Thread(
+              target=record_model, args=(model_path, info_path, meta),
+              name="record-model", daemon=True).start())
 
 
 if __name__ == "__main__":

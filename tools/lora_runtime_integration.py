@@ -28,6 +28,12 @@ from datetime import datetime
 import sys
 import os
 
+# Defaults shared with ticktalk_main.py and the watchers
+DEFAULT_SHUTDOWN_LIMIT = 3          # captures per wake before the node shuts down
+DEFAULT_EMERGENCY_FREQUENCY = 10    # minutes between captures in emergency mode / holds
+MIN_EMERGENCY_FREQUENCY = 1
+MAX_EMERGENCY_FREQUENCY = 240
+
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _parent_dir = os.path.dirname(_current_dir)
 
@@ -88,7 +94,7 @@ class LoRaRuntimeManager:
         'area_threshold':                   (0, 100),
         'stage_threshold':                  (0, 65535),
         'monitoring_frequency':             (1, 10080),
-        'emergency_frequency':              (1, 1440),
+        'emergency_frequency':              (MIN_EMERGENCY_FREQUENCY, MAX_EMERGENCY_FREQUENCY),
         'photo_interval':                   (30, 1440),   # seconds
         'neighborhood_emergency_frequency': (1, 1440),
         'max_retransmissions':              (0, 10),
@@ -141,7 +147,7 @@ class LoRaRuntimeManager:
         
         # Timing parameters
         'monitoring_frequency': 60,     # Monitoring frequency (minutes)
-        'emergency_frequency': 30,       # Emergency transmission frequency (minutes)
+        'emergency_frequency': DEFAULT_EMERGENCY_FREQUENCY,  # Minutes between captures in emergency mode and keep-awake holds
         'photo_interval': 60,           # Capture period within a wake (seconds)
         'neighborhood_emergency_frequency': 30,  # Neighborhood emergency frequency
         
@@ -154,7 +160,7 @@ class LoRaRuntimeManager:
         
         # Advanced parameters
         'auto_shutdown_enabled': True,  # Enable automatic shutdown after iterations
-        'shutdown_iteration_limit': 2,  # Number of iterations before shutdown
+        'shutdown_iteration_limit': DEFAULT_SHUTDOWN_LIMIT,  # Number of iterations before shutdown
         'data_retention_days': 0,       # Days to keep photos (JPEG, TIFF) and audio; 0 keeps all
         'storage_low_free_pct': 20,     # Below this free space, remove the oldest photos...
         'storage_target_free_pct': 30,  # ... until this much is free (tools/data_retention.py)
@@ -169,7 +175,7 @@ class LoRaRuntimeManager:
 
     # Keys set_parameter() accepts: the defaults, the ranged keys, and the
     # emergency timestamp it writes itself. Anything else is refused.
-    _SETTABLE_PARAMS: frozenset = frozenset(_DEFAULT_PARAMS) | frozenset(_PARAM_RANGES) | {'emergency_since'}
+    _SETTABLE_PARAMS: frozenset = frozenset(_DEFAULT_PARAMS) | frozenset(_PARAM_RANGES) | {'emergency_since', 'schedule'}
 
     def __init__(self, config_file='runtime_config.json', lora_handler=None):
         self.config_file = config_file
@@ -305,7 +311,7 @@ class LoRaRuntimeManager:
         return {
             'iteration_count': new_count,
             'auto_shutdown_enabled': cfg.get('auto_shutdown_enabled', True),
-            'shutdown_iteration_limit': cfg.get('shutdown_iteration_limit', 3),
+            'shutdown_iteration_limit': cfg.get('shutdown_iteration_limit', DEFAULT_SHUTDOWN_LIMIT),
             'emergency_mode': cfg.get('emergency_mode', False),
             'emergency_since': cfg.get('emergency_since'),
             'emergency_max_hours': cfg.get('emergency_max_hours', self.EMERGENCY_MAX_HOURS),

@@ -180,3 +180,66 @@ sudo systemctl daemon-reload
 ```
 
 For a one-off run: `COREG_SINGLE_THREAD=1 venv/bin/python tools/coreg_multiple.py <capture dir> --position-changed`.
+
+
+## Thermal registration: what gets cached
+
+The Lepton's PGM is 16-bit whenever its span exceeds 255 (`tools/capture.c` writes
+`maxval = max - min`). Registration scales it between the 1st and 99th percentile
+before the 8-bit step; casting straight to 8 bits wrapped it modulo 256.
+
+A fresh solve is written to `images/registration_transform.json` (the cache every later
+capture reuses) only if both hold, in `tools/coreg_multiple.py`:
+
+- the final mutual-information metric is a number, and at most `MIN_ACCEPT_METRIC` once
+  that is set (more negative is better, a failed solve sits near 0). It is empty for now:
+  solves on the field units, before the thermal frame was scaled properly, had a median of
+  about -0.006 and a best of -0.18, so a threshold has to be measured from the `Final metric
+  value` lines of good captures with the fixed preprocessing;
+- no point of the registration frame moves more than `MAX_TRANSFORM_DRIFT_PX` (25 px, at
+  the resized registration resolution) from the transform already cached. The cameras are
+  bolted together, so the true transform is a constant. After deliberately remounting a
+  camera, run `tools/coreg_multiple.py DIR --position-changed --no-drift-check`, or re-seed
+  with `tools/seed_registration_cache.py` (which does not use this gate).
+
+A rejected solve is not cached and the capture uses the previous cached transform (or, with
+none, the rejected solve for that capture only). The verdict is in the capture's
+`coregistration_metadata.json` under `image_info.registration_solve`
+(`accepted`, `reasons`, `metric`, `drift_px`, `used`). `tools/registration_orientation.py`
+then never adopts a pose for that capture (`no_reference`, nothing sent).
+
+The NIR band is built from frames undistorted like the registered one (same
+`config/camera_calibration.json`). `image_info.undistorted_camera_matrix` in the same file is
+the camera matrix of those frames (from `getOptimalNewCameraMatrix`), which is not the
+calibrated `K`.
+
+## A capture with no thermal frame
+
+`flir()` runs the Lepton capture, and if it fails (the failure resets the Lepton) runs it once
+more. With still no frame it writes `thermal: "missing"` to `capture_status.json` in the
+capture directory, and then:
+
+- co-registration builds the TIFFs from RGB and NIR with an all-zero thermal band (no
+  registration, no cache change);
+- the segmentation step asks the daemon for `rgb_only`. The daemon runs only a model that
+  declares `bands=red,green,blue` (so a thermal-free model never sees the placeholder band)
+  and refuses any other, in which case segmentation is skipped, the cold-load fallback is
+  not tried, `capture_status.json` gets `segmentation: "skipped_no_thermal"`, and there is
+  no mask, so `camera_water_pct` is absent and the bitmap empty. An RGB-only run is recorded
+  as `segmentation: "rgb_only"`.
+
+The graph's deadline for the thermal step is 80 s (was 30 s) so the retry fits.
+
+## Housekeeping
+
+- `tools/data_retention.py` removes whole capture directories (and loose photos at the top
+  of `images/`), judged by the newest file in each, under the same age and free-space rules.
+- A failed `get_time` directory creation uses `images/<timestamp>-fallback`, created fresh,
+  never a shared `images/fallback`, so outputs from an earlier failure cannot be resent.
+- `data/metadata_log.txt` is in `config/logrotate-watercam.conf`.
+- The segformer daemon hashes its model in the background after the socket is serving, and
+  `segformer_daemon.service` waits up to 60 s for the socket.
+- Flood flags (`tools/flood_baseline.py`) need two captures in a row over their condition,
+  and ignore frames darker than 40 or brighter than 225 (mean grey level).
+- A home position (`tools/gps_home.py`) is learned only from fixes whose reported error is at
+  most 15 m, at least 30 s apart.

@@ -52,15 +52,11 @@ def flir(directory):
     try:
         makedirs(directory, exist_ok=True)
     except Exception as exc:
-        fallback_directory = path.join(project_root, "images", "fallback")
+        # No shared fallback directory: the later steps work on `directory`, so
+        # frames written elsewhere would never be used, and a directory reused
+        # across captures would hand stale outputs to the next one.
         print(f"Unable to create FLIR output directory '{directory}': {exc}")
-        try:
-            makedirs(fallback_directory, exist_ok=True)
-            print(f"Falling back to FLIR output directory '{fallback_directory}'")
-            directory = fallback_directory
-        except Exception as fallback_exc:
-            print(f"Unable to create fallback FLIR output directory '{fallback_directory}': {fallback_exc}")
-            return True
+        return True
 
     def _reset_lepton():
         import sys
@@ -117,8 +113,7 @@ def flir(directory):
         # Verify output was written during this run. Allow a small mtime slop
         # for filesystems with coarse timestamp granularity and minor clock /
         # timestamp-recording skew, while still requiring output to be fresh.
-        # Using mtime handles both new files and overwrites of existing files,
-        # so validation stays correct when the fallback directory is reused.
+        # Using mtime handles both new files and overwrites of existing files.
         if out_glob is not None:
             fresh = [f for f in glob(out_glob) if path.getmtime(f) >= start_time - MTIME_SLOP_SEC]
             if not fresh:
@@ -133,8 +128,19 @@ def flir(directory):
     # the files produced by this run — no re-glob that could match a file
     # from a concurrent run sharing the same (fallback) directory.
     capture_fresh = _run_flir_cmd("capture", [capture_bin])
+    if not capture_fresh:
+        # The failed run has already reset the Lepton. A frame is the whole point
+        # of the thermal step, so try once more now that it is reset.
+        print("[flir] capture failed: retrying once after the reset")
+        capture_fresh = _run_flir_cmd("capture", [capture_bin])
     print(f"[flir] capture done: {_time.time() - _flir_t0:.1f}s")
     if not capture_fresh:
+        print("⚠️ [flir] no thermal frame for this capture (after one retry)")
+        try:
+            from tools.capture_status import mark
+            mark(directory, thermal="missing")
+        except Exception as exc:
+            print(f"Could not record the missing thermal frame: {exc}")
         return True
     lepton_fresh = _run_flir_cmd("lepton", [lepton_bin])
     print(f"[flir] lepton done: {_time.time() - _flir_t0:.1f}s")

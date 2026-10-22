@@ -10,9 +10,18 @@ Camera is at (0, 0, camera_height_m) in ENU; ground plane Z = 0.
 
 from __future__ import annotations
 
+import logging
 from typing import Callable, Optional, Tuple
 
 import numpy as np
+
+log = logging.getLogger(__name__)
+
+# Guards for flat-ground intersection. A ray this close to the horizon turns
+# centimetres of pitch error into hundreds of metres on the ground, so such
+# pixels are rejected rather than returned as if they were reliable.
+MIN_GRAZING_ANGLE_DEG = 2.0    # min angle between ray and ground plane
+MAX_GROUND_RANGE_M = 2000.0    # max horizontal distance from camera
 
 
 def pixel_ray(K: np.ndarray, u: float, v: float) -> np.ndarray:
@@ -34,14 +43,27 @@ def intersect_flat(
     with the flat ground plane Z = 0.
 
     Returns (east_m, north_m) in meters relative to camera, or None if
-    the ray does not hit the ground (horizontal or pointing up).
+    the ray does not hit the ground (horizontal or pointing up), is within
+    MIN_GRAZING_ANGLE_DEG of horizontal, or lands farther than
+    MAX_GROUND_RANGE_M from the camera (the last two are logged).
     """
     if abs(ray_world[2]) < 1e-9:
         return None
     lam = -camera_height_m / ray_world[2]
     if lam < 0:
         return None
+    norm = float(np.linalg.norm(ray_world))
+    depression_deg = float(np.degrees(np.arcsin(min(1.0, abs(ray_world[2]) / norm))))   # unit or not
+    if depression_deg < MIN_GRAZING_ANGLE_DEG:
+        log.info("Ray rejected: %.2f deg below horizon (< %.1f deg grazing limit)",
+                    depression_deg, MIN_GRAZING_ANGLE_DEG)
+        return None
     ground_enu = np.array([0.0, 0.0, camera_height_m], dtype=np.float64) + lam * ray_world
+    rng = float(np.hypot(ground_enu[0], ground_enu[1]))
+    if rng > MAX_GROUND_RANGE_M:
+        log.info("Ray rejected: ground range %.0f m exceeds %.0f m limit",
+                    rng, MAX_GROUND_RANGE_M)
+        return None
     return float(ground_enu[0]), float(ground_enu[1])
 
 

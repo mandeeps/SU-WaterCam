@@ -227,6 +227,7 @@ def _tx(enabled=False, reachable=True):
     tx.wifi_grace_s = 0
     tx.is_reachable.return_value = reachable
     tx.wait_tailnet.return_value = True
+    tx.server_only_down.return_value = False
     tx._drain_queue.return_value = {"drained": 0, "failed": False, "failed_file": None, "drained_ts": []}
     tx.send_uplink.return_value = {"success": True, "attempts": 1}
     tx.poll_downlink.return_value = {"success": True, "command": None}

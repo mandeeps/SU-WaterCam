@@ -48,6 +48,7 @@ def _tx(reachable, only_if_lora=True, cellular="Quectel"):
     tx.is_reachable.return_value = reachable
     tx.wait_reachable.return_value = True
     tx.wait_tailnet.return_value = True
+    tx.server_only_down.return_value = False
     tx._drain_queue.return_value = {"drained": 0, "failed": False, "failed_file": None, "drained_ts": []}
     tx.send_uplink.return_value = {"success": True, "attempts": 1}
     tx.poll_downlink.return_value = {"success": True, "commands": []}
@@ -102,14 +103,38 @@ class TestWiFiThenCellular:
         m["up"].assert_not_called()
         m["down"].assert_not_called()
 
-    def test_unreachable_brings_cellular_up_and_leaves_it_up(self):
+    def test_unreachable_brings_cellular_up_and_takes_it_down_after(self):
         tx = _tx(reachable=False)
         m = _run(tx)
         assert m["result"]["success"] is True
         m["up"].assert_called_once_with("Quectel", 90)
         tx.send_uplink.assert_called_once()
         tx.poll_downlink.assert_called_once()
-        m["down"].assert_not_called()
+        m["down"].assert_called_once_with("Quectel")      # after the upload and the poll
+        tx._drain_queue.assert_called_once_with(metered=True)
+
+    def test_wifi_up_and_server_peer_online_does_not_bring_cellular_up(self):
+        tx = _tx(reachable=False)
+        tx.server_only_down.return_value = True
+        tx.wait_reachable.return_value = False
+        m = _run(tx, wifi=True)
+        m["up"].assert_not_called()
+        tx._enqueue.assert_called_once()
+        tx.send_uplink.assert_not_called()
+        assert m["result"]["status"] == "queued"
+
+    def test_cellular_comes_down_when_the_post_fails_too(self):
+        tx = _tx(reachable=False)
+        tx.send_uplink.return_value = {"success": False, "attempts": 3, "error": "x"}
+        m = _run(tx)
+        m["down"].assert_called_once_with("Quectel")
+
+    def test_cellular_comes_down_even_if_the_uplink_raises(self):
+        tx = _tx(reachable=False)
+        tx.send_uplink.side_effect = RuntimeError("boom")
+        m = _run(tx)
+        assert m["result"]["status"] == "error"
+        m["down"].assert_called_once_with("Quectel")
 
     def test_existing_session_is_used_while_wifi_is_down(self):
         tx = _tx(reachable=True)
@@ -132,7 +157,7 @@ class TestWiFiThenCellular:
         tx = _tx(reachable=False)
         tx.wait_reachable.return_value = False
         m = _run(tx, status=ON_DEMAND_UP, wifi=True)
-        m["down"].assert_called_once_with("Quectel")
+        assert m["down"].call_args_list == [(("Quectel",),)] * 2   # WiFi came back, then after the upload
         tx.wait_reachable.assert_called_once_with(45)
         tx.wait_tailnet.assert_called_once_with(30)
         m["up"].assert_called_once()
@@ -273,7 +298,8 @@ class TestReplyCommands:
         from tools.transmit_ip import IPTransmitter
         tx = IPTransmitter.__new__(IPTransmitter)
         tx.device_id, tx.server_url = "watercam-006", "http://server.example.ts.net:8000"
-        with patch.object(IPTransmitter, "_post_with_retry", return_value={"success": True}) as post:
+        with patch.object(IPTransmitter, "_post_with_retry", return_value={"success": True}) as post, \
+                patch("tools.transmit_ip._resolves_into_tailnet", return_value=True):
             tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1, want_command=True)
             tx.send_uplink([{"code": "02 01", "payload_hex": "0000002c"}], device_ts=1)
         assert post.call_args_list[0].args[1]["want_command"] is True
@@ -428,7 +454,7 @@ class TestRemoveDelivered:
         for t in (1000, 1060, 1120):
             lsf.enqueue("aa", None, t, queue_dir=q)
         assert lsf.remove_delivered([1060, 1121], queue_dir=q) == 1
-        left = sorted(int(f.split("_")[0]) for f in os.listdir(q))
+        left = sorted(int(f.split("_")[0]) for f in os.listdir(q) if f.endswith(".json"))
         assert left == [1000, 1120]
 
     def test_fractional_capture_time_matches_its_second(self, tmp_path):

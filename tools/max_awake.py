@@ -55,8 +55,11 @@ HOLD_FLAG = "/etc/watercam/hold-awake"
 DEFAULT_MAX_MINUTES = 60
 # Same default as RuntimeParameterManager.EMERGENCY_MAX_HOURS and call_shutdown()
 EMERGENCY_DEFAULT_HOURS = 24
-# Past the deadline the graph's own expiry (once per iteration) gets this long first
+# Past the deadline the graph's own expiry (once per iteration) gets this long first,
+# plus one emergency_frequency: that is how far apart the iterations are
 EMERGENCY_MARGIN_MIN = 15
+EMERGENCY_DEFAULT_FREQUENCY_MIN = 10
+EMERGENCY_MAX_FREQUENCY_MIN = 240
 # emergency_since this far ahead of the clock is treated as unusable
 CLOCK_SLACK_S = 300
 SHUTDOWN_COMMANDS = (["doas", "/usr/sbin/shutdown", "-h", "now"],
@@ -112,7 +115,11 @@ def emergency_limit_min(cfg: dict) -> Optional[float]:
         hours = EMERGENCY_DEFAULT_HOURS
     if hours == 0:
         return None
-    return hours * 60 + EMERGENCY_MARGIN_MIN
+    every = _number(cfg.get("emergency_frequency"))
+    if every is None or every < 1:
+        every = EMERGENCY_DEFAULT_FREQUENCY_MIN
+    every = min(every, EMERGENCY_MAX_FREQUENCY_MIN)
+    return hours * 60 + EMERGENCY_MARGIN_MIN + every
 
 
 def emergency_expired(cfg: dict, now: Optional[float] = None,
