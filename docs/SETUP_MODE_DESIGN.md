@@ -150,16 +150,15 @@ Needs adding in three places: `API/app/encoders.py`,
 `tools/transmit_ip.py` `apply_downlink_command()`, and the TLV table in
 `tools/lora_runtime_integration.py`.
 
-**Status message.** The IP downlink queue marks a command delivered as soon as
-the node fetches it, and there is no acknowledgement, so the dashboard cannot
-tell whether a command took effect. On entering and leaving maintenance mode
+**Status message.** Commands are acked ([SYSTEM_REFERENCE.md](SYSTEM_REFERENCE.md#command-frames)),
+but an ack only says the command was applied, not what state the node is in. On entering and leaving maintenance mode
 the node sends a status uplink: mode, Wi-Fi mode, SSID, IP address on the Wi-Fi
 interface, minutes remaining, the Pi's under-voltage flags (and battery level
 once a real reading exists), and the reason it left.
 
 **Fix first:** `14 94` means something different on each transport. The IP
-path and the API encoder treat it as the flood-code frequency (an index into
-10-60 min); the LoRa TLV table sets `photo_interval` in seconds. Whatever
+path and the API encoder treat it as the flood-code interval (minutes, 1-240);
+the LoRa TLV table sets `photo_interval` in seconds. Whatever
 `14 94` should mean, the two paths must agree before more commands are added.
 
 ## 6. Dashboard (API repo)

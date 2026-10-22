@@ -11,7 +11,9 @@ and from the planned maintenance mode (#117, Wi-Fi only).
 
 ## Command
 
-`18 98 NN`, on fPort 10 like the other downlinks. It has the same meaning over IP.
+`18 98 NN`, in a command frame (`[seq] 18 98 NN`, e.g. `00189803` by hand) on fPort 10
+like the other downlinks. It has the same meaning over IP. The node acks it with a
+status reply led by `"ak":seq` ([SYSTEM_REFERENCE.md](SYSTEM_REFERENCE.md#command-frames)).
 The code picks the connection:
 
 | Code | Connection |
@@ -47,7 +49,7 @@ node:  1. clear the Witty Pi shutdown alarm       (the Pi stays on past its wind
        2. stop ticktalk.service                   (no capture load, no call_shutdown)
        3. nmcli connection up Quectel             (pi may do this: polkit rule)
        4. wait for Tailscale: BackendState Running and Self.Online (up to 120 s)
-       5. LoRa status uplink {"dbg":1,"rd":<min left>,"tn":<tailscale 0/1>,"cl":<cellular 0/1>}
+       5. LoRa status uplink {"ak":<seq>,"dbg":1,"rd":<min left>,"tn":<tailscale 0/1>,"cl":<cellular 0/1>}
 admin: tailscale ssh pi@ufo-01-01-NNN...
 end:   dashboard "End remote debug" (18 98 00), or on the node:
          ~/SU-WaterCam/venv/bin/python ~/SU-WaterCam/tools/remote_debug.py stop
@@ -83,7 +85,7 @@ boots caused by power returning, not switch presses.
   it, and whether cellular was already up. Written atomically.
 - **`lora_daemon`**: on `18 98 NN`, runs `remote_debug.start()` or `stop()` on
   a thread, so the serial listener isn't blocked while Tailscale connects.
-- **IP downlink**: `18 98 NN` writes a request file that the timer picks up, since
+- **IP downlink**: the command (acked with `POST /ip/ack`) writes a request file that the timer picks up, since
   ticktalk can't stop itself and keep running the session.
 - **`remote-debug.timer`** runs `remote_debug.py tick` every 30 s as `pi`. It
   applies a pending request and ends an expired session. It doesn't depend on
@@ -105,9 +107,9 @@ boots caused by power returning, not switch presses.
   session is still running and keeps ticktalk stopped. A session that expired
   while the Pi was off is ended on the first tick.
 - **Data rate:** the status uplink is trimmed to the mDot's payload limit, keeping
-  `{"dbg":1,"rd":N}` (about 17 B), which is what the API confirms with. That fits at
-  SF9 or faster. At SF10 (11 B) nothing useful fits, so the node sends no status
-  and the API can't confirm; the session still starts.
+  `{"ak":N,"dbg":1,"rd":N}` (about 25 B), where `ak` (the command's seq, 10 B alone)
+  is what the API confirms with. The ack alone fits even at SF10 (11 B), so the API
+  can confirm at any rate; `dbg` and `rd` come as room allows. The session starts either way.
 - **Cost:** a session uses roughly 1–5 MB of the 500 MB SIM (Tailscale overhead
   plus the SSH traffic) and keeps the Pi on at about 2–2.6 W. Use short sessions
   on units with marginal power.

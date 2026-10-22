@@ -19,9 +19,10 @@ Sensors ──┬── LoRa (mDot → ChirpStack → POST /chirpstack/uplink)
                             └── GET /ip/downlink/{device_id}  (polling)
 ```
 
-The server auto-sets `transport_type = "ip"` for any device that hits the
-`/ip/uplink` endpoint, which makes the `/downlink` router queue commands
-for polling instead of pushing them through ChirpStack.
+The server stores every command once and offers it over IP (in `/ip/uplink` and
+`/ip/downlink` replies) until the node acks it; a device with a LoRa EUI also gets
+it over LoRa. Whichever ack arrives first completes it
+([SYSTEM_REFERENCE.md](SYSTEM_REFERENCE.md#command-frames)).
 
 ---
 
@@ -128,24 +129,27 @@ retried up to `retry_attempts` times.
 
 ### `poll_downlink() → dict`
 
-GET `/ip/downlink/{device_id}` to retrieve the oldest queued command.
+GET `/ip/downlink/{device_id}` to retrieve the commands waiting for this node.
 
 ```python
 result = tx.poll_downlink()
-if result["success"] and result["command"]:
-    cmd = result["command"]
-    print(cmd["hex_payload"])   # encoded command to decode/apply
-    print(cmd["queue_id"])      # DB id (already marked delivered)
-    print(cmd["parts"])         # decoded parts list (may be None)
+if result["success"]:
+    for cmd in result["commands"]:
+        print(cmd["id"])        # server id, used to ack it
+        print(cmd["frame"])     # hex command frame: [seq][code][value]...
 ```
 
-The server marks the command as delivered **atomically on retrieval** — there is
-no separate acknowledge call. Once polled, the command is consumed.
+The server offers a command until the node acks it, so polling twice is
+harmless. The node applies each frame once (it remembers `seq` and a hash) and
+acks every offer with `post_acks()` (`POST /ip/ack`); acks that can't be posted
+are kept and sent in the next uplink. Frame format, result codes and dedup:
+[SYSTEM_REFERENCE.md](SYSTEM_REFERENCE.md#command-frames).
 
 A wake polls three times: at the start (often skipped, the network isn't up
 yet), after an IP uplink is delivered, and **just before shutdown**
-(`tools/last_downlink_check.py`, from `call_shutdown`). The last one takes up
-to three queued commands and never brings a connection up. If a command turns
+(`tools/last_downlink_check.py`, from `call_shutdown`). The last one polls up
+to twice (one poll returns everything pending; the second catches a command sent
+meanwhile) and never brings a connection up. If a command turns
 emergency mode on or starts a remote access session, the node doesn't power
 off. LoRa needs no poll: Class C downlinks reach the mDot as soon as they're sent.
 
@@ -154,15 +158,22 @@ off. LoRa needs no poll: Class C downlinks reach the mDot as soon as they're sen
 {
     "success": True,
     "status_code": 200,
-    "command": {                  # or None if nothing queued
-        "queue_id": 42,
-        "hex_payload": "...",
-        "parts": [...],
-        "created_at": "2026-04-14T12:00:00+00:00"
-    },
+    "commands": [                 # empty if nothing is pending (also for a 404)
+        {"id": 412, "frame": "9c219118"}
+    ],
     "error": None
 }
 ```
+
+A server that is not trusted (not on the tailnet, not HTTPS) is not polled:
+`commands` is empty and `untrusted` is true.
+
+### `post_acks(acks) → bool`
+
+POST `/ip/ack` with `{"device_id": ..., "acks": [{"id": 412, "result": 0}]}`
+(`result`: 0 applied, 1 partly, 2 rejected). True on a 2xx reply. Otherwise the
+acks are stored (`data/pending_acks.json`) and `send_uplink()` adds them to the
+next `/ip/uplink` body as `"acks"`, clearing them once the server answers.
 
 ### `is_reachable() → bool`
 
@@ -292,27 +303,26 @@ Receive sensor data from an IP device.
 
 ### `GET /ip/downlink/{device_id}`
 
-Poll for the oldest pending queued command.
+The commands pending for the node (at most 8, oldest first), until they are acked.
 
-**Response (200) — command pending:**
+**Response (200):**
 ```json
-{
-    "command": {
-        "queue_id": 42,
-        "hex_payload": "09192A...",
-        "parts": [...],
-        "created_at": "2026-04-14T11:55:00+00:00"
-    },
-    "message": "Command retrieved successfully"
-}
+{"commands": [{"id": 412, "frame": "9c219118"}]}
 ```
 
-**Response (200) — nothing queued:**
+Nothing pending: `{"commands": []}`.
+
+### `POST /ip/ack`
+
+The node's results for the commands it applied.
+
 ```json
-{"command": null, "message": "No pending commands"}
+{"device_id": "watercam-001", "acks": [{"id": 412, "result": 0}]}
 ```
 
-The command is marked delivered **atomically** when retrieved. No ACK needed.
+Unknown ids, and ids of other devices, are ignored. The same `acks` list may ride
+in an `/ip/uplink` body (acks that couldn't be posted earlier). `/ip/uplink` also
+returns the pending `commands` in its reply when the body sets `want_command`.
 
 ### `POST /ip/device/{device_id}/transport`
 
@@ -403,12 +413,14 @@ On by default. Each capture's IP uplink:
    it is taken down straight away.
 
 Whichever way it went, once a reading is delivered over IP the node collects
-and applies any command waiting. The uplink asks for it (`want_command`) and the
-server's reply carries it, which saves a separate request on a metered link; from
-a server too old to do that, the node polls `/ip/downlink` instead. The wake-start poll runs
+and applies the commands waiting. The uplink asks for them (`want_command`) and the
+server's reply carries them in `commands`, which saves a separate request on a
+metered link; without `commands` in the reply, the node polls `/ip/downlink`
+instead. Each is applied once and acked with `POST /ip/ack`; acks that can't be
+posted ride on the next uplink as `acks`. The wake-start poll runs
 before the uplink and never brings up cellular, so a unit without WiFi gets its
 commands here, after the capture rather than before it. Polling twice is safe:
-the server marks a command delivered as it hands it out.
+the server offers a command until it is acked, and the node applies a frame once.
 
 Only a connection with autoconnect **off** is managed. A unit whose `Quectel`
 connection still autoconnects keeps cellular up as before, so a field unit
@@ -505,7 +517,7 @@ while LoRa can't carry bitmaps; a unit with WiFi in range costs no SIM data. Rai
 ### `ip_downlink_poll_and_apply(lora_init)` (line ~1647)
 
 Polls `/ip/downlink/{device_id}` at the start of each wake cycle and applies
-any queued parameter-update commands.  Called after `initialize_lora_integration`
+any pending parameter-update commands (each acked, see above).  Called after `initialize_lora_integration`
 so updated thresholds are in effect for the capture cycle that follows. It
 doesn't bring up cellular; if the server is unreachable, the poll after the IP
 uplink (above) collects the command instead:
@@ -515,15 +527,15 @@ lora_init   = initialize_lora_integration(trigger)
 ip_downlink = ip_downlink_poll_and_apply(lora_init)  # NEW
 ```
 
-**Downlink command codes handled** (from server `app/encoders.py`):
+**Downlink command codes handled** (a frame is `[seq][code][value]...`: [SYSTEM_REFERENCE.md](SYSTEM_REFERENCE.md#command-frames)):
 
 | Code | Name | Decoding | `set_parameter` target |
 |---|---|---|---|
 | `10 90` | `area_threshold_pct` | u8 direct | `area_threshold` |
 | `11 91` | `stage_threshold_cm` | u16 direct | `stage_threshold` |
-| `12 92` | `monitoring_freq_h` | u8 index → `[1,3,6,24,72]` hrs → ×60 | `monitoring_frequency` (min) |
-| `13 93` | `emergency_freq_min` | u8 index → `[2,5,10]` min | `emergency_frequency` |
-| `14 94` | `flood_code_freq_min` | u8 index → `[10,20,30,40,50,60]` min | `neighborhood_emergency_frequency` |
+| `12 92` | monitoring interval | u16 minutes, 1-10080 | `monitoring_frequency` (min) |
+| `13 93` | emergency capture interval | u8 minutes, 1-240 | `emergency_frequency` |
+| `14 94` | flood-code interval | u8 minutes, 1-240 | `neighborhood_emergency_frequency` |
 | `16 96` | `audio_recording_enabled` | u8 bool | `audio_recording_enabled` |
 | `17 97` | IP upload in each of the next NN wakes, even with `ip_upload.enabled` false | u8 wakes, 0 = cancel ([below](#ip-fallback-when-lora-cant-carry-bitmaps)) | `data/ip_fallback.json` |
 | `18 98` | remote debug session | u8 × 10 min, 0 = end ([REMOTE_DEBUG_SESSION.md](REMOTE_DEBUG_SESSION.md)) | request for `remote-debug.timer` |
@@ -531,7 +543,7 @@ ip_downlink = ip_downlink_poll_and_apply(lora_init)  # NEW
 | `18 9A` | remote access over WiFi, else cellular | u8 × 10 min, 0 = end | request for `remote-debug.timer` |
 | `21 91` | emergency mode on | u8 hours, 0 = `emergency_max_hours` ([REMOTE_START_AND_EMERGENCY.md](REMOTE_START_AND_EMERGENCY.md)) | `emergency_mode`, `emergency_max_hours`, `emergency_since` |
 | `99 99` | emergency mode off | no value | `emergency_mode` |
-| `21` | emergency mode on (old code, kept during the transition) | no value | `emergency_mode` |
+| `50 01` | status request | no value; the ack is the status reply | none |
 
 Unrecognised codes are logged and ignored — forward-compatible with new server
 commands.
