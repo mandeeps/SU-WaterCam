@@ -422,7 +422,7 @@ class LoRaHandler:
             'area_threshold': 10,
             'stage_threshold': 50,
             'monitoring_frequency': 60,
-            'emergency_frequency': 30,
+            'emergency_frequency': 10,
             'neighborhood_emergency_frequency': 30,
             'photo_interval': 60,
             'debug_mode': False,

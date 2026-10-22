@@ -173,7 +173,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     from tools.bno055_imu import get_orientation
     from tools.aht20_temperature import get_aht20
     from tools.get_gps import get_location_with_retry
-    from tools.lora_runtime_integration import get_parameter
+    from tools.lora_runtime_integration import get_parameter, DEFAULT_EMERGENCY_FREQUENCY
     # Helper functions are now imported at module level
 
     # LoRa transmission is always enabled
@@ -215,13 +215,15 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         from tools.wittypi_control import get_wittypi_status
         wittypi_data = get_wittypi_status()
         if wittypi_data.get('status') == 'wittypi_data_retrieved':
-            data.update({
-                'wittypi_temperature': wittypi_data.get('temperature', 0.0),
-                'wittypi_internal_voltage': wittypi_data.get('internal_voltage', 0.0),
-                # Witty Pi input (the V50's 5 V): only the compact packet carries it
-                'wittypi_vin': wittypi_data.get('battery_voltage')
-            })
-            print(f"WittyPi data: temp={wittypi_data.get('temperature', 0.0)}°C, internal={wittypi_data.get('internal_voltage', 0.0)}V")
+            # A reading the board didn't give is None: leave the field out
+            # rather than send a made-up value
+            for key, source in (('wittypi_temperature', 'temperature'),
+                                ('wittypi_internal_voltage', 'internal_voltage'),
+                                # Witty Pi input (the V50's 5 V): only the compact packet carries it
+                                ('wittypi_vin', 'battery_voltage')):
+                if wittypi_data.get(source) is not None:
+                    data[key] = wittypi_data[source]
+            print(f"WittyPi data: temp={wittypi_data.get('temperature')}°C, internal={wittypi_data.get('internal_voltage')}V")
         else:
             print(f"⚠️ WittyPi data unavailable: {wittypi_data.get('status', 'unknown')}")
     except Exception as e:
@@ -288,7 +290,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         'status_area_threshold': area_threshold,
         'stage_threshold': stage_threshold,
         'monitoring_frequency': get_parameter('monitoring_frequency', 60),
-        'emergency_frequency': get_parameter('emergency_frequency', 5),
+        'emergency_frequency': get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY),
         'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30),
         'audio_recording_enabled': 1 if get_parameter('audio_recording_enabled', False) else 0,
     })
@@ -733,13 +735,13 @@ def validate_configuration(trigger):
     """
     Validate that all required configuration parameters are properly set
     """
-    from tools.lora_runtime_integration import get_parameter
+    from tools.lora_runtime_integration import get_parameter, DEFAULT_EMERGENCY_FREQUENCY
     
     required_params = {
         'area_threshold': (10, 'default flood detection threshold'),
         'stage_threshold': (50, 'default stage height threshold'),
         'monitoring_frequency': (60, 'default monitoring interval'),
-        'emergency_frequency': (5, 'default emergency monitoring interval'),
+        'emergency_frequency': (DEFAULT_EMERGENCY_FREQUENCY, 'default emergency capture interval (minutes)'),
         # transmission_enabled and gps_enabled removed (always-on policy)
         
         'shutdown_iteration_limit': (3, 'default shutdown limit'),
@@ -937,21 +939,22 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
 def call_shutdown(state):
     import sys
     from subprocess import call
-    from tools.lora_runtime_integration import get_runtime_manager
+    from tools.lora_runtime_integration import get_runtime_manager, DEFAULT_SHUTDOWN_LIMIT
 
     import time
 
     new_count = 1
     auto_shutdown_enabled = True
-    shutdown_limit = 3
+    shutdown_limit = DEFAULT_SHUTDOWN_LIMIT
     emergency_mode = False
     emergency_since = None
     emergency_max_hours = 24
 
     # One heartbeat per iteration for ticktalk.service's WatchdogSec (#208)
     try:
-        from tools.systemd_watchdog import heartbeat
+        from tools.systemd_watchdog import heartbeat, note_progress
         heartbeat()
+        note_progress()
     except Exception:
         pass
 
@@ -1052,15 +1055,6 @@ def call_shutdown(state):
         print(f"✅ Continuing: count={new_count} < limit={shutdown_limit} or shutdown disabled")
 
     return "continue"
-
-@SQify
-def flir_planb(dummy):
-    from tools.lepton_reset_gpiozero import reset
-    print("\n reset lepton \n")
-    try:
-        reset()
-    except Exception as e:
-        print(f"⚠️ Failed to reset lepton: {e}")
 
 @SQify
 def compress_bitmap(segmented_file):
@@ -1262,7 +1256,7 @@ def emergency_workflow(trigger, monitoring_params, dirname, photo, lepton_file, 
     # Photos, lepton data, coregistration, segmentation, compression, LoRa transmission, and shutdown check are now passed as parameters from GRAPH level
     
     # LoRa monitoring and parameter management
-    from tools.lora_runtime_integration import get_parameter, set_parameter
+    from tools.lora_runtime_integration import get_parameter, set_parameter, DEFAULT_EMERGENCY_FREQUENCY
     
     # Get current parameters directly
     try:
@@ -1274,7 +1268,6 @@ def emergency_workflow(trigger, monitoring_params, dirname, photo, lepton_file, 
         if emergency_mode:
             # Set faster monitoring frequency for emergency
             set_parameter('monitoring_frequency', 5)  # 5 minutes instead of 60
-            set_parameter('emergency_frequency', 1)   # 1 minute for critical monitoring
             print("🚨 Emergency parameters set: Fast monitoring (5min), continuous transmission")
         
         # Return comprehensive status with emergency indicators
@@ -1284,7 +1277,7 @@ def emergency_workflow(trigger, monitoring_params, dirname, photo, lepton_file, 
             'emergency_mode': emergency_mode,
             'area_threshold': area_threshold,
             'monitoring_frequency': get_parameter('monitoring_frequency', 5),  # Use updated value
-            'emergency_frequency': get_parameter('emergency_frequency', 1),   # Use updated value
+            'emergency_frequency': get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY),   # Use updated value
             'bitmap_compressed': True,
             'lora_transmitted': True,
             'photos_captured': True,
@@ -1348,12 +1341,12 @@ def emergency_status_monitor(trigger):
     Monitor and report emergency status for system visibility
     """
     from datetime import datetime
-    from tools.lora_runtime_integration import get_parameter
+    from tools.lora_runtime_integration import get_parameter, DEFAULT_EMERGENCY_FREQUENCY
     
     try:
         emergency_mode = get_parameter('emergency_mode', False)
         monitoring_freq = get_parameter('monitoring_frequency', 60)
-        emergency_freq = get_parameter('emergency_frequency', 5)
+        emergency_freq = get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY)
         
         if emergency_mode:
             print(f"🚨 EMERGENCY STATUS ({datetime.now().strftime('%H:%M:%S')}):")
@@ -1386,7 +1379,7 @@ def lora_parameter_monitor(trigger):
     This function runs periodically and checks for parameter changes
     """
     from datetime import datetime
-    from tools.lora_runtime_integration import get_parameter, sync_lora_parameters
+    from tools.lora_runtime_integration import get_parameter, sync_lora_parameters, DEFAULT_EMERGENCY_FREQUENCY
     from tools.lora_handler_concurrent import get_lora_handler
     
     # Sync runtime parameters with LoRa config to ensure consistency
@@ -1403,7 +1396,7 @@ def lora_parameter_monitor(trigger):
             'area_threshold': get_parameter('area_threshold', 10),
             'stage_threshold': get_parameter('stage_threshold', 50),
             'monitoring_frequency': get_parameter('monitoring_frequency', 60),
-            'emergency_frequency': get_parameter('emergency_frequency', 5),
+            'emergency_frequency': get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY),
             'debug_mode': get_parameter('debug_mode', False),
             
             'photo_interval': get_parameter('photo_interval', 60),
@@ -1417,7 +1410,7 @@ def lora_parameter_monitor(trigger):
             'area_threshold': 10,
             'stage_threshold': 50,
             'monitoring_frequency': 60,
-            'emergency_frequency': 5,
+            'emergency_frequency': DEFAULT_EMERGENCY_FREQUENCY,
             'debug_mode': False,
             
             'photo_interval': 60,
@@ -1448,7 +1441,7 @@ def lora_emergency_handler(trigger, lora_status):
     This function is triggered when emergency mode changes
     """
     from datetime import datetime
-    from tools.lora_runtime_integration import get_parameter
+    from tools.lora_runtime_integration import get_parameter, DEFAULT_EMERGENCY_FREQUENCY
     
     if lora_status and lora_status.get('emergency_mode', False):
         print("🚨 EMERGENCY MODE DETECTED - Taking immediate action!")
@@ -1460,7 +1453,7 @@ def lora_emergency_handler(trigger, lora_status):
                 'emergency_triggered': True,
                 'timestamp': datetime.now().isoformat(),
                 'actions_taken': ['emergency_logging', 'increased_monitoring'],
-                'monitoring_frequency': get_parameter('emergency_frequency', 5)
+                'monitoring_frequency': get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY)
             }
             return emergency_actions
         except Exception as e:
@@ -1797,7 +1790,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                                    cellular_down, handle_downlink_reply, reply_commands,
                                    wifi_connected, wifi_in_range)
     from tools import lora_store_forward as _lsf
-    from tools.lora_runtime_integration import get_parameter, set_parameter
+    from tools.lora_runtime_integration import get_parameter, set_parameter, DEFAULT_EMERGENCY_FREQUENCY
 
     tx = IPTransmitter()
 
@@ -1939,7 +1932,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         data['area_threshold']                    = get_parameter('area_threshold', 10)
         data['stage_threshold']                   = get_parameter('stage_threshold', 50)
         data['monitoring_frequency']              = get_parameter('monitoring_frequency', 60)
-        data['emergency_frequency']               = get_parameter('emergency_frequency', 5)
+        data['emergency_frequency']               = get_parameter('emergency_frequency', DEFAULT_EMERGENCY_FREQUENCY)
         data['neighborhood_emergency_frequency']  = get_parameter('neighborhood_emergency_frequency', 30)
         data['audio_recording_enabled']           = 1 if get_parameter('audio_recording_enabled', False) else 0
 
@@ -2264,17 +2257,7 @@ def ttmain(trigger):
         # Take photos and capture lepton data at GRAPH level
         from tt_take_photos import flir, take_two_photos
         photo = take_two_photos(trigger, dirname)
-        deadline_time = READ_TTCLOCK(token, TTClock=root_clock) + 30_000_000
-        
         lepton_file = flir(dirname)
-        lepton = TTFinishByOtherwise(lepton_file, TTTimeDeadline=deadline_time, TTPlanB=TTSingleRunTimeout(flir_planb(token), TTTimeout=3_000_000), TTWillContinue=False) 
-        
-        #lepton_file = TTFinishByOtherwise(
-        #    flir(dirname, TTClock=root_clock, TTPeriod=60_000_000, TTPhase=0, TTDataIntervalWidth=1_000_000),
-        #    TTTimeDeadline=deadline_time,
-        #    TTPlanB=TTSingleRunTimeout(flir_planb(token), TTTimeout=10_000_000),
-        #    TTWillContinue=True
-        #)
         
         # Coregistration and segmentation at GRAPH level
         coreg_state = coregistration(dirname, lepton_file, photo)
