@@ -141,6 +141,8 @@ TRANSMIT_DEADLINE_S = 75
 SENDB_WINDOW_HEX_S = 15
 SENDB_WINDOW_BYTES_S = 20
 MAC_FLUSH_WINDOW_S = 20
+# The listener gives up (and the daemon restarts) after this many failures in a row
+LISTEN_MAX_CONSECUTIVE_FAILURES = 30
 
 
 def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
@@ -497,27 +499,47 @@ class LoRaHandler:
             self.listener_thread.join(timeout=2)
             print("LoRa listener stopped")
 
+    def _at_query(self, command: bytes, timeout_s: float, done) -> list:
+        """Send one AT command and collect reply lines until done(line) or timeout.
+
+        Holds transmit_lock + the inter-process fcntl lock so the listener thread
+        cannot consume the reply between the write and the read. Lines go through
+        _read_line(), so a downlink arriving meanwhile is queued, not mistaken for
+        part of the reply. Returns the stripped non-empty lines read.
+        """
+        lines = []
+        with self.transmit_lock:
+            fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
+            try:
+                self._drain_input()
+                self.ser.write(command)
+                end = time.time() + timeout_s
+                while time.time() < end:
+                    if not self.ser.in_waiting > 0:
+                        time.sleep(0.05)
+                        continue
+                    raw = self._read_line()
+                    if not raw:
+                        continue
+                    line = raw.decode('utf-8', errors='replace').strip()
+                    if not line:
+                        continue
+                    lines.append(line)
+                    if done(line):
+                        break
+            finally:
+                fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
+        return lines
+
     def is_joined(self) -> bool:
         """Return True if the mDot is currently joined to a LoRaWAN network.
 
-        Holds transmit_lock + the inter-process fcntl lock so the listener
-        thread cannot consume the AT+NJS? response between the write and read.
+        AT+NJS? answers a line that is exactly 0 or 1 (after the echo); nothing
+        else in the reply counts. Waits up to 3 s for it before concluding.
         """
-        import re as _re
         try:
-            with self.transmit_lock:
-                fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
-                try:
-                    self.ser.reset_input_buffer()
-                    self.ser.write(b'AT+NJS?\r\n')
-                    time.sleep(0.8)
-                    n = self.ser.in_waiting
-                    raw = self.ser.read(n) if n else b''
-                finally:
-                    fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
-            text = raw.decode('utf-8', errors='replace')
-            nums = _re.findall(r'\d+', text)
-            return bool(nums) and nums[0] == '1'
+            lines = self._at_query(b'AT+NJS?\r\n', 3.0, lambda l: l in ('0', '1'))
+            return bool(lines) and lines[-1] == '1'
         except Exception:
             return False
 
@@ -530,17 +552,8 @@ class LoRaHandler:
         Holds the same locks as is_joined() so the listener can't take the reply.
         """
         try:
-            with self.transmit_lock:
-                fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
-                try:
-                    self.ser.reset_input_buffer()
-                    self.ser.write(b'AT+ALIVE\r\n')
-                    time.sleep(0.5)
-                    n = self.ser.in_waiting
-                    raw = self.ser.read(n) if n else b''
-                finally:
-                    fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
-            return b'OK' in raw
+            lines = self._at_query(b'AT+ALIVE\r\n', 2.0, lambda l: 'OK' in l or 'ERROR' in l)
+            return bool(lines) and 'OK' in lines[-1]
         except Exception:
             return False
 
@@ -555,26 +568,10 @@ class LoRaHandler:
         import re as _re
         result = {"ok": False, "margin_db": None, "gateways": 0, "error": None}
         try:
-            with self.transmit_lock:
-                fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
-                try:
-                    self.ser.reset_input_buffer()
-                    self.ser.write(b'AT+NLC\r\n')
-                    raw = b''
-                    end = time.time() + timeout_s
-                    while time.time() < end:
-                        n = self.ser.in_waiting
-                        if n:
-                            raw += self.ser.read(n)
-                            if b'OK' in raw or b'ERROR' in raw:
-                                break
-                        else:
-                            time.sleep(0.1)
-                finally:
-                    fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
-            text = raw.decode('utf-8', errors='replace')
+            lines = self._at_query(b'AT+NLC\r\n', timeout_s, lambda l: 'OK' in l or 'ERROR' in l)
+            text = '\n'.join(lines)
             m = None
-            for line in text.replace('\r', '').split('\n'):
+            for line in lines:
                 m = _re.fullmatch(r'\s*(\d+),(\d+)\s*', line) or m
             if m and 'OK' in text:
                 result.update(ok=int(m.group(2)) > 0, margin_db=int(m.group(1)), gateways=int(m.group(2)))
@@ -584,81 +581,162 @@ class LoRaHandler:
             result["error"] = str(e)
         return result
 
+    # ------------------------------------------------------------------
+    # Reading lines from the mDot
+    #
+    # Every line any code reads from the port goes through _read_line(). The
+    # mDot prints each Class C downlink on its own ("PACKET:PORT=..") and
+    # "EMERGENCY:" lines whenever they arrive, including in the middle of an
+    # AT reply. _read_line() puts those on a queue instead of returning them,
+    # so an AT path can never swallow one. They are decoded by
+    # _dispatch_downlinks(), which only the listener thread calls and never
+    # while it holds the serial lock (decode() may transmit a status reply).
+    # ------------------------------------------------------------------
+
+    _DOWNLINK_RE = re.compile(r'PACKET:PORT=(\d+),SIZE=(\d+),DATA=([0-9A-Fa-f]*)')
+    _ASYNC_PREFIXES = ('PACKET:', 'EMERGENCY:')
+    _RX_PARTIAL_MAX_BYTES = 1024
+    _RX_PARTIAL_MAX_AGE_S = 5.0
+    # Class defaults so a handler built with __new__ (tests) still works.
+    _rx_partial = b''
+    _rx_partial_t = 0.0
+    listener_failed = False
+
+    def _downlink_q(self) -> "queue.Queue":
+        return self.__dict__.setdefault('_downlink_queue', queue.Queue())
+
+    def _read_line(self):
+        """Read one line from the port; the caller holds the serial lock.
+
+        Returns the line as bytes (terminator included) when it is an ordinary
+        line, b'' when nothing was read, and None when the bytes read were a
+        downlink/EMERGENCY line (queued), or the start of a line that a
+        readline() timeout cut short (kept and joined with the next read).
+        """
+        raw = self.ser.read_until()
+        if not isinstance(raw, (bytes, bytearray)):
+            return b''
+        now = time.time()
+        if self._rx_partial and now - self._rx_partial_t > self._RX_PARTIAL_MAX_AGE_S:
+            print(f"DEBUG: Dropping stale partial line: {self._rx_partial[:40]!r}")
+            self._rx_partial = b''
+        if not raw:
+            return b''
+        line = self._rx_partial + bytes(raw)
+        if not line.endswith(b'\n'):
+            if len(line) > self._RX_PARTIAL_MAX_BYTES:
+                print(f"DEBUG: Dropping oversize partial line ({len(line)} bytes)")
+                self._rx_partial = b''
+            else:
+                if not self._rx_partial:
+                    self._rx_partial_t = now
+                self._rx_partial = line
+            return None
+        self._rx_partial = b''
+        try:
+            text = line.decode('utf-8').strip()
+        except UnicodeDecodeError:
+            return line
+        if text.startswith(self._ASYNC_PREFIXES):
+            self._downlink_q().put(text)
+            return None
+        return line
+
+    def _drain_input(self) -> None:
+        """Replace reset_input_buffer(): read what is buffered so downlinks are kept.
+
+        Ordinary lines are discarded, as the reset did. A partial line is kept
+        only if it can be the start of a downlink.
+        """
+        try:
+            for _ in range(200):
+                if not self.ser.in_waiting > 0:
+                    break
+                if self._read_line() == b'':
+                    break
+        except TypeError:
+            pass
+        if self._rx_partial and not self._rx_partial.startswith(
+                tuple(p.encode() for p in self._ASYNC_PREFIXES)):
+            self._rx_partial = b''
+
+    def _dispatch_downlinks(self) -> None:
+        """Handle queued downlink lines. Call without holding the serial lock."""
+        q = self._downlink_q()
+        while True:
+            try:
+                text = q.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                self._handle_async_line(text)
+            except Exception as e:
+                print(f"Error processing downlink line: {e}")
+                import traceback
+                traceback.print_exc()
+
+    def _handle_async_line(self, text: str) -> None:
+        """One queued line: a downlink to decode, or an EMERGENCY: note."""
+        if text.startswith('EMERGENCY:'):
+            # The mDot's line for the remote start downlink '!' (0x21). '!' only
+            # powers a sleeping Pi on; it is not emergency mode, which is its own
+            # command (21 91 HH). The Pi only sees the line when it was already on.
+            if self._is_emergency_message(text):
+                print(f"ℹ️ Remote start request from the mDot (Pi already on): '{text}'")
+            else:
+                print(f"ℹ️ mDot: {text}")
+            return
+        m = self._DOWNLINK_RE.fullmatch(text)
+        if not m:
+            print(f"⚠️ Malformed downlink line ignored: '{text[:80]}'")
+            return
+        size, data = int(m.group(2)), m.group(3)
+        if len(data) != 2 * size:
+            print(f"⚠️ Downlink size mismatch (SIZE={size}, {len(data) // 2} bytes of data): ignored")
+            return
+        if not data:
+            return
+        print(f"📡 LoRa packet received: {data}")
+        self.decode(data)
+
     def _listen_loop(self):
         """Main listening loop - runs in separate thread"""
         print('Listening for incoming packets')
+        failures = 0
         while self.listening:
             try:
+                self._dispatch_downlinks()
                 if self.ser.in_waiting > 0:
+                    with self.transmit_lock:
+                        fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
+                        try:
+                            # the lock wait can be long (a send); look again inside
+                            raw = self._read_line() if self.ser.in_waiting > 0 else b''
+                        finally:
+                            fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
+                    self._dispatch_downlinks()
+                    failures = 0
+                    if not raw:
+                        continue
                     try:
-                        with self.transmit_lock:
-                            fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
-                            try:
-                                raw = self.ser.readline()
-                            finally:
-                                fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
                         res = raw.decode().strip()
                         print(f"DEBUG: Raw received: '{res}'")
                         # Skip empty messages
                         if not res:
                             continue
-                        
+
                         # Skip AT+SENDB= messages (these are transmission commands, not incoming data)
                         if res.startswith('AT+SENDB='):
                             print(f"DEBUG: Skipping transmission command echo: '{res[:50]}...'")
                             continue
-                        
+
                         # Validate message integrity before processing
                         if not self._is_valid_message(res):
                             print(f"⚠️ Skipping corrupted/invalid message: '{res}'")
                             continue
-                        
-                        # The mDot's line for the remote start downlink '!' (0x21).
-                        # '!' only powers a sleeping Pi on; it is not emergency
-                        # mode, which is its own command (21 91 HH). The mDot
-                        # prints this whether or not it pulsed the switch, and
-                        # the Pi only sees it when it was already on, so there
-                        # is nothing to do but log it.
-                        if self._is_emergency_message(res):
-                            print(f"ℹ️ Remote start request from the mDot (Pi already on): '{res.strip()}'")
-                            continue
 
-                        # The firmware's other "EMERGENCY: ..." lines (switch
-                        # activation progress) are logged, not acted on, and
-                        # must not reach the AT-response handling below.
-                        elif res.strip().startswith('EMERGENCY:'):
-                            print(f"ℹ️ mDot: {res.strip()}")
-                            continue
-
-                        # Check for emergency clear messages SECOND (high priority) - only "9999" turns off emergency mode  
-                        elif self._is_emergency_clear_message(res):
-                            print(f"✅ Emergency clear message received: '{res}'")
-                            # Clear emergency mode in runtime integration
-                            try:
-                                from tools.lora_runtime_integration import set_parameter
-                                set_parameter('emergency_mode', False)
-                                self.config['emergency_mode'] = False
-                                print("✅ Emergency mode deactivated via '9999' clear message")
-                            except Exception as e:
-                                print(f"⚠️ Failed to clear emergency mode: {e}")
-                            self._reply_with_status()   # lets the API confirm it arrived
-                            continue  # Emergency clear messages are handled, don't process further
-                        
-                        # Look for actual LoRa data messages THIRD (priority)
-                        if self._is_lora_data(res):
-                            try:
-                                data = self._extract_lora_data(res)
-                                if data:
-                                    print(f"📡 LoRa packet received: {data}")
-                                    self.decode(data)
-                                else:
-                                    print(f"DEBUG: Could not extract LoRa data from: '{res}'")
-                            except Exception as e:
-                                print(f"Error processing LoRa data: {e}")
-                                import traceback
-                                traceback.print_exc()
-                        # Check for +TXS: responses (size limit information) - SECOND priority
-                        elif self._is_txs_response(res):
+                        # Check for +TXS: responses (size limit information)
+                        if self._is_txs_response(res):
                             size_limit = self._extract_txs_size_limit(res)
                             if size_limit is not None:
                                 print(f"📏 mDot size limit received: {size_limit} bytes")
@@ -666,7 +744,7 @@ class LoRaHandler:
                                 self.current_size_limit = size_limit
                             else:
                                 print(f"DEBUG: Could not extract size limit from TXS response: '{res}'")
-                        # Check for transmission-related responses (THIRD priority)
+                        # Check for transmission-related responses
                         elif self._is_transmission_response(res):
                             status = self._extract_transmission_status(res)
                             # Store the transmission status
@@ -675,7 +753,7 @@ class LoRaHandler:
                             # Keep only last 10 entries to prevent memory bloat
                             if len(self.transmission_history) > 10:
                                 self.transmission_history.pop(0)
-                            
+
                             if status['success']:
                                 print(f"✅ Transmission success: {status['details'].get('confirmation', 'OK')}")
                             else:
@@ -691,9 +769,10 @@ class LoRaHandler:
                         print(f"Received binary data (hex): {raw.hex()}")
                 else:
                     time.sleep(0.5)  # Small delay to prevent busy waiting
+                    failures = 0
             except Exception as e:
                 print(f"Error in listen loop: {e}")
-                
+
                 # Handle serial port disconnection specifically
                 if "device disconnected" in str(e).lower() or "no data" in str(e).lower():
                     print(f"⚠️ Serial port disconnected or no data available: {e}")
@@ -701,9 +780,11 @@ class LoRaHandler:
                     if not self._check_serial_connection():
                         if self._attempt_reconnection():
                             print("✅ Reconnection successful, continuing...")
+                            failures = 0
                             continue
                         else:
                             print("❌ Reconnection failed, stopping listener")
+                            self.listener_failed = True
                             break
                     else:
                         print("⚠️ Connection appears fine, waiting before retry...")
@@ -712,8 +793,13 @@ class LoRaHandler:
                 else:
                     import traceback
                     traceback.print_exc()
+                    failures += 1
+                    if failures >= LISTEN_MAX_CONSECUTIVE_FAILURES:
+                        print(f"❌ Listener failed {failures} times in a row, stopping listener")
+                        self.listener_failed = True
+                        break
                     time.sleep(1)  # Longer delay on error
-    
+
     def transmit(self, content: bytes, max_retries: int = 2,
                  deadline_s: float = TRANSMIT_DEADLINE_S) -> bool:
         """Transmit data with thread safety and error recovery.
@@ -1130,201 +1216,32 @@ class LoRaHandler:
                 return
 
             # Frames the server encodes (API app/encoders.py): [code 2B][value], the
-            # same codes the IP downlink carries. Tried before the older formats
-            # below, which never matched them, so dashboard configuration over LoRa
-            # was ignored.
+            # same codes the IP downlink carries.
             frame = self._parse_server_frame(payload)
             if frame:
                 self._apply_server_frame(frame)
                 return
-            
-            # First try TLV hex multi-command format: [ch:1B][cmd:1B][len:1B][value:len]
-            # Entire payload must be hex characters (no delimiters) and even length
-            def _is_hex_string(s: str) -> bool:
-                hexdigits = set('0123456789abcdefABCDEF')
-                return len(s) % 2 == 0 and all(c in hexdigits for c in s)
 
-            def _parse_tlv_commands(hex_payload: str):
-                try:
-                    data = bytes.fromhex(hex_payload)
-                except Exception:
-                    return None
-                i = 0
-                cmds = []
-                while i + 3 <= len(data):
-                    ch = data[i]
-                    cmd = data[i+1]
-                    vlen = data[i+2]
-                    i += 3
-                    if i + vlen > len(data):
-                        print(f"DEBUG: TLV truncated: needed {vlen} bytes, remaining {len(data)-i}")
-                        return None
-                    value_bytes = data[i:i+vlen]
-                    i += vlen
-                    cmds.append((ch, cmd, value_bytes))
-                if i != len(data):
-                    print(f"DEBUG: TLV leftover bytes: {len(data)-i}")
-                    return None
-                return cmds
-
-            def _to_int_be(b: bytes) -> int:
-                if not b:
-                    return 0
-                return int.from_bytes(b, byteorder='big', signed=False)
-
-            def _apply_command_tlv(ch: int, cmd: int, value_bytes: bytes):
-                channel = f"{ch:02d}"
-                command = f"{cmd:02d}"
-                val_int = _to_int_be(value_bytes)
-                # Map TLV channel/command to existing update logic
-                if channel == '10' and command == '90':
-                    self.update_config('area_threshold', val_int * 10)
-                    print(f'Area threshold updated to: {val_int * 10}%')
-                elif channel == '11' and command == '91':
-                    self.update_config('stage_threshold', float(val_int))
-                    print(f'Stage threshold updated to: {float(val_int)} cm')
-                elif channel == '12' and command == '92':
-                    # an index into the server's hours list, not minutes
-                    self._apply_server_frame([{'code': '12 92', 'payload_hex': f"{val_int & 0xFF:02x}"}])
-                elif channel == '13' and command == '93':
-                    self.update_config('emergency_frequency', val_int)
-                    print(f'Emergency frequency updated to: {val_int} minutes')
-                # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
-                elif channel == '99' and command == '00':
-                    self.update_config('emergency_mode', False)
-                    print('✅ Emergency mode deactivated')
-                elif ch == 0x21 and cmd == 0x91:
-                    # "21 91 00" (emergency on, default duration) parses as a zero-length TLV
-                    self._start_emergency(f"{val_int:x}")
-                elif ch == 0x18 and cmd == 0x98:
-                    # "18 98 00" (end remote debug) also parses as a zero-length TLV
-                    self._start_remote_debug(f"{val_int:x}")
+            # Debug status request: reply with the node status JSON
+            if payload.strip() == '5001':
+                print('🔍 Debug status requested via LoRa command')
+                from tools.lora_debug_integration import handle_debug_status_request
+                debug_response = handle_debug_status_request(
+                    size_limit=self.current_size_limit,
+                    emergency_mode=self._emergency_mode(),
+                )
+                if debug_response['status'] == 'success':
+                    # Sent from a helper thread: transmit() takes the serial lock,
+                    # and this must not wait on it.
+                    print(f"📤 Sending debug reply: {debug_response['size_bytes']} bytes")
+                    threading.Thread(target=self._send_debug_reply, args=(debug_response['data'],),
+                                     name='debug-reply', daemon=True).start()
                 else:
-                    print(f'Unknown TLV channel/command: {channel}/{command} value={val_int}')
+                    print(f"❌ Debug status failed: {debug_response.get('error', 'Unknown error')}")
+                return
 
-            # Try TLV first if it looks like hex
-            if _is_hex_string(payload):
-                tlv_cmds = _parse_tlv_commands(payload)
-                if tlv_cmds is not None and len(tlv_cmds) > 0:
-                    print(f"DEBUG: Parsed {len(tlv_cmds)} TLV command(s)")
-                    for (ch, cmd, vbytes) in tlv_cmds:
-                        _apply_command_tlv(ch, cmd, vbytes)
-                    return
+            print(f"ℹ️ Unrecognised downlink ignored: '{payload}'")
 
-            # Handle new format: [Channel][Command][Value] (single command, digits)
-            if len(payload) >= 4:
-                # Clean the payload to remove any whitespace or special characters
-                clean_payload = payload.strip()
-                print(f"DEBUG: Cleaned payload: '{clean_payload}' (length: {len(clean_payload)})")
-                
-                if len(clean_payload) >= 4:
-                    # Parse the format: [Type][Command][Value]
-                    # Type: 2 digits (10, 11, 12, etc.)
-                    # Command: 2 digits (90, 01, etc.)
-                    # Value: remaining digits (0, 1, 10, etc.)
-                    channel = clean_payload[:2]
-                    command = clean_payload[2:4]  # Two digit command
-                    value = clean_payload[4:]     # Remaining digits as value
-                    
-                    print(f"DEBUG: Channel: '{channel}', Command: '{command}', Value: '{value}'")
-                    print(f"DEBUG: Channel length: {len(channel)}, Command length: {len(command)}, Value length: {len(value)}")
-                    print(f"DEBUG: Channel hex: {channel.encode().hex()}, Command hex: {command.encode().hex()}, Value hex: {value.encode().hex()}")
-                    print(f"DEBUG: Channel repr: {repr(channel)}, Command repr: {repr(command)}, Value repr: {repr(value)}")
-                    
-                    # Validate that channel and command are not empty or just whitespace
-                    if not channel or channel.isspace() or not command or command.isspace():
-                        print(f"ERROR: Invalid channel or command - empty or whitespace: channel='{channel}', command='{command}'")
-                        return
-                    
-                    # Process commands based on channel and command combination
-                    if channel == '10' and command == '9':
-                        # Area threshold - value represents 10% increments
-                        try:
-                            val = int(value) * 10
-                            print(f"DEBUG: Calculated area threshold: {value} * 10 = {val}%")
-                            self.update_config('area_threshold', val)
-                            print(f'Area threshold updated to: {val}%')
-                        except ValueError as e:
-                            print(f'Invalid area threshold value: {value}, error: {e}')
-                            print(f'DEBUG: Value type: {type(value)}, Value repr: {repr(value)}')
-                            
-                    elif channel == '11' and command == '9':
-                        # Stage threshold - continuous cm value
-                        try:
-                            val = float(value)
-                            self.update_config('stage_threshold', val)
-                            print(f'Stage threshold updated to: {val} cm')
-                        except ValueError:
-                            print(f'Invalid stage threshold value: {value}')
-                            
-                    elif channel == '12' and command == '9':
-                        # Monitoring frequency - index into the server's hours list
-                        try:
-                            self._apply_server_frame([{'code': '12 92', 'payload_hex': f"{int(value) & 0xFF:02x}"}])
-                        except ValueError:
-                            print(f'Invalid monitoring frequency value: {value}')
-
-                    elif channel == '13' and command == '9':
-                        # Emergency frequency - minute value
-                        try:
-                            val = int(value)
-                            self.update_config('emergency_frequency', val)
-                            print(f'Emergency frequency updated to: {val} minutes')
-                        except ValueError:
-                            print(f'Invalid emergency frequency value: {value}')
-                            
-                    # 14 94 is the flood-code frequency (server frame, decoded by tools/transmit_ip.py); it no longer sets photo_interval here (#116)
-
-                    elif channel == '99' and command == '0':
-                        # Deactivate emergency mode
-                        self.update_config('emergency_mode', False)
-                        print('✅ Emergency mode deactivated')
-                        
-                    elif channel == '21' and command == '91':
-                        # Emergency mode on: value = HH (hex) hours, 00 = default duration
-                        self._start_emergency(value)
-
-                    elif channel == '18' and command == '98':
-                        # Remote debug session: value = NN (hex) x 10 min, 00 = end
-                        self._start_remote_debug(value)
-
-                    elif channel == '50' and command == '01':
-                        # Debug status command - request comprehensive system information
-                        print('🔍 Debug status requested via LoRa command')
-                        try:
-                            from tools.lora_debug_integration import handle_debug_status_request
-                            debug_response = handle_debug_status_request(
-                                size_limit=self.current_size_limit,
-                                emergency_mode=self._emergency_mode(),
-                            )
-                            
-                            if debug_response['status'] == 'success':
-                                # Send from a helper thread rather than the transmit queue:
-                                # nothing in the LoRa daemon drains that queue, so the reply
-                                # waited for ticktalk's next process_transmit_queue() and was
-                                # lost if the node powered off first. decode() runs in the
-                                # listener while it holds transmit_lock, so transmit() can't
-                                # be called here directly; the thread waits for the lock.
-                                debug_data = debug_response['data']
-                                print(f"📤 Sending debug reply: {debug_response['size_bytes']} bytes")
-                                threading.Thread(target=self._send_debug_reply, args=(debug_data,),
-                                                 name='debug-reply', daemon=True).start()
-                            else:
-                                print(f"❌ Debug status failed: {debug_response.get('error', 'Unknown error')}")
-                                
-                        except ImportError as e:
-                            print(f"⚠️ Debug status module not available: {e}")
-                        except Exception as e:
-                            print(f"⚠️ Failed to process debug status request: {e}")
-                        
-                    else:
-                        print(f'Unknown channel/command combination: Channel {channel}, Command {command} with value: {value}')
-                else:
-                    print(f"ERROR: Cleaned payload too short for new format: '{clean_payload}' (length: {len(clean_payload)})")
-                    return
-            else:
-                print(f'Invalid payload format: {payload} (minimum 4 characters required for [Channel][Command][Value] format)')
-                
         except Exception as e:
             print(f"Error decoding payload '{payload}': {e}")
             import traceback
@@ -1336,7 +1253,7 @@ class LoRaHandler:
             print("DEBUG: Checking mDot status...")
             
             # Clear buffers first
-            self.ser.reset_input_buffer()
+            self._drain_input()
             self.ser.reset_output_buffer()
             
             # Send newline to clear any partial commands first
@@ -1351,7 +1268,7 @@ class LoRaHandler:
             responses = []
             ver_success = False
             while self.ser.in_waiting > 0:
-                res = self.ser.read_until()
+                res = self._read_line()
                 if res:
                     try:
                         response = res.decode('utf-8').strip()
@@ -1381,7 +1298,7 @@ class LoRaHandler:
             responses = []
             njs_success = False
             while self.ser.in_waiting > 0:
-                res = self.ser.read_until()
+                res = self._read_line()
                 if res:
                     try:
                         response = res.decode('utf-8').strip()
@@ -1433,7 +1350,7 @@ class LoRaHandler:
                 
                 # Read and display waiting data
                 while self.ser.in_waiting > 0:
-                    res = self.ser.read_until()
+                    res = self._read_line()
                     if res:
                         try:
                             response = res.decode('utf-8').strip()
@@ -1459,7 +1376,7 @@ class LoRaHandler:
             print("DEBUG: Checking mDot data reception configuration...")
             
             # Clear buffers first
-            self.ser.reset_input_buffer()
+            self._drain_input()
             self.ser.reset_output_buffer()
             
             # Send newline to clear any partial commands
@@ -1473,7 +1390,7 @@ class LoRaHandler:
             
             responses = []
             while self.ser.in_waiting > 0:
-                res = self.ser.read_until()
+                res = self._read_line()
                 if res:
                     try:
                         response = res.decode('utf-8').strip()
@@ -1490,7 +1407,7 @@ class LoRaHandler:
             time.sleep(1)
             
             while self.ser.in_waiting > 0:
-                res = self.ser.read_until()
+                res = self._read_line()
                 if res:
                     try:
                         response = res.decode('utf-8').strip()
@@ -1520,28 +1437,8 @@ class LoRaHandler:
             pass
         print("LoRa handler closed")
     
-    def test_reception_format(self, test_payload: str):
-        """Test the new reception format with a sample payload"""
-        print(f"🧪 Testing reception format with payload: {test_payload}")
-        print(f"Expected format: [Channel][Command][Value]")
-        
-        if len(test_payload) >= 4:
-            channel = test_payload[:2]
-            command = test_payload[2:4]
-            value = test_payload[4:]
-            print(f"Parsed: Channel={channel}, Command={command}, Value={value}")
-            
-            # Test decoding
-            self.decode(test_payload)
-        else:
-            print(f"Invalid test payload: {test_payload} (minimum 4 characters required)")
-    
     def _is_at_response(self, message: str) -> bool:
         """Check if a message is an AT command response that should be ignored"""
-        # IMPORTANT: Check for LoRa data patterns FIRST to avoid conflicts
-        if self._is_lora_data(message):
-            return False
-        
         # Check for transmission-related responses that need to be processed
         if self._is_transmission_response(message):
             return False
@@ -1578,66 +1475,6 @@ class LoRaHandler:
         # This ensures all unclassified messages are treated as AT responses
         return True
     
-    def _is_lora_data(self, message: str) -> bool:
-        """Check if a message contains actual LoRa data that should be decoded"""
-        # Look for LoRa data indicators
-        lora_patterns = [
-            'DATA=',                 # Explicit data prefix
-            'RX:',                   # Receive indicator
-            'RX ',                   # Receive indicator (space)
-        ]
-        
-        message_upper = message.upper()
-        for pattern in lora_patterns:
-            if pattern in message_upper:
-                return True
-        
-        # Check if it's a raw numeric command (4+ digits in [Channel][Command][Value] format)
-        # Must be exactly 4 digits for the new format, or longer for legacy
-        if message.isdigit():
-            if len(message) == 4:  # New format: [Channel][Command][Value]
-                return True
-            elif len(message) > 4:  # Legacy format or extended commands
-                return True
-            
-        return False
-    
-    def _extract_lora_data(self, message: str) -> str:
-        """Extract LoRa data from various message formats"""
-        try:
-            # Handle DATA= format
-            if "DATA=" in message:
-                data = message.split("DATA=", 1)[1]
-                return data.strip()
-            
-            # Handle RX: format
-            elif "RX:" in message:
-                rx_data = message.split("RX:", 1)[1].strip()
-                return rx_data
-            
-            # Handle RX format (space separated)
-            elif message.startswith("RX "):
-                rx_data = message[3:].strip()
-                return rx_data
-            
-            # Handle raw numeric commands
-            elif message.isdigit() and len(message) >= 4:
-                return message.strip()
-            
-            # Handle other potential formats
-            else:
-                # Try to extract any numeric data that might be a command
-                import re
-                numeric_match = re.search(r'(\d{4,})', message)
-                if numeric_match:
-                    return numeric_match.group(1)
-                
-                return None
-                
-        except Exception as e:
-            print(f"Error extracting LoRa data from '{message}': {e}")
-            return None
-    
     # The first line the mDot firmware prints when it handles the emergency
     # downlink '!' (CmdClassCPacketProcessor::handleEmergencyPacket). Its later
     # "EMERGENCY: ..." lines are progress messages and must not re-trigger.
@@ -1663,11 +1500,6 @@ class LoRaHandler:
             print(f"Error extracting emergency status from '{message}': {e}")
             return None
     
-    def _is_emergency_clear_message(self, message: str) -> bool:
-        """Check if a message is an emergency clear message that should turn off emergency mode"""
-        # Only the specific message '9999' turns off emergency mode
-        return message == '9999'
-    
     def _is_txs_response(self, message: str) -> bool:
         """Check if a message is a +TXS: response containing size limit information"""
         # Check for the actual mDot response format: "AT+TXS" (echo) or "242" (size limit)
@@ -1691,7 +1523,7 @@ class LoRaHandler:
         """Clear mDot input buffer and send blank AT command to reset state"""
         try:
             print("DEBUG: Clearing mDot input buffer...")
-            self.ser.reset_input_buffer()
+            self._drain_input()
             self.ser.reset_output_buffer()
             
             # Send blank AT command to clear any partial state
@@ -1701,7 +1533,7 @@ class LoRaHandler:
             
             # Read any response from the blank AT command
             while self.ser.in_waiting > 0:
-                res = self.ser.read_until()
+                res = self._read_line()
                 if res:
                     try:
                         response = res.decode('utf-8').strip()
@@ -1727,12 +1559,12 @@ class LoRaHandler:
         """
         try:
             print("DEBUG: MAC flush: sending 1-byte probe to drain MAC command queue...")
-            self.ser.reset_input_buffer()
+            self._drain_input()
             self.ser.write(b'AT+SENDB=00\r\n')
             deadline = time.time() + MAC_FLUSH_WINDOW_S
             while time.time() < deadline:
                 if self.ser.in_waiting > 0:
-                    res = self.ser.read_until()
+                    res = self._read_line()
                     if not res:
                         continue
                     try:
@@ -1779,7 +1611,7 @@ class LoRaHandler:
                 if self.ser.in_waiting > 0:
                     idle_since = None
                     try:
-                        res = self.ser.read_until()
+                        res = self._read_line()
                     except Exception as exc:
                         print(f"DEBUG: Serial read error: {exc}")
                         time.sleep(0.1)
@@ -1857,7 +1689,7 @@ class LoRaHandler:
 
                 # Discard any stale RX bytes (e.g. leftover echoes from earlier commands)
                 # before sending so they don't pollute our response window.
-                self.ser.reset_input_buffer()
+                self._drain_input()
 
                 at_command = f"AT+SENDB={content}\r\n".encode()
                 print(f"DEBUG: Sending AT command: {at_command}")
@@ -1878,7 +1710,7 @@ class LoRaHandler:
                     return False, f"Generated invalid hex string from bytes: {hex_content}"
 
                 # Discard stale RX bytes before sending
-                self.ser.reset_input_buffer()
+                self._drain_input()
 
                 print(f"DEBUG: Sending data payload...")
                 self.ser.write(f'AT+SENDB={hex_content}\r\n'.encode())
@@ -2073,11 +1905,11 @@ class LoRaHandler:
         Caller must already hold both transmit_lock and the fcntl inter-process
         lock.  Use refresh_size_limit() from outside the transmit path instead.
         """
-        self.ser.reset_input_buffer()
+        self._drain_input()
         self.ser.write('AT+TXS\r\n'.encode())
         time.sleep(1)
         while self.ser.in_waiting > 0:
-            res = self.ser.read_until()
+            res = self._read_line()
             if res:
                 try:
                     response = res.decode('utf-8').strip()
@@ -2112,7 +1944,7 @@ class LoRaHandler:
                 fcntl.lockf(self._lock_fd, fcntl.LOCK_EX)
                 try:
                     # Clear buffers and send AT+TXS command
-                    self.ser.reset_input_buffer()
+                    self._drain_input()
                     self.ser.write('AT+TXS\r\n'.encode())
                     time.sleep(1)
 
@@ -2121,7 +1953,7 @@ class LoRaHandler:
                     # responses — run it on every line so we don't miss the numeric reply.
                     responses = []
                     while self.ser.in_waiting > 0:
-                        res = self.ser.read_until()
+                        res = self._read_line()
                         if res:
                             try:
                                 response = res.decode('utf-8').strip()
@@ -2622,13 +2454,6 @@ def check_mdot_data_config():
         return False
     return handler.check_mdot_data_config()
 
-def test_reception_format(test_payload: str):
-    """Convenience function to test the new reception format"""
-    handler = get_lora_handler()
-    if handler is None:
-        return False
-    return handler.test_reception_format(test_payload)
-
 def get_size_limit() -> int:
     """Convenience function to get the current payload size limit"""
     handler = get_lora_handler()
@@ -2718,12 +2543,11 @@ if __name__ == "__main__":
             # Test the new reception format
             if len(argv) >= 3:
                 test_payload = argv[2]
-                handler.test_reception_format(test_payload)
+                handler.decode(test_payload)
             else:
                 print("Usage: python lora_handler_concurrent.py test <payload>")
-                print("Example: python lora_handler_concurrent.py test 1090")
-                print("Example: python lora_handler_concurrent.py test 1191")
-                print("Example: python lora_handler_concurrent.py test 2100")
+                print("Example: python lora_handler_concurrent.py test 109032")
+                print("Example: python lora_handler_concurrent.py test 119100c8")
         # else transmit the file param
         elif argv[1] == 'binary':
             # Transmit arbitrary binary data

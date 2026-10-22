@@ -87,17 +87,14 @@ def test_radio_never_touched_off_a_pi(monkeypatch):
 
 
 def _serial_handler(reply: bytes):
-    """A LoRaHandler with only what link_check() uses."""
+    """A LoRaHandler with only what link_check() uses; the mDot answers the AT write."""
     import threading
+    from test_lora_reception import FakeMdot
     from tools.lora_handler_concurrent import LoRaHandler
     h = LoRaHandler.__new__(LoRaHandler)
     h.transmit_lock = threading.Lock()
     h._lock_fd = open("/dev/null", "w")
-    ser = MagicMock()
-    chunks = [reply]
-    ser.in_waiting = len(reply)
-    ser.read.side_effect = lambda n: chunks.pop(0) if chunks else b""
-    h.ser = ser
+    h.ser = FakeMdot(on_write=lambda data, ser: ser.feed(reply))
     return h
 
 

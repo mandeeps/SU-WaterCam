@@ -68,6 +68,7 @@ import socket
 import stat
 import sys
 import threading
+import time
 
 # Running this script directly (`python tools/lora_daemon.py`, as systemd
 # does) puts only this file's own directory (tools/) on sys.path, not the
@@ -98,6 +99,7 @@ MAX_REQUEST_BYTES = 16384
 # came on, so a unit without it never gets a silence restart. Every 5 minutes is
 # well inside the limit.
 MDOT_KEEPALIVE_S = 300
+LISTENER_CHECK_S = 5.0     # how often the daemon checks that the listener thread lives
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 log = logging.getLogger(__name__)
@@ -271,8 +273,36 @@ def serve(handler, socket_path: str) -> None:
         ).start()
 
 
-def _keepalive_loop(handler, stop: threading.Event, interval_s: float) -> None:
-    while not stop.wait(interval_s):
+def _exit_listener_dead(reason: str) -> None:
+    """Exit non-zero so systemd restarts the daemon (Restart=on-failure).
+
+    Without the listener no downlink is ever received, and the daemon would
+    keep answering sockets as if nothing were wrong. os._exit because
+    sys.exit() in a worker thread only ends that thread.
+    """
+    log.critical("LoRa listener is gone (%s); exiting for a restart", reason)
+    logging.shutdown()
+    os._exit(1)
+
+
+def _keepalive_loop(handler, stop: threading.Event, interval_s: float,
+                    check_s: float = LISTENER_CHECK_S) -> None:
+    last_alive = time.monotonic()
+    dead_checks = 0
+    while not stop.wait(min(interval_s, check_s)):
+        if getattr(handler, "listener_failed", False) is True:
+            _exit_listener_dead("it gave up after repeated errors or a failed reconnect")
+        thread = getattr(handler, "listener_thread", None)
+        if handler.listening and thread is not None and not thread.is_alive():
+            # twice in a row: one check can land while start_listening() swaps threads
+            dead_checks += 1
+            if dead_checks >= 2:
+                _exit_listener_dead("its thread died")
+        else:
+            dead_checks = 0
+        if time.monotonic() - last_alive < interval_s:
+            continue
+        last_alive = time.monotonic()
         try:
             handler.keepalive()             # AT+ALIVE: no radio traffic
         except Exception:

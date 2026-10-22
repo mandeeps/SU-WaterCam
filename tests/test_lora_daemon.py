@@ -343,10 +343,8 @@ class TestMdotKeepalive:
         handler.transmit_lock = threading.Lock()
         handler._lock_fd = open(os.devnull, "w")
         written = []
-        ser = MagicMock()
-        ser.write.side_effect = written.append
-        ser.in_waiting = 6
-        ser.read.return_value = b"\r\nOK\r\n"
+        from test_lora_reception import FakeMdot
+        ser = FakeMdot(on_write=lambda data, s: (written.append(data), s.feed(b"AT+ALIVE\r\nOK\r\n")))
         handler.ser = ser
         with patch.object(lhc.fcntl, "lockf"), patch.object(lhc.time, "sleep"):
             assert handler.keepalive() is True
