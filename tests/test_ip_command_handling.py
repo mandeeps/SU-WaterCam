@@ -101,28 +101,12 @@ class TestStageThreshold(unittest.TestCase):
         self.assertIn("11 91", result["skipped"])
 
 
-class TestMonitoringFrequency(unittest.TestCase):
-    """12 92 - monitoring interval: u16 minutes, 1-10080."""
+class TestMonitoringFrequencyRemoved(unittest.TestCase):
+    """12 92 is gone: the wake schedule (15 95, tests/test_schedule_control.py) replaced it."""
 
-    def test_applies_minutes(self):
-        for mins in (1, 90, 360, 10080):
-            with self.subTest(mins=mins):
-                store, fn = _accumulator()
-                result = apply_downlink_command(_cmd(("12 92", struct.pack(">H", mins))), fn)
-                self.assertEqual(store["monitoring_frequency"], mins)
-                self.assertIn(f"monitoring_frequency={mins}min", result["applied"])
-
-    def test_out_of_range_skipped(self):
-        for mins in (0, 10081, 65535):
-            with self.subTest(mins=mins):
-                store, fn = _accumulator()
-                result = apply_downlink_command(_cmd(("12 92", struct.pack(">H", mins))), fn)
-                self.assertNotIn("monitoring_frequency", store)
-                self.assertIn("12 92", result["skipped"])
-
-    def test_one_byte_value_skipped(self):
+    def test_12_92_is_unrecognised(self):
         store, fn = _accumulator()
-        result = apply_downlink_command(_cmd(("12 92", b"\x02")), fn)   # the old index form
+        result = apply_downlink_command(_cmd(("12 92", struct.pack(">H", 360))), fn)
         self.assertEqual(store, {})
         self.assertIn("12 92", result["skipped"])
 

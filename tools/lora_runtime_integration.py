@@ -175,7 +175,7 @@ class LoRaRuntimeManager:
 
     # Keys set_parameter() accepts: the defaults, the ranged keys, and the
     # emergency timestamp it writes itself. Anything else is refused.
-    _SETTABLE_PARAMS: frozenset = frozenset(_DEFAULT_PARAMS) | frozenset(_PARAM_RANGES) | {'emergency_since'}
+    _SETTABLE_PARAMS: frozenset = frozenset(_DEFAULT_PARAMS) | frozenset(_PARAM_RANGES) | {'emergency_since', 'schedule'}
 
     def __init__(self, config_file='runtime_config.json', lora_handler=None):
         self.config_file = config_file

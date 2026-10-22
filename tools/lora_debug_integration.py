@@ -23,6 +23,7 @@ alone, {"ak":123}, is 10):
 
     ak   seq of the command this reply acks (only in an ack)
     ar   its result when not 0: 1 partly applied, 2 rejected
+    sc   the wake schedule set by 15 95: "HHMM-HHMM/interval/awake"
     ut   1 while the configured IP server is untrusted (IP readings stay queued)
     dbg  format version (always present)
     up   uptime, hours
@@ -152,6 +153,15 @@ def _ip_uploads_requested() -> Optional[int]:
         return None
 
 
+def _schedule_label() -> Optional[str]:
+    try:
+        from tools import schedule_control
+        s = schedule_control.current()
+        return s.label() if s else None
+    except Exception:   # noqa: BLE001 - a status reply must never fail over this
+        return None
+
+
 def _ip_server_untrusted() -> Optional[int]:
     try:
         from tools.initial_health_check import ip_server_untrusted
@@ -194,6 +204,8 @@ def collect_compact_status(emergency_mode: Optional[bool] = None,
         ("sd", _sf_dropped()),
         # cycles queued because the LoRa daemon was down (tools/drop_counter.py)
         ("du", _lora_daemon_unavailable()),
+        # the wake schedule set by 15 95, "HHMM-HHMM/interval/awake"
+        ("sc", _schedule_label()),
         # 1 while the configured IP server is untrusted, so IP readings stay queued
         ("ut", _ip_server_untrusted()),
     ]

@@ -21,7 +21,7 @@ deduplicated, and acked as `ak: 0`.
 |---|---|---|---|
 | `10 90` | 1 | area threshold, % | 0-255 stored as sent |
 | `11 91` | 2 | stage threshold, cm (u16) | 0-65535 |
-| `12 92` | 2 | monitoring interval, minutes (u16) | 1-10080 |
+| `15 95` | 7 | wake schedule: start HH MM, end HH MM, interval u16 min, awake u8 min (site local time; `tools/schedule_control.py`) | interval 15-1440, awake 5-60 and < interval |
 | `13 93` | 1 | emergency capture interval, minutes | 1-240 |
 | `14 94` | 1 | flood-code interval, minutes | 1-240 |
 | `16 96` | 1 | audio recording | 0 or 1 |
@@ -85,3 +85,11 @@ If `/ip/ack` fails (no route, non-2xx), the acks are kept in
 server answers 2xx. Acks are never sent to a server that is not trusted (see
 [NODE_SECURITY.md](NODE_SECURITY.md)); commands from such a server are not
 applied either.
+
+## Wake schedule (15 95)
+
+The dashboard sets the wake schedule with one command (7-byte value): a daily window, an interval and an awake time, in the site's local time. Wakes are start, start + interval, ... while a wake begins before end; start == end is all day (a last wake with no off time before the next day's first is dropped), end < start crosses midnight.
+
+The node (`tools/schedule_control.py`, as `pi`, no root needed) writes `~/wittypi/schedule.wpi` as one day of ON/OFF states from BEGIN (the old file kept as `schedule.wpi.prev`), and arms the next wake with the shutdown path's code (`tools/recovery_boot.py`). If writing or arming fails, the old file is put back and the command is acked rejected. The Witty Pi daemon reads the new file at the next boot.
+
+The Witty Pi counts seconds from BEGIN, so the node rewrites the file when the local UTC offset changes (DST): `ticktalk.service` runs `tools/schedule_control.py --refresh` before it starts. The active schedule is reported as `09 79` (the same 7 bytes) in sensor packets and IP uplinks, and as `sc` ("HHMM-HHMM/interval/awake") in the status reply.

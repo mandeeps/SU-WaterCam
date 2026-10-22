@@ -809,7 +809,7 @@ def _clear_pending_acks(ids) -> None:
 DOWNLINK_CODE_LENGTHS: Dict[str, int] = {
     "10 90": 1,    # area threshold %
     "11 91": 2,    # stage threshold, cm (u16)
-    "12 92": 2,    # monitoring interval, minutes (u16, 1-10080)
+    "15 95": 7,    # wake schedule: start HH MM, end HH MM, interval u16 min, awake u8 min (tools/schedule_control.py)
     "13 93": 1,    # emergency capture interval, minutes (1-240)
     "14 94": 1,    # flood code interval, minutes (1-240)
     "16 96": 1,    # audio_recording_enabled
@@ -823,7 +823,6 @@ DOWNLINK_CODE_LENGTHS: Dict[str, int] = {
 }
 
 #: Accepted values of the interval commands, minutes
-MONITORING_MINUTES = (1, 10080)
 EMERGENCY_MINUTES = (1, 240)
 FLOOD_CODE_MINUTES = (1, 240)
 
@@ -1009,9 +1008,21 @@ def apply_downlink_command(
             logger.info("Applied: stage_threshold = %dcm", val_cm)
             applied.append(f"stage_threshold={val_cm}cm")
 
-        elif code in ("12 92", "13 93", "14 94"):  # intervals, plain minutes
-            name, (lo, hi) = {"12 92": ("monitoring_frequency", MONITORING_MINUTES),
-                              "13 93": ("emergency_frequency", EMERGENCY_MINUTES),
+        elif code == "15 95":  # wake schedule: writes schedule.wpi and arms the next wake
+            try:
+                from tools import schedule_control
+            except ImportError:
+                import schedule_control
+            try:
+                ok, msg = schedule_control.apply(schedule_control.from_bytes(payload_bytes),
+                                                 set_param=set_param_fn)
+            except ValueError as e:
+                ok, msg = False, f"schedule rejected: {e}"
+            logger.info("%s", msg)
+            (applied if ok else skipped).append(f"schedule={payload_bytes.hex()}" if ok else code)
+
+        elif code in ("13 93", "14 94"):  # intervals, plain minutes
+            name, (lo, hi) = {"13 93": ("emergency_frequency", EMERGENCY_MINUTES),
                               "14 94": ("neighborhood_emergency_frequency", FLOOD_CODE_MINUTES)}[code]
             mins = int.from_bytes(payload_bytes, "big")
             if lo <= mins <= hi and set_param_fn(name, mins) is not False:

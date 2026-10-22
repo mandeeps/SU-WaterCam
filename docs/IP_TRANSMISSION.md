@@ -573,7 +573,7 @@ ip_downlink = ip_downlink_poll_and_apply(lora_init)  # NEW
 |---|---|---|---|
 | `10 90` | `area_threshold_pct` | u8 direct | `area_threshold` |
 | `11 91` | `stage_threshold_cm` | u16 direct | `stage_threshold` |
-| `12 92` | monitoring interval | u16 minutes, 1-10080 | `monitoring_frequency` (min) |
+| `15 95` | wake schedule | 7 bytes: start HH MM, end HH MM, interval u16 min, awake u8 min | writes `~/wittypi/schedule.wpi`, arms the next wake; `schedule` (and `monitoring_frequency` = interval) |
 | `13 93` | emergency capture interval | u8 minutes, 1-240 | `emergency_frequency` |
 | `14 94` | flood-code interval | u8 minutes, 1-240 | `neighborhood_emergency_frequency` |
 | `16 96` | `audio_recording_enabled` | u8 bool | `audio_recording_enabled` |

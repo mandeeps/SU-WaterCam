@@ -31,6 +31,7 @@ from typing import Dict, Any, Optional
 # 09 19 status area threshold %
 # 09 29 stage threshold, u16 cm
 # 09 39 monitoring freq
+# 09 79 wake schedule (7 bytes, as downlink 15 95)
 # 09 49 emergency freq
 # 09 59 neighborhood emergency status freq
 # 0A 01 wittypi temperature (float, celsius; no longer sent)
@@ -187,6 +188,13 @@ def _u32_field(ch, t, key):
     return lambda d: bytes([ch, t]) + struct.pack(">I", _int_in(d[key], 0, 0xFFFFFFFF))
 
 
+def _schedule_field(d):
+    value = bytes.fromhex(d['schedule'])
+    if len(value) != 7:
+        raise _SkipField("schedule must be 7 bytes")
+    return b"\x09\x79" + value
+
+
 def _stage_field(d):
     # centimetres, a u16: clamped rather than skipped
     return bytes([0x09, 0x29]) + struct.pack(">H", max(0, min(65535, int(_f32_val(d['stage_threshold'])))))
@@ -247,6 +255,8 @@ _SENSOR_FIELDS = (
     ('emergency_frequency', _u16_field(0x09, 0x49, 'emergency_frequency')),
     ('neighborhood_emergency_frequency', _u16_field(0x09, 0x59, 'neighborhood_emergency_frequency')),
     ('audio_recording_enabled', _u8_field(0x09, 0x69, 'audio_recording_enabled')),
+    # the wake schedule (15 95's 7 bytes, tools/schedule_control.py)
+    ('schedule', _schedule_field),
     # Pi throttled/under-voltage flags (tools/pi_power.py), packed to one byte
     ('pi_throttled', _throttled_field),
     # Registration orientation check (tools/registration_orientation.py)
@@ -277,7 +287,7 @@ _CHUNK_PRIORITY = (
     'temperature_celsius', 'relative_humidity', 'pi_throttled', 'clock_unverified',
     'lat_lon_z', 'tilt_roll_yaw', 'registration_status', 'sf_dropped',
     'status_area_threshold', 'stage_threshold', 'monitoring_frequency', 'emergency_frequency',
-    'neighborhood_emergency_frequency', 'audio_recording_enabled',
+    'neighborhood_emergency_frequency', 'audio_recording_enabled', 'schedule',
     'software_version', 'model_id',
 )
 

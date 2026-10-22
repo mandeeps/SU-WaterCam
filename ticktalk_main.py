@@ -294,6 +294,14 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         'neighborhood_emergency_frequency': get_parameter('neighborhood_emergency_frequency', 30),
         'audio_recording_enabled': 1 if get_parameter('audio_recording_enabled', False) else 0,
     })
+    # 09 79: the wake schedule set by 15 95, as its 7 bytes (tools/schedule_control.py)
+    try:
+        from tools import schedule_control
+        _sched = schedule_control.current(get_parameter)
+        if _sched is not None:
+            data['schedule'] = _sched.to_bytes().hex()
+    except Exception as e:
+        print(f"⚠️ schedule not reported: {e}")
 
     # Embed capture timestamp so stored packets carry original collection time
     if 'timestamp' not in data:
@@ -2079,6 +2087,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                           ("09 59", "neighborhood_emergency_frequency"),
                           ("09 69", "audio_recording_enabled")):
             _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(data[key])).hex()})
+        if data.get('schedule'):
+            _add("09 79", lambda: {"payload_hex": data['schedule']})
 
         # ── Reachability check (after data is ready so we can queue on failure) ─
         # WiFi first; cellular only as the last resort.  A cellular session

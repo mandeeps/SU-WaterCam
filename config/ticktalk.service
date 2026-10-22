@@ -21,6 +21,9 @@ Environment=PYTHONUNBUFFERED=1
 # unit never wakes again on its own. The wait gives up after 120 s and always
 # lets the service start; TimeoutStartSec covers it with room to spare.
 ExecStartPre=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/tools/wait_for_wittypi_schedule.py
+# Rewrite schedule.wpi if the UTC offset changed since it was written (DST), so
+# the 15 95 schedule keeps its local times (tools/schedule_control.py)
+ExecStartPre=-/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/tools/schedule_control.py --refresh
 TimeoutStartSec=180
 ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/runrtm.py -d 50 -s 0 --timeout=0 /home/pi/SU-WaterCam/output/ticktalk_main.pickle 8080
 # An uncaught exception anywhere in the TTPython graph (e.g. the flir()

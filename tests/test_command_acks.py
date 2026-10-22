@@ -159,13 +159,11 @@ def _blocks(code, value_hex):
 
 class TestDownlinkCodes:
     def test_code_widths_table(self):
-        assert tip.DOWNLINK_CODE_LENGTHS["12 92"] == 2
+        assert tip.DOWNLINK_CODE_LENGTHS["15 95"] == 7 and "12 92" not in tip.DOWNLINK_CODE_LENGTHS
         assert tip.DOWNLINK_CODE_LENGTHS["13 93"] == tip.DOWNLINK_CODE_LENGTHS["14 94"] == 1
         assert tip.DOWNLINK_CODE_LENGTHS["50 01"] == 0 and "21" not in tip.DOWNLINK_CODE_LENGTHS
 
     @pytest.mark.parametrize("code, name, value_hex, minutes", [
-        ("12 92", "monitoring_frequency", "0001", 1),
-        ("12 92", "monitoring_frequency", "2760", 10080),
         ("13 93", "emergency_frequency", "01", 1),
         ("13 93", "emergency_frequency", "f0", 240),
         ("14 94", "neighborhood_emergency_frequency", "01", 1),
@@ -177,7 +175,6 @@ class TestDownlinkCodes:
         assert store == {name: minutes} and r["skipped"] == []
 
     @pytest.mark.parametrize("code, value_hex", [
-        ("12 92", "0000"), ("12 92", "2761"), ("12 92", "ffff"),
         ("13 93", "00"), ("13 93", "f1"), ("14 94", "00"), ("14 94", "f1"),
     ])
     def test_interval_out_of_range_is_skipped(self, code, value_hex):
@@ -186,8 +183,8 @@ class TestDownlinkCodes:
         assert store == {} and r["skipped"] == [code] and r["applied"] == []
 
     def test_set_param_returning_false_is_skipped(self):
-        r = tip.apply_downlink_command(_blocks("12 92", "003c"), lambda k, v: False)
-        assert r["skipped"] == ["12 92"] and r["applied"] == []
+        r = tip.apply_downlink_command(_blocks("13 93", "0a"), lambda k, v: False)
+        assert r["skipped"] == ["13 93"] and r["applied"] == []
 
     def test_status_request_is_applied(self):
         set_param = MagicMock()

@@ -32,7 +32,6 @@ def handler():
 @pytest.mark.parametrize("frame, key, value", [
     ("07109032", "area_threshold", 50),              # area 50 %
     ("07119100c8", "stage_threshold", 200),          # stage 2.00 m -> 200 cm (u16)
-    ("0712920168", "monitoring_frequency", 360),     # 6 h as minutes (u16)
     ("07139305", "emergency_frequency", 5),          # 5 min
     ("0714941e", "neighborhood_emergency_frequency", 30),  # 30 min
     ("07169601", "audio_recording_enabled", True),
@@ -57,8 +56,8 @@ def test_uppercase_hex_from_the_mdot(handler):
 
 
 def test_out_of_range_interval_is_skipped_and_acked_rejected(handler):
-    handler.decode("0712920000")                   # 0 minutes
-    assert "monitoring_frequency" not in handler.config
+    handler.decode("07139300")                     # 0 minutes
+    assert "emergency_frequency" not in handler.config
     handler.reply.assert_called_once_with(ack=(7, 2))
 
 
@@ -150,21 +149,12 @@ def test_runtime_manager_ignores_removed_codes(tmp_path, payload):
     assert m.get_parameter("shutdown_iteration_limit") == 2
 
 
-def test_runtime_manager_code_12_is_minutes(tmp_path):
-    """12 92 carries a u16 number of minutes."""
-    import json
-    from tools.lora_runtime_integration import LoRaRuntimeManager
-    cfg = tmp_path / "runtime_config.json"
-    cfg.write_text(json.dumps({"monitoring_frequency": 60}))
-    with patch.object(LoRaRuntimeManager, "_init_lora_handler", lambda self: None):
-        m = LoRaRuntimeManager(config_file=str(cfg))
-    assert m.process_lora_payload("129205a0")      # 1440 min
-    assert m.get_parameter("monitoring_frequency") == 1440
-
-
-def test_handler_code_12_is_minutes(handler):
-    handler.decode("07129205a0")
-    assert handler.config["monitoring_frequency"] == 1440
+def test_handler_code_15_is_the_schedule(handler):
+    from tools import schedule_control
+    with patch.object(schedule_control, "apply", return_value=(True, "applied")) as apply:
+        handler.decode("071595" + "0800100f007814")   # 08:00-16:15, 120 min, 20 min awake
+    assert apply.call_args.args[0] == schedule_control.Schedule(480, 975, 120, 20)
+    handler.reply.assert_called_once_with(ack=(7, 0))
 
 
 def test_debug_status_typed_as_text_in_chirpstack(handler):
