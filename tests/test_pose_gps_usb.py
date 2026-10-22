@@ -202,3 +202,15 @@ def test_gps_fix_and_pose_reset_downlinks(monkeypatch):
     req.assert_called_once()
     reset.assert_called_once()
     assert out["applied"] == ["gps_fix_requested", "pose_reference_reset"] and not out["skipped"]
+
+
+def test_a_holder_whose_process_ended_does_not_keep_usb_on(monkeypatch, tmp_path):
+    monkeypatch.setattr(usb_power, "HOLDERS_DIR", str(tmp_path / "usb"))
+    monkeypatch.setattr(usb_power, "release", REAL_RELEASE)
+    switched = []
+    monkeypatch.setattr(usb_power, "_switch", lambda a: switched.append(a) or True)
+    (tmp_path / "usb").mkdir()
+    (tmp_path / "usb" / "audio").write_text("999999999")      # a pid that can't exist
+    usb_power.acquire("gps")
+    assert usb_power.holders() == ["gps"]
+    assert usb_power.release("gps") is True and switched[-1] == "off"
