@@ -254,6 +254,23 @@ def _command_log_state(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _gps_pose_usb_state(monkeypatch, tmp_path, request):
+    """Keep the GPS window, pose monitor and USB holders off the real /tmp, data/
+    and hardware: no real GPS-window thread, no doas uhubctl."""
+    from tools import gps_window, pose_monitor, usb_power
+    monkeypatch.setattr(gps_window, "BOOT_MARK", str(tmp_path / "gps-window-mark"))
+    monkeypatch.setattr(gps_window, "REQUEST_FILE", str(tmp_path / "gps_request.json"))
+    monkeypatch.setattr(gps_window, "_thread", None)
+    monkeypatch.setattr(gps_window, "run_window", lambda why, **kw: False)
+    monkeypatch.setattr(pose_monitor, "STATE_FILE", str(tmp_path / "pose_state.json"))
+    monkeypatch.setattr(pose_monitor, "read_samples", lambda *a, **k: [])
+    pose_monitor._last.clear()
+    monkeypatch.setattr(usb_power, "HOLDERS_DIR", str(tmp_path / "usb-holders"))
+    if request.module.__name__.split(".")[-1] != "test_usb_power":   # that one tests the switching
+        monkeypatch.setattr(usb_power, "_switch", lambda action: True)
+
+
+@pytest.fixture(autouse=True)
 def _reset_singletons():
     """Reset module-level singletons before every test so tests are isolated."""
     # Import lazily to avoid triggering hardware init at collection time.

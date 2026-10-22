@@ -10,6 +10,9 @@ from tools import gps_window, pose_monitor as pm, usb_power
 from tools.transmit_ip import apply_downlink_command, parse_downlink_frame
 
 G0 = [0.0, 0.0, 9.81]
+# The real functions, kept before conftest's autouse fixture stubs them per test
+REAL_RUN_WINDOW = gps_window.run_window
+REAL_RELEASE = usb_power.release
 
 
 def _g(tilt_deg, noise=0.0):
@@ -143,6 +146,7 @@ def test_due_reasons(cache):
 
 
 def test_window_holds_usb_only_while_it_runs(monkeypatch):
+    monkeypatch.setattr(gps_window, "run_window", REAL_RUN_WINDOW)
     calls = []
     monkeypatch.setattr(usb_power, "acquire", lambda n: calls.append(("on", n)) or True)
     monkeypatch.setattr(usb_power, "release", lambda n: calls.append(("off", n)) or True)
@@ -177,6 +181,7 @@ def test_gps_skips_gpsd_with_the_modem_off(monkeypatch):
 
 def test_last_release_turns_usb_off(monkeypatch, tmp_path):
     monkeypatch.setattr(usb_power, "HOLDERS_DIR", str(tmp_path / "usb"))
+    monkeypatch.setattr(usb_power, "release", REAL_RELEASE)
     monkeypatch.setattr(usb_power, "_powered", False)
     switched = []
     monkeypatch.setattr(usb_power, "_switch", lambda a: switched.append(a) or True)
