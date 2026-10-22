@@ -323,10 +323,35 @@ Also in `battery_manager.py`: the INA260 path ignores charging and charges the
 whole off period at the current measured at boot. Fix it before anyone fits an
 INA260.
 
+## Boot and shutdown (005, 2026-10-22)
+
+*Measured* with a 5 Hz sampler of the Witty Pi's Vout × Iout, started from early boot by a one-off unit; 005 in bench mode (no ticktalk), woken by a Witty Pi alarm. The sampler adds a little load.
+
+| Phase | Time | Energy | Mean power |
+|---|---|---|---|
+| Power-on to kernel start (bootloader) | about 7.7 s | about 5-7 mWh | estimate: not sampled |
+| Kernel start to first sample | 6 s | about 4-5 mWh | estimate |
+| First sample to the Witty Pi daemon ready (uptime 6-15 s) | 9 s | 7.5 mWh | 3.0 W |
+| Uptime 15-45 s | 30 s | 17.5 mWh | 2.1 W |
+| Uptime 45-120 s | 75 s | 62 mWh | 3.0 W (peak 7 W at 74 s) |
+| Idle, uptime 120-240 s | 120 s | 104 mWh | 3.1 W |
+| Shutdown request to the sampler being killed | 8.8 s | 9.6 mWh | 3.9 W (6 W at the end) |
+
+So a boot to "ready" costs about 25-35 mWh and a shutdown about 10-15 mWh: about 40-50 mWh together, the same as about 50-60 s of idling at 3 W. Staying up between captures only pays for gaps shorter than about a minute; for anything longer (emergency mode's 10-min interval), shutting down and waking on the Witty Pi alarm saves most of the energy:
+
+| Emergency mode, 10-min interval | Per day |
+|---|---|
+| Pi kept on (about 3 W idle) | about 72 Wh |
+| Shut down between captures (boot + one capture + shutdown, about 0.09 Wh, ×144, plus about 0.08 W off) | about 14-15 Wh |
+
+The off draw (Witty Pi + mDot) is still an estimate and needs a meter between the pack and the Witty Pi.
+
+Note: 005 idled at 2.8-3.1 W that day (the one-minute logger read 0.58-0.64 A before the sampler started), well above the 2.0 W in the table at the top. Something resident now draws about 1 W more (the segformer and LoRa daemons both run on the bench); worth finding before trusting idle figures.
+
 ## Still to measure
 
 1. **Off-state draw:** the Witty Pi plus the mDot listening in Class C, with the Pi off. A meter between the pack and the Witty Pi doesn't see the V75's own 7 mA; add it.
-2. **Energy per wake, boot and shutdown included:** the captures were sampled at 5 Hz on 2026-10-06; boot and shutdown weren't.
+2. **Energy per wake, boot and shutdown included:** captures sampled at 5 Hz on 2026-10-06; boot and shutdown measured on 005 on 2026-10-22 (below). Still missing: the first ~14 s after power-on (bootloader and kernel, before any sampler can run), estimated.
 3. **WiFi's draw:** idle looked about 0.3–0.6 W lower with WiFi disconnected, in one session.
 4. **Solar charging through the V75's solar jack:** a load test while it charges from the real panel in sun.
 5. **Winter yield** at the 10 W input cap.
