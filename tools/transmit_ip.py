@@ -763,7 +763,7 @@ def apply_downlink_command(
     Parameters
     ----------
     cmd:
-        The dict at ``poll_downlink()["command"]``.  Must have a ``"parts"``
+        The frame's blocks as ``{"parts": [...]}`` (see ``parse_command_frame``).  Must have a ``"parts"``
         field — a list of ``{"code": str, "payload_hex": str}`` dicts.
     set_param_fn:
         ``Callable[[str, Any], None]`` used to persist each change.  Defaults
@@ -777,7 +777,6 @@ def apply_downlink_command(
         "skipped" : list[str] — string identifiers for skipped parts: the
             command code when available, otherwise a stringified malformed part
             or invalid code value
-        "queue_id": the queue_id from cmd, or None
     """
     if set_param_fn is None:
         try:
@@ -927,7 +926,6 @@ def apply_downlink_command(
     return {
         "applied": applied,
         "skipped": skipped,
-        "queue_id": cmd.get("queue_id"),
     }
 
 
