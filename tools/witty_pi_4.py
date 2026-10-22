@@ -384,6 +384,14 @@ class WittyPi4:
         except Exception as e:
             logging.error("Could not clear shutdown time: %s", str(e))
 
+    def clear_startup_time(self) -> None:
+        '''Clear the startup time from the Witty Pi 4'''
+        try:
+            self.run_command("clear_startup_time")
+            logging.info("Startup time cleared")
+        except Exception as e:
+            logging.error("Could not clear startup time: %s", str(e))
+
 if __name__ == "__main__":
 
     logging.basicConfig(level=logging.DEBUG)

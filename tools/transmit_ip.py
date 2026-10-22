@@ -853,6 +853,18 @@ def parse_downlink_frame(data: bytes) -> List[Dict[str, str]] | None:
     return parts or None
 
 
+def _end_emergency_backstop() -> None:
+    """Replace the emergency backstop's alarms (tools/wittypi_control.py); never raises."""
+    try:
+        try:
+            from tools.wittypi_control import end_emergency_backstop
+        except ImportError:
+            from wittypi_control import end_emergency_backstop
+        logger.info("Emergency backstop: %s", end_emergency_backstop())
+    except Exception as exc:   # noqa: BLE001
+        logger.warning("Emergency backstop not replaced: %s", exc)
+
+
 def parse_command_frame(frame: bytes) -> Optional[Tuple[int, Optional[List[Dict[str, str]]]]]:
     """(seq, parts) of a server command frame; parts None if the rest isn't a valid frame.
 
@@ -1094,6 +1106,7 @@ def apply_downlink_command(
             set_param_fn("emergency_mode", False)
             logger.info("Applied: emergency_mode = False")
             applied.append("emergency_mode=False")
+            _end_emergency_backstop()
 
         else:
             logger.warning("apply_downlink_command: unrecognised code '%s' — ignoring", code)
