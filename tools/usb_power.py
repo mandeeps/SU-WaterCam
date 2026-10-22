@@ -56,11 +56,39 @@ def usb_power_on() -> bool:
     return _powered
 
 
-def holders() -> list:
+def _alive(pid: int) -> bool:
     try:
-        return sorted(os.listdir(HOLDERS_DIR))
+        os.kill(pid, 0)
+        return True
+    except PermissionError:      # another user's process (root's remote session): alive
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def holders() -> list:
+    """Names holding USB; a holder whose process has ended (it never released,
+    e.g. ticktalk stopped mid-wake) no longer counts and is removed."""
+    try:
+        names = sorted(os.listdir(HOLDERS_DIR))
     except OSError:
         return []
+    live = []
+    for name in names:
+        path = os.path.join(HOLDERS_DIR, name)
+        try:
+            with open(path) as f:
+                pid = int(f.read().strip() or 0)
+        except (OSError, ValueError):
+            pid = 0
+        if pid and _alive(pid):
+            live.append(name)
+        else:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+    return live
 
 
 def acquire(name: str) -> bool:
