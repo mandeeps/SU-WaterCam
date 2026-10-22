@@ -51,9 +51,12 @@ class CoregistrationConfig:
     #: the final metric is at least this good AND the transform stays within
     #: MAX_TRANSFORM_DRIFT_PX of the one already cached. Mattes mutual
     #: information is negative and more negative is better; a failed solve sits
-    #: near 0. -0.10 is a first guess to be tuned from the "Final metric value"
-    #: lines of good captures. A metric absent from the map is not gated.
-    MIN_ACCEPT_METRIC = {"mutual_information": -0.10, "correlation": -0.10}
+    #: near 0. Not gated yet: solves on the field units (before the thermal
+    #: frame was scaled properly) had a median of about -0.006 and a best of
+    #: -0.18, so a threshold needs measuring with the fixed preprocessing (the
+    #: "Final metric value" lines). Until then only the drift check applies.
+    #: A metric absent from the map is not gated.
+    MIN_ACCEPT_METRIC: dict = {}
     #: Largest movement of any point of the (resized) fixed frame between the
     #: cached transform and a new solve. The cameras are bolted together, so the
     #: true transform is a constant; the same scene has solved 100 px apart.
@@ -581,7 +584,9 @@ def judge_solve(metric_value: float, solved: sitk.Transform, previous: Optional[
     """Decide whether a fresh solve may be cached; see MIN_ACCEPT_METRIC and MAX_TRANSFORM_DRIFT_PX."""
     verdict = {"accepted": True, "reasons": [], "metric": float(metric_value), "drift_px": None}
     limit = config.MIN_ACCEPT_METRIC.get(config.REGISTRATION_METRIC)
-    if limit is not None and not metric_value <= limit:   # also rejects NaN
+    if not np.isfinite(metric_value):
+        verdict["reasons"].append(f"metric {metric_value} is not a number")
+    elif limit is not None and not metric_value <= limit:
         verdict["reasons"].append(f"metric {metric_value:.4f} is worse than {limit}")
     if previous is not None and config.MAX_TRANSFORM_DRIFT_PX is not None:
         try:

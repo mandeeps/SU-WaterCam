@@ -191,9 +191,11 @@ before the 8-bit step; casting straight to 8 bits wrapped it modulo 256.
 A fresh solve is written to `images/registration_transform.json` (the cache every later
 capture reuses) only if both hold, in `tools/coreg_multiple.py`:
 
-- the final mutual-information metric is at most `MIN_ACCEPT_METRIC` (-0.10; more negative
-  is better, a failed solve sits near 0). A first guess: tune it from the `Final metric
-  value` lines of good captures;
+- the final mutual-information metric is a number, and at most `MIN_ACCEPT_METRIC` once
+  that is set (more negative is better, a failed solve sits near 0). It is empty for now:
+  solves on the field units, before the thermal frame was scaled properly, had a median of
+  about -0.006 and a best of -0.18, so a threshold has to be measured from the `Final metric
+  value` lines of good captures with the fixed preprocessing;
 - no point of the registration frame moves more than `MAX_TRANSFORM_DRIFT_PX` (25 px, at
   the resized registration resolution) from the transform already cached. The cameras are
   bolted together, so the true transform is a constant. After deliberately remounting a

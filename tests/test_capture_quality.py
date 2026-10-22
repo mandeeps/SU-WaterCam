@@ -72,7 +72,12 @@ def test_good_solve_near_the_cached_one_is_accepted():
     assert v["accepted"] and v["drift_px"] == 10
 
 
-def test_weak_metric_is_rejected():
+def test_metric_is_not_gated_by_default():
+    assert cm.judge_solve(-0.002, _shift(0), None, 100, 80)["accepted"]
+
+
+def test_weak_metric_is_rejected(monkeypatch):
+    monkeypatch.setattr(cm.config, "MIN_ACCEPT_METRIC", {cm.config.REGISTRATION_METRIC: -0.10})
     v = cm.judge_solve(-0.02, _shift(0), None, 100, 80)
     assert not v["accepted"] and "metric" in v["reasons"][0]
 
