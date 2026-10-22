@@ -250,13 +250,14 @@ class TestHandleDownlinkReply:
 
 # ── IPTransmitter: post_acks, send_uplink, poll_downlink ─────────────────────
 
-TRUSTED = "http://node-test.example.ts.net:8000"
+TRUSTED = "http://100.101.102.103:8000"   # a tailnet address: trusted without DNS
 
 
 def _tx(url=TRUSTED):
     tx = tip.IPTransmitter.__new__(tip.IPTransmitter)
     tx.device_id, tx.server_url = "watercam-005", url
     tx.timeout_s, tx.retry_attempts, tx.retry_backoff_s = 5, 1, 0
+    tx.api_key = ""
     tx._session = MagicMock()
     return tx
 

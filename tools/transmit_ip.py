@@ -333,7 +333,7 @@ class IPTransmitter:
             try:
                 resp = self._session.post(f"{self.server_url}/ip/ack",
                                           json={"device_id": self.device_id, "acks": acks},
-                                          timeout=self.timeout_s)
+                                          timeout=self.timeout_s, headers=self._auth_headers())
                 ok = 200 <= resp.status_code < 300
                 if not ok:
                     logger.warning("POST /ip/ack: HTTP %s", resp.status_code)
