@@ -30,6 +30,7 @@ from typing import Dict, Any, Optional
 # 08 18 flood bitmap compressed binary
 # 09 19 status area threshold %
 # 09 29 stage threshold, u16 cm
+# 01 0E pose level, 01 0F tilt from the reference (0.1 deg)
 # 09 39 monitoring freq
 # 09 79 wake schedule (7 bytes, as downlink 15 95)
 # 09 49 emergency freq
@@ -255,6 +256,9 @@ _SENSOR_FIELDS = (
     ('emergency_frequency', _u16_field(0x09, 0x49, 'emergency_frequency')),
     ('neighborhood_emergency_frequency', _u16_field(0x09, 0x59, 'neighborhood_emergency_frequency')),
     ('audio_recording_enabled', _u8_field(0x09, 0x69, 'audio_recording_enabled')),
+    # pose level and tilt from the reference (tools/pose_monitor.py)
+    ('pose_level', _u8_field(0x01, 0x0E, 'pose_level')),
+    ('pose_tilt_tenths', _u16_field(0x01, 0x0F, 'pose_tilt_tenths')),
     # the wake schedule (15 95's 7 bytes, tools/schedule_control.py)
     ('schedule', _schedule_field),
     # Pi throttled/under-voltage flags (tools/pi_power.py), packed to one byte
@@ -283,9 +287,9 @@ _SENSOR_FIELDS = (
 # release last. A field that doesn't fit the room left in a chunk starts the next.
 _CHUNK_PRIORITY = (
     'emergency_status', 'camera_flood_detected', 'camera_flood_growing', 'camera_water_pct',
-    'battery_percent', 'health_status', 'movement_threshold',
+    'battery_percent', 'health_status', 'movement_threshold', 'pose_level',
     'temperature_celsius', 'relative_humidity', 'pi_throttled', 'clock_unverified',
-    'lat_lon_z', 'tilt_roll_yaw', 'registration_status', 'sf_dropped',
+    'lat_lon_z', 'tilt_roll_yaw', 'pose_tilt_tenths', 'registration_status', 'sf_dropped',
     'status_area_threshold', 'stage_threshold', 'monitoring_frequency', 'emergency_frequency',
     'neighborhood_emergency_frequency', 'audio_recording_enabled', 'schedule',
     'software_version', 'model_id',

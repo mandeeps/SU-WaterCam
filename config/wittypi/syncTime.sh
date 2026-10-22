@@ -24,13 +24,6 @@ sleep 30
 
 # 1. network time (HTTP Date header, about 1 s)
 net_ts=$(get_network_timestamp)
-if [[ "$net_ts" == "-1" && -x /usr/sbin/uhubctl ]]; then
-  # No network. Make sure the modem has power for the GPS time below
-  # (usb-power-on.timer normally has turned USB on by now). Cellular data isn't
-  # brought up: the connection has autoconnect off, so waiting for it is no use.
-  sudo /usr/sbin/uhubctl -l 1-1 -a on >/dev/null 2>&1
-  sudo /usr/sbin/uhubctl -l 2 -a on >/dev/null 2>&1
-fi
 if [[ "$net_ts" != "-1" ]]; then
   log '  Applying network time to system...'
   sudo date -u -s @$net_ts >/dev/null
@@ -39,7 +32,14 @@ if [[ "$net_ts" != "-1" ]]; then
   exit 0
 fi
 
-# 2. GPS time, from gpsd. The modem's GNSS starts with the Pi, so allow time for a fix.
+# 2. GPS time, from gpsd, only if the modem already has power: USB is off unless
+#    something needs it (tools/usb_power.py), and the RTC keeps time well enough.
+#    The daily GPS window sets the clock from its fix when nothing else did
+#    (tools/gps_window.py).
+if [[ ! -e /dev/ttyUSB1 ]]; then
+  log '  No network time; the modem is off, so no GPS time: system time and RTC left as they are.'
+  exit 0
+fi
 gps_time=$(timeout 100 python3 $my_dir/gps_time.py 90 2>/dev/null)
 gps_ts=$(date -u -d "$gps_time" +%s 2>/dev/null)
 if [[ -n "$gps_time" && -n "$gps_ts" && "$gps_ts" -gt 1767225600 ]]; then   # after 2026-01-01

@@ -1,7 +1,0 @@
-[Unit]
-Description=Turn USB (cellular modem, microphone) back on (tools/usb_power.py)
-
-[Service]
-Type=oneshot
-ExecStart=/usr/sbin/uhubctl -l 1-1 -a on
-ExecStart=/usr/sbin/uhubctl -l 2 -a on

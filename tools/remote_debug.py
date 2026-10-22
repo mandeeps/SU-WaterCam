@@ -134,6 +134,13 @@ def cellular_state(conn):
 
 
 def cellular_up(conn):
+    # The modem is on USB, which is off unless something holds it (tools/usb_power.py)
+    try:
+        from tools import usb_power
+    except ImportError:
+        import usb_power
+    if usb_power.acquire("cellular"):
+        usb_power.wait_for("/dev/cdc-wdm*", 60)
     rc, out = _run(["nmcli", "--wait", "90", "connection", "up", conn], timeout=100)
     if rc != 0:
         log(f"cellular up failed: {out}")
@@ -142,6 +149,11 @@ def cellular_up(conn):
 
 def cellular_down(conn):
     _run(["nmcli", "connection", "down", conn], timeout=30)
+    try:
+        from tools import usb_power
+    except ImportError:
+        import usb_power
+    usb_power.release("cellular")
 
 
 def tailscale_online():

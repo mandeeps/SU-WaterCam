@@ -61,6 +61,7 @@ class FakeGpsd:
 
 @pytest.fixture
 def fake(monkeypatch, tmp_path):
+    monkeypatch.setattr(get_gps, "GNSS_DEVICE", __file__)   # the modem powered
     g = FakeGpsd()
     monkeypatch.setattr(get_gps, "GPSD_PORT", g.port)
     monkeypatch.setattr(get_gps, "REQUEST_TIMEOUT_S", 0.5)

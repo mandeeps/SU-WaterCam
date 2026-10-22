@@ -16,7 +16,11 @@ except ImportError:     # run from tools/ as a script
 # modem's GNSS takes 40-50 s to fix after USB comes on, so a wake's first LoRa
 # step (about 38 s after boot) would otherwise go without a position.
 CACHE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "gps_last_fix.json")
-DEFAULT_CACHE_MAX_AGE_H = 48    # runtime parameter gps_cache_max_age_h; 0 turns the cache off
+# runtime parameter gps_cache_max_age_h; 0 turns the cache off. A fixed camera takes
+# a live fix once a day (tools/gps_window.py), so the cache is what most wakes use.
+DEFAULT_CACHE_MAX_AGE_H = 720
+#: The modem's NMEA port: present only while USB powers the modem (tools/usb_power.py)
+GNSS_DEVICE = "/dev/ttyUSB1"
 _MOVED_DEG = 1e-4               # about 10 m: rewrite the cache when the fix moves this much
 _REFRESH_S = 3600               # or when the cached fix is this old
 
@@ -220,7 +224,8 @@ def get_location_with_retry(max_retries: int = 3, delay: float = 1.0,
         tuple: (dict, packet) where dict contains GPS data (or empty dict if unavailable)
                and packet is the raw GPS packet (or None if unavailable or cached)
     """
-    if _ensure_connected():
+    # With USB off there is no GNSS: don't spend seconds asking gpsd
+    if os.path.exists(GNSS_DEVICE) and _ensure_connected():
         for attempt in range(max_retries):
             try:
                 location, packet = _get_lat_lon_alt_with_packet()

@@ -23,6 +23,8 @@ alone, {"ak":123}, is 10):
 
     ak   seq of the command this reply acks (only in an ack)
     ar   its result when not 0: 1 partly applied, 2 rejected
+    pl   pose level: 0 ok, 1 re-check georeferencing, 2 knocked, 3 removed, 255 no reference
+    ga   hours since the last live GPS fix
     sc   the wake schedule set by 15 95: "HHMM-HHMM/interval/awake"
     ut   1 while the configured IP server is untrusted (IP readings stay queued)
     dbg  format version (always present)
@@ -153,6 +155,24 @@ def _ip_uploads_requested() -> Optional[int]:
         return None
 
 
+def _pose_level() -> Optional[int]:
+    try:
+        from tools import pose_monitor
+        level = pose_monitor._load(pose_monitor.STATE_FILE).get("level")
+        return int(level) if level is not None else None
+    except Exception:   # noqa: BLE001 - a status reply must never fail over this
+        return None
+
+
+def _gps_fix_age_h() -> Optional[float]:
+    try:
+        from tools import gps_window
+        age = gps_window.last_live_fix_age_s()
+        return round(age / 3600, 1) if age is not None else None
+    except Exception:   # noqa: BLE001
+        return None
+
+
 def _schedule_label() -> Optional[str]:
     try:
         from tools import schedule_control
@@ -203,6 +223,9 @@ def collect_compact_status(emergency_mode: Optional[bool] = None,
         ("sd", _sf_dropped()),
         # cycles queued because the LoRa daemon was down (tools/drop_counter.py)
         ("du", _lora_daemon_unavailable()),
+        # pose level (tools/pose_monitor.py) and hours since the last live GPS fix
+        ("pl", _pose_level()),
+        ("ga", _gps_fix_age_h()),
         # the wake schedule set by 15 95, "HHMM-HHMM/interval/awake"
         ("sc", _schedule_label()),
         # 1 while the configured IP server is untrusted, so IP readings stay queued
