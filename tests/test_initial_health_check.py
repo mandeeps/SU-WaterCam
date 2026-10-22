@@ -14,11 +14,23 @@ def test_all_good():
 
 
 def test_unreadable_wittypi_is_unavailable_not_low_voltage():
-    # what witty_pi_4 returns when i2cget fails
-    dead = {'wittypi_temperature_c': -273.15, 'wittypi_battery_voltage_v': 0.0,
-            'wittypi_internal_voltage_v': 0.0, 'wittypi_internal_current_a': 0.0}
-    r = hc.evaluate_health(45.0, dead, GPS, IMU)
+    # read_wittypi_voltages() leaves out readings the board didn't give (None)
+    r = hc.evaluate_health(45.0, {}, GPS, IMU)
     assert r['failures'] == ['wittypi_unavailable']
+
+
+def test_missing_output_voltage_is_unavailable_not_low():
+    partial = {'wittypi_temperature_c': 30.5}
+    r = hc.evaluate_health(45.0, partial, GPS, IMU)
+    assert r['failures'] == ['internal_voltage_unavailable']
+
+
+def test_read_wittypi_voltages_skips_none(monkeypatch):
+    import tools.wittypi_control as wc
+    monkeypatch.setattr(wc, 'get_data', lambda: (None, None, 4.9, None))
+    assert hc.read_wittypi_voltages() == {'wittypi_internal_voltage_v': 4.9}
+    monkeypatch.setattr(wc, 'get_data', lambda: (None, None, None, None))
+    assert hc.read_wittypi_voltages() == {}
 
 
 def test_input_voltage_is_reported_but_never_fails():

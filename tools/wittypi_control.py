@@ -257,9 +257,20 @@ def get_wittypi_status():
     """
     Get current WittyPi status including temperature, battery voltage,
     internal voltage, and internal current.
+
+    A reading the board didn't give is None (tools/witty_pi_4.py), never a
+    made-up value; callers skip it. If none came back the status is
+    'wittypi_read_failed', not 'wittypi_data_retrieved'.
     """
     try:
         temperature, battery_voltage, internal_voltage, internal_current = get_data()
+
+        if all(v is None for v in (temperature, battery_voltage, internal_voltage, internal_current)):
+            return {
+                'status': 'wittypi_read_failed',
+                'message': 'No Witty Pi reading could be read',
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
 
         return {
             'status': 'wittypi_data_retrieved',
