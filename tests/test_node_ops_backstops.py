@@ -72,9 +72,9 @@ def test_emergency_exempt_only_until_deadline():
     now = 1_800_000_000.0
     cfg = {"emergency_mode": True, "emergency_since": now - 3600, "emergency_max_hours": 2}
     assert not max_awake.emergency_expired(cfg, now=now, uptime_min=90)
-    cfg["emergency_since"] = now - (2 * 3600 + 14 * 60)        # inside the 15 min margin
+    cfg["emergency_since"] = now - (2 * 3600 + 24 * 60)        # inside the 15 min margin plus one 10 min capture interval (the default emergency_frequency)
     assert not max_awake.emergency_expired(cfg, now=now, uptime_min=90)
-    cfg["emergency_since"] = now - (2 * 3600 + 16 * 60)
+    cfg["emergency_since"] = now - (2 * 3600 + 26 * 60)
     assert max_awake.emergency_expired(cfg, now=now, uptime_min=90)
     assert max_awake.decide(500, 60, False, False, True, emergency_over=True) == "shutdown"
     # the session and the hold flag still keep it up
@@ -100,8 +100,8 @@ def test_emergency_default_hours_and_no_expiry():
 def test_emergency_bad_since_counts_from_boot(since):
     now = 1_800_000_000.0
     cfg = {"emergency_mode": True, "emergency_since": since, "emergency_max_hours": 1}
-    assert not max_awake.emergency_expired(cfg, now=now, uptime_min=70)
-    assert max_awake.emergency_expired(cfg, now=now, uptime_min=80)
+    assert not max_awake.emergency_expired(cfg, now=now, uptime_min=80)
+    assert max_awake.emergency_expired(cfg, now=now, uptime_min=90)
     assert not max_awake.emergency_expired(cfg, now=now, uptime_min=None)
 
 

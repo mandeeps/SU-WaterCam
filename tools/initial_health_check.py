@@ -53,12 +53,14 @@ def read_wittypi_voltages() -> Dict[str, float]:
     try:
         from tools.wittypi_control import get_data
         temperature_c, battery_voltage_v, internal_voltage_v, internal_current_a = get_data()
-        return {
-            'wittypi_temperature_c': float(temperature_c),
-            'wittypi_battery_voltage_v': float(battery_voltage_v),
-            'wittypi_internal_voltage_v': float(internal_voltage_v),
-            'wittypi_internal_current_a': float(internal_current_a),
+        readings = {
+            'wittypi_temperature_c': temperature_c,
+            'wittypi_battery_voltage_v': battery_voltage_v,
+            'wittypi_internal_voltage_v': internal_voltage_v,
+            'wittypi_internal_current_a': internal_current_a,
         }
+        # A reading the board didn't give (None) is left out, not reported as 0
+        return {k: float(v) for k, v in readings.items() if v is not None}
     except Exception:
         return {}
 
@@ -109,8 +111,9 @@ def evaluate_health(
         failures.append(f'cpu_temp_high_{cpu_temp_c:.1f}C')
 
     # WittyPi voltages
-    # witty_pi_4 returns -273.15 C and 0 V when it can't read the board, not an error
-    if not wittypi or wittypi.get('wittypi_temperature_c') == -273.15:
+    # witty_pi_4 returns None for a reading it can't get, so those keys are missing;
+    # no readings at all means the board didn't answer
+    if not wittypi:
         failures.append('wittypi_unavailable')
     else:
         iv = wittypi.get('wittypi_internal_voltage_v', math.nan)

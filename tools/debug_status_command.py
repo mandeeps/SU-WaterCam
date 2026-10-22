@@ -253,12 +253,19 @@ def get_wittypi_status() -> Dict[str, Any]:
         from tools.wittypi_control import get_data
         temperature, battery_voltage, internal_voltage, internal_current = get_data()
 
+        readings = {'temperature_c': temperature, 'battery_voltage_v': battery_voltage,
+                    'internal_voltage_v': internal_voltage, 'internal_current_a': internal_current}
+        if all(v is None for v in readings.values()):
+            return {
+                'available': False,
+                'status': 'wittypi_read_failed',
+                'error': 'No Witty Pi reading could be read'
+            }
+
+        # A reading the board didn't give (None) is left out, not reported as 0
         return {
             'available': True,
-            'temperature_c': temperature,
-            'battery_voltage_v': battery_voltage,
-            'internal_voltage_v': internal_voltage,
-            'internal_current_a': internal_current,
+            **{k: v for k, v in readings.items() if v is not None},
             'status': 'wittypi_available',
             'i2c_address': '0x08'
         }
