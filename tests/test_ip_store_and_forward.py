@@ -125,13 +125,13 @@ class TestDrainEmpty:
     def test_missing_dir_returns_zero(self, tmp_path):
         tx = _make_tx(tmp_path)
         result = tx._drain_queue()
-        assert result == {"drained": 0, "failed": False, "failed_file": None, "drained_ts": []}
+        assert result == {"drained": 0, "failed": False, "failed_file": None, "drained_ts": [], "limited": False}
 
     def test_empty_dir_returns_zero(self, tmp_path):
         tx = _make_tx(tmp_path)
         os.makedirs(tx._queue_dir)
         result = tx._drain_queue()
-        assert result == {"drained": 0, "failed": False, "failed_file": None, "drained_ts": []}
+        assert result == {"drained": 0, "failed": False, "failed_file": None, "drained_ts": [], "limited": False}
 
 
 # ── drain: age eviction ────────────────────────────────────────────────────────
