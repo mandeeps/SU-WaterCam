@@ -191,7 +191,7 @@ The server's `CHANNEL_REGISTRY` maps 2-byte codes to sensor fields.  The
 | Code | Field | Bytes | Encoding |
 |---|---|---|---|
 | `00 01` | `device_ts` | 8 | uint64 — UNIX seconds |
-| `01 04` | `emergency_status` | 4 | uint32 bool (0 or 1) |
+| `01 04` | `emergency_status` | 4 | uint32 bool (0 or 1); in every upload |
 | `02 01` | `battery_pct` | 4 | uint32 (0–100) |
 | `03 01` | `imu_block` | 12 | 3× int32 accel (mg), or custom IMU packing |
 | `01 06` | `move_threshold` | 4 | uint32 bool: 1 while the unit is away from its mount position (`tools/gps_home.py`) |
@@ -205,7 +205,7 @@ The server's `CHANNEL_REGISTRY` maps 2-byte codes to sensor fields.  The
 | `07 37` | `camera_water_pct` | 1 | uint8 (0–100): water share of the capture's mask, whenever it has one (same 1 byte over LoRa) |
 | `08 18` | `camera_flood_bitmap` | variable | the mask at full resolution, lossless (methods 0/1, at most 32000 B); the LoRa-sized bitmap if it is larger or there is no mask (docs/BITMAP_DECODING_SPEC.md) |
 | `09 19` | `sr_area_threshold_pct` | 4 | uint32 |
-| `09 29` | `sr_stage_threshold_cm` | 4 | uint32 (cm); reserved, unused on the node |
+| `09 29` | `sr_stage_threshold_cm` | 4 | uint32 (cm); reserved, unused on the node (over LoRa a u16, 0-65535 cm) |
 | `09 39` | `sr_monitoring_frequency` | 4 | uint32 |
 | `09 49` | `sr_emergency_frequency` | 4 | uint32 |
 | `09 59` | `sr_neighborhood_emerg_freq` | 4 | uint32 |
@@ -259,7 +259,30 @@ reading that is missing or not a number is left out. The compact channels come
 last in the packet: a decoder that predates them stops there and loses only
 these fields. Update the codec and the API before the nodes. The full sensor
 packet in `tests/test_lora_small_payloads.py` (`FULL_SENSOR_DATA`) goes from
-104 to 84 bytes.
+104 to 85 bytes (the stage threshold is a u16 now).
+
+### LoRa sensor packet: chunks
+
+The sensor packet is split into **chunks**, each at most the mDot's payload limit
+now (`size_limit_now()`), each starting with `00 01` (the capture time, so every
+chunk stands alone and the server knows its capture). `encode_sensor_chunks` in
+`tools/lora_handler_concurrent.py` fills them in this priority order: emergency
+status, flood detected, flood growing, water %, battery, health fault, moved,
+temperature, humidity, Pi throttle flags, clock flag, GPS, orientation,
+registration, dropped entries, then the settings (area and stage thresholds,
+the three frequencies, audio) and last the release and model. A limit of 242 B
+holds all of it in one chunk. Below `CHUNK_MIN_LIMIT` (12 B, DR0) the 11-byte
+compact packet (`0C 01`) is sent instead and the full fields wait for a wake
+with room; the sensor baseline (`tools/sensor_changes.py`) doesn't move then.
+
+A field that can't be encoded (not finite, out of range, wrong type) is left out;
+the others still go. A chunk that fails to send is queued, with the chunks after
+it (`sensor_hex` holds the list, `tools/lora_store_forward.py`); capture-time
+packets queued without a known data rate use 51-byte chunks. The drain skips an
+entry with a payload over the limit and sends smaller ones behind it. After one
+send runs into the 75 s deadline, the rest of that wake's LoRa payloads are
+queued without trying (`tools/lora_send.py`). The stage threshold (`09 29`) is a
+u16 in centimetres; `0A 02` is no longer sent.
 
 ---
 

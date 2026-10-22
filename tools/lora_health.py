@@ -2,7 +2,7 @@
 
 The mDot's joined flag (AT+NJS) is its saved session: it stays 1 with no
 gateway in range, so a unit trusting it would skip IP and lose every reading.
-assess() asks the network instead, once per boot: a link check (AT+NLC) the
+assess() asks the network instead: a link check (AT+NLC) the
 network server must answer, reporting the signal margin and how many gateways
 heard the node.
 
@@ -14,8 +14,10 @@ LoRa counts as healthy when:
   link that comes and goes doesn't count as reliable.
 
 The result decides whether WiFi stays off (tools/wifi_policy.py) and whether the
-IP uplink is needed (ip_uplink_transmit). It's kept for the rest of the boot in
-/tmp and the check history in data/lora_health.json.
+IP uplink is needed (ip_uplink_transmit). A healthy result is kept in /tmp for
+CACHE_TTL_S (and the boot); an unhealthy one is always checked again, and so is
+a healthy one after a send failed (invalidate()). The check history is in
+data/lora_health.json.
 """
 import json
 import os
@@ -35,6 +37,7 @@ MAX_FAILURES_IN_HISTORY = 1
 DEFAULT_MIN_MARGIN_DB = 5
 ATTEMPTS = 2
 RETRY_GAP_S = 5
+CACHE_TTL_S = 30 * 60
 
 
 def _boot_id() -> str:
@@ -70,15 +73,29 @@ def _min_margin() -> float:
 
 
 def cached() -> Optional[Dict[str, Any]]:
-    """This boot's assessment, if one was made."""
+    """This boot's healthy assessment, if one was made in the last CACHE_TTL_S."""
     c = _read(CACHE_PATH)
     if isinstance(c, dict) and c.get("boot_id") == _boot_id():
-        return c.get("result")
+        r = c.get("result")
+        try:
+            fresh = time.time() - float(r.get("checked_at", 0)) < CACHE_TTL_S
+        except (AttributeError, TypeError, ValueError):
+            return None
+        if fresh and r.get("healthy"):
+            return r
     return None
 
 
+def invalidate() -> None:
+    """Forget the cached assessment (a send just failed): the next assess() checks again."""
+    try:
+        os.unlink(CACHE_PATH)
+    except OSError:
+        pass
+
+
 def assess(handler=None, force: bool = False) -> Dict[str, Any]:
-    """{'healthy': bool, 'reason': str, 'joined', 'margin_db', 'gateways'}; once per boot."""
+    """{'healthy': bool, 'reason': str, 'joined', 'margin_db', 'gateways'}; a healthy one is reused for 30 min."""
     if not force:
         c = cached()
         if c is not None:
@@ -123,5 +140,8 @@ def assess(handler=None, force: bool = False) -> Dict[str, Any]:
     except Exception as e:
         result["reason"] = f"check failed: {e}"
     print(f"📡 LoRa {'healthy' if result['healthy'] else 'NOT healthy'}: {result['reason']}")
-    _write(CACHE_PATH, {"boot_id": _boot_id(), "result": result})
+    if result["healthy"]:
+        _write(CACHE_PATH, {"boot_id": _boot_id(), "result": result})
+    else:
+        invalidate()
     return result

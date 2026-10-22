@@ -8,7 +8,7 @@ Queue directory: $WATERCAM_REPO/data/lora_pending/
 File per cycle:  {captured_at_int}_{counter:06d}.json
 Record schema:
     {
-        "sensor_hex": "<hex string or null>",
+        "sensor_hex": "<hex string, or a list of hex strings (the chunks), or null>",
         "bitmap_hex": "<hex string or null>",
         "captured_at": <Unix epoch float>,
         "enqueued_at": <Unix epoch float>,
@@ -23,11 +23,22 @@ superseded, not lost, so they don't count in sf_dropped (tools/drop_counter.py).
 A queued bitmap that is larger than the room when it is drained is compressed
 again from mask_path at that room (drain(refit=...), tools/bitmap_fit.py).
 
+A capture's sensor packet is queued as chunks (encode_sensor_chunks in
+tools/lora_handler_concurrent.py), a list in sensor_hex; each chunk that goes out
+is removed from the list. An entry with a payload larger than the limit now is
+skipped, left queued, and the drain goes on to smaller ones.
+
+The nodes' processes (the capture graph, the commands, the IP path) all touch the
+queue, so every read-modify-write holds an flock on LOCK_NAME in the queue
+directory.
+
 Timestamps are captured at collection time and baked into the stored hex bytes,
 so retransmitted packets carry the original capture timestamp, not the retransmit
 wall-clock time.
 """
 
+import contextlib
+import fcntl
 import json
 import logging
 import os
@@ -42,6 +53,33 @@ _REPO_ROOT = os.environ.get("WATERCAM_REPO", "/home/pi/SU-WaterCam")
 DEFAULT_QUEUE_DIR = os.path.join(_REPO_ROOT, "data", "lora_pending")
 DEFAULT_MAX_DEPTH = 96
 DEFAULT_MAX_AGE_DAYS = 7
+LOCK_NAME = ".lock"
+
+
+@contextlib.contextmanager
+def _locked(queue_dir: str):
+    """Hold the queue's flock (blocking) around a read-modify-write.  The lock is
+    per open file, so it also excludes other threads that open it themselves."""
+    try:
+        os.makedirs(queue_dir, exist_ok=True)
+        fd = os.open(os.path.join(queue_dir, LOCK_NAME), os.O_RDWR | os.O_CREAT, 0o644)
+    except OSError as exc:
+        logger.warning("LoRa S&F: no lock file (%s): going without", exc)
+        yield
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        os.close(fd)        # closing releases the flock
+
+
+def _sensor_list(record: dict) -> list:
+    """The record's sensor payloads (hex) as a list, whatever sensor_hex holds."""
+    v = record.get("sensor_hex")
+    if not v:
+        return []
+    return list(v) if isinstance(v, (list, tuple)) else [v]
 
 
 def _write_atomic(tmp: str, final: str, record: dict) -> None:
@@ -84,8 +122,18 @@ def enqueue(
     """
     try:
         os.makedirs(queue_dir, exist_ok=True)
+        with _locked(queue_dir):
+            return _enqueue_locked(sensor_hex, bitmap_hex, captured_at, queue_dir, max_depth,
+                                   mask_path, bitmap_policy)
+    except OSError as exc:
+        logger.warning("LoRa S&F: enqueue failed: %s", exc)
+        return False
+
+
+def _enqueue_locked(sensor_hex, bitmap_hex, captured_at, queue_dir, max_depth, mask_path, bitmap_policy):
+    try:
         if bitmap_hex:
-            supersede_bitmaps(captured_at, queue_dir=queue_dir)
+            _supersede_locked(captured_at, queue_dir)
         existing = sorted(f for f in os.listdir(queue_dir) if f.endswith(".json"))
         while len(existing) >= max_depth:
             try:
@@ -164,6 +212,10 @@ def drain(
         try:
             with open(path) as fh:
                 record = json.load(fh)
+            if not isinstance(record, dict):
+                raise ValueError("not an object")
+        except FileNotFoundError:
+            continue        # removed by another process since the listing
         except (OSError, ValueError):
             logger.warning("LoRa S&F: dropping corrupt file %s", fname)
             try:
@@ -197,39 +249,43 @@ def drain(
                     logger.info("LoRa S&F: %s bitmap %d B -> %d B for a %d B limit",
                                 fname, len(bitmap) // 2, len(new_hex) // 2, size_limit)
                     record["bitmap_hex"] = new_hex
-                    _rewrite(path, record)
+                    _update(path, queue_dir, record, [], False)
 
-        # Oldest first: wait for a data rate that fits rather than skipping ahead
-        if size_limit is not None and any(
-                record.get(k) and len(record[k]) // 2 > size_limit for k in ("sensor_hex", "bitmap_hex")):
+        # An entry with a payload that doesn't fit waits for a data rate that does;
+        # smaller entries behind it still go
+        payloads = _sensor_list(record) + ([record["bitmap_hex"]] if record.get("bitmap_hex") else [])
+        if size_limit is not None and any(len(h) // 2 > size_limit for h in payloads):
             logger.info("LoRa S&F: %s waits for a payload limit above %d B", fname, size_limit)
             result["deferred"] = True
-            break
+            continue
 
-        # Both payloads must succeed; stop on first failure.
+        # Every payload must succeed; stop on first failure.  The sensor chunks go
+        # first, one at a time, then the bitmap.
         ok = True
-        for key in ("sensor_hex", "bitmap_hex"):
-            hex_payload = record.get(key)
-            if not hex_payload:
-                continue
+        delivered = []
+        bitmap_sent = False
+        for hex_payload in _sensor_list(record):
             if not handler.transmit(hex_payload):
                 logger.warning("LoRa S&F: drain failed on %s", fname)
                 ok = False
                 break
-            record[key] = None
-            if any(record.get(k) for k in ("sensor_hex", "bitmap_hex")):
-                _rewrite(path, record)
-            if key == "bitmap_hex" and on_bitmap_sent is not None:
-                try:
-                    on_bitmap_sent(record)
-                except Exception as exc:
-                    logger.warning("LoRa S&F: on_bitmap_sent failed for %s: %s", fname, exc)
-
-        if ok:
+            delivered.append(hex_payload)
+        if ok and record.get("bitmap_hex"):
+            if handler.transmit(record["bitmap_hex"]):
+                bitmap_sent = True
+            else:
+                logger.warning("LoRa S&F: drain failed on %s", fname)
+                ok = False
+        # What went out is cleared from the file (as it is now, not as it was read:
+        # another process may have superseded the bitmap meanwhile)
+        if delivered or bitmap_sent:
+            _update(path, queue_dir, record, delivered, bitmap_sent)
+        if bitmap_sent and on_bitmap_sent is not None:
             try:
-                os.unlink(path)
-            except OSError:
-                pass
+                on_bitmap_sent(record)
+            except Exception as exc:
+                logger.warning("LoRa S&F: on_bitmap_sent failed for %s: %s", fname, exc)
+        if ok:
             result["drained"] += 1
             sent += 1
         else:
@@ -239,10 +295,33 @@ def drain(
     return result
 
 
-def _rewrite(path: str, record: dict) -> None:
-    """Save a record with its delivered payload cleared (atomic; never raises)."""
+def _update(path: str, queue_dir: str, seen: dict, delivered_sensors: list, bitmap_sent: bool) -> None:
+    """Clear what went out from the file's record, under the lock (never raises).
+
+    The record is read again, so a bitmap another process superseded meanwhile
+    stays gone; `seen` is the drain's copy, whose own changes (a bitmap compressed
+    again) are kept when nothing else changed the bitmap.  An entry left with
+    nothing to send is removed."""
     try:
-        _write_atomic(path + ".tmp", path, record)
+        with _locked(queue_dir):
+            try:
+                with open(path) as fh:
+                    record = json.load(fh)
+            except (OSError, ValueError):
+                return          # removed meanwhile
+            if record.get("bitmap_hex") and record.get("bitmap_hex") != seen.get("bitmap_hex") \
+                    and record.get("captured_at") == seen.get("captured_at") and not bitmap_sent:
+                record["bitmap_hex"] = seen.get("bitmap_hex")   # compressed again
+            left = [h for h in _sensor_list(record) if h not in delivered_sensors]
+            record["sensor_hex"] = left or None
+            if bitmap_sent:
+                record["bitmap_hex"] = None
+                record.pop("mask_path", None)
+                record.pop("bitmap_policy", None)
+            if record.get("sensor_hex") or record.get("bitmap_hex"):
+                _write_atomic(path + ".tmp", path, record)
+            else:
+                os.unlink(path)
     except OSError as exc:
         logger.warning("LoRa S&F: could not update %s: %s", path, exc)
 
@@ -255,6 +334,11 @@ def supersede_bitmaps(
     """Clear the bitmaps of entries captured at or before *captured_at*: a newer
     bitmap was queued or sent.  An entry left with nothing to send is removed.
     Not counted as dropped.  Returns the number of bitmaps cleared (never raises)."""
+    with _locked(queue_dir):
+        return _supersede_locked(captured_at, queue_dir)
+
+
+def _supersede_locked(captured_at: float, queue_dir: str) -> int:
     try:
         entries = sorted(f for f in os.listdir(queue_dir) if f.endswith(".json"))
     except OSError:
@@ -278,7 +362,7 @@ def supersede_bitmaps(
         record.pop("mask_path", None)
         record.pop("bitmap_policy", None)
         try:
-            if record.get("sensor_hex"):
+            if _sensor_list(record):
                 _write_atomic(path + ".tmp", path, record)
             else:
                 os.unlink(path)
@@ -302,6 +386,11 @@ def remove_delivered(
     removed (never raises).
     """
     wanted = {int(ts) for ts in delivered_ts}
+    with _locked(queue_dir):
+        return _remove_locked(wanted, queue_dir)
+
+
+def _remove_locked(wanted: set, queue_dir: str) -> int:
     try:
         entries = sorted(f for f in os.listdir(queue_dir) if f.endswith(".json"))
     except FileNotFoundError:

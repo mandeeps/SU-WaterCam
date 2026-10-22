@@ -428,7 +428,7 @@ class TestRemoveDelivered:
         for t in (1000, 1060, 1120):
             lsf.enqueue("aa", None, t, queue_dir=q)
         assert lsf.remove_delivered([1060, 1121], queue_dir=q) == 1
-        left = sorted(int(f.split("_")[0]) for f in os.listdir(q))
+        left = sorted(int(f.split("_")[0]) for f in os.listdir(q) if f.endswith(".json"))
         assert left == [1000, 1120]
 
     def test_fractional_capture_time_matches_its_second(self, tmp_path):

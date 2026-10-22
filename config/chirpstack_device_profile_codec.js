@@ -21,18 +21,18 @@
  * Channel 07 Type 27: Camera flood growing (0/1)
  * Channel 08 Type 18: Flood bitmap compressed binary
  * Channel 09 Type 19: Status area threshold %
- * Channel 09 Type 29: Stage threshold %
+ * Channel 09 Type 29: Stage threshold (u16, cm)
  * Channel 09 Type 39: Monitoring frequency (minutes)
  * Channel 09 Type 49: Emergency frequency (minutes)
  * Channel 09 Type 59: Neighborhood emergency frequency (minutes)
  * Channel 0A Type 01: WittyPi temperature (float32, Celsius; older nodes, no longer sent)
- * Channel 0A Type 02: WittyPi battery voltage (float32, Volts)
  * Channel 0A Type 03: WittyPi internal voltage (float32, Volts; older nodes, no longer sent)
- * Channel 0B Type 01: Debug status message (JSON string)
+ * Channel 0B Type 01: Debug status message (JSON string; not a Witty Pi channel)
  * Channel 0C Type 01: Compact packet (11 bytes in all, for DR0): u32 capture time, u8 flags
  *   (bit 0 emergency, 1 flood detected, 2 flood growing, 3 health fault, 4 moved, 5 under-voltage
  *   now, 6 since boot), u8 battery % (255 none), u8 Witty Pi voltage in 25 mV (255 none),
- *   i8 temperature C (-128 none), u8 humidity % (255 none). The full packet follows later.
+ *   i8 temperature C (-128 none), u8 humidity % (255 none). The full packet goes in chunks (each
+ *   starting with 00 01) when the payload limit allows.
  * 
  * @param {object} input
  * @param {number[]} input.bytes Byte array containing the uplink payload, e.g. [255, 230, 255, 0]
@@ -147,7 +147,8 @@ function decodeUplink(input) {
         result.status_area_threshold = view.getUint8(offset++);
         break;
       case '9-29':
-        result.stage_threshold = view.getUint8(offset++);
+        result.stage_threshold = view.getUint16(offset, false);
+        offset += 2;
         break;
       case '9-39':
         result.monitoring_frequency = view.getUint16(offset, false);
@@ -164,10 +165,6 @@ function decodeUplink(input) {
       case '9-69':
         // USB microphone recording on (1) or off (0)
         result.audio_recording_enabled = view.getUint8(offset++);
-        break;
-      case 'a-2':
-        result.wittypi_battery_voltage = view.getFloat32(offset, false);
-        offset += 4;
         break;
       case 'b-1': {
         // Debug status message (JSON string)
@@ -252,7 +249,6 @@ function decodeUplink(input) {
  *     "temperature_celsius": 23.5,
  *     "relative_humidity": 55,
  *     "wittypi_temperature": 30.625,
- *     "wittypi_battery_voltage": 4.73,
  *     "wittypi_internal_voltage": 5.2
  *   }
  * }

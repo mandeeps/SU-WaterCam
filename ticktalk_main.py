@@ -164,7 +164,10 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     bitmap. If the mDot isn't joined, both are queued for store-and-forward.
     """
 
-    from tools.lora_handler_concurrent import get_lora_handler, get_config_value, encode_compact_packet, COMPACT_PACKET_SIZE
+    from tools.lora_handler_concurrent import (get_lora_handler, get_config_value, encode_compact_packet,
+                                               encode_sensor_chunks, COMPACT_PACKET_SIZE, CHUNK_MIN_LIMIT,
+                                               QUEUE_CHUNK_LIMIT)
+    from tools.lora_send import WakeSender
     from tools import lora_store_forward as _lsf
 
     from tools.bno055_imu import get_orientation
@@ -389,7 +392,8 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
                          if k in sensors_to_transmit or k == 'timestamp'}
                         if (sensor_tracker and sensors_to_transmit) else data)
             if always_transmit_sensors or not sensor_tracker or sensors_to_transmit:
-                _sensor_hex = _encode(_sf_data).hex()
+                # Chunks small enough for the lower data rates; the queue holds them
+                _sensor_hex = [c.hex() for c in encode_sensor_chunks(_sf_data, QUEUE_CHUNK_LIMIT)] or None
         except Exception as _e:
             print(f"⚠️ S&F: sensor encode failed: {_e}")
         try:
@@ -426,7 +430,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     # until ADR raises it, and the stored value lags. A packet that doesn't fit,
     # or fails, waits in the store-and-forward queue (drained below only once it
     # fits, so the gateway never sees sends that can't work), and a sensor
-    # packet that doesn't fit is replaced by the 11-byte compact one.
+    # packet is sent as chunks that do (or as the 11-byte compact one at DR0).
     try:
         size_limit = handler.size_limit_now()
     except Exception as e:
@@ -434,7 +438,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         size_limit = handler.get_size_limit()
     print(f"📏 LoRa payload limit now: {size_limit} B")
     deferred = {}
-    sensor_sent = False
+    sender = WakeSender(handler)
 
     if always_transmit_sensors or not sensor_tracker or sensors_to_transmit:
         try:
@@ -451,35 +455,37 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
                 transmission_result['transmitted_sensors'] = list(data.keys())
                 print(f"📡 Transmitting all sensor data (no tracker, always_transmit_sensors, or all sensors qualify)")
             
-            sensor_packet = handler.compressed_encoding(filtered_data)
-            if len(sensor_packet) <= size_limit:
-                sensor_sent = handler.transmit(sensor_packet.hex())
-                if not sensor_sent:
-                    print("⚠️ Sensor packet not sent: queued for a later cycle")
+            if size_limit < CHUNK_MIN_LIMIT:
+                # DR0: no room for a useful chunk, so the 11-byte compact packet
+                # of the key readings stands in for the sensor packet. Before the
+                # bitmap, which the API pairs with the packet just before it. The
+                # baseline stays where it was: the full fields go when there is room.
+                compact = encode_compact_packet(data)
+                if sender.transmit(compact.hex()):
+                    print(f"📡 Compact packet sent ({len(compact)} B): {compact.hex()}")
+                else:
+                    print("⚠️ Compact packet not sent")
             else:
-                print(f"📏 Sensor packet {len(sensor_packet)} B > {size_limit} B limit: queued for later")
-            if not sensor_sent:
-                deferred['sensor_hex'] = sensor_packet.hex()
-            # Sent or queued: either way the tracker's baseline moves on
-            from tools.sensor_changes import mark_sent
-            mark_sent(filtered_data, full=full_send)
-            
+                # Chunks of at most the limit, each starting with the capture time;
+                # one that fails (and every later one) is queued
+                chunks = encode_sensor_chunks(filtered_data, size_limit)
+                print(f"📡 Sensor packet in {len(chunks)} chunk(s) of at most {size_limit} B: "
+                      f"{[len(c) for c in chunks]}")
+                unsent = []
+                for chunk in chunks:
+                    if unsent or not sender.transmit(chunk.hex()):
+                        unsent.append(chunk.hex())
+                if unsent:
+                    print(f"⚠️ {len(unsent)} sensor chunk(s) not sent: queued for a later cycle")
+                    deferred['sensor_hex'] = unsent
+                # Sent or queued: either way the tracker's baseline moves on
+                from tools.sensor_changes import mark_sent
+                mark_sent(filtered_data, full=full_send)
+
         except Exception as e:
             print(f"⚠️ Failed to transmit sensor data: {e}")
     else:
         print(f"📊 No sensor changes detected - skipping sensor data transmission")
-
-    # The full sensor packet didn't go out: send the key readings in 11 bytes
-    # now. Before the bitmap, which the API pairs with the packet just before it.
-    if 'sensor_hex' in deferred and size_limit >= COMPACT_PACKET_SIZE:
-        try:
-            compact = encode_compact_packet(data)
-            if handler.transmit(compact.hex()):
-                print(f"📡 Compact packet sent ({len(compact)} B): {compact.hex()}")
-            else:
-                print("⚠️ Compact packet not sent either")
-        except Exception as e:
-            print(f"⚠️ Compact packet failed: {e}")
 
     if not bitmap:
         print("[lora_token_with_tracker] No bitmap data to transmit")
@@ -503,7 +509,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
                     bitmap_packet = _refit
             if len(bitmap_packet) <= size_limit:
                 print(f"[lora_token_with_tracker] Bitmap: {len(bitmap_packet) - bitmap_fit.TLV_OVERHEAD}B → TLV 08 18")
-                if handler.transmit(bitmap_packet.hex()):
+                if sender.transmit(bitmap_packet.hex()):
                     bitmap_policy.mark_sent(data, dirname, now=captured_at)
                     # Older bitmaps still queued would only show an older scene
                     _lsf.supersede_bitmaps(captured_at)
@@ -538,7 +544,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     if _sf_enabled:
         try:
             _drain = _lsf.drain(
-                handler,
+                sender,
                 max_packets=get_config_value('lora_sf_drain_per_cycle', 2),
                 max_age_days=get_config_value('lora_sf_max_age_days', 7),
                 size_limit=size_limit,
