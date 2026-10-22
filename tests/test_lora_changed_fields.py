@@ -91,6 +91,15 @@ def _run_capture(tmp_path, temperature, joined=True, bitmap=b"\x01\x00\x40\x00\x
         st.enter_context(patch("tools.pi_power.get_throttled", return_value=0))
         st.enter_context(patch("tools.lora_store_forward.drain", return_value={"drained": 0, "failed": False}))
         enq = st.enter_context(patch("tools.lora_store_forward.enqueue", return_value=True))
+        # what each sensor packet was built from (the packets go out as chunks)
+        from tools import lora_handler_concurrent as lhc
+        real_chunks = lhc.encode_sensor_chunks
+        handler.sensor_inputs = []
+
+        def record_chunks(data, limit):
+            handler.sensor_inputs.append(dict(data))
+            return real_chunks(data, limit)
+        st.enter_context(patch("tools.lora_handler_concurrent.encode_sensor_chunks", side_effect=record_chunks))
         ticktalk_main.lora_token_with_tracker.__wrapped__(
             bitmap, {"change_threshold": 0.05, "previous_values": {}}, str(cap))
     handler.enqueue = enq
@@ -108,7 +117,7 @@ class TestLoRaDaemonDown:
         h = _run_capture(tmp_path, 20.0, daemon=daemon, bitmap_send=True)
         h.enqueue.assert_called_once()
         sensor_hex, bitmap_hex = h.enqueue.call_args.args[:2]
-        assert sensor_hex.startswith("0001") and bitmap_hex.startswith("0818")
+        assert all(c.startswith("0001") for c in sensor_hex) and bitmap_hex.startswith("0818")
         h.transmit.assert_not_called()
         assert _daemon_events(tmp_path) == 1
         from tools import drop_counter
@@ -137,8 +146,7 @@ class TestLoRaDaemonDown:
 
 
 def _sensor_packets(handler):
-    return [c.args[0] for c in handler.compressed_encoding.call_args_list
-            if "flood_bitmap_compressed" not in c.args[0]]
+    return handler.sensor_inputs
 
 
 class TestLoRaSend:
@@ -267,27 +275,35 @@ class TestPosition:
 class TestSmallPayloadLimit:
     """US915 DR0 (11 B): queue what doesn't fit, send the compact packet instead."""
 
-    def test_dr0_queues_full_packets_and_sends_compact(self, tmp_path):
+    def test_dr0_sends_compact_and_queues_only_the_bitmap(self, tmp_path):
         big_bitmap = bytes(60)
         h = _run_capture(tmp_path, 20.0, size_limit=11, bitmap=big_bitmap)
         sent = [c.args[0] for c in h.transmit.call_args_list]
         assert len(sent) == 1 and sent[0].startswith("0c01") and len(sent[0]) == 22
         h.enqueue.assert_called_once()
         sensor_hex, bitmap_hex = h.enqueue.call_args.args[:2]
-        assert sensor_hex.startswith("0001") and bitmap_hex.startswith("0818")
+        assert sensor_hex is None and bitmap_hex.startswith("0818")
+        assert h.sensor_inputs == []                # no chunks at DR0
 
     def test_small_bitmap_still_goes_at_dr0(self, tmp_path):
         h = _run_capture(tmp_path, 20.0, size_limit=11)     # 10-byte bitmap packet fits
         sent = [c.args[0] for c in h.transmit.call_args_list]
         assert sent[0].startswith("0c01") and sent[1].startswith("0818")   # compact first: bitmap pairing
-        assert h.enqueue.call_args.args[1] is None
+        h.enqueue.assert_not_called()
 
     def test_failed_send_is_queued(self, tmp_path):
         h = _run_capture(tmp_path, 20.0, size_limit=242, transmit_ok=False)
         h.enqueue.assert_called_once()
-        assert h.enqueue.call_args.args[0].startswith("0001")
-        # the key readings still get a try in 11 bytes
-        assert any(c.args[0].startswith("0c01") for c in h.transmit.call_args_list)
+        queued = h.enqueue.call_args.args[0]
+        assert isinstance(queued, list) and all(c.startswith("0001") for c in queued)
+        # the compact packet is only for DR0
+        assert not any(c.args[0].startswith("0c01") for c in h.transmit.call_args_list)
+
+    def test_small_limit_splits_the_packet_into_chunks(self, tmp_path):
+        h = _run_capture(tmp_path, 20.0, size_limit=20)
+        sent = [c.args[0] for c in h.transmit.call_args_list]
+        chunks = [x for x in sent if not x.startswith("0818")]
+        assert len(chunks) > 1 and all(len(x) // 2 <= 20 and x.startswith("0001") for x in chunks)
 
     def test_fits_sends_no_compact_and_queues_nothing(self, tmp_path):
         h = _run_capture(tmp_path, 20.0, size_limit=242)

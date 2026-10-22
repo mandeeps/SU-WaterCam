@@ -87,7 +87,7 @@ def test_store_forward_records_are_fsynced(tmp_path):
     from tools import lora_store_forward as lsf
     q = str(tmp_path / "lora_pending")
     assert _fsyncs(lambda: lsf.enqueue("0001", None, 1791400000.0, queue_dir=q)) >= 1
-    assert [f for f in os.listdir(q) if not f.endswith(".json")] == []
+    assert [f for f in os.listdir(q) if not f.endswith(".json") and f != ".lock"] == []
 
 
 # --- log rotation ------------------------------------------------------------------

@@ -22,7 +22,43 @@ import tools.transmit_ip as tip
     ("", False),
 ])
 def test_trusted_server(url, ok):
-    assert tip.trusted_server(url) is ok
+    with patch.object(tip, "_resolves_into_tailnet", return_value=True):
+        assert tip.trusted_server(url) is ok
+
+
+def _resolve(*addrs):
+    import socket
+    return patch.object(tip.socket, "getaddrinfo",
+                        return_value=[(socket.AF_INET, 0, 0, "", (a, 0)) for a in addrs])
+
+
+def test_a_ts_net_name_must_resolve_into_the_tailnet():
+    url = "http://server.example.ts.net:8000"
+    with _resolve("100.101.102.103"):
+        assert tip.trusted_server(url)
+    with _resolve("100.101.102.103", "192.0.2.7"):
+        assert not tip.trusted_server(url)
+    with _resolve("203.0.113.9"):
+        assert not tip.trusted_server(url)
+    with patch.object(tip.socket, "getaddrinfo", side_effect=OSError("no dns")):
+        assert not tip.trusted_server(url)
+    with _resolve("203.0.113.9"):
+        assert tip.trusted_server("https://x.ts.net")       # https verifies the certificate itself
+
+
+def _keyed(url):
+    tx = _tx(url)
+    tx.api_key, tx._key_refused_logged = "secret", False
+    return tx
+
+
+def test_api_key_goes_only_to_a_trusted_server():
+    with _resolve("100.101.102.103"):
+        assert _keyed("http://a.ts.net:8000")._auth_headers() == {"Authorization": "Bearer secret"}
+    with _resolve("203.0.113.9"):
+        assert _keyed("http://a.ts.net:8000")._auth_headers() == {}
+    assert _keyed("http://192.168.1.20:8000")._auth_headers() == {}
+    assert _keyed("https://api.example.org")._auth_headers() == {"Authorization": "Bearer secret"}
 
 
 def _tx(url):

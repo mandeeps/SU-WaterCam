@@ -29,12 +29,11 @@ from typing import Dict, Any, Optional
 # 07 27 new local max (flood growing) 0/1
 # 08 18 flood bitmap compressed binary
 # 09 19 status area threshold %
-# 09 29 stage threshold %
+# 09 29 stage threshold, u16 cm
 # 09 39 monitoring freq
 # 09 49 emergency freq
 # 09 59 neighborhood emergency status freq
 # 0A 01 wittypi temperature (float, celsius; no longer sent)
-# 0A 02 wittypi battery voltage (float, volts)
 # 0A 03 wittypi internal voltage (float, volts; no longer sent)
 
 # Reception Data Format
@@ -58,8 +57,8 @@ from typing import Dict, Any, Optional
 
 # Compact packet: channel 0C type 01 and nine bytes, 11 in all, so it fits
 # US915 DR0 (SF10, 11-byte payloads). Sent instead of the full sensor packet
-# when that doesn't fit the mDot's current limit; the full one waits in the
-# store-and-forward queue (tools/lora_store_forward.py). Layout after 0C 01:
+# when the mDot's current limit is below CHUNK_MIN_LIMIT; otherwise the sensor
+# packet goes in chunks. Layout after 0C 01:
 #   u32 capture time (as 00 01)
 #   u8  flags: bit 0 emergency, 1 flood detected, 2 flood growing, 3 health
 #       fault, 4 moved from mount, 5 under-voltage now, 6 under-voltage since boot
@@ -68,6 +67,12 @@ from typing import Dict, Any, Optional
 #   i8  temperature, whole degrees C (-128: none)
 #   u8  relative humidity percent  (255: none)
 COMPACT_PACKET_SIZE = 11
+# Below this payload limit the compact packet is sent in place of the sensor packet;
+# from it up the sensor packet goes in chunks (encode_sensor_chunks)
+CHUNK_MIN_LIMIT = COMPACT_PACKET_SIZE + 1
+# Chunk size for sensor packets queued without knowing the data rate they'll go
+# at: fits DR1 and up (US915 53 B, less the MAC answers a payload may share the frame with)
+QUEUE_CHUNK_LIMIT = 51
 
 
 def encode_compact_packet(data: Dict[str, Any]) -> bytes:
@@ -145,196 +150,194 @@ MAC_FLUSH_WINDOW_S = 20
 LISTEN_MAX_CONSECUTIVE_FAILURES = 30
 
 
+class _SkipField(Exception):
+    """A value that can't be encoded (not a number, not finite, out of range)."""
+
+
+def _int_in(v, lo: int, hi: int) -> int:
+    """int(v) when v is a finite number inside [lo, hi]; otherwise _SkipField."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise _SkipField(f"not a number: {v!r}")
+    if not math.isfinite(f) or not lo <= int(f) <= hi:
+        raise _SkipField(f"out of range {lo}..{hi}: {v!r}")
+    return int(f)
+
+
+def _f32_val(v) -> float:
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        raise _SkipField(f"not a number: {v!r}")
+    if not math.isfinite(f):
+        raise _SkipField(f"not finite: {v!r}")
+    return f
+
+
+def _u8_field(ch, t, key):
+    return lambda d: bytes([ch, t, _int_in(d[key], 0, 255)])
+
+
+def _u16_field(ch, t, key):
+    return lambda d: bytes([ch, t]) + struct.pack(">H", _int_in(d[key], 0, 65535))
+
+
+def _u32_field(ch, t, key):
+    return lambda d: bytes([ch, t]) + struct.pack(">I", _int_in(d[key], 0, 0xFFFFFFFF))
+
+
+def _stage_field(d):
+    # centimetres, a u16: clamped rather than skipped
+    return bytes([0x09, 0x29]) + struct.pack(">H", max(0, min(65535, int(_f32_val(d['stage_threshold'])))))
+
+
+def _latlon_field(d):
+    v = d['lat_lon_z']
+    if not isinstance(v, (list, tuple)) or len(v) != 3:
+        raise _SkipField(f"expected three numbers: {v!r}")
+    return bytes([0x04, 0x01]) + b"".join(struct.pack(">f", _f32_val(x)) for x in v)
+
+
+def _bitmap_field(d):
+    b = d['flood_bitmap_compressed']
+    if isinstance(b, str):
+        b = b.encode('utf-8')
+    elif not isinstance(b, (bytes, bytearray)):
+        b = str(b).encode('utf-8')
+    return bytes([0x08, 0x18]) + struct.pack(">H", len(b)) + bytes(b)
+
+
+def _throttled_field(d):
+    from tools.pi_power import pack_throttled_u8
+    return bytes([0x01, 0x07, pack_throttled_u8(d['pi_throttled'])])
+
+
+def _tilt_field(d):
+    tilt = d['tilt_roll_yaw']
+    if not (isinstance(tilt, (list, tuple)) and len(tilt) == 3 and all(_finite(x) for x in tilt)):
+        raise _SkipField(f"expected three finite numbers: {tilt!r}")
+    return bytes([0x03, 0x02]) + struct.pack(">Hhh", int(round(float(tilt[0]) * 100)) % 36000,
+                                             _scaled_int(tilt[1], 100, -32768, 32767),
+                                             _scaled_int(tilt[2], 100, -32768, 32767))
+
+
+def _temperature_field(d):
+    return b"\x05\x02" + struct.pack(">h", _scaled_int(_f32_val(d['temperature_celsius']), 100, -32768, 32767))
+
+
+# (key, builder) in wire order. Optional fields are left out when None. A value that
+# can't be encoded drops its own field and nothing else. Decoders that predate a
+# channel stop at the first pair they don't know, so newer channels come last
+# (01 07 and after), as the comments in the history of this list explain.
+_SENSOR_FIELDS = (
+    ('timestamp', _u32_field(0x00, 0x01, 'timestamp')),
+    ('emergency_status', _u8_field(0x01, 0x04, 'emergency_status')),
+    ('health_status', _u8_field(0x01, 0x05, 'health_status')),
+    ('movement_threshold', _u8_field(0x01, 0x06, 'movement_threshold')),
+    ('battery_percent', _u8_field(0x02, 0x01, 'battery_percent')),
+    ('lat_lon_z', _latlon_field),
+    ('relative_humidity', _u8_field(0x06, 0x01, 'relative_humidity')),
+    ('camera_flood_detected', _u8_field(0x07, 0x17, 'camera_flood_detected')),
+    ('camera_flood_growing', _u8_field(0x07, 0x27, 'camera_flood_growing')),
+    ('flood_bitmap_compressed', _bitmap_field),
+    ('status_area_threshold', _u8_field(0x09, 0x19, 'status_area_threshold')),
+    ('stage_threshold', _stage_field),
+    ('monitoring_frequency', _u16_field(0x09, 0x39, 'monitoring_frequency')),
+    ('emergency_frequency', _u16_field(0x09, 0x49, 'emergency_frequency')),
+    ('neighborhood_emergency_frequency', _u16_field(0x09, 0x59, 'neighborhood_emergency_frequency')),
+    ('audio_recording_enabled', _u8_field(0x09, 0x69, 'audio_recording_enabled')),
+    # Pi throttled/under-voltage flags (tools/pi_power.py), packed to one byte
+    ('pi_throttled', _throttled_field),
+    # Registration orientation check (tools/registration_orientation.py)
+    ('registration_status', _u8_field(0x01, 0x08, 'registration_status')),
+    # Software release and loaded model (tools/node_version.py); the commit is IP only
+    ('software_version', _u32_field(0x01, 0x09, 'software_version')),
+    ('model_id', _u32_field(0x01, 0x0B, 'model_id')),
+    # Dropped store-and-forward entries and the unverified-clock flag
+    ('sf_dropped', lambda d: bytes([0x01, 0x0C]) + struct.pack(">I", min(_int_in(d['sf_dropped'], 0, 1 << 64), 0xFFFFFFFF))),
+    ('clock_unverified', lambda d: bytes([0x01, 0x0D, 1 if d['clock_unverified'] else 0])),
+    # Water percentage of the capture's mask (tools/flood_baseline.py)
+    ('camera_water_pct', lambda d: bytes([0x07, 0x37, max(0, min(100, _int_in(d['camera_water_pct'], -(1 << 31), 1 << 31)))])),
+    # Compact forms of the old float32 channels, 2 bytes a value instead of 4:
+    # 03 02 orientation in 0.01 deg (u16 heading 0-360, i16 roll, i16 pitch),
+    # 05 02 temperature as i16 0.01 C. The Witty Pi temperature, input and output
+    # voltages aren't sent over LoRa (the server doesn't store them).
+    ('tilt_roll_yaw', _tilt_field),
+    ('temperature_celsius', _temperature_field),
+)
+
+# Order of the fields in a chunked sensor packet (encode_sensor_chunks): what an
+# emergency needs first (flood, water, emergency, battery, health), then the
+# readings, then GPS, IMU, the flags about the node itself, the settings, and the
+# release last. A field that doesn't fit the room left in a chunk starts the next.
+_CHUNK_PRIORITY = (
+    'emergency_status', 'camera_flood_detected', 'camera_flood_growing', 'camera_water_pct',
+    'battery_percent', 'health_status', 'movement_threshold',
+    'temperature_celsius', 'relative_humidity', 'pi_throttled', 'clock_unverified',
+    'lat_lon_z', 'tilt_roll_yaw', 'registration_status', 'sf_dropped',
+    'status_area_threshold', 'stage_threshold', 'monitoring_frequency', 'emergency_frequency',
+    'neighborhood_emergency_frequency', 'audio_recording_enabled',
+    'software_version', 'model_id',
+)
+
+
+def _encode_fields(data: Dict[str, Any]) -> Dict[str, bytes]:
+    """{key: TLV bytes} for every field of `data` that can be encoded, in wire order."""
+    out = {}
+    for key, build in _SENSOR_FIELDS:
+        if data.get(key) is None:
+            continue
+        try:
+            out[key] = build(data)
+        except (_SkipField, TypeError, ValueError, OverflowError, KeyError, struct.error) as e:
+            print(f"Skipping field {key}: {e}")
+    return out
+
+
 def _encode_compressed_packet(data: Dict[str, Any]) -> bytes:
-    """Encode and compress sensor data into the TLV wire format for LoRa transmission.
+    """Encode sensor data into the TLV wire format for LoRa transmission.
 
     Pure function of `data` alone -- no handler state involved -- so it's
     shared verbatim by LoRaHandler.compressed_encoding() (real handler,
     inside the daemon) and LoRaHandlerClient.compressed_encoding() (every
     other process), computed locally in both rather than round-tripped over
-    IPC.
+    IPC. A field that can't be encoded (not a number, not finite, out of range)
+    is left out; the others still go.
     """
-    print(f"DEBUG: Starting compressed_encoding with data: {data}")
-    print(f"DEBUG: Data types: {[(k, type(v)) for k, v in data.items()]}")
-    packet = bytearray()
+    return b"".join(_encode_fields(data).values())
 
-    def add_u8(ch, t, v):
-        try:
-            print(f"DEBUG: add_u8 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-            packet.extend(bytes([ch, t, int(v)]))
-        except Exception as e:
-            print(f"Error in add_u8: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-            raise
 
-    def add_u16(ch, t, v):
-        try:
-            print(f"DEBUG: add_u16 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-            packet.extend(bytes([ch, t]))
-            packet.extend(struct.pack(">H", int(v)))
-        except Exception as e:
-            print(f"Error in add_u16: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-            raise
+def encode_sensor_chunks(data: Dict[str, Any], limit: int) -> list:
+    """Split the sensor fields of `data` into packets of at most `limit` bytes.
 
-    def add_u32(ch, t, v):
-        try:
-            print(f"DEBUG: add_u32 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-            packet.extend(bytes([ch, t]))
-            packet.extend(struct.pack(">I", int(v)))
-        except Exception as e:
-            print(f"Error in add_u32: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-            raise
-
-    def add_f32(ch, t, v):
-        try:
-            print(f"DEBUG: add_f32 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-            packet.extend(bytes([ch, t]))
-            packet.extend(struct.pack(">f", float(v)))
-        except Exception as e:
-            print(f"Error in add_f32: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-            raise
-
-    def add_f32_3(ch, t, v):
-        try:
-            print(f"DEBUG: add_f32_3 called with ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-            packet.extend(bytes([ch, t]))
-            if not isinstance(v, (list, tuple)):
-                raise ValueError(f"Expected list/tuple for f32_3, got {type(v)}: {v}")
-            for x in v:
-                packet.extend(struct.pack(">f", float(x)))
-        except Exception as e:
-            print(f"Error in add_f32_3: ch={ch}, t={t}, v={v}, type(v)={type(v)}")
-            raise
-
-    def add_blob(ch, t, b):
-        try:
-            print(f"DEBUG: add_blob called with ch={ch}, t={t}, b={b}, type(b)={type(b)}")
-            packet.extend(bytes([ch, t]))
-            # Ensure b is bytes
-            if isinstance(b, str):
-                print(f"DEBUG: Converting string to bytes: '{b}'")
-                b = b.encode('utf-8')
-            elif not isinstance(b, (bytes, bytearray)):
-                print(f"DEBUG: Converting {type(b)} to bytes: {b}")
-                b = str(b).encode('utf-8')
-
-            print(f"DEBUG: Final blob data type: {type(b)}, length: {len(b)}")
-            packet.extend(struct.pack(">H", len(b)))
-            packet.extend(b)
-        except Exception as e:
-            print(f"Error in add_blob: ch={ch}, t={t}, b={b}, type(b)={type(b)}")
-            print(f"Error details: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
-
-    try:
-        print("DEBUG: Processing data fields...")
-        if 'timestamp' in data:
-            print(f"DEBUG: Processing timestamp: {data['timestamp']}")
-            add_u32(0x00, 0x01, data['timestamp'])
-        if 'emergency_status' in data:
-            print(f"DEBUG: Processing emergency_status: {data['emergency_status']}")
-            add_u8(0x01, 0x04, data['emergency_status'])
-        if 'health_status' in data:
-            print(f"DEBUG: Processing health_status: {data['health_status']}")
-            add_u8(0x01, 0x05, data['health_status'])
-        if 'movement_threshold' in data:
-            print(f"DEBUG: Processing movement_threshold: {data['movement_threshold']}")
-            add_u8(0x01, 0x06, data['movement_threshold'])
-        if data.get('battery_percent') is not None:
-            print(f"DEBUG: Processing battery_percent: {data['battery_percent']}")
-            add_u8(0x02, 0x01, data['battery_percent'])
-        if 'lat_lon_z' in data:
-            print(f"DEBUG: Processing lat_lon_z: {data['lat_lon_z']}")
-            add_f32_3(0x04, 0x01, data['lat_lon_z'])
-        if 'relative_humidity' in data:
-            print(f"DEBUG: Processing relative_humidity: {data['relative_humidity']}")
-            add_u8(0x06, 0x01, data['relative_humidity'])
-        if 'camera_flood_detected' in data:
-            print(f"DEBUG: Processing camera_flood_detected: {data['camera_flood_detected']}")
-            add_u8(0x07, 0x17, data['camera_flood_detected'])
-        if 'camera_flood_growing' in data:
-            print(f"DEBUG: Processing camera_flood_growing: {data['camera_flood_growing']}")
-            add_u8(0x07, 0x27, data['camera_flood_growing'])
-        if 'flood_bitmap_compressed' in data:
-            print(f"DEBUG: Processing flood_bitmap_compressed: {data['flood_bitmap_compressed']}")
-            add_blob(0x08, 0x18, data['flood_bitmap_compressed'])
-        if 'status_area_threshold' in data:
-            print(f"DEBUG: Processing status_area_threshold: {data['status_area_threshold']}")
-            add_u8(0x09, 0x19, data['status_area_threshold'])
-        if 'stage_threshold' in data:
-            print(f"DEBUG: Processing stage_threshold: {data['stage_threshold']}")
-            add_u8(0x09, 0x29, max(0, min(255, int(data['stage_threshold']))))
-        if 'monitoring_frequency' in data:
-            print(f"DEBUG: Processing monitoring_frequency: {data['monitoring_frequency']}")
-            add_u16(0x09, 0x39, data['monitoring_frequency'])
-        if 'emergency_frequency' in data:
-            print(f"DEBUG: Processing emergency_frequency: {data['emergency_frequency']}")
-            add_u16(0x09, 0x49, data['emergency_frequency'])
-        if 'neighborhood_emergency_frequency' in data:
-            print(f"DEBUG: Processing neighborhood_emergency_frequency: {data['neighborhood_emergency_frequency']}")
-            add_u16(0x09, 0x59, data['neighborhood_emergency_frequency'])
-        if 'audio_recording_enabled' in data:
-            print(f"DEBUG: Processing audio_recording_enabled: {data['audio_recording_enabled']}")
-            add_u8(0x09, 0x69, data['audio_recording_enabled'])
-
-        # WittyPi battery voltage (its temperature and output voltage aren't sent over LoRa)
-        if 'wittypi_battery_voltage' in data:
-            print(f"DEBUG: Processing wittypi_battery_voltage: {data['wittypi_battery_voltage']}")
-            add_f32(0x0A, 0x02, data['wittypi_battery_voltage'])
-
-        # Pi throttled/under-voltage flags (tools/pi_power.py), packed to one byte.
-        # Deliberately encoded LAST: decoders that predate this channel stop at the
-        # first unknown pair, so every field before it still decodes.
-        if data.get('pi_throttled') is not None:
-            from tools.pi_power import pack_throttled_u8
-            print(f"DEBUG: Processing pi_throttled: {data['pi_throttled']:#x}")
-            add_u8(0x01, 0x07, pack_throttled_u8(data['pi_throttled']))
-
-        # Registration orientation check (tools/registration_orientation.py). After
-        # 01 07 for the same reason: an older decoder loses only this field.
-        if data.get('registration_status') is not None:
-            add_u8(0x01, 0x08, data['registration_status'])
-
-        # Software release and loaded model (tools/node_version.py), last so an
-        # older decoder stops cleanly before them. The commit is IP only.
-        if data.get('software_version') is not None:
-            add_u32(0x01, 0x09, data['software_version'])
-        if data.get('model_id') is not None:
-            add_u32(0x01, 0x0B, data['model_id'])
-        # Dropped store-and-forward entries and the unverified-clock flag, last again.
-        if data.get('sf_dropped') is not None:
-            add_u32(0x01, 0x0C, min(int(data['sf_dropped']), 0xFFFFFFFF))
-        if data.get('clock_unverified') is not None:
-            add_u8(0x01, 0x0D, 1 if data['clock_unverified'] else 0)
-
-        # Water percentage of the capture's mask (tools/flood_baseline.py), last
-        # for the same reason as 01 07: an older decoder loses only this field.
-        if data.get('camera_water_pct') is not None:
-            add_u8(0x07, 0x37, max(0, min(100, int(data['camera_water_pct']))))
-
-        # Compact forms of the old float32 channels, 2 bytes a value instead of 4
-        # (03 01 and 05 01 stay decodable for units on older code): 03 02 orientation
-        # in 0.01 deg (u16 heading 0-360, i16 roll, i16 pitch), 05 02 temperature as
-        # i16 0.01 C. Last for the same reason as 01 07; a missing or non-numeric
-        # reading is left out. The Witty Pi temperature and output voltage aren't sent
-        # over LoRa (the server doesn't store them); the decoders keep 0A 01/03 for
-        # units on older code.
-        tilt = data.get('tilt_roll_yaw')
-        if isinstance(tilt, (list, tuple)) and len(tilt) == 3 and all(_finite(x) for x in tilt):
-            packet.extend(bytes([0x03, 0x02]))
-            packet.extend(struct.pack(">Hhh", int(round(float(tilt[0]) * 100)) % 36000,
-                                      _scaled_int(tilt[1], 100, -32768, 32767),
-                                      _scaled_int(tilt[2], 100, -32768, 32767)))
-        if _finite(data.get('temperature_celsius')):
-            packet.extend(b"\x05\x02" + struct.pack(">h", _scaled_int(data['temperature_celsius'], 100, -32768, 32767)))
-
-        print(f"DEBUG: Final packet size: {len(packet)} bytes")
-        return bytes(packet)
-    except Exception as e:
-        print(f"Error in compressed_encoding: {e}")
-        print(f"Data: {data}")
-        raise
+    Each chunk starts with the capture time (00 01) so the server can tell which
+    capture it belongs to, and the chunks are independent TLV packets. Fields go in
+    _CHUNK_PRIORITY order, so the first chunk holds the most important ones. A field
+    too big for an empty chunk is dropped. Returns [] without a capture time or when
+    `limit` can't hold a capture time and one field; the caller then sends the
+    compact packet (encode_compact_packet).
+    """
+    fields = _encode_fields(data)
+    header = fields.pop('timestamp', None)
+    fields.pop('flood_bitmap_compressed', None)  # its own packet
+    if header is None or limit <= len(header):
+        return []
+    chunks, cur = [], bytearray(header)
+    for key in _CHUNK_PRIORITY:
+        tlv = fields.pop(key, None)
+        if tlv is None:
+            continue
+        if len(header) + len(tlv) > limit:
+            print(f"Field {key} ({len(tlv)} B) doesn't fit a {limit} B chunk: dropped")
+            continue
+        if len(cur) + len(tlv) > limit:
+            chunks.append(bytes(cur))
+            cur = bytearray(header)
+        cur += tlv
+    if len(cur) > len(header):
+        chunks.append(bytes(cur))
+    return chunks
 
 
 class LoRaHandler:

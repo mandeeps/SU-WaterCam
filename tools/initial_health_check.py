@@ -202,7 +202,20 @@ def remote_debug_timer_enabled() -> bool:
         return False
 
 
-def setup_warnings(mdot: bool, gpio5: Dict[str, str], wittypi_fw, timer_enabled: bool) -> List[str]:
+def ip_server_untrusted() -> bool:
+    """True when IP upload has a server configured that readings won't be sent to:
+    not https and not a tailnet address (tools/transmit_ip.trusted_server)."""
+    try:
+        from tools.transmit_ip import _DEFAULT_CONFIG_PATH, _load_ip_config, trusted_server
+        cfg = _load_ip_config(_DEFAULT_CONFIG_PATH)
+        url = cfg.get('server_url')
+        return bool(url) and not trusted_server(url)
+    except Exception:
+        return False
+
+
+def setup_warnings(mdot: bool, gpio5: Dict[str, str], wittypi_fw, timer_enabled: bool,
+                   untrusted_server: bool = False) -> List[str]:
     """Setup mistakes that don't stop a cycle but lose remote start or remote access."""
     warnings: List[str] = []
     if mdot:
@@ -213,6 +226,9 @@ def setup_warnings(mdot: bool, gpio5: Dict[str, str], wittypi_fw, timer_enabled:
             warnings.append('wittypi_l3v7_daemon_reconfigures_gpio5 (firmware ID 0x37)')
     if not timer_enabled:
         warnings.append('remote_debug_timer_not_enabled (systemctl enable --now remote-debug.timer)')
+    if untrusted_server:
+        warnings.append('ip_server_untrusted (server_url is neither https nor a tailnet address, '
+                        'or Tailscale is down: IP readings stay queued)')
     return warnings
 
 
@@ -278,7 +294,7 @@ def main(argv=None) -> int:
     mdot = has_mdot()
     for w in setup_warnings(mdot, read_gpio5() if mdot else {},
                             read_wittypi_firmware_id() if mdot else None,
-                            remote_debug_timer_enabled()):
+                            remote_debug_timer_enabled(), ip_server_untrusted()):
         print(f"  WARN  {w}", flush=True)
 
     if result['status'] == 'fail':

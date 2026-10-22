@@ -26,10 +26,27 @@ Cellular is the last resort: LoRa first, then WiFi (see
   `tailscaled` restart and didn't.
 - **While the link stays up,** Tailscale costs about 0.4–2 KB/s (1.5–7 MB an
   hour), mostly the private-address probes. A normal wake keeps cellular up for
-  about a minute; in emergency mode the unit stays on, so cellular can stay up
-  for hours.
+  about a minute. A wake that brought cellular up takes it down again once the
+  upload and the command poll are done, or on any failure, also in emergency
+  mode (the unit stays on, but not the modem): before 2026-10 a successful
+  upload left it up, which on a unit that stays awake meant hours of probes.
 - **Turning off log uploads** (`--no-logs-no-support`) made no difference: no
   log traffic was seen either way.
+
+## What a cellular wake sends
+
+- **Only when the link is the problem.** Cellular comes up when the server can't
+  be reached over WiFi. If WiFi is connected and Tailscale shows the server's
+  peer online, the server itself is down: cellular would only burn data, so the
+  reading is queued for a later wake.
+- **A capped backlog.** A cellular wake sends its reading and at most 5 queued
+  readings or 200 KB of them (`CELLULAR_DRAIN_MAX_ENTRIES`,
+  `CELLULAR_DRAIN_MAX_BYTES` in `tools/transmit_ip.py`); WiFi sends them all.
+- **One bitmap in the queue.** Queued readings keep only the newest bitmap, the
+  largest part of a reading, so a long outage doesn't send a stack of scenes.
+  The bitmap goes base64 (a third smaller than hex).
+- **Torn down after the upload.** The modem connection goes down as soon as the
+  upload and the command poll are done.
 
 ## The private-address filter (2026-10-12)
 

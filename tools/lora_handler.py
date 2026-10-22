@@ -19,7 +19,7 @@ import serial
 # 07 27 new local max (flood growing) 0/1
 # 08 18 flood bitmap compressed binary
 # 09 19 status area threshold %
-# 09 29 stage threshold %
+# 09 29 stage threshold, u16 cm
 # 09 39 monitoring freq
 # 09 49 emergency freq
 # 09 59 neighborhood emergency status freq
@@ -102,7 +102,7 @@ def compressed_encoding(data):
     if 'camera_flood_growing' in data: add_u8(0x07, 0x27, data['camera_flood_growing'])
     if 'flood_bitmap_compressed' in data: add_blob(0x08, 0x18, data['flood_bitmap_compressed'])
     if 'status_area_threshold' in data: add_u8(0x09, 0x19, data['status_area_threshold'])
-    if 'stage_threshold' in data: add_u8(0x09, 0x29, data['stage_threshold'])
+    if 'stage_threshold' in data: add_u16(0x09, 0x29, max(0, min(65535, int(data['stage_threshold']))))
     if 'monitoring_frequency' in data: add_u16(0x09, 0x39, data['monitoring_frequency'])
     if 'emergency_frequency' in data: add_u16(0x09, 0x49, data['emergency_frequency'])
     if 'neighborhood_emergency_frequency' in data: add_u16(0x09, 0x59, data['neighborhood_emergency_frequency'])

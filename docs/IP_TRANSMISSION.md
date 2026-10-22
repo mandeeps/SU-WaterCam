@@ -107,7 +107,7 @@ channels = [
     {"code": "06 01", "payload_hex": "3D"},                # humidity 61%
     {"code": "04 01", "payload_hex": "028F5C2AFAD47800"},  # GPS lat/lon
     {"code": "07 17", "payload_hex": "00000001"},          # flood detected
-    {"code": "08 18", "payload_hex": "FF00FF00..."},       # flood bitmap (variable)
+    {"code": "08 18", "payload_b64": "/wD/AA=="},          # flood bitmap (variable; base64)
 ]
 result = tx.send_uplink(channels, device_ts=int(time.time()))
 ```
@@ -166,7 +166,14 @@ off. LoRa needs no poll: Class C downlinks reach the mDot as soon as they're sen
 ```
 
 A server that is not trusted (not on the tailnet, not HTTPS) is not polled:
-`commands` is empty and `untrusted` is true.
+`commands` is empty and `untrusted` is true. Nothing is uploaded to it either:
+readings stay queued until the server is trusted (a `*.ts.net` name counts only
+once it resolves into the tailnet, i.e. Tailscale is up), because whoever
+answered could read them, positions included, and a 2xx answer would make the
+node drop them. An upload counts as delivered only when the reply is the API's
+own JSON for this device, so a captive portal's 200 page doesn't swallow a
+reading; `/health` must answer `{"status":"ok"}` likewise. The health check
+warns `ip_server_untrusted`, and the status reply carries `"ut":1`.
 
 ### `post_acks(acks) → bool`
 
@@ -186,12 +193,14 @@ whether to attempt IP or fall back to LoRa.
 
 The server's `CHANNEL_REGISTRY` maps 2-byte codes to sensor fields.  The
 `payload_hex` for each channel must be exactly the right length and use
-**big-endian byte order**.
+**big-endian byte order**. Any channel may carry `payload_b64` (base64 of the
+same bytes) instead; the node sends the `08 18` bitmap that way, a third smaller
+than hex.
 
 | Code | Field | Bytes | Encoding |
 |---|---|---|---|
 | `00 01` | `device_ts` | 8 | uint64 — UNIX seconds |
-| `01 04` | `emergency_status` | 4 | uint32 bool (0 or 1) |
+| `01 04` | `emergency_status` | 4 | uint32 bool (0 or 1); in every upload |
 | `02 01` | `battery_pct` | 4 | uint32 (0–100) |
 | `03 01` | `imu_block` | 12 | 3× int32 accel (mg), or custom IMU packing |
 | `01 06` | `move_threshold` | 4 | uint32 bool: 1 while the unit is away from its mount position (`tools/gps_home.py`) |
@@ -205,7 +214,7 @@ The server's `CHANNEL_REGISTRY` maps 2-byte codes to sensor fields.  The
 | `07 37` | `camera_water_pct` | 1 | uint8 (0–100): water share of the capture's mask, whenever it has one (same 1 byte over LoRa) |
 | `08 18` | `camera_flood_bitmap` | variable | the mask at full resolution, lossless (methods 0/1, at most 32000 B); the LoRa-sized bitmap if it is larger or there is no mask (docs/BITMAP_DECODING_SPEC.md) |
 | `09 19` | `sr_area_threshold_pct` | 4 | uint32 |
-| `09 29` | `sr_stage_threshold_cm` | 4 | uint32 (cm); reserved, unused on the node |
+| `09 29` | `sr_stage_threshold_cm` | 4 | uint32 (cm); reserved, unused on the node (over LoRa a u16, 0-65535 cm) |
 | `09 39` | `sr_monitoring_frequency` | 4 | uint32 |
 | `09 49` | `sr_emergency_frequency` | 4 | uint32 |
 | `09 59` | `sr_neighborhood_emerg_freq` | 4 | uint32 |
@@ -259,7 +268,30 @@ reading that is missing or not a number is left out. The compact channels come
 last in the packet: a decoder that predates them stops there and loses only
 these fields. Update the codec and the API before the nodes. The full sensor
 packet in `tests/test_lora_small_payloads.py` (`FULL_SENSOR_DATA`) goes from
-104 to 84 bytes.
+104 to 85 bytes (the stage threshold is a u16 now).
+
+### LoRa sensor packet: chunks
+
+The sensor packet is split into **chunks**, each at most the mDot's payload limit
+now (`size_limit_now()`), each starting with `00 01` (the capture time, so every
+chunk stands alone and the server knows its capture). `encode_sensor_chunks` in
+`tools/lora_handler_concurrent.py` fills them in this priority order: emergency
+status, flood detected, flood growing, water %, battery, health fault, moved,
+temperature, humidity, Pi throttle flags, clock flag, GPS, orientation,
+registration, dropped entries, then the settings (area and stage thresholds,
+the three frequencies, audio) and last the release and model. A limit of 242 B
+holds all of it in one chunk. Below `CHUNK_MIN_LIMIT` (12 B, DR0) the 11-byte
+compact packet (`0C 01`) is sent instead and the full fields wait for a wake
+with room; the sensor baseline (`tools/sensor_changes.py`) doesn't move then.
+
+A field that can't be encoded (not finite, out of range, wrong type) is left out;
+the others still go. A chunk that fails to send is queued, with the chunks after
+it (`sensor_hex` holds the list, `tools/lora_store_forward.py`); capture-time
+packets queued without a known data rate use 51-byte chunks. The drain skips an
+entry with a payload over the limit and sends smaller ones behind it. After one
+send runs into the 75 s deadline, the rest of that wake's LoRa payloads are
+queued without trying (`tools/lora_send.py`). The stage threshold (`09 29`) is a
+u16 in centimetres; `0A 02` is no longer sent.
 
 ---
 
@@ -285,7 +317,7 @@ Receive sensor data from an IP device.
 ```
 
 - `device_ts` — optional; if omitted, server time is used.
-- `channels` — at least one required (or provide `payload_hex` for raw TTLoRa hex).
+- `channels` — at least one required (or provide `payload_hex` for raw TTLoRa hex); a channel has `payload_hex` or `payload_b64`.
 - Side effect: device `transport_type` is set to `"ip"` on first call.
 
 **Response (201):**
@@ -407,10 +439,13 @@ On by default. Each capture's IP uplink:
    WiFi's route (metric 600) to the modem's (700). If a cellular session is up
    and WiFi has reconnected, the session is taken down first.
 3. **Cellular.** If the server is still unreachable, `nmcli connection up`
-   brings the modem's data connection up and the reading and queued backlog
-   are sent. The connection then stays up for the session, until LoRa or WiFi
-   returns or the Pi powers off. If the server can't be reached over it either,
-   it is taken down straight away.
+   brings the modem's data connection up and the reading and a capped part of
+   the queued backlog are sent (5 readings or 200 KB a wake on cellular, the
+   rest waits; WiFi sends it all). A wake that brought cellular up takes it down
+   again once the upload and the command poll are done, or on any failure, so
+   Tailscale stops using data. Cellular isn't brought up when WiFi is connected
+   and Tailscale shows the server's peer online: the server is failing, not the
+   link, and the reading is queued.
 
 Whichever way it went, once a reading is delivered over IP the node collects
 and applies the commands waiting. The uplink asks for them (`want_command`) and the
@@ -421,6 +456,11 @@ posted ride on the next uplink as `acks`. The wake-start poll runs
 before the uplink and never brings up cellular, so a unit without WiFi gets its
 commands here, after the capture rather than before it. Polling twice is safe:
 the server offers a command until it is acked, and the node applies a frame once.
+
+Queued readings keep only the newest bitmap: queuing one removes the `08 18`
+channel from older entries. An entry the server rejects as wrong (a 4xx other
+than 401, 403 and 429) or that can't be read is dropped rather than blocking the
+queue. Entries are written with an fsync (`config_io.write_json`).
 
 Only a connection with autoconnect **off** is managed. A unit whose `Quectel`
 connection still autoconnects keeps cellular up as before, so a field unit
