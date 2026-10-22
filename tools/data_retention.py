@@ -1,12 +1,16 @@
-"""Keep the SD card from filling with photos.
+"""Keep the SD card from filling with captures.
 
 A wake writes two captures of about 10 MB each (JPEGs and five-band TIFFs), and
 nothing sent them anywhere or removed them, so a card filled in months. Each
-wake cycle, run() removes JPEG and TIFF files only (never masks, bitmaps,
-metadata or audio, which has its own rule in tools/audio_recorder.py):
+wake cycle, run() removes whole capture directories (every file in them: photos,
+masks, metadata, audio, thermal frames), and loose JPEG/TIFF files at the top of
+images/. Masks and metadata used to be kept, but they filled the card on their
+own and are of no use without their photos. Camera-wide files that sit directly
+in images/ (registration_transform.json and the like) are never touched.
 
 1. older than data_retention_days (runtime parameter; the default 0 keeps
-   everything, while the system is still being developed), and
+   everything, while the system is still being developed), judged by the newest
+   file in the directory, and
 2. if the card's free space is at or below storage_low_free_pct (default 20 %),
    the oldest ones until it's back to storage_target_free_pct (default 30 %).
 
@@ -36,24 +40,50 @@ def _param(name: str, default: float) -> float:
 
 
 def _photos(root: str, skip: Iterable[str]) -> List[Tuple[float, int, str]]:
-    """(mtime, size, path) of every JPEG and TIFF under root, oldest first."""
+    """(mtime, size, path) of every capture directory and loose photo in root, oldest first.
+
+    A directory's mtime is that of its newest file, so a capture still being
+    added to (audio, a late mask) is as new as its last write.
+    """
     skip = {os.path.realpath(s) for s in skip if s}
     out = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        if os.path.realpath(dirpath) in skip:
-            dirnames[:] = []
+    try:
+        entries = list(os.scandir(root))
+    except OSError:
+        return out
+    for entry in entries:
+        if os.path.realpath(entry.path) in skip:
             continue
-        dirnames[:] = [d for d in dirnames if os.path.realpath(os.path.join(dirpath, d)) not in skip]
-        for name in filenames:
-            if name.lower().endswith(EXTENSIONS):
-                path = os.path.join(dirpath, name)
-                try:
-                    st = os.lstat(path)
-                except OSError:
-                    continue
-                out.append((st.st_mtime, st.st_size, path))
+        try:
+            if entry.is_symlink():
+                continue
+            if entry.is_dir(follow_symlinks=False):
+                newest, size = None, 0
+                for dirpath, _, filenames in os.walk(entry.path):
+                    for name in filenames:
+                        try:
+                            st = os.lstat(os.path.join(dirpath, name))
+                        except OSError:
+                            continue
+                        newest, size = max(newest or st.st_mtime, st.st_mtime), size + st.st_size
+                out.append((entry.stat().st_mtime if newest is None else newest, size, entry.path))
+            elif entry.name.lower().endswith(EXTENSIONS):
+                st = entry.stat(follow_symlinks=False)
+                out.append((st.st_mtime, st.st_size, entry.path))
+        except OSError:
+            continue
     out.sort()
     return out
+
+
+def _remove(path: str) -> None:
+    """Delete a capture directory or a loose photo; raises OSError if it can't."""
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path)
+        if os.path.exists(path):
+            raise OSError(f"{path} not fully removed")
+    else:
+        os.remove(path)
 
 
 def free_pct(path: str) -> float:
@@ -78,7 +108,7 @@ def run(current_dir: Optional[str] = None, root: str = IMAGES_DIR, now: Optional
         for mtime, size, path in photos:
             if cutoff is not None and mtime < cutoff:
                 try:
-                    os.remove(path)
+                    _remove(path)
                     summary["aged"] += 1
                     freed += size
                 except OSError:
@@ -90,7 +120,7 @@ def run(current_dir: Optional[str] = None, root: str = IMAGES_DIR, now: Optional
                 if free_pct(root) >= target:
                     break
                 try:
-                    os.remove(path)
+                    _remove(path)
                     summary["for_space"] += 1
                     freed += size
                 except OSError:
@@ -98,7 +128,7 @@ def run(current_dir: Optional[str] = None, root: str = IMAGES_DIR, now: Optional
         summary["freed_mb"] = round(freed / 1e6, 1)
         summary["free_pct"] = round(free_pct(root), 1)
         if summary["aged"] or summary["for_space"]:
-            print(f"🗑️ Photo retention: removed {summary['aged']} older than {days:g} days and "
+            print(f"🗑️ Photo retention: removed {summary['aged']} captures older than {days:g} days and "
                   f"{summary['for_space']} for space ({summary['freed_mb']} MB); "
                   f"{summary['free_pct']} % free")
     except Exception as e:
