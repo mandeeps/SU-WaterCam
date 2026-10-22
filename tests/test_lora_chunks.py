@@ -207,12 +207,21 @@ def test_healthy_result_is_cached_for_half_an_hour(health_paths, monkeypatch):
     assert h.link_check.call_count == 2
 
 
-def test_unhealthy_result_is_never_cached(health_paths):
+def test_unhealthy_link_check_is_cached_for_ten_minutes(health_paths, monkeypatch):
     h = _h(ok=False)
     assert not lh.assess(h)["healthy"]
-    assert lh.cached() is None
     lh.assess(h)
-    assert h.link_check.call_count == 4         # two tries each time
+    assert h.link_check.call_count == 2         # two tries, then the cached result
+    real = time.time()
+    monkeypatch.setattr(lh.time, "time", lambda: real + lh.UNHEALTHY_TTL_S + 5)
+    lh.assess(h)
+    assert h.link_check.call_count == 4
+
+
+def test_not_joined_is_never_cached(health_paths):
+    h = _h(joined=False)
+    assert not lh.assess(h)["healthy"]
+    assert lh.cached() is None
 
 
 def test_invalidate_forces_a_new_check(health_paths):

@@ -15,8 +15,10 @@ LoRa counts as healthy when:
 
 The result decides whether WiFi stays off (tools/wifi_policy.py) and whether the
 IP uplink is needed (ip_uplink_transmit). A healthy result is kept in /tmp for
-CACHE_TTL_S (and the boot); an unhealthy one is always checked again, and so is
-a healthy one after a send failed (invalidate()). The check history is in
+CACHE_TTL_S, an unhealthy one from a link check for UNHEALTHY_TTL_S (each check
+is an uplink, and a long emergency wake asks every capture), both only for this
+boot; "not joined" or "daemon not running" is checked again at once, and so is a
+healthy result after a send failed (invalidate()). The check history is in
 data/lora_health.json.
 """
 import json
@@ -38,6 +40,7 @@ DEFAULT_MIN_MARGIN_DB = 5
 ATTEMPTS = 2
 RETRY_GAP_S = 5
 CACHE_TTL_S = 30 * 60
+UNHEALTHY_TTL_S = 10 * 60
 
 
 def _boot_id() -> str:
@@ -83,6 +86,9 @@ def cached() -> Optional[Dict[str, Any]]:
             return None
         if fresh and r.get("healthy"):
             return r
+        age = time.time() - float(r.get("checked_at", 0))
+        if not r.get("healthy") and r.get("joined") and age < UNHEALTHY_TTL_S:
+            return r
     return None
 
 
@@ -95,7 +101,8 @@ def invalidate() -> None:
 
 
 def assess(handler=None, force: bool = False) -> Dict[str, Any]:
-    """{'healthy': bool, 'reason': str, 'joined', 'margin_db', 'gateways'}; a healthy one is reused for 30 min."""
+    """{'healthy': bool, 'reason': str, 'joined', 'margin_db', 'gateways'}; reused for 30 min if
+    healthy, 10 min if a link check found it unhealthy."""
     if not force:
         c = cached()
         if c is not None:
@@ -140,7 +147,7 @@ def assess(handler=None, force: bool = False) -> Dict[str, Any]:
     except Exception as e:
         result["reason"] = f"check failed: {e}"
     print(f"📡 LoRa {'healthy' if result['healthy'] else 'NOT healthy'}: {result['reason']}")
-    if result["healthy"]:
+    if result["healthy"] or result.get("joined"):
         _write(CACHE_PATH, {"boot_id": _boot_id(), "result": result})
     else:
         invalidate()
