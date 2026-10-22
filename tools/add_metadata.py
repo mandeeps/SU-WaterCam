@@ -2,6 +2,7 @@
 # embed GPS/IMU data into image EXIF
 # Takes image path as parameter
 
+import datetime
 import logging
 import time
 from fractions import Fraction
@@ -32,8 +33,9 @@ except ImportError:
 except Exception:
     print("BNO055 hardware issue")
 
+last_fix: dict = {}   # replaced by tools.get_gps.last_fix when that imports
 try:
-    from tools.get_gps import get_location_with_retry, get_loc
+    from tools.get_gps import get_location_with_retry, get_loc, last_fix
 except ImportError:
     print("GPS import issue")
 except Exception:
@@ -66,6 +68,17 @@ def change_to_rational(number):
     """
     f = Fraction(str(number))
     return (f.numerator, f.denominator)
+
+
+def _vector(v, n):
+    """v as a tuple of n floats, or None if it is not a complete finite reading."""
+    try:
+        out = tuple(float(x) for x in v)
+    except (TypeError, ValueError):
+        return None
+    if len(out) != n or any(x != x or abs(x) == float("inf") for x in out):
+        return None
+    return out
 
 
 _METADATA_LOG = "/home/pi/SU-WaterCam/data/metadata_log.txt"
@@ -128,6 +141,56 @@ def add_metadata(image):
                 print(f"WARNING: BNO055 magnetometer uncalibrated (mag={calib_mag}/3) "
                       f"— heading in EXIF will be unreliable")
 
+    # Quaternion and gravity vector: Euler angles cannot be compared across captures
+    # near +/-90 degrees pitch (gimbal lock), and a fixed camera is mounted close to
+    # it. Read just after the Euler average above, and stamped with the read time.
+    pose = {}
+    pose_time = None
+    if imu_values:
+        try:
+            pose = bno055_imu.get_pose() or {}
+            pose_time = datetime.datetime.now(datetime.timezone.utc).astimezone().isoformat(timespec="seconds")
+        except Exception as error:
+            print(f"IMU pose error: {error}")
+            pose = {}
+    quaternion = _vector(pose.get("quaternion"), 4)
+    gravity = _vector(pose.get("gravity"), 3)
+
+    # GPS: get current info from gpsd, or the last saved fix (packet None) when
+    # there is no live one
+    formatted_gps_data = []
+    packet = None
+    location = {}
+
+    try:
+        # The packet feeds the EXIF position of a live fix; the dict is all a cached fix has
+        location, packet = get_location_with_retry()
+    except Exception as error:
+        print(f"No GPS data returned from get_location_with_retry: {error}")
+        with open(DATA, 'a', encoding="utf8") as data:
+            data.write("\nGPS Error \n")
+
+    try:
+        # Get formatted GPS data for logging
+        formatted_gps_data = get_loc()
+    except Exception as error:
+        print(f"No GPS data returned from get_loc: {error}")
+
+    # save formatted GPS data to text file
+    if formatted_gps_data:
+        with open(DATA, 'a', encoding="utf8") as data:
+            for line in formatted_gps_data:
+                data.writelines(line)
+
+    cached_fix = (not packet and isinstance(location, dict)
+                  and location.get("gps_lat") is not None and location.get("gps_lon") is not None)
+    fix_age_s = None
+    if cached_fix:
+        try:
+            fix_age_s = int(round(float(last_fix.get("age_s"))))
+        except (TypeError, ValueError):
+            fix_age_s = None
+
     # Start exif handling
     # load original exif data
     exif_data = piexif.load(image)
@@ -138,11 +201,27 @@ def add_metadata(image):
         exif_data["Exif"][piexif.ExifIFD.BodySerialNumber] = device_id.encode("ascii", errors="replace")
 
     # Add roll/pitch/yaw to UserComment tag only when all three are available
+    comment = ""
     if roll is not None and pitch is not None and yaw is not None:
-        uc = f"Roll {roll} Pitch {pitch} Yaw {yaw}"
+        comment = f"Roll {roll} Pitch {pitch} Yaw {yaw}"
         if heading_std is not None:
-            uc += f" HeadingStd {heading_std}"
-        exif_data["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.UserComment.dump(uc)
+            comment += f" HeadingStd {heading_std}"
+        if calib_mag is not None:
+            comment += f" CalibMag {calib_mag}"
+        if quaternion is not None:
+            comment += " Quaternion " + ",".join(f"{v:.5f}" for v in quaternion)
+        if gravity is not None:
+            comment += " Gravity " + ",".join(f"{v:.4f}" for v in gravity)
+        if pose_time and (quaternion is not None or gravity is not None):
+            comment += f" PoseTime {pose_time}"
+    if cached_fix:
+        # No live fix: the position written is the last saved one, not where the
+        # node is known to be now
+        comment = (comment + " " if comment else "") + "GPSFix CACHED"
+        if fix_age_s is not None:
+            comment += f" AgeS {fix_age_s}"
+    if comment:
+        exif_data["Exif"][piexif.ExifIFD.UserComment] = piexif.helper.UserComment.dump(comment)
 
     # Write XMP tags: unit ID always, orientation + quality when available
     xmp_props: dict = {}
@@ -162,7 +241,23 @@ def add_metadata(image):
         xmp_props["CalibSys"]   = str(calib_sys)
         xmp_props["CalibGyro"]  = str(calib_gyro)
         xmp_props["CalibAccel"] = str(calib_accel)
-        xmp_props["CalibMag"]   = str(calib_mag)
+        xmp_props["CalibMag"]   = str(calib_mag)   # 0-3; heading is trustworthy at 2 or more
+    # Orientation without gimbal lock, in the sensor frame (BNO055 order: w,x,y,z;
+    # gravity in m/s^2), and when it was read (ISO 8601 with UTC offset)
+    if quaternion is not None:
+        for axis, v in zip("WXYZ", quaternion):
+            xmp_props[f"Quaternion{axis}"] = f"{v:.5f}"
+    if gravity is not None:
+        for axis, v in zip("XYZ", gravity):
+            xmp_props[f"Gravity{axis}"] = f"{v:.4f}"
+    if pose_time and (quaternion is not None or gravity is not None):
+        xmp_props["PoseReadTime"] = pose_time
+    if packet:
+        xmp_props["GPSFixSource"] = "live"
+    elif cached_fix:
+        xmp_props["GPSFixSource"] = "cached"
+        if fix_age_s is not None:
+            xmp_props["GPSFixAgeSeconds"] = str(fix_age_s)
 
     if xmp_props:
         xmpfile = XMPFiles(file_path=image, open_forupdate=True)
@@ -176,35 +271,24 @@ def add_metadata(image):
         finally:
             xmpfile.close_file()
 
-    # GPS: get current info from gpsd
-    formatted_gps_data = []
-    packet = None
-    
-    try:
-        # Get GPS packet for EXIF data (we discard the location dict as we use get_loc() for logging)
-        _, packet = get_location_with_retry()
-    except Exception as error:
-        print(f"No GPS data returned from get_location_with_retry: {error}")
-        with open(DATA, 'a', encoding="utf8") as data:
-            data.write("\nGPS Error \n")
-    
-    try:
-        # Get formatted GPS data for logging
-        formatted_gps_data = get_loc()
-    except Exception as error:
-        print(f"No GPS data returned from get_loc: {error}")
-    
-    # save formatted GPS data to text file
-    if formatted_gps_data:
-        with open(DATA, 'a', encoding="utf8") as data:
-            for line in formatted_gps_data:
-                data.writelines(line)
+    # EXIF GPS: a live fix (packet) or the last saved fix (cached_fix). The EXIF
+    # position is never left out for a cached fix, but it is marked: its
+    # GPSProcessingMethod is CACHED, and its age is in the UserComment and XMP.
+    # GPSTrack is not written: it is the course over the ground, meaningless for a
+    # fixed camera, and readers took it for the direction the camera points.
+    if packet or cached_fix:
+        if packet:
+            lat, lon = packet.lat, packet.lon
+            alt = round(packet.alt) if packet.mode >= 3 else None
+            method = b"GPS"
+        else:
+            lat, lon = float(location["gps_lat"]), float(location["gps_lon"])
+            alt = round(location["gps_alt"]) if location.get("gps_alt") is not None else None
+            method = b"CACHED"
 
-    # Only add EXIF GPS data if we have a valid packet
-    if packet:
         # Conversion for exif use
-        lat_deg = to_deg(packet.lat,['S','N'])
-        lng_deg = to_deg(packet.lon,['W','E'])
+        lat_deg = to_deg(lat,['S','N'])
+        lng_deg = to_deg(lon,['W','E'])
 
         exiv_lat = (change_to_rational(lat_deg[0]),
                     change_to_rational(lat_deg[1]),
@@ -220,14 +304,16 @@ def add_metadata(image):
                 piexif.GPSIFD.GPSLatitude: exiv_lat,
                 piexif.GPSIFD.GPSLongitudeRef: lng_deg[3],
                 piexif.GPSIFD.GPSLongitude: exiv_lng,
-                piexif.GPSIFD.GPSTrack: change_to_rational(packet.track)
+                # Undefined-type tag: 8-byte character code, then the text
+                piexif.GPSIFD.GPSProcessingMethod: b"ASCII\x00\x00\x00" + method,
         }
 
         # Altitude is only valid in a 3D fix (mode 3); skip for 2D fix to avoid
-        # AttributeError or writing stale/zero altitude into EXIF.
-        if packet.mode >= 3:
-            gps_ifd[piexif.GPSIFD.GPSAltitudeRef] = 0
-            gps_ifd[piexif.GPSIFD.GPSAltitude] = change_to_rational(round(packet.alt))
+        # AttributeError or writing stale/zero altitude into EXIF. A cached fix
+        # has one only if the live fix it was saved from did.
+        if alt is not None:
+            gps_ifd[piexif.GPSIFD.GPSAltitudeRef] = 0 if alt >= 0 else 1
+            gps_ifd[piexif.GPSIFD.GPSAltitude] = change_to_rational(abs(alt))
 
         # Since we have GPS data, add to Exif
         gps_exif = {"GPS": gps_ifd}

@@ -253,17 +253,18 @@ def compress_image(input_path, max_bytes=228, min_size=32, output_path=None, sav
     """
     input_path = Path(input_path)
     
-    # Load and compress image
-    img = Image.open(input_path)
-    error = mask_format_error(img)
-    if error:
-        print(f"⚠️ {input_path}: {error}: not compressed")
-        return {'success': False, 'error': error}
-    result = find_best_size(img, max_bytes, min_size, method2=method2)
-    
+    # Load and compress image. Closed once the bits are packed: the file handle
+    # would otherwise stay open until garbage collection, once per capture.
+    with Image.open(input_path) as img:
+        error = mask_format_error(img)
+        if error:
+            print(f"⚠️ {input_path}: {error}: not compressed")
+            return {'success': False, 'error': error}
+        result = find_best_size(img, max_bytes, min_size, method2=method2)
+
     if not result:
         return {'success': False}
-    
+
     arr_bin, comp, method, header = result
     total_size = len(header) + len(comp)
     

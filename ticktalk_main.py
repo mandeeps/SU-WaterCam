@@ -806,7 +806,21 @@ def get_time(trigger):
         return directory
     except Exception as e:
         print(f"Failed to create directory: {e}")
-        return path.join(repo_root, "images", "fallback")
+        # A fresh, timestamped directory every time. A shared "fallback" directory
+        # kept the previous failure's outputs, and co-registration skips work
+        # when its outputs already exist, so stale results were sent as new.
+        now = datetime.now()
+        fallback = path.join(repo_root, "images", now.strftime('%Y%m%d-%H%M%S') + "-fallback")
+        try:
+            makedirs(fallback, exist_ok=True)
+            try:
+                from tools.capture_time import write_capture_time
+                write_capture_time(fallback, now.timestamp())
+            except Exception as time_exc:
+                print(f"Could not record the capture time in {fallback}: {time_exc}")
+        except Exception as fallback_exc:
+            print(f"Could not create fallback directory {fallback}: {fallback_exc}")
+        return fallback
 
 @SQify
 def record_audio(trigger, directory):
@@ -910,15 +924,33 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
         print(f"⚠️ Skipping segmentation: no co-registered image ({tiff_path})")
         return None
 
+    # No thermal frame this capture (tt_take_photos.flir): the TIFF's thermal band
+    # is zeros. Only a model that reads the RGB bands alone may run on it, and only
+    # the daemon can say whether the loaded one does. Otherwise skip, and say so
+    # (capture_status.json, this log): no mask, so no camera_water_pct either.
+    from tools import capture_status
+    no_thermal = capture_status.thermal_missing(filepath)
+
     try:
         # Prefer the persistent daemon — no cold-start, model stays loaded.
         # Not while a cellular upload runs: together they pull the Pi under-voltage.
         if os.path.exists(socket_path):
             with power_exclusive("segmentation", 120):
-                ok = segformer_via_daemon(tiff_path, output_path, socket_path)
+                ok = segformer_via_daemon(tiff_path, output_path, socket_path, rgb_only=no_thermal)
             if ok:
+                if no_thermal:
+                    print("⚠️ No thermal frame: segmented with the RGB-only model")
+                    capture_status.mark(filepath, segmentation="rgb_only")
                 return output_path
+            if no_thermal:
+                print("⚠️ No thermal frame and no RGB-only model: segmentation skipped for this capture")
+                capture_status.mark(filepath, segmentation="skipped_no_thermal")
+                return None
             print("⚠️ Daemon call failed, falling back to subprocess")
+        elif no_thermal:
+            print("⚠️ No thermal frame and no segmentation daemon: segmentation skipped for this capture")
+            capture_status.mark(filepath, segmentation="skipped_no_thermal")
+            return None
 
         # Legacy fallback: spawn a fresh Python process each cycle.
         segformer_location = os.environ.get("SEGFORMER_DIR", "/home/pi/segformer_5band")

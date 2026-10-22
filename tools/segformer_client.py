@@ -8,18 +8,26 @@ imports this inside its body, like the other SQs import their tools.
 
 
 def segformer_via_daemon(tiff_path: str, output_path: str,
-                         socket_path: str = "/run/segformer/segformer.sock") -> bool:
+                         socket_path: str = "/run/segformer/segformer.sock",
+                         rgb_only: bool = False) -> bool:
     """Send an inference request to the persistent SegFormer daemon.
 
     Returns True on success. The daemon keeps the ONNX model resident in
     memory, cutting the per-cycle cold-start cost of ~10–20 s.
+
+    rgb_only: the TIFF's thermal band is a placeholder (the Lepton gave no
+    frame). The daemon then runs only a model that reads the RGB bands alone and
+    answers with an error otherwise.
     """
     import json
     import os as _os
     import socket as _socket
     import stat as _stat
 
-    req = json.dumps({"tiff_path": tiff_path, "output_path": output_path}) + "\n"
+    request = {"tiff_path": tiff_path, "output_path": output_path}
+    if rgb_only:
+        request["rgb_only"] = True
+    req = json.dumps(request) + "\n"
     try:
         if not _stat.S_ISSOCK(_os.lstat(socket_path).st_mode):
             print(f"⚠️ {socket_path} is not a Unix socket — skipping daemon")

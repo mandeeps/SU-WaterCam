@@ -59,32 +59,74 @@ def test_detection_on_without_baseline_sends_no_flags(tmp_path):
     assert _fields(d, tmp_path / "s.json", camera_flood_detection_enabled=True) == {"camera_water_pct": 90}
 
 
-def test_flood_detected_against_baseline(tmp_path):
+def test_flood_detected_needs_two_captures_in_a_row(tmp_path):
     s = tmp_path / "s.json"
     on = dict(camera_flood_detection_enabled=True, flood_baseline_water_pct=20)
     out = _fields(_capture(tmp_path, "20261015-100000", 0.29), s, **on)
     assert out["camera_flood_detected"] == 0
     out = _fields(_capture(tmp_path, "20261015-110000", 0.30), s, **on)
-    assert out["camera_flood_detected"] == 1
+    assert out["camera_flood_detected"] == 0              # over once: not yet
+    out = _fields(_capture(tmp_path, "20261015-120000", 0.35), s, **on)
+    assert out["camera_flood_detected"] == 1              # over twice in a row
 
 
-def test_growing_compares_with_previous_capture(tmp_path):
+def test_a_capture_back_under_restarts_the_count(tmp_path):
     s = tmp_path / "s.json"
-    on = dict(camera_flood_detection_enabled=True, flood_baseline_water_pct=50)
+    on = dict(camera_flood_detection_enabled=True, flood_baseline_water_pct=20)
+    for name, frac, want in (("100000", 0.40, 0), ("110000", 0.25, 0), ("120000", 0.40, 0), ("130000", 0.40, 1)):
+        out = _fields(_capture(tmp_path, f"20261015-{name}", frac), s, **on)
+        assert out["camera_flood_detected"] == want, name
+
+
+def test_growing_compares_with_previous_capture_and_is_confirmed(tmp_path):
+    s = tmp_path / "s.json"
+    on = dict(camera_flood_detection_enabled=True, flood_baseline_water_pct=90)
     assert _fields(_capture(tmp_path, "20261015-100000", 0.10), s, **on)["camera_flood_growing"] == 0
     assert _fields(_capture(tmp_path, "20261015-110000", 0.19), s, **on)["camera_flood_growing"] == 0
-    out = _fields(_capture(tmp_path, "20261015-120000", 0.29), s, **on)
-    assert out == {"camera_water_pct": 29, "camera_flood_detected": 0, "camera_flood_growing": 1}
+    out = _fields(_capture(tmp_path, "20261015-120000", 0.29), s, **on)       # first rise
+    assert out == {"camera_water_pct": 29, "camera_flood_detected": 0, "camera_flood_growing": 0}
+    out = _fields(_capture(tmp_path, "20261015-130000", 0.39), s, **on)       # second rise
+    assert out == {"camera_water_pct": 39, "camera_flood_detected": 0, "camera_flood_growing": 1}
 
 
-def test_lora_and_ip_see_the_same_previous_value(tmp_path):
+def test_lora_and_ip_see_the_same_previous_value_and_streak(tmp_path):
     s = tmp_path / "s.json"
     on = dict(camera_flood_detection_enabled=True, flood_baseline_water_pct=0)
     _fields(_capture(tmp_path, "20261015-100000", 0.10), s, **on)
     d = _capture(tmp_path, "20261015-110000", 0.40)
     first = _fields(d, s, **on)
-    assert first == _fields(d, s, **on)
-    assert first["camera_flood_growing"] == 1
+    assert first == _fields(d, s, **on)               # the IP uplink's second look changes nothing
+    assert first["camera_flood_detected"] == 1        # over on both captures
+    assert first["camera_flood_growing"] == 0         # only one rise so far
+    d2 = _capture(tmp_path, "20261015-120000", 0.60)
+    assert _fields(d2, s, **on)["camera_flood_growing"] == 1
+
+
+def _frame(capture_dir, grey):
+    Image.fromarray(np.full((16, 16, 3), grey, np.uint8), mode="RGB").save(
+        str(capture_dir + "/20261015-NIR-OFF.jpg"))
+
+
+@pytest.mark.parametrize("grey", [5, 250])
+def test_dark_or_blown_out_frames_raise_no_flags_and_leave_no_trace(tmp_path, grey):
+    s = tmp_path / "s.json"
+    on = dict(camera_flood_detection_enabled=True, flood_baseline_water_pct=0)
+    good = _capture(tmp_path, "20261015-100000", 0.10)
+    _frame(good, 128)
+    _fields(good, s, **on)
+    bad = _capture(tmp_path, "20261015-110000", 0.90)
+    _frame(bad, grey)
+    assert _fields(bad, s, **on) == {"camera_water_pct": 90}      # reported, no flags
+    state = json.loads(s.read_text())
+    assert state["capture"] == "20261015-100000" and state["water_pct"] == 10
+
+
+def test_normal_brightness_frame_is_used(tmp_path):
+    s = tmp_path / "s.json"
+    d = _capture(tmp_path, "20261015-100000", 0.50)
+    _frame(d, 128)
+    out = _fields(d, s, camera_flood_detection_enabled=True, flood_baseline_water_pct=0)
+    assert "camera_flood_detected" in out
 
 
 def test_decide_threshold_zero_needs_a_rise():

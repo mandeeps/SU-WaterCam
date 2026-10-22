@@ -81,3 +81,23 @@ def test_binary_masks_are_accepted():
     arr[:8] = 255
     assert mask_format_error(Image.fromarray(arr, mode="L")) is None
     assert mask_format_error(Image.fromarray(arr, mode="L").convert("1")) is None
+
+
+def test_compress_image_closes_the_file(tmp_path, monkeypatch):
+    from PIL import Image
+    import numpy as np
+    from tools import compress_segmented as cs
+    arr = np.zeros((64, 64), np.uint8)
+    arr[:20] = 255
+    path = tmp_path / "mask.png"
+    Image.fromarray(arr, mode="L").save(path)
+    opened = []
+    real_open = Image.open
+
+    def spy(*a, **k):
+        img = real_open(*a, **k)
+        opened.append(img)
+        return img
+    monkeypatch.setattr(cs.Image, "open", spy)
+    assert cs.compress_image(str(path))["success"]
+    assert opened and all(img.fp is None for img in opened)

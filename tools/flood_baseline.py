@@ -14,6 +14,15 @@ on and a baseline set, area_threshold (percentage points, default 10) sets:
     camera_flood_growing  (07 27) = 1 if water % rose by area_threshold or more
                                     since the previous capture with a mask
 
+A flag is raised only after CONFIRM_CAPTURES (2) captures in a row meet its
+condition: one bad mask (a glare, a shadow, a failed segmentation) is not a
+flood. The count restarts at the first capture that does not meet it.
+
+Masks of frames whose mean brightness (0-255) is below MIN_BRIGHTNESS or above
+MAX_BRIGHTNESS (night, dense fog, a covered or blown-out lens) are not trusted:
+they still report camera_water_pct, but raise no flags and count for neither
+the previous water % nor the streaks.
+
 The previous water percentage persists across wakes in data/flood_state.json.
 
 At installation, once a capture of the site in normal conditions has been
@@ -25,7 +34,7 @@ At a new site, or after the camera is re-aimed: --reset, then set it again.
 import argparse
 import os
 import sys
-from typing import Optional
+from typing import Optional, Tuple
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if REPO not in sys.path:
@@ -39,6 +48,12 @@ DEFAULT_IMAGES_DIR = os.path.join(_REPO_ROOT, "images")
 BASELINE_KEY = "flood_baseline_water_pct"
 ENABLED_KEY = "camera_flood_detection_enabled"
 DEFAULT_AREA_THRESHOLD = 10
+#: Consecutive captures that must meet a flag's condition before it is raised
+CONFIRM_CAPTURES = 2
+#: Mean grey level (0-255) of the RGB frame outside which its mask is not used
+#: for flood decisions. A first guess to tune from field captures.
+MIN_BRIGHTNESS = 40
+MAX_BRIGHTNESS = 225
 #: Must match coreg_multiple.config.SEGMENTATION_PNG / LEGACY_SEGMENTATION_PNG.
 #: Constants so this doesn't import OpenCV and rasterio just to find a file.
 MASK_NAMES = ("color_preserved_5_band_segmentation.png", "final_5_band_segmentation.png")
@@ -72,6 +87,24 @@ def mask_water_percent(dirname: str) -> Optional[int]:
         return None
 
 
+def frame_brightness(dirname: str) -> Optional[float]:
+    """Mean grey level (0-255) of the capture's RGB frame, or None if it has none."""
+    try:
+        names = sorted(n for n in os.listdir(dirname) if n.endswith("-NIR-OFF.jpg"))
+    except OSError:
+        return None
+    if not names:
+        return None
+    try:
+        from PIL import Image, ImageStat
+        with Image.open(os.path.join(dirname, names[0])) as img:
+            img.draft("L", (320, 240))      # decode JPEG at reduced size: this is a mean
+            return float(ImageStat.Stat(img.convert("L")).mean[0])
+    except Exception as e:                  # noqa: BLE001 - never fail a capture over this
+        print(f"⚠️ Water %: couldn't measure brightness of {dirname}: {e}")
+        return None
+
+
 def latest_mask_dir(images_dir: str = DEFAULT_IMAGES_DIR) -> Optional[str]:
     """The newest capture directory (images/YYYYMMDD-HHMMSS) that has a mask."""
     try:
@@ -93,34 +126,57 @@ def _load_state(path: str) -> dict:
         return {}
 
 
-def _record(dirname: str, pct: int, state_path: str) -> Optional[int]:
-    """Store this capture's water % and return the previous capture's.
+def _record(dirname: str, pct: int, state_path: str) -> Tuple[Optional[int], dict]:
+    """Store this capture's water % and return (the previous capture's, the flag
+    streaks before this capture).
 
     Called by both the LoRa and the IP uplink for one capture: the second call
-    sees the same capture and returns the same previous value."""
+    sees the same capture and returns the same values."""
     capture = os.path.basename(os.path.normpath(dirname))
     state = _load_state(state_path)
     if state.get("capture") == capture:
         previous = state.get("previous_water_pct")
+        before = state.get("streak_before")
+        streak = state.get("streak")
     else:
         previous = state.get("water_pct")
-    new = {"capture": capture, "water_pct": pct, "previous_water_pct": previous}
+        before = streak = state.get("streak")
+    before = before if isinstance(before, dict) else {}
+    new = {"capture": capture, "water_pct": pct, "previous_water_pct": previous,
+           "streak_before": before, "streak": streak if isinstance(streak, dict) else before}
     try:
         if new != state:
             os.makedirs(os.path.dirname(state_path), exist_ok=True)
             config_io.write_json(state_path, new)
     except OSError as e:
         print(f"⚠️ Water %: couldn't save {state_path}: {e}")
-    return previous if isinstance(previous, int) else None
+    return (previous if isinstance(previous, int) else None), before
+
+
+def _store_streak(state_path: str, streak: dict) -> None:
+    state = _load_state(state_path)
+    if state.get("streak") == streak:
+        return
+    state["streak"] = streak
+    try:
+        config_io.write_json(state_path, state)
+    except OSError as e:
+        print(f"⚠️ Water %: couldn't save {state_path}: {e}")
 
 
 def decide(pct: int, previous: Optional[int], baseline: int, area_threshold: int) -> dict:
-    """The two flood flags for this water %; see the module docstring."""
+    """The two flood conditions for this water % (before confirmation); see the module docstring."""
     rise = max(1, area_threshold)   # with a threshold of 0, "growing" still needs a rise
     return {
         "camera_flood_detected": 1 if pct >= baseline + area_threshold else 0,
         "camera_flood_growing": 1 if previous is not None and pct - previous >= rise else 0,
     }
+
+
+def confirm(raw: dict, before: dict) -> Tuple[dict, dict]:
+    """(flags, streaks): a flag is 1 once its condition has held CONFIRM_CAPTURES captures running."""
+    streak = {k: (int(before.get(k) or 0) + 1 if v else 0) for k, v in raw.items()}
+    return {k: 1 if n >= CONFIRM_CAPTURES else 0 for k, n in streak.items()}, streak
 
 
 def flood_fields(dirname: str, state_path: Optional[str] = None) -> dict:
@@ -130,7 +186,12 @@ def flood_fields(dirname: str, state_path: Optional[str] = None) -> dict:
     if pct is None:
         return {}
     fields = {"camera_water_pct": pct}
-    previous = _record(dirname, pct, state_path or DEFAULT_STATE_PATH)
+    brightness = frame_brightness(dirname)
+    if brightness is not None and not MIN_BRIGHTNESS <= brightness <= MAX_BRIGHTNESS:
+        print(f"🌙 Water {pct}%: frame brightness {brightness:.0f} is outside "
+              f"{MIN_BRIGHTNESS}-{MAX_BRIGHTNESS}, mask not used for flood flags")
+        return fields
+    previous, before = _record(dirname, pct, state_path or DEFAULT_STATE_PATH)
     from tools.lora_runtime_integration import get_parameter
     if not get_parameter(ENABLED_KEY, False):
         return fields
@@ -142,9 +203,14 @@ def flood_fields(dirname: str, state_path: Optional[str] = None) -> dict:
         area_threshold = int(get_parameter("area_threshold", DEFAULT_AREA_THRESHOLD))
     except (TypeError, ValueError):
         area_threshold = DEFAULT_AREA_THRESHOLD
-    fields.update(decide(pct, previous, baseline, area_threshold))
+    raw = decide(pct, previous, baseline, area_threshold)
+    flags, streak = confirm(raw, before)
+    _store_streak(state_path or DEFAULT_STATE_PATH, streak)
+    fields.update(flags)
     print(f"🌊 Water {pct}% (baseline {baseline}%, previous {previous}%): "
-          f"flood={fields['camera_flood_detected']} growing={fields['camera_flood_growing']}")
+          f"flood={flags['camera_flood_detected']} growing={flags['camera_flood_growing']} "
+          f"(conditions met: {raw['camera_flood_detected']}/{raw['camera_flood_growing']}, "
+          f"{CONFIRM_CAPTURES} in a row needed)")
     return fields
 
 
