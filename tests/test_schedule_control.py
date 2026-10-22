@@ -140,3 +140,76 @@ def test_downlink_15_95_applies_through_the_shared_decoder(tmp_path, monkeypatch
 
 def test_downlink_12_92_is_gone():
     assert parse_downlink_frame(bytes.fromhex("12920168")) is None
+
+
+# ── following the sun ────────────────────────────────────────────────────────
+
+import os
+import time as _time
+from datetime import date
+
+WHERE = (51.4769, 0.0)        # a generic reference point (Greenwich), not a site
+
+
+@pytest.fixture
+def utc(monkeypatch):
+    monkeypatch.setenv("TZ", "UTC")
+    _time.tzset()
+    yield
+    monkeypatch.delenv("TZ", raising=False)
+    _time.tzset()
+
+
+SUN = sc.Schedule(30, -15, 60, 10, "sunrise", "sunset")
+
+
+def test_sun_bytes_round_trip_and_label():
+    assert SUN.to_bytes() == bytes([0xF0, 30, 0xF1, 0xF1, 0, 60, 10])   # -15 as a signed byte
+    assert sc.from_bytes(SUN.to_bytes()) == SUN
+    assert SUN.label() == "SR+30-SS-15/60/10"
+
+
+def test_sun_offset_out_of_range():
+    with pytest.raises(ValueError):
+        sc.from_bytes(bytes([0xF0, 125, 16, 0, 0, 60, 10]))
+
+
+def test_resolve_follows_the_seasons(utc):
+    summer, _ = sc.resolve(SUN, date(2026, 6, 21), WHERE)
+    winter, _ = sc.resolve(SUN, date(2026, 12, 21), WHERE)
+    assert (summer.start, summer.end) == (3 * 60 + 42 + 30, 20 * 60 + 20 - 15)
+    assert (winter.start, winter.end) == (8 * 60 + 2 + 30, 15 * 60 + 52 - 15)
+    assert len(sc.wakes(summer)) > len(sc.wakes(winter))
+
+
+def test_resolve_without_a_location_uses_the_fallback(utc):
+    s, why = sc.resolve(SUN, date(2026, 6, 21), None)
+    assert (s.start, s.end) == sc.FALLBACK_WINDOW and "no location" in why
+
+
+def test_sun_schedule_applies_with_todays_window(tmp_path, monkeypatch, utc):
+    monkeypatch.setattr(rb, "log_to_wittypi", lambda *a: None)
+    now = datetime(2026, 6, 21, 12, 0)
+    params, armed = {}, []
+    ok, msg = sc.apply(SUN, wittypi_dir=str(tmp_path), now=now, arm=armed.append,
+                       set_param=params.__setitem__, clock=lambda: now.timestamp(), where=WHERE)
+    assert ok, msg
+    assert params["schedule"]["window"] == [4 * 60 + 12, 20 * 60 + 5]
+    assert params["schedule"]["start_ref"] == "sunrise"
+    assert "BEGIN 2026-06-21 04:12:00" in (tmp_path / "schedule.wpi").read_text()
+    assert datetime.fromtimestamp(armed[0]) == datetime(2026, 6, 21, 12, 12)
+    assert sc.status_label(lambda k, d=None: params.get(k, d)) == "SR+30-SS-15/60/10 0412-2005"
+
+
+def test_sun_schedule_rewritten_only_when_the_window_moves_10_min(tmp_path, monkeypatch, utc):
+    monkeypatch.setattr(rb, "log_to_wittypi", lambda *a: None)
+    stored = {}
+    get = lambda k, d=None: stored.get(k, d)        # noqa: E731
+    kw = dict(wittypi_dir=str(tmp_path), arm=lambda t: None, set_param=stored.__setitem__, where=WHERE)
+    day0 = datetime(2026, 3, 20, 12, 0)             # around the equinox the window moves fastest
+    assert sc.apply(SUN, now=day0, clock=lambda: day0.timestamp(), **kw)[0]
+    day2 = datetime(2026, 3, 22, 12, 0)
+    assert "up to date" in sc.refresh(now=day2, get_param=get, clock=lambda: day2.timestamp(), **kw)
+    day7 = datetime(2026, 3, 27, 12, 0)
+    out = sc.refresh(now=day7, get_param=get, clock=lambda: day7.timestamp(), **kw)
+    assert out.startswith("rewritten (the sun window moved"), out

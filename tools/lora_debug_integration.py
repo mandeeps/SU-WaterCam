@@ -156,8 +156,7 @@ def _ip_uploads_requested() -> Optional[int]:
 def _schedule_label() -> Optional[str]:
     try:
         from tools import schedule_control
-        s = schedule_control.current()
-        return s.label() if s else None
+        return schedule_control.status_label()
     except Exception:   # noqa: BLE001 - a status reply must never fail over this
         return None
 
