@@ -62,23 +62,16 @@ def test_debug_status_command():
     assert result["lora_size_bytes"] <= MDOT_MAX_PAYLOAD
 
 
-@pytest.mark.parametrize("command", ["5001", "50011", "50010", "50012"])
-def test_digit_form_downlink_gets_a_hex_encoded_reply(command):
-    """A '5001...' downlink returns the report hex-encoded, as the mDot path needs."""
+def test_status_reply_is_hex_encoded_for_the_mdot():
+    """The status reply is returned hex-encoded, as the mDot path needs."""
     pytest.importorskip("psutil")
-    from tools.lora_debug_integration import process_debug_command
+    from tools.lora_debug_integration import handle_debug_status_request
 
-    response = process_debug_command(command)
-    assert response is not None and response["status"] == "success", response
+    response = handle_debug_status_request()
+    assert response["status"] == "success", response
     payload = bytes.fromhex(response["data"])        # every character must be hex
     assert len(payload) == response["size_bytes"] <= MDOT_MAX_PAYLOAD
     json.loads(payload.decode("utf-8"))               # and it decodes back to the report
-
-
-@pytest.mark.parametrize("command", ["2001", "500", "", "6001"])
-def test_other_commands_are_not_debug_requests(command):
-    from tools.lora_debug_integration import process_debug_command
-    assert process_debug_command(command) is None
 
 
 def print_system_details(debug_status):

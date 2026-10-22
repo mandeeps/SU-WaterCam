@@ -177,9 +177,9 @@ def test_lora_frame_is_applied_and_answered():
     h = LoRaHandler.__new__(LoRaHandler)
     h.config, h.config_file, h.runtime_callback = {}, os.path.join(tempfile.mkdtemp(), "c.json"), None
     with patch.object(LoRaHandler, "_reply_with_status") as reply:
-        h.decode("179701")
+        h.decode("05179701")
     assert ipf.pending_wakes() == 1
-    reply.assert_called_once()      # the status answer lets the API confirm it
+    reply.assert_called_once_with(ack=(5, 0))      # the ack lets the API confirm it
 
 
 def test_status_reply_carries_pending_requests():

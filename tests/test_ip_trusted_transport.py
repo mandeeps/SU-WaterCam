@@ -42,7 +42,7 @@ def test_untrusted_server_is_never_polled():
     tx = _tx("http://192.168.1.20:8000")
     tx._session = None                      # any request would fail loudly
     out = tx.poll_downlink()
-    assert out["success"] and out["command"] is None and out["untrusted"]
+    assert out["success"] and out["commands"] == [] and out["untrusted"]
 
 
 def _correct(offset_s, tmp_path, monkeypatch, rtc_untrusted=False):

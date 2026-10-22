@@ -42,8 +42,6 @@ def _accumulator():
 def _cmd(*parts: tuple[str, bytes]) -> dict:
     """Build a minimal command dict from (code, payload_bytes) tuples."""
     return {
-        "queue_id": "test-qid-001",
-        "hex_payload": "",
         "parts": [
             {"code": code, "payload_hex": payload.hex()}
             for code, payload in parts
@@ -104,65 +102,67 @@ class TestStageThreshold(unittest.TestCase):
 
 
 class TestMonitoringFrequency(unittest.TestCase):
-    """12 92 — monitoring_freq_h: u8 index into [1, 3, 6, 24, 72]."""
+    """12 92 - monitoring interval: u16 minutes, 1-10080."""
 
-    _MF_HOURS = [1, 3, 6, 24, 72]
-
-    def test_each_valid_index(self):
-        for idx, hours in enumerate(self._MF_HOURS):
-            with self.subTest(idx=idx, hours=hours):
+    def test_applies_minutes(self):
+        for mins in (1, 90, 360, 10080):
+            with self.subTest(mins=mins):
                 store, fn = _accumulator()
-                apply_downlink_command(_cmd(("12 92", struct.pack("B", idx))), fn)
-                self.assertEqual(store["monitoring_frequency"], hours * 60)
+                result = apply_downlink_command(_cmd(("12 92", struct.pack(">H", mins))), fn)
+                self.assertEqual(store["monitoring_frequency"], mins)
+                self.assertIn(f"monitoring_frequency={mins}min", result["applied"])
 
-    def test_out_of_range_index_skipped(self):
+    def test_out_of_range_skipped(self):
+        for mins in (0, 10081, 65535):
+            with self.subTest(mins=mins):
+                store, fn = _accumulator()
+                result = apply_downlink_command(_cmd(("12 92", struct.pack(">H", mins))), fn)
+                self.assertNotIn("monitoring_frequency", store)
+                self.assertIn("12 92", result["skipped"])
+
+    def test_one_byte_value_skipped(self):
         store, fn = _accumulator()
-        result = apply_downlink_command(_cmd(("12 92", struct.pack("B", 99))), fn)
-        self.assertNotIn("monitoring_frequency", store)
+        result = apply_downlink_command(_cmd(("12 92", b"\x02")), fn)   # the old index form
+        self.assertEqual(store, {})
         self.assertIn("12 92", result["skipped"])
-
-    def test_applied_label_uses_hours(self):
-        store, fn = _accumulator()
-        result = apply_downlink_command(_cmd(("12 92", struct.pack("B", 2))), fn)  # 6h
-        self.assertIn("monitoring_frequency=6h", result["applied"])
 
 
 class TestEmergencyFrequency(unittest.TestCase):
-    """13 93 — emergency_freq_min: u8 index into [2, 5, 10]."""
+    """13 93 - emergency capture interval: u8 minutes, 1-240."""
 
-    _EF_MIN = [2, 5, 10]
-
-    def test_each_valid_index(self):
-        for idx, mins in enumerate(self._EF_MIN):
-            with self.subTest(idx=idx, mins=mins):
+    def test_applies_minutes(self):
+        for mins in (1, 10, 240):
+            with self.subTest(mins=mins):
                 store, fn = _accumulator()
-                apply_downlink_command(_cmd(("13 93", struct.pack("B", idx))), fn)
+                apply_downlink_command(_cmd(("13 93", struct.pack("B", mins))), fn)
                 self.assertEqual(store["emergency_frequency"], mins)
 
-    def test_out_of_range_index_skipped(self):
-        store, fn = _accumulator()
-        result = apply_downlink_command(_cmd(("13 93", struct.pack("B", 5))), fn)
-        self.assertNotIn("emergency_frequency", store)
-        self.assertIn("13 93", result["skipped"])
+    def test_out_of_range_skipped(self):
+        for mins in (0, 241, 255):
+            with self.subTest(mins=mins):
+                store, fn = _accumulator()
+                result = apply_downlink_command(_cmd(("13 93", struct.pack("B", mins))), fn)
+                self.assertNotIn("emergency_frequency", store)
+                self.assertIn("13 93", result["skipped"])
 
 
 class TestFloodCodeFrequency(unittest.TestCase):
-    """14 94 — flood_code_freq_min: u8 index into [10, 20, 30, 40, 50, 60]."""
+    """14 94 - flood-code interval: u8 minutes, 1-240."""
 
-    _FF_MIN = [10, 20, 30, 40, 50, 60]
-
-    def test_each_valid_index(self):
-        for idx, mins in enumerate(self._FF_MIN):
-            with self.subTest(idx=idx, mins=mins):
+    def test_applies_minutes(self):
+        for mins in (1, 30, 240):
+            with self.subTest(mins=mins):
                 store, fn = _accumulator()
-                apply_downlink_command(_cmd(("14 94", struct.pack("B", idx))), fn)
+                apply_downlink_command(_cmd(("14 94", struct.pack("B", mins))), fn)
                 self.assertEqual(store["neighborhood_emergency_frequency"], mins)
 
-    def test_out_of_range_index_skipped(self):
-        store, fn = _accumulator()
-        result = apply_downlink_command(_cmd(("14 94", struct.pack("B", 10))), fn)
-        self.assertNotIn("neighborhood_emergency_frequency", store)
-        self.assertIn("14 94", result["skipped"])
+    def test_out_of_range_skipped(self):
+        for mins in (0, 241):
+            with self.subTest(mins=mins):
+                store, fn = _accumulator()
+                result = apply_downlink_command(_cmd(("14 94", struct.pack("B", mins))), fn)
+                self.assertNotIn("neighborhood_emergency_frequency", store)
+                self.assertIn("14 94", result["skipped"])
 
 
 class TestAudioRecordingEnabled(unittest.TestCase):
@@ -205,7 +205,6 @@ class TestMultiPartCommand(unittest.TestCase):
     def test_mixed_valid_and_unknown(self):
         store, fn = _accumulator()
         cmd = {
-            "queue_id": "q2",
             "parts": [
                 {"code": "10 90", "payload_hex": struct.pack("B", 15).hex()},
                 {"code": "FF FF", "payload_hex": "deadbeef"},
@@ -222,52 +221,42 @@ class TestMalformedInput(unittest.TestCase):
 
     def test_empty_parts_list(self):
         store, fn = _accumulator()
-        result = apply_downlink_command({"queue_id": "q", "parts": []}, fn)
+        result = apply_downlink_command({"parts": []}, fn)
         self.assertEqual(store, {})
         self.assertEqual(result["applied"], [])
         self.assertEqual(result["skipped"], [])
 
     def test_missing_parts_field(self):
         store, fn = _accumulator()
-        result = apply_downlink_command({"queue_id": "q"}, fn)
+        result = apply_downlink_command({}, fn)
         self.assertEqual(result["applied"], [])
 
     def test_parts_not_a_list(self):
         store, fn = _accumulator()
-        result = apply_downlink_command({"queue_id": "q", "parts": "bad"}, fn)
+        result = apply_downlink_command({"parts": "bad"}, fn)
         self.assertEqual(result["applied"], [])
 
     def test_part_not_a_dict(self):
         store, fn = _accumulator()
-        result = apply_downlink_command({"queue_id": "q", "parts": ["notadict"]}, fn)
+        result = apply_downlink_command({"parts": ["notadict"]}, fn)
         self.assertEqual(result["applied"], [])
         self.assertEqual(len(result["skipped"]), 1)
 
     def test_invalid_hex_payload(self):
         store, fn = _accumulator()
         result = apply_downlink_command(
-            {"queue_id": "q", "parts": [{"code": "10 90", "payload_hex": "ZZ"}]},
+            {"parts": [{"code": "10 90", "payload_hex": "ZZ"}]},
             fn,
         )
         self.assertNotIn("area_threshold", store)
         self.assertIn("10 90", result["skipped"])
-
-    def test_queue_id_preserved_in_result(self):
-        _, fn = _accumulator()
-        result = apply_downlink_command({"queue_id": "abc-123", "parts": []}, fn)
-        self.assertEqual(result["queue_id"], "abc-123")
-
-    def test_queue_id_none_when_absent(self):
-        _, fn = _accumulator()
-        result = apply_downlink_command({"parts": []}, fn)
-        self.assertIsNone(result["queue_id"])
 
     def test_set_param_called_once_per_valid_part(self):
         calls = []
         result = apply_downlink_command(
             _cmd(
                 ("10 90", struct.pack("B", 5)),
-                ("13 93", struct.pack("B", 1)),
+                ("13 93", struct.pack("B", 5)),
             ),
             lambda k, v: calls.append((k, v)),
         )
@@ -277,13 +266,13 @@ class TestMalformedInput(unittest.TestCase):
 
 
 class TestEmergencyMode(unittest.TestCase):
-    """The API queues these from POST /devices/{id}/emergency for IP units."""
+    """The API sends these as command frames (see test_command_acks.py)."""
 
-    def test_code_21_turns_emergency_on(self):
+    def test_bare_code_21_is_unknown(self):
         store, setp = _accumulator()
         result = apply_downlink_command(_cmd(("21", b"")), setp)
-        self.assertEqual(store, {"emergency_mode": True})
-        self.assertEqual(result["applied"], ["emergency_mode=True"])
+        self.assertEqual(store, {})
+        self.assertEqual(result["skipped"], ["21"])
 
     def test_code_9999_turns_emergency_off(self):
         store, setp = _accumulator()
@@ -292,9 +281,9 @@ class TestEmergencyMode(unittest.TestCase):
 
     def test_emergency_codes_take_no_payload(self):
         store, setp = _accumulator()
-        result = apply_downlink_command(_cmd(("21", b"\x01"), ("99 99", b"\x00")), setp)
+        result = apply_downlink_command(_cmd(("21 91", b""), ("99 99", b"\x00")), setp)
         self.assertEqual(store, {})
-        self.assertEqual(result["skipped"], ["21", "99 99"])
+        self.assertEqual(result["skipped"], ["21 91", "99 99"])
 
     def test_old_api_part_without_a_code_is_skipped(self):
         # What the API queued before: {"name": "emergency_mode", "enable": True}

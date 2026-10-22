@@ -50,7 +50,7 @@ def _tx(reachable, only_if_lora=True, cellular="Quectel"):
     tx.wait_tailnet.return_value = True
     tx._drain_queue.return_value = {"drained": 0, "failed": False, "failed_file": None, "drained_ts": []}
     tx.send_uplink.return_value = {"success": True, "attempts": 1}
-    tx.poll_downlink.return_value = {"success": True, "command": None}
+    tx.poll_downlink.return_value = {"success": True, "commands": []}
     return tx
 
 
@@ -180,11 +180,12 @@ class TestWiFiThenCellular:
 
     def test_downlink_command_over_cellular_is_applied(self):
         tx = _tx(reachable=False)
-        tx.poll_downlink.return_value = {"success": True, "command": {"queue_id": 7}}
+        tx.poll_downlink.return_value = {"success": True, "commands": [{"id": 7, "frame": "0a109032"}]}
         with patch("tools.transmit_ip.apply_downlink_command",
-                   return_value={"applied": ["photo_interval"], "skipped": [], "queue_id": 7}) as apply:
+                   return_value={"applied": ["photo_interval"], "skipped": []}) as apply:
             _run(tx)
         apply.assert_called_once()
+        tx.post_acks.assert_called_once_with([{"id": 7, "result": 0}])
 
     def test_downlink_polled_after_uplink_over_wifi(self):
         # The wake-start poll may have had no route even when the uplink gets
@@ -234,37 +235,39 @@ class TestCommandInUplinkReply:
     def test_command_in_the_reply_is_applied_without_a_poll(self):
         tx = _tx(reachable=True)
         tx.send_uplink.return_value = {"success": True, "attempts": 1,
-                                       "response": {"decoded": {}, "command": {"queue_id": 9}}}
+                                       "response": {"decoded": {},
+                                                    "commands": [{"id": 9, "frame": "0b109032"}]}}
         with patch("tools.transmit_ip.apply_downlink_command",
-                   return_value={"applied": ["photo_interval=60"], "skipped": [], "queue_id": 9}) as apply:
+                   return_value={"applied": ["photo_interval=60"], "skipped": []}) as apply:
             _run(tx, wifi=True)
         apply.assert_called_once()
+        tx.post_acks.assert_called_once_with([{"id": 9, "result": 0}])
         tx.poll_downlink.assert_not_called()
 
-    def test_null_command_in_the_reply_means_nothing_pending(self):
+    def test_empty_commands_in_the_reply_mean_nothing_pending(self):
         tx = _tx(reachable=True)
         tx.send_uplink.return_value = {"success": True, "attempts": 1,
-                                       "response": {"decoded": {}, "command": None}}
+                                       "response": {"decoded": {}, "commands": []}}
         _run(tx, wifi=True)
         tx.poll_downlink.assert_not_called()
 
-    def test_older_server_reply_falls_back_to_a_poll(self):
+    def test_reply_without_commands_falls_back_to_a_poll(self):
         tx = _tx(reachable=True)
         tx.send_uplink.return_value = {"success": True, "attempts": 1, "response": {"decoded": {}}}
         _run(tx, wifi=True)
         tx.poll_downlink.assert_called_once()
 
 
-class TestReplyCommand:
-    def test_reply_command(self):
-        from tools.transmit_ip import reply_command
-        assert reply_command({"success": True, "response": {"command": {"queue_id": 1}}}) == \
-            {"success": True, "command": {"queue_id": 1}}
-        assert reply_command({"success": True, "response": {"command": None}}) == \
-            {"success": True, "command": None}
-        assert reply_command({"success": True, "response": {"decoded": {}}}) is None
-        assert reply_command({"success": True, "response": None}) is None
-        assert reply_command({"success": False, "response": {"command": {"queue_id": 1}}}) is None
+class TestReplyCommands:
+    def test_reply_commands(self):
+        from tools.transmit_ip import reply_commands
+        c = [{"id": 1, "frame": "0110902a"}]
+        assert reply_commands({"success": True, "response": {"commands": c}}) == {"success": True, "commands": c}
+        assert reply_commands({"success": True, "response": {"commands": []}}) == \
+            {"success": True, "commands": []}
+        assert reply_commands({"success": True, "response": {"decoded": {}}}) is None
+        assert reply_commands({"success": True, "response": None}) is None
+        assert reply_commands({"success": False, "response": {"commands": c}}) is None
 
     def test_send_uplink_sends_the_flag_only_when_asked(self):
         from tools.transmit_ip import IPTransmitter
@@ -377,21 +380,22 @@ class TestHandleDownlinkReply:
 
     def test_no_command_is_reported(self, capsys):
         from tools.transmit_ip import handle_downlink_reply
-        out = handle_downlink_reply({"success": True, "command": None},
+        out = handle_downlink_reply({"success": True, "commands": []},
                                     set_param_fn=lambda k, v: None, label="IP downlink after uplink")
         assert out == {"status": "no_command"}
         assert "IP downlink after uplink: no pending commands" in capsys.readouterr().out
 
-    def test_command_is_applied(self):
+    def test_command_is_applied_and_acked(self):
         from tools.transmit_ip import handle_downlink_reply
+        acks = []
         with patch("tools.transmit_ip.apply_downlink_command",
-                   return_value={"applied": ["photo_interval=5"], "skipped": ["99 99"], "queue_id": 3}):
-            out = handle_downlink_reply({"success": True, "command": {"queue_id": 3, "hex_payload": "ab"}},
-                                        set_param_fn=lambda k, v: None)
+                   return_value={"applied": ["photo_interval=5"], "skipped": ["99 99"]}):
+            out = handle_downlink_reply({"success": True, "commands": [{"id": 3, "frame": "039999"}]},
+                                        set_param_fn=lambda k, v: None, ack_fn=acks.append)
         assert out["status"] == "applied"
         assert out["applied_params"] == ["photo_interval=5"]
-        assert out["skipped_parts"] == ["99 99"]
-        assert out["queue_id"] == 3
+        assert out["acks"] == [{"id": 3, "result": 1}]
+        assert acks == [[{"id": 3, "result": 1}]]
 
 
 class TestLoRaDuplicates:
