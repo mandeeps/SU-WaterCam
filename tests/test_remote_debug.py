@@ -179,12 +179,13 @@ def test_ip_downlink_queues_a_request(node):
     assert json.load(open(rd.REQUEST_FILE))["minutes"] == 120
 
 
-@pytest.mark.parametrize("payload, value", [("189806", "06"), ("18980c", "0c"), ("189800", "0")])
+@pytest.mark.parametrize("payload, value", [("09189806", "06"), ("0918980c", "0c"), ("09189800", "0")])
 def test_lora_decode_routes_remote_debug(payload, value):
     from tools.lora_handler_concurrent import LoRaHandler
     h = LoRaHandler.__new__(LoRaHandler)
     h.update_config = MagicMock()
     h._start_remote_debug = MagicMock()
+    h._reply_with_status = MagicMock()
     LoRaHandler.decode(h, payload)
     h._start_remote_debug.assert_called_once()
     assert rd.minutes_from_code(h._start_remote_debug.call_args.args[0]) == rd.minutes_from_code(value)

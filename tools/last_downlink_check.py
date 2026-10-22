@@ -22,7 +22,7 @@ from typing import Any, Callable, Dict, Optional
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REMOTE_STATE = os.path.join(REPO, "data", "remote_debug.json")
-MAX_COMMANDS = 3        # the server hands out one queued command per poll
+MAX_COMMANDS = 2        # polls: one gets them all; a second catches one sent meanwhile
 REACH_TIMEOUT_S = 2
 
 
@@ -44,7 +44,7 @@ def _emergency_on(get_param: Callable[[str, Any], Any]) -> bool:
 def check(set_param_fn: Optional[Callable[[str, Any], None]] = None,
           get_param_fn: Optional[Callable[[str, Any], Any]] = None,
           transmitter=None) -> Dict[str, Any]:
-    """Poll and apply up to MAX_COMMANDS queued commands; never raises.
+    """Poll (up to MAX_COMMANDS times) and apply the pending commands; never raises.
 
     Returns {"status", "applied": [...], "keep_awake": bool, "why": str}.
     status: "disabled" (IP upload off), "unreachable", "no_command", "applied",
@@ -67,7 +67,7 @@ def check(set_param_fn: Optional[Callable[[str, Any], None]] = None,
             else:
                 for _ in range(MAX_COMMANDS):
                     reply = handle_downlink_reply(tx.poll_downlink(), set_param_fn=set_param_fn,
-                                                  label="Last downlink check")
+                                                  label="Last downlink check", ack_fn=tx.post_acks)
                     if reply.get("status") in ("no_command", "poll_failed"):
                         if reply.get("status") == "poll_failed" and not out["applied"]:
                             out["status"] = "error"

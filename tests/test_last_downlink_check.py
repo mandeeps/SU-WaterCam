@@ -7,17 +7,22 @@ from tools import last_downlink_check as ldc
 class FakeTx:
     def __init__(self, replies, enabled=True, reachable=True):
         self.replies, self.enabled, self.reachable, self.polls = list(replies), enabled, reachable, 0
+        self.acked = []
 
     def is_reachable(self, timeout_s=None):
         return self.reachable
 
+    def post_acks(self, acks):
+        self.acked.append(acks)
+        return True
+
     def poll_downlink(self):
         self.polls += 1
-        return self.replies.pop(0) if self.replies else {"success": True, "command": None}
+        return self.replies.pop(0) if self.replies else {"success": True, "commands": []}
 
 
-def _cmd(parts):
-    return {"success": True, "command": {"queue_id": 1, "hex_payload": "", "parts": parts}}
+def _cmd(frame_hex, cid=1):
+    return {"success": True, "commands": [{"id": cid, "frame": frame_hex}]}
 
 
 def _run(tx, params=None, tmp_path=None, monkeypatch=None, session=False):
@@ -46,14 +51,15 @@ def test_no_command(tmp_path, monkeypatch):
 
 
 def test_applies_queued_commands_up_to_the_cap(tmp_path, monkeypatch):
-    tx = FakeTx([_cmd([{"code": "10 90", "payload_hex": "14"}])] * 5)
+    tx = FakeTx([_cmd("07109014")] * 5)
     out, params = _run(tx, tmp_path=tmp_path, monkeypatch=monkeypatch)
     assert out["status"] == "applied" and tx.polls == ldc.MAX_COMMANDS
     assert params                       # something was set
+    assert tx.acked == [[{"id": 1, "result": 0}]] * ldc.MAX_COMMANDS   # acked each time offered
 
 
 def test_emergency_on_keeps_the_unit_awake(tmp_path, monkeypatch):
-    tx = FakeTx([_cmd([{"code": "21 91", "payload_hex": "02"}])])
+    tx = FakeTx([_cmd("08219102")])
     out, params = _run(tx, tmp_path=tmp_path, monkeypatch=monkeypatch)
     assert params.get("emergency_mode") is True
     assert out["keep_awake"] and "emergency" in out["why"]

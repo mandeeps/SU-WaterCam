@@ -951,60 +951,70 @@ class LoRaHandler:
 
     @staticmethod
     def _parse_server_frame(payload: str):
-        """Parts for a server-encoded frame (tools/transmit_ip.parse_downlink_frame), or None."""
+        """The bytes of a server command frame ([seq][code][value]...), or None if not hex."""
         clean = payload.strip()
-        if not clean or len(clean) % 2 or any(c not in '0123456789abcdefABCDEF' for c in clean):
+        if len(clean) < 6 or len(clean) % 2 or any(c not in '0123456789abcdefABCDEF' for c in clean):
             return None
-        try:
-            from tools.transmit_ip import parse_downlink_frame
-        except ImportError:
-            from transmit_ip import parse_downlink_frame
-        return parse_downlink_frame(bytes.fromhex(clean))
+        return bytes.fromhex(clean)
 
-    def _apply_server_frame(self, parts) -> None:
-        """Apply a server frame: the IP decoder for parameters, the handler for actions."""
-        rest = []
+    def _apply_server_frame(self, frame: bytes) -> None:
+        """Apply a server command frame once and ack it with the status reply.
+
+        The server resends until it has the ack ({"ak":seq,"ar":result}); a
+        frame applied before is only acked again (tools/command_log.py).
+        """
+        try:
+            from tools.transmit_ip import apply_command_frame
+        except ImportError:
+            from transmit_ip import apply_command_frame
+        r = apply_command_frame(frame, self._apply_parts)
+        print(f"📥 Server command seq {r['seq']}: applied {r['applied']} skipped {r['skipped']}"
+              f"{' (already applied)' if r['duplicate'] else ''}; ack result {r['result']}")
+        self._reply_with_status(ack=(r['seq'], r['result']))
+
+    def _apply_parts(self, parts) -> Dict[str, Any]:
+        """Apply a frame's blocks: the handler for actions, the IP decoder for parameters."""
+        applied, skipped, rest = [], [], []
         for part in parts:
             code, value = part['code'], part['payload_hex']
             if code in ('18 98', '18 99', '18 9A'):
                 self._start_remote_debug(value, code)
+                applied.append(f"remote_debug={value}")
             elif code == '21 91':
-                self._start_emergency(value)
+                (applied if self._start_emergency(value) else skipped).append(code)
             elif code == '99 99':
                 self.update_config('emergency_mode', False)
                 print('✅ Emergency mode deactivated')
-                self._reply_with_status()
+                applied.append('emergency_mode=False')
             else:
                 rest.append(part)
-        if not rest:
-            return
-        try:
-            from tools.transmit_ip import apply_downlink_command
-        except ImportError:
-            from transmit_ip import apply_downlink_command
-        result = apply_downlink_command({'parts': rest}, set_param_fn=self.update_config)
-        print(f"📥 Server command applied: {result['applied']} skipped: {result['skipped']}")
-        if result['applied']:
-            self._reply_with_status()   # lets the server confirm the change arrived
+        if rest:
+            try:
+                from tools.transmit_ip import apply_downlink_command
+            except ImportError:
+                from transmit_ip import apply_downlink_command
+            result = apply_downlink_command({'parts': rest}, set_param_fn=self.update_config)
+            applied += result['applied']
+            skipped += result['skipped']
+        return {'applied': applied, 'skipped': skipped}
 
-    def _start_emergency(self, value: str) -> None:
+    def _start_emergency(self, value: str) -> bool:
         """Emergency mode on for HH hours (21 91 HH; 00 keeps emergency_max_hours).
 
-        The duration starts now, even if emergency mode was already on, and the
-        node answers with its status ({"dbg":1,...,"em":1}) so the API knows the
-        command arrived and stops resending.
+        The duration starts now, even if emergency mode was already on. The
+        frame's ack ({"ak":seq,...,"em":1}) tells the server it arrived.
         """
         try:
             hours = int(str(value).strip() or "0", 16)
         except ValueError:
             print(f"⚠️ Emergency command with a bad duration {value!r}: ignored")
-            return
+            return False
         if hours:
             self.update_config('emergency_max_hours', min(hours, 168))
         self.update_config('emergency_mode', True)
         self.update_config('emergency_since', time.time())
         print(f"🚨 Emergency mode on for {hours or self.get_config('emergency_max_hours', 24)} h")
-        self._reply_with_status()
+        return True
 
     def _emergency_mode(self) -> bool:
         """Emergency mode as the node acts on it: runtime_config.json.
@@ -1020,12 +1030,12 @@ class LoRaHandler:
         except Exception:
             return bool(self.get_config('emergency_mode', False))
 
-    def _reply_with_status(self) -> None:
-        """Send the node status JSON (as for 5001) from a helper thread."""
+    def _reply_with_status(self, ack=None) -> None:
+        """Send the node status JSON from a helper thread; ack = (seq, result) leads it."""
         try:
             from tools.lora_debug_integration import handle_debug_status_request
             reply = handle_debug_status_request(size_limit=self.current_size_limit,
-                                                emergency_mode=self._emergency_mode())
+                                                emergency_mode=self._emergency_mode(), ack=ack)
             if reply['status'] == 'success':
                 threading.Thread(target=self._send_debug_reply, args=(reply['data'],),
                                  name='status-reply', daemon=True).start()
@@ -1215,29 +1225,11 @@ class LoRaHandler:
                 print('ℹ️ Remote start byte received; emergency mode needs 21 91 HH')
                 return
 
-            # Frames the server encodes (API app/encoders.py): [code 2B][value], the
-            # same codes the IP downlink carries.
+            # Command frames the server encodes (API app/commands.py): [seq][code 2B][value]...,
+            # the same frames the IP downlink carries. 50 01 asks for the status reply.
             frame = self._parse_server_frame(payload)
             if frame:
                 self._apply_server_frame(frame)
-                return
-
-            # Debug status request: reply with the node status JSON
-            if payload.strip() == '5001':
-                print('🔍 Debug status requested via LoRa command')
-                from tools.lora_debug_integration import handle_debug_status_request
-                debug_response = handle_debug_status_request(
-                    size_limit=self.current_size_limit,
-                    emergency_mode=self._emergency_mode(),
-                )
-                if debug_response['status'] == 'success':
-                    # Sent from a helper thread: transmit() takes the serial lock,
-                    # and this must not wait on it.
-                    print(f"📤 Sending debug reply: {debug_response['size_bytes']} bytes")
-                    threading.Thread(target=self._send_debug_reply, args=(debug_response['data'],),
-                                     name='debug-reply', daemon=True).start()
-                else:
-                    print(f"❌ Debug status failed: {debug_response.get('error', 'Unknown error')}")
                 return
 
             print(f"ℹ️ Unrecognised downlink ignored: '{payload}'")

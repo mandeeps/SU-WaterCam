@@ -2,23 +2,27 @@
 """
 LoRa Debug Integration
 
-Answers the remote debug-status downlink (channel 50, command 01), which
+Builds the node's status reply: the answer to the status request (command
+50 01) and the ack of every server command frame (tools/command_log.py), which
 LoRaHandler.decode() in tools/lora_handler_concurrent.py routes here.
 
 Sending the request
 -------------------
-Send the downlink as the ASCII digits "5001" (any trailing digit works, e.g.
-"50011"). The hex/TLV form "500100" does NOT work: decode() tries the TLV
-parser first, reads it as channel 0x50 = 80, finds no handler and drops it.
+The server sends it as a command frame like any other: [seq] 50 01
+(API app/commands.py, kind status_request). By hand, e.g. in ChirpStack's
+enqueue form: 005001 (seq 0: applied every time, acked as "ak":0).
 
 The reply
 ---------
-One uplink: compact JSON, UTF-8, sent raw (no TLV). It always starts with
-{"dbg":1 so the server can tell it apart from sensor uplinks. Fields come in
-priority order and are dropped from the end until the reply fits the mDot's
-current payload limit, so it still goes out at low data rates (about 115 bytes
-in full, about 115 with sd; US915 DR2 allows 125, DR1 53, DR0 11):
+One uplink: compact JSON, UTF-8, sent raw (no TLV). It starts with {"ak": when
+it acks a command, else {"dbg":1, so the server can tell it apart from sensor
+uplinks. Fields come in priority order and are dropped from the end until the
+reply fits the mDot's current payload limit, so it still goes out at low data
+rates (about 115 bytes in full; US915 DR2 allows 125, DR1 53, DR0 11; the ack
+alone, {"ak":123}, is 10):
 
+    ak   seq of the command this reply acks (only in an ack)
+    ar   its result when not 0: 1 partly applied, 2 rejected
     dbg  format version (always present)
     up   uptime, hours
     ct   CPU temperature, deg C
@@ -147,9 +151,19 @@ def _ip_uploads_requested() -> Optional[int]:
         return None
 
 
-def collect_compact_status(emergency_mode: Optional[bool] = None) -> List[Field]:
-    """The reply's fields, in priority order, leaving out any that can't be read."""
-    candidates: List[Field] = [
+def collect_compact_status(emergency_mode: Optional[bool] = None,
+                           ack: Optional[Tuple[int, int]] = None) -> List[Field]:
+    """The reply's fields, in priority order, leaving out any that can't be read.
+
+    ack = (seq, result) of the server command this reply answers: first, so it
+    survives trimming even at DR0 ({"ak":123} is 10 B); the result only when
+    not 0 (applied).
+    """
+    candidates: List[Field] = []
+    if ack is not None:
+        seq, result = ack
+        candidates += [("ak", int(seq)), ("ar", int(result) or None)]
+    candidates += [
         ("dbg", FORMAT_VERSION),
         # second: the server confirms emergency on/off from it, so it must survive
         # trimming to a small payload limit ({"dbg":1,"em":1} is 16 B)
@@ -189,7 +203,8 @@ def encode_for_limit(fields: List[Field], size_limit: int) -> Tuple[bytes, List[
 
 
 def handle_debug_status_request(size_limit: int = DEFAULT_SIZE_LIMIT,
-                                emergency_mode: Optional[bool] = None) -> Dict[str, Any]:
+                                emergency_mode: Optional[bool] = None,
+                                ack: Optional[Tuple[int, int]] = None) -> Dict[str, Any]:
     """Build the reply and return it ready to transmit.
 
     On success `data` is the compact JSON hex-encoded: LoRaHandler.transmit()
@@ -197,7 +212,7 @@ def handle_debug_status_request(size_limit: int = DEFAULT_SIZE_LIMIT,
     """
     timestamp = datetime.now().isoformat()
     try:
-        payload, dropped = encode_for_limit(collect_compact_status(emergency_mode), size_limit)
+        payload, dropped = encode_for_limit(collect_compact_status(emergency_mode, ack), size_limit)
         if not payload:
             raise ValueError(f"payload limit {size_limit} B is too small for any reply")
         if dropped:
@@ -218,21 +233,6 @@ def handle_debug_status_request(size_limit: int = DEFAULT_SIZE_LIMIT,
             'status': 'error',
             'error': str(e),
         }
-
-
-def process_debug_command(command_data: str, size_limit: int = DEFAULT_SIZE_LIMIT) -> Optional[Dict[str, Any]]:
-    """Handle a raw debug command string such as "50011" (type 50, command 01).
-
-    Returns the response for a debug status command, otherwise None.
-    """
-    try:
-        if command_data.startswith('5001'):
-            print(f"🔍 Processing debug status command: {command_data}")
-            return handle_debug_status_request(size_limit)
-        return None
-    except Exception as e:
-        print(f"⚠️ Failed to process debug command {command_data}: {e}")
-        return None
 
 
 if __name__ == "__main__":

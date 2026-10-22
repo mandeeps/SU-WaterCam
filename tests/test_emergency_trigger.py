@@ -6,8 +6,8 @@ with it off, the packet reaches the Pi as the hex payload "21". Neither turns
 emergency mode on any more: it used to only when the Pi was already awake, so the
 same command meant two things depending on power state.
 
-Emergency mode is 21 91 HH (HH hours, hex; 00 = emergency_max_hours), and the node
-answers with its status. 99 99 still ends it.
+Emergency mode is 21 91 HH (HH hours, hex; 00 = emergency_max_hours) in a command
+frame with a leading seq byte, and the node answers with its status and an ack. 99 99 still ends it.
 """
 import json
 import os
@@ -52,7 +52,7 @@ def test_the_firmware_line_does_not_turn_emergency_on(handler):
     set_param.assert_not_called()
 
 
-@pytest.mark.parametrize("payload, hours", [("219106", 6), ("219130", 48), ("219100", None)])
+@pytest.mark.parametrize("payload, hours", [("07219106", 6), ("07219130", 48), ("07219100", None)])
 def test_21_91_turns_emergency_on_for_hh_hours(handler, payload, hours):
     with patch.object(LoRaHandler, "_reply_with_status") as reply:
         handler.decode(payload)
@@ -62,12 +62,12 @@ def test_21_91_turns_emergency_on_for_hh_hours(handler, payload, hours):
         assert handler.config["emergency_max_hours"] == hours
     else:
         assert "emergency_max_hours" not in handler.config     # default kept
-    reply.assert_called_once()
+    reply.assert_called_once_with(ack=(7, 0))
 
 
 def test_21_91_duration_is_capped(handler):
     with patch.object(LoRaHandler, "_reply_with_status"):
-        handler.decode("2191ff")
+        handler.decode("072191ff")
     assert handler.config["emergency_max_hours"] == 168
 
 

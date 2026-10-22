@@ -321,7 +321,10 @@ def test_legacy_text_commands_change_nothing(payload):
         h.decode(payload)
     upd.assert_not_called()
     em.assert_not_called()
-    reply.assert_not_called()
+    if payload == "22000001":           # hex: parsed as a frame with seq 0x22 whose blocks are invalid
+        reply.assert_called_once_with(ack=(0x22, 2))     # acked as rejected, nothing applied
+    else:
+        reply.assert_not_called()
 
 
 def test_the_legacy_line_classifiers_are_gone():

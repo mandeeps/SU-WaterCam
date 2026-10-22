@@ -1784,7 +1784,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     import struct
     import time as _time
     from tools.transmit_ip import (IPTransmitter, cellular_status, cellular_up,
-                                   cellular_down, handle_downlink_reply, reply_command,
+                                   cellular_down, handle_downlink_reply, reply_commands,
                                    wifi_connected, wifi_in_range)
     from tools import lora_store_forward as _lsf
     from tools.lora_runtime_integration import get_parameter, set_parameter
@@ -2161,16 +2161,16 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     finally:
         if delivered:
             # The server is reachable now; collect any command the wake-start
-            # poll missed (see the docstring). The uplink reply carries it; a
-            # server too old to put it there gets polled instead.
+            # poll missed (see the docstring). The uplink reply carries them;
+            # without one (the uplink didn't ask), poll.
             try:
-                carried = reply_command(result)
+                carried = reply_commands(result)
                 if carried is not None:
                     handle_downlink_reply(carried, set_param_fn=set_parameter,
-                                          label="IP downlink in uplink reply")
+                                          label="IP downlink in uplink reply", ack_fn=tx.post_acks)
                 else:
                     handle_downlink_reply(tx.poll_downlink(), set_param_fn=set_parameter,
-                                          label="IP downlink after uplink")
+                                          label="IP downlink after uplink", ack_fn=tx.post_acks)
             except Exception as exc:
                 print(f"⚠️ IP downlink after uplink failed: {exc}")
         if fallback and cellular_started and not tx.enabled:
@@ -2218,10 +2218,10 @@ def ip_downlink_poll_and_apply(_lora_init):
         print("⚠️ IP downlink poll skipped: server unreachable — polling again after the IP uplink")
         return {"status": "unreachable"}
 
-    poll_result = tx.poll_downlink()
-    tx.close()
-
-    return handle_downlink_reply(poll_result, set_param_fn=set_parameter)
+    try:
+        return handle_downlink_reply(tx.poll_downlink(), set_param_fn=set_parameter, ack_fn=tx.post_acks)
+    finally:
+        tx.close()
 
 
 @GRAPHify

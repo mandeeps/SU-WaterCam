@@ -79,13 +79,6 @@ def test_success_payload_is_hex_of_the_json_reply():
     assert r["size_bytes"] == len(bytes.fromhex(r["data"]))
 
 
-def test_process_debug_command_only_answers_type_50_command_01():
-    with mock.patch.object(dbg, "handle_debug_status_request", return_value={"status": "success"}) as h:
-        assert dbg.process_debug_command("50011") == {"status": "success"}
-        assert dbg.process_debug_command("21001") is None
-    h.assert_called_once()
-
-
 # ── decode() sends it promptly, off the listener thread ─────────────────────
 
 def test_decode_sends_the_reply_from_a_helper_thread():
@@ -103,11 +96,11 @@ def test_decode_sends_the_reply_from_a_helper_thread():
 
     with mock.patch.object(handler, "transmit", side_effect=fake_transmit), \
          mock.patch.object(handler, "queue_binary_transmit") as queued:
-        handler.decode("5001")
+        handler.decode("005001")
         assert done.wait(5), "reply was never transmitted"
 
     content, thread_name = sent[0]
     payload = bytes.fromhex(content)
     assert len(payload) <= 53 and _decode(payload)["dbg"] == 1
-    assert thread_name == "debug-reply"   # not the caller's (listener's) thread
+    assert thread_name == "status-reply"  # not the caller's (listener's) thread
     queued.assert_not_called()            # the undrained queue is no longer used

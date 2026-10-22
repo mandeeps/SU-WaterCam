@@ -246,6 +246,14 @@ def _ip_fallback_state(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _command_log_state(monkeypatch, tmp_path):
+    """Keep tools/command_log.py's applied-command and pending-ack files in the test's own directory."""
+    from tools import command_log
+    monkeypatch.setattr(command_log, "APPLIED_FILE", str(tmp_path / "applied_commands.json"))
+    monkeypatch.setattr(command_log, "PENDING_ACKS_FILE", str(tmp_path / "pending_acks.json"))
+
+
+@pytest.fixture(autouse=True)
 def _reset_singletons():
     """Reset module-level singletons before every test so tests are isolated."""
     # Import lazily to avoid triggering hardware init at collection time.
