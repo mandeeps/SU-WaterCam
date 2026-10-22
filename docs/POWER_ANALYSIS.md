@@ -39,7 +39,7 @@ All figures are the Witty Pi's output (Vout × Iout), from the power logger
 | Two captures, from the first photo to the shutdown request | **3.3–3.8 W** mean, **75–87 mWh** in 73–87 s | measured: five real ticktalk wakes on 006, 2026-10-06, sampled at 5 Hz |
 | Peaks during a real wake | **7.5–8 W** (1.50–1.67 A) | measured: same five wakes, stock clocks |
 | Brief peaks under synthetic load (camera, inference, 4-core stress, modem) | **8–10 W** (1.8–2.2 A) | measured: 006 load tests at 2000 MHz |
-| Off: Witty Pi standby plus the mDot listening | **about 0.05–0.1 W** | estimate: not yet measured |
+| Off: Witty Pi standby plus the mDot listening | **under about 0.05 W** | below the resolution of two USB meters, on 005 and 006 (2026-10-22) |
 
 The one-minute logger is too coarse to integrate a wake, so the 2026-10-06
 figures come from a 5 Hz sampler of the same Witty Pi registers. The sampler
@@ -342,15 +342,27 @@ So a boot to "ready" costs about 25-35 mWh and a shutdown about 10-15 mWh: about
 | Emergency mode, 10-min interval | Per day |
 |---|---|
 | Pi kept on (about 3 W idle) | about 72 Wh |
-| Shut down between captures (boot + one capture + shutdown, about 0.09 Wh, ×144, plus about 0.08 W off) | about 14-15 Wh |
+| Shut down between captures (boot + one capture + shutdown, about 0.09 Wh, ×144, plus under 0.05 W off) | about 13-14 Wh |
 
-The off draw (Witty Pi + mDot) is still an estimate and needs a meter between the pack and the Witty Pi.
+The off draw (Witty Pi + mDot) was below what two cheap USB meters (different models and vendors) could read, on 006 and on 005 (2026-10-22): under their resolution, so at most a few tens of mW. The estimates use 0.05 W as an upper bound.
 
-Note: 005 idled at 2.8-3.1 W that day (the one-minute logger read 0.58-0.64 A before the sampler started), well above the 2.0 W in the table at the top. Something resident now draws about 1 W more (the segformer and LoRa daemons both run on the bench); worth finding before trusting idle figures.
+### Why 005 idles at 3 W, not 2 W (2026-10-22)
+
+005 idled at a steady 1.96 W from 10-04 to 10-16 and at 2.9-3.1 W from 10-19 about 15:00, after two power-on boots that afternoon (Witty Pi reason 0x0a). It is the USB devices: the Quectel EC25 modem and the PCM2902 USB microphone, which 005 didn't have in the earlier measurement. Measured at 5 Hz:
+
+| State | Mean |
+|---|---|
+| Normal (USB on, modem on and searching) | 2.97-3.17 W |
+| Modem in low power (`mmcli --set-power-state-low`) | 2.93 W |
+| Modem de-authorised (still powered) | 2.60 W |
+| Microphone de-authorised | 3.07 W |
+| USB power off (`uhubctl`, all four ports) | 1.90 W |
+
+So the modem draws about 0.6-0.9 W while powered, even in low power, and the microphone about 0.1 W. The four USB ports share one power switch, and `usb-power-on.timer` turns them on 8 s after every boot, so a unit with the modem pays about 1 W for its whole awake time. Turning USB on only when it is needed (the GPS fix, a cellular upload, a recording) would save most of it; the modem's GPS needs 40-50 s for a fix, which sets the cost.
 
 ## Still to measure
 
-1. **Off-state draw:** the Witty Pi plus the mDot listening in Class C, with the Pi off. A meter between the pack and the Witty Pi doesn't see the V75's own 7 mA; add it.
+1. **Off-state draw:** below what two USB meters could read (2026-10-22); a meter with mA resolution would pin it down. The V75's own 7 mA is on top.
 2. **Energy per wake, boot and shutdown included:** captures sampled at 5 Hz on 2026-10-06; boot and shutdown measured on 005 on 2026-10-22 (below). Still missing: the first ~14 s after power-on (bootloader and kernel, before any sampler can run), estimated.
 3. **WiFi's draw:** idle looked about 0.3–0.6 W lower with WiFi disconnected, in one session.
 4. **Solar charging through the V75's solar jack:** a load test while it charges from the real panel in sun.
