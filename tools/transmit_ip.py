@@ -57,7 +57,7 @@ import logging
 import os
 import subprocess
 import time
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import requests
 
@@ -238,9 +238,9 @@ class IPTransmitter:
             When provided, the server uses it as the measurement timestamp
             instead of the server arrival time.
         want_command:
-            Ask the server to put the oldest pending downlink command in the
-            reply (`reply_command()`), marked delivered, instead of the node
-            polling for it. Only for a send whose reply is acted on.
+            Ask the server to put the pending commands in the reply
+            (`reply_commands()`) instead of the node polling for them. Only
+            for a send whose reply is acted on.
         ip_fallback:
             This is a LoRa unit's IP fallback upload (tools/ip_fallback.py): the
             server keeps sending its commands over LoRa rather than switching
@@ -264,79 +264,93 @@ class IPTransmitter:
         }
         if device_ts is not None:
             payload["device_ts"] = device_ts
-        if want_command and self.trusted:     # the server marks it delivered: only ask when we'd apply it
+        if want_command and self.trusted:     # only ask when we'd apply them
             payload["want_command"] = True
         if ip_fallback:
             payload["ip_fallback"] = True
+        # Acks that couldn't be posted to /ip/ack (tools/command_log.py)
+        acks = _pending_acks() if self.trusted else []
+        if acks:
+            payload["acks"] = acks
 
         url = f"{self.server_url}/ip/uplink"
-        return self._post_with_retry(url, payload)
+        result = self._post_with_retry(url, payload)
+        if acks and result.get("success"):
+            _clear_pending_acks(a["id"] for a in acks)
+        return result
+
+    def post_acks(self, acks: List[Dict[str, Any]]) -> bool:
+        """POST /ip/ack; True if the server took them. Kept for the next uplink otherwise."""
+        if not acks:
+            return True
+        ok = False
+        if self.trusted:
+            try:
+                resp = self._session.post(f"{self.server_url}/ip/ack",
+                                          json={"device_id": self.device_id, "acks": acks},
+                                          timeout=self.timeout_s)
+                ok = 200 <= resp.status_code < 300
+                if not ok:
+                    logger.warning("POST /ip/ack: HTTP %s", resp.status_code)
+            except requests.exceptions.RequestException as exc:
+                logger.warning("POST /ip/ack failed: %s", exc)
+        if not ok:
+            try:
+                from tools import command_log
+            except ImportError:
+                import command_log
+            command_log.add_pending_acks(acks)
+        return ok
 
     def poll_downlink(self) -> Dict[str, Any]:
-        """GET /ip/downlink/{device_id} to retrieve the oldest pending command.
+        """GET /ip/downlink/{device_id}: the commands waiting for this node's ack.
 
-        The server atomically marks the command as delivered on retrieval, so
-        calling this multiple times without handling the first response will
-        consume queued commands.
+        The server offers them until they are acked (`post_acks`), so polling
+        twice is harmless; tools/command_log.py applies each frame once.
 
         Returns
         -------
         dict with keys:
             "success"    : bool
-            "command"    : dict or None  (None means no pending command)
+            "commands"   : list of {"id", "frame"} (empty: nothing pending)
             "status_code": int or None
             "error"      : error message string or None
         """
         if not self.trusted:
-            # Polling marks the command delivered, so don't poll a server whose
-            # commands would be ignored
-            return {"success": True, "command": None, "status_code": None, "error": None,
+            # Commands from a server we don't trust are never applied
+            return {"success": True, "commands": [], "status_code": None, "error": None,
                     "untrusted": True}
         url = f"{self.server_url}/ip/downlink/{self.device_id}"
 
         try:
             resp = self._session.get(url, timeout=self.timeout_s)
         except requests.exceptions.ConnectionError as exc:
-            return {"success": False, "command": None, "status_code": None,
+            return {"success": False, "commands": [], "status_code": None,
                     "error": f"Connection error: {exc}"}
         except requests.exceptions.Timeout:
-            return {"success": False, "command": None, "status_code": None,
+            return {"success": False, "commands": [], "status_code": None,
                     "error": f"Request timed out after {self.timeout_s}s"}
         except requests.exceptions.RequestException as exc:
-            return {"success": False, "command": None, "status_code": None,
+            return {"success": False, "commands": [], "status_code": None,
                     "error": str(exc)}
 
         if resp.status_code == 404:
-            # Device not yet registered on the server — treat as "no pending commands"
-            # rather than a transport error, so callers handle it uniformly.
-            return {
-                "success": True,
-                "command": None,
-                "status_code": resp.status_code,
-                "error": None,
-            }
+            # Device not yet registered on the server: nothing pending
+            return {"success": True, "commands": [], "status_code": resp.status_code, "error": None}
 
         if resp.status_code != 200:
-            return {
-                "success": False,
-                "command": None,
-                "status_code": resp.status_code,
-                "error": f"HTTP {resp.status_code}: {resp.text[:200]}",
-            }
+            return {"success": False, "commands": [], "status_code": resp.status_code,
+                    "error": f"HTTP {resp.status_code}: {resp.text[:200]}"}
 
         try:
             body = resp.json()
         except ValueError:
-            return {"success": False, "command": None,
-                    "status_code": resp.status_code,
+            return {"success": False, "commands": [], "status_code": resp.status_code,
                     "error": "Non-JSON response from server"}
 
-        return {
-            "success": True,
-            "command": body.get("command"),   # dict or None
-            "status_code": resp.status_code,
-            "error": None,
-        }
+        commands = body.get("commands") if isinstance(body, dict) else None
+        return {"success": True, "commands": commands if isinstance(commands, list) else [],
+                "status_code": resp.status_code, "error": None}
 
     def is_reachable(self, timeout_s: Optional[float] = None) -> bool:
         """Quick check — returns True if the server /health endpoint responds.
@@ -608,7 +622,7 @@ def send_uplink(
 
 
 def poll_downlink(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
-    """Module-level wrapper: create a transmitter, poll for one downlink, then close."""
+    """Module-level wrapper: create a transmitter, poll for the pending commands, then close."""
     tx = IPTransmitter(config_path=config_path)
     try:
         return tx.poll_downlink()
@@ -616,25 +630,55 @@ def poll_downlink(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
         tx.close()
 
 
-# Downlink command codes and their payload lengths, as the server encodes them
-# (app/encoders.py): a frame is one or more [code: 2 bytes][value: fixed width],
-# with no length byte. The same frames arrive over IP (as parts) and over LoRa
-# (as raw bytes, see parse_downlink_frame), so this is the one table for both.
+def post_acks(acks: List[Dict[str, Any]], config_path: str = _DEFAULT_CONFIG_PATH) -> bool:
+    """Module-level wrapper for IPTransmitter.post_acks."""
+    tx = IPTransmitter(config_path=config_path)
+    try:
+        return tx.post_acks(acks)
+    finally:
+        tx.close()
+
+
+def _pending_acks() -> List[Dict[str, Any]]:
+    try:
+        from tools import command_log
+    except ImportError:
+        import command_log
+    return command_log.pending_acks()
+
+
+def _clear_pending_acks(ids) -> None:
+    try:
+        from tools import command_log
+    except ImportError:
+        import command_log
+    command_log.clear_pending_acks(ids)
+
+
+# Downlink command codes and their value widths, as the server encodes them
+# (API app/encoders.py). A command frame is [seq][code: 2 bytes][value]...,
+# with no length byte; the same frames arrive over IP and LoRa, so this is the
+# one table for both (tools/command_log.py: seq, acks).
 DOWNLINK_CODE_LENGTHS: Dict[str, int] = {
-    "10 90": 1,    # area_threshold_pct
-    "11 91": 2,    # stage_threshold_cm (u16)
-    "12 92": 1,    # monitoring_freq_h index
-    "13 93": 1,    # emergency_freq_min index
-    "14 94": 1,    # flood_code_freq_min index
+    "10 90": 1,    # area threshold %
+    "11 91": 2,    # stage threshold, cm (u16)
+    "12 92": 2,    # monitoring interval, minutes (u16, 1-10080)
+    "13 93": 1,    # emergency capture interval, minutes (1-240)
+    "14 94": 1,    # flood code interval, minutes (1-240)
     "16 96": 1,    # audio_recording_enabled
     "17 97": 1,    # IP upload in each of the next NN wakes, 00 cancels (tools/ip_fallback.py)
     "18 98": 1,    # remote debug session: NN x 10 min, 0 = end (docs/REMOTE_DEBUG_SESSION.md)
     "18 99": 1,    # the same session over WiFi only, never cellular
     "18 9A": 1,    # the same session over WiFi if a known network answers, else cellular
     "21 91": 1,    # emergency on for HH hours (00 = emergency_max_hours)
-    "21": 0,       # emergency on, from before 21 91; kept while nodes and API update (IP only)
+    "50 01": 0,    # status request: the ack is the node's status reply
     "99 99": 0,    # emergency off: the same 0x99 0x99 as over LoRa
 }
+
+#: Accepted values of the interval commands, minutes
+MONITORING_MINUTES = (1, 10080)
+EMERGENCY_MINUTES = (1, 240)
+FLOOD_CODE_MINUTES = (1, 240)
 
 
 def parse_downlink_frame(data: bytes) -> List[Dict[str, str]] | None:
@@ -659,6 +703,50 @@ def parse_downlink_frame(data: bytes) -> List[Dict[str, str]] | None:
         parts.append({"code": code, "payload_hex": value.hex()})
         i += 2 + width
     return parts or None
+
+
+def parse_command_frame(frame: bytes) -> Optional[Tuple[int, Optional[List[Dict[str, str]]]]]:
+    """(seq, parts) of a server command frame; parts None if the rest isn't a valid frame.
+
+    None for an empty frame.
+    """
+    if not frame:
+        return None
+    return frame[0], parse_downlink_frame(bytes(frame[1:]))
+
+
+def apply_command_frame(frame: bytes, apply_parts: Callable[[List[Dict[str, str]]], Dict[str, Any]]) -> Dict[str, Any]:
+    """Apply one server command frame once, through apply_parts; what to ack.
+
+    A frame applied before (tools/command_log.py) isn't applied again: the
+    server resends until it has the ack, so it gets the same result again.
+    apply_parts(parts) returns apply_downlink_command()'s dict.
+    Returns {"seq", "result" (0 applied, 1 partly, 2 rejected), "duplicate",
+    "applied", "skipped"}.
+    """
+    try:
+        from tools import command_log
+    except ImportError:
+        import command_log
+    frame = bytes(frame)
+    prior = command_log.seen(frame)
+    if prior is not None:
+        print(f"📥 Command seq {frame[0]} already applied (result {prior}): acking again")
+        return {"seq": frame[0], "result": prior, "duplicate": True, "applied": [], "skipped": []}
+    parsed = parse_command_frame(frame)
+    if parsed is None:
+        return {"seq": 0, "result": command_log.REJECTED, "duplicate": False, "applied": [], "skipped": ["<empty>"]}
+    seq, parts = parsed
+    if not parts:
+        print(f"⚠️ Command seq {seq}: not a valid frame ({frame.hex()}); rejected")
+        result = {"applied": [], "skipped": ["<frame>"]}
+    else:
+        result = apply_parts(parts)
+    code = command_log.APPLIED if not result["skipped"] else (
+        command_log.PARTLY if result["applied"] else command_log.REJECTED)
+    command_log.record(frame, code)
+    return {"seq": seq, "result": code, "duplicate": False,
+            "applied": result["applied"], "skipped": result["skipped"]}
 
 
 def apply_downlink_command(
@@ -700,11 +788,6 @@ def apply_downlink_command(
                 "tools.lora_runtime_integration is unavailable. "
                 "Pass set_param_fn explicitly when calling outside TickTalkPython."
             ) from exc
-
-    # Index-based lookup tables — must match server app/encoders.py constants.
-    _MF_HOURS = [1, 3, 6, 24, 72]       # monitoring_freq_h allowed values
-    _EF_MIN   = [2, 5, 10]              # emergency_freq_min allowed values
-    _FF_MIN   = [10, 20, 30, 40, 50, 60]  # flood_code_freq_min allowed values
 
     _expected_len = DOWNLINK_CODE_LENGTHS
 
@@ -780,37 +863,16 @@ def apply_downlink_command(
             logger.info("Applied: stage_threshold = %dcm", val_cm)
             applied.append(f"stage_threshold={val_cm}cm")
 
-        elif code == "12 92":  # monitoring_freq_h — u8 index into _MF_HOURS
-            idx = int.from_bytes(payload_bytes, "big")
-            if 0 <= idx < len(_MF_HOURS):
-                hours = _MF_HOURS[idx]
-                set_param_fn("monitoring_frequency", hours * 60)  # stored in minutes
-                logger.info("Applied: monitoring_frequency = %dh (%dmin)", hours, hours * 60)
-                applied.append(f"monitoring_frequency={hours}h")
+        elif code in ("12 92", "13 93", "14 94"):  # intervals, plain minutes
+            name, (lo, hi) = {"12 92": ("monitoring_frequency", MONITORING_MINUTES),
+                              "13 93": ("emergency_frequency", EMERGENCY_MINUTES),
+                              "14 94": ("neighborhood_emergency_frequency", FLOOD_CODE_MINUTES)}[code]
+            mins = int.from_bytes(payload_bytes, "big")
+            if lo <= mins <= hi and set_param_fn(name, mins) is not False:
+                logger.info("Applied: %s = %dmin", name, mins)
+                applied.append(f"{name}={mins}min")
             else:
-                logger.warning("apply_downlink_command: monitoring_freq index %d out of range", idx)
-                skipped.append(code)
-
-        elif code == "13 93":  # emergency_freq_min — u8 index into _EF_MIN
-            idx = int.from_bytes(payload_bytes, "big")
-            if 0 <= idx < len(_EF_MIN):
-                mins = _EF_MIN[idx]
-                set_param_fn("emergency_frequency", mins)
-                logger.info("Applied: emergency_frequency = %dmin", mins)
-                applied.append(f"emergency_frequency={mins}min")
-            else:
-                logger.warning("apply_downlink_command: emergency_freq index %d out of range", idx)
-                skipped.append(code)
-
-        elif code == "14 94":  # flood_code_freq_min — u8 index into _FF_MIN
-            idx = int.from_bytes(payload_bytes, "big")
-            if 0 <= idx < len(_FF_MIN):
-                mins = _FF_MIN[idx]
-                set_param_fn("neighborhood_emergency_frequency", mins)
-                logger.info("Applied: neighborhood_emergency_frequency = %dmin", mins)
-                applied.append(f"neighborhood_emergency_frequency={mins}min")
-            else:
-                logger.warning("apply_downlink_command: flood_code_freq index %d out of range", idx)
+                logger.warning("apply_downlink_command: %s %d min out of range (%d-%d)", name, mins, lo, hi)
                 skipped.append(code)
 
         elif code == "16 96":  # audio_recording_enabled — direct u8 bool (0/1)
@@ -850,10 +912,8 @@ def apply_downlink_command(
             logger.info("Applied: emergency_mode = True for %s h", hours or "default")
             applied.append(f"emergency_mode=True({hours or 'default'}h)")
 
-        elif code == "21":  # emergency mode on: the API's code before 21 91
-            set_param_fn("emergency_mode", True)
-            logger.info("Applied: emergency_mode = True")
-            applied.append("emergency_mode=True")
+        elif code == "50 01":  # status request: answered by the ack (its status reply)
+            applied.append("status_request")
 
         elif code == "99 99":  # emergency mode off
             set_param_fn("emergency_mode", False)
@@ -871,58 +931,63 @@ def apply_downlink_command(
     }
 
 
-def reply_command(uplink_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """The command an /ip/uplink reply carried, as a poll_downlink()-style result.
+def reply_commands(uplink_result: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """The commands an /ip/uplink reply carried, as a poll_downlink()-style result.
 
-    None when the reply has no `command` key: the server predates want_command,
-    so the caller polls instead. A `command` of null means nothing was pending.
+    None when the reply has no `commands` key (the uplink didn't ask, or failed),
+    so the caller polls instead.
     """
     body = uplink_result.get("response") if uplink_result.get("success") else None
-    if not isinstance(body, dict) or "command" not in body:
+    if not isinstance(body, dict) or not isinstance(body.get("commands"), list):
         return None
-    return {"success": True, "command": body["command"]}
+    return {"success": True, "commands": body["commands"]}
 
 
 def handle_downlink_reply(
     poll_result: Dict[str, Any],
     set_param_fn: Callable[[str, Any], None] | None = None,
     label: str = "IP downlink",
+    ack_fn: Callable[[List[Dict[str, Any]]], bool] | None = None,
 ) -> Dict[str, Any]:
-    """Apply the command in a poll_downlink() reply, if any, and print what happened.
+    """Apply the commands in a poll_downlink() reply, ack them, and print what happened.
 
-    Shared by the wake-start poll and the poll after each IP uplink in
-    ``ticktalk_main.py``, so both report the same way. A poll marks the command
-    delivered on the server, so polling twice in one wake can't apply it twice.
+    Shared by the wake-start poll and the reply to each IP uplink in
+    ``ticktalk_main.py``. Each frame is applied once (tools/command_log.py) and
+    acked every time it is offered, so the server stops offering it. Acks go to
+    ack_fn (default: POST /ip/ack, kept for the next uplink if that fails).
     """
     if not poll_result.get("success"):
         print(f"⚠️ {label} poll failed: {poll_result.get('error')}")
         return {"status": "poll_failed", "error": poll_result.get("error")}
 
-    cmd = poll_result.get("command")
-    if not cmd:
+    commands = [c for c in poll_result.get("commands") or [] if isinstance(c, dict)]
+    if not commands:
         print(f"📬 {label}: no pending commands")
         return {"status": "no_command"}
 
-    print(f"📬 {label}: received command (queue_id={cmd.get('queue_id')})")
+    acks: List[Dict[str, Any]] = []
+    applied_all: List[str] = []
+    for cmd in commands:
+        try:
+            cid = int(cmd["id"])
+            frame = bytes.fromhex(str(cmd["frame"]))
+        except (KeyError, TypeError, ValueError):
+            print(f"⚠️ {label}: malformed command {cmd!r}: ignored")
+            continue
+        r = apply_command_frame(frame, lambda parts: apply_downlink_command({"parts": parts},
+                                                                            set_param_fn=set_param_fn))
+        acks.append({"id": cid, "result": r["result"]})
+        applied_all.extend(r["applied"])
+        what = "already applied" if r["duplicate"] else (", ".join(r["applied"]) or "nothing applied")
+        print(f"📬 {label}: command {cid} (seq {r['seq']}): {what}"
+              + (f"; skipped {', '.join(r['skipped'])}" if r["skipped"] else ""))
 
-    dispatch = apply_downlink_command(cmd, set_param_fn=set_param_fn)
-
-    applied = dispatch["applied"]
-    skipped = dispatch["skipped"]
-    if applied:
-        print(f"✅ {label}: applied {len(applied)} parameter(s): {', '.join(applied)}")
-    else:
-        print(f"⚠️ {label}: no recognised parameters in command "
-              f"(hex={cmd.get('hex_payload', '')})")
-    if skipped:
-        print(f"⚠️ {label}: skipped {len(skipped)} part(s): {', '.join(skipped)}")
-
+    if acks:
+        (ack_fn or post_acks)(acks)
     return {
-        "status": "applied" if applied else "no_match",
-        "queue_id": dispatch["queue_id"],
-        "applied_params": applied,
-        "skipped_parts": skipped,
-        "hex_payload": cmd.get("hex_payload"),
+        "status": "applied" if applied_all else "no_match",
+        "acks": acks,
+        "applied_params": applied_all,
     }
 
 
