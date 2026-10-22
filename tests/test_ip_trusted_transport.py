@@ -33,7 +33,7 @@ def _resolve(*addrs):
 
 
 def test_a_ts_net_name_must_resolve_into_the_tailnet():
-    url = "http://ist-rs-ccaicedo.taild7822.ts.net:8000"
+    url = "http://server.example.ts.net:8000"
     with _resolve("100.101.102.103"):
         assert tip.trusted_server(url)
     with _resolve("100.101.102.103", "192.0.2.7"):
