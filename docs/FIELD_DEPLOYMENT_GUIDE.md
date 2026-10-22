@@ -432,6 +432,12 @@ Also confirm before deploying:
   The status also goes to the server as `registration_status` (channel `01 08`, LoRa and IP)
   whenever it changes, and the dashboard shows **Check alignment** on the unit's card while it
   is `shifted`.
+- **Pose reference for georeferencing:** separately, `tools/pose_monitor.py` watches for the unit
+  being knocked, removed or tilted enough to spoil georeferencing (1° of tilt; see
+  `docs/SYSTEM_REFERENCE.md`, "Pose levels"). Once the unit is mounted in its final position and
+  georeferenced, run `venv/bin/python tools/pose_monitor.py --reset`: the next three stable captures
+  become the reference. After re-georeferencing a unit that was knocked, reset it again (or send
+  "Accept current orientation" from the dashboard).
 - **Transport order** (on by default): LoRa first, then WiFi, then cellular only if
   neither works. The modem is only kept off until needed once it is set up as in
   1.5.1 below.
@@ -762,26 +768,28 @@ goes straight back to sleep. **Press the WittyPi button** to start a normal
 cycle on the bench or at deployment. On the bench you can also set
 `"recovery_boot": {"enabled": false}`.
 
-Keep USB off through early boot. The cellular modem draws its start-up
-current as soon as USB has power. `usb-power-off.service` turns USB off about
-5 s into boot and `usb-power-on.timer` turns it back on 8 s after boot, past
-the kernel and early userspace. The wake cycle, `cellular_up()` and
-`syncTime.sh` also turn it on, in case the timer didn't run. The modem's GPS
-needs 40–50 s for a fix after that, so the wake's first LoRa step uses the last
-saved fix (`gps_last_fix.json`, kept for `gps_cache_max_age_h`, default two
-days). A Pi 4's USB ports share one power switch, so the modem and microphone
-are always on or off together.
-The two `uhubctl` lines from `config/doas.conf` let `ticktalk` turn USB on.
+Keep USB off unless something needs it. The cellular modem draws 0.6-0.9 W
+whenever it has power, even idle, and the microphone about 0.1 W
+(docs/POWER_ANALYSIS.md). `usb-power-off.service` turns USB off about 5 s into
+boot and nothing turns it back on by default: `tools/usb_power.py` turns it on
+for the daily GPS fix (`tools/gps_window.py`: once the last live fix is
+`gps_fix_interval_h` old, default 24 h, after a knock or removal, or when the
+server asks), for a cellular upload or remote session, and for recording, and
+off again when the last of these is done. Wakes in between use the last saved
+fix (`gps_last_fix.json`, kept for `gps_cache_max_age_h`, default 30 days),
+marked as cached. A Pi 4's USB ports share one power switch, so the modem and
+microphone are always on or off together. The four `uhubctl` lines from
+`config/doas.conf` let `pi` turn USB on and off.
 
 ```bash
 sudo apt install uhubctl
-sudo cp config/usb-power-off.service config/usb-power-on.service config/usb-power-on.timer \
-        /etc/systemd/system/
-sudo cp config/quectel-gnss.service /etc/systemd/system/
+sudo cp config/usb-power-off.service config/quectel-gnss.service /etc/systemd/system/
 sudo cp config/wittypi/syncTime.sh /home/pi/wittypi/
+# Units set up before 2026-10-22: the old timer turned USB on 8 s after every boot
+sudo systemctl disable --now usb-power-on.timer 2>/dev/null; sudo rm -f /etc/systemd/system/usb-power-on.{timer,service}
 sudo systemctl daemon-reload
 sudo systemctl disable quectel-gnss.service   # drops the old gpsd.service link
-sudo systemctl enable quectel-gnss.service usb-power-off.service usb-power-on.timer
+sudo systemctl enable quectel-gnss.service usb-power-off.service
 grep uhubctl config/doas.conf | sudo tee -a /etc/doas.conf && sudo doas -C /etc/doas.conf
 ```
 

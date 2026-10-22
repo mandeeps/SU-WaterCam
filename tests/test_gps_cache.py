@@ -12,6 +12,7 @@ FIX = {"gps_lat": 10.5, "gps_lon": -20.25, "gps_alt": 100.0}
 @pytest.fixture
 def gps(tmp_path, monkeypatch):
     monkeypatch.setattr(get_gps, "CACHE_PATH", str(tmp_path / "gps_last_fix.json"))
+    monkeypatch.setattr(get_gps, "GNSS_DEVICE", __file__)   # the modem powered
     monkeypatch.setattr(get_gps, "_gps_available", True)
     monkeypatch.setattr(get_gps.time, "sleep", lambda s: None)
     monkeypatch.setattr(get_gps, "_cache_max_age_s", lambda: 48 * 3600)
@@ -84,5 +85,6 @@ def test_last_fix_records_the_source(gps, monkeypatch):
     assert gps.last_fix["source"] == "none"
 
 
-def test_default_cache_is_two_days():
-    assert get_gps.DEFAULT_CACHE_MAX_AGE_H == 48
+def test_default_cache_is_thirty_days():
+    # a live fix is taken once a day (tools/gps_window.py); the cache covers the rest
+    assert get_gps.DEFAULT_CACHE_MAX_AGE_H == 720

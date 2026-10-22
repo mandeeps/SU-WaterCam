@@ -26,7 +26,8 @@ def _sent(handler):
                                          (17, {"dbg", "rd"})])
 def test_remote_debug_status_is_trimmed(limit, keys):
     h = MagicMock(current_size_limit=limit)
-    assert rd.send_status(STATE, handler=h)
+    # 30 min from now, now: a module-level deadline goes stale in a slow full run
+    assert rd.send_status(dict(STATE, until=time.time() + 30 * 60), handler=h)
     msg = _sent(h)
     assert set(msg) == keys and len(json.dumps(msg, separators=(",", ":"))) <= limit
     assert msg["rd"] in (29, 30)

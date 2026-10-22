@@ -819,6 +819,8 @@ DOWNLINK_CODE_LENGTHS: Dict[str, int] = {
     "18 9A": 1,    # the same session over WiFi if a known network answers, else cellular
     "21 91": 1,    # emergency on for HH hours (00 = emergency_max_hours)
     "50 01": 0,    # status request: the ack is the node's status reply
+    "19 99": 0,    # take a live GPS fix at the next wake (tools/gps_window.py)
+    "19 9A": 0,    # accept the current orientation as the reference (tools/pose_monitor.py)
     "99 99": 0,    # emergency off: the same 0x99 0x99 as over LoRa
 }
 
@@ -1071,6 +1073,22 @@ def apply_downlink_command(
 
         elif code == "50 01":  # status request: answered by the ack (its status reply)
             applied.append("status_request")
+
+        elif code == "19 99":  # a live GPS fix at the next wake
+            try:
+                from tools import gps_window
+            except ImportError:
+                import gps_window
+            gps_window.request()
+            applied.append("gps_fix_requested")
+
+        elif code == "19 9A":  # orientation reference reset, after re-georeferencing
+            try:
+                from tools import pose_monitor
+            except ImportError:
+                import pose_monitor
+            pose_monitor.reset()
+            applied.append("pose_reference_reset")
 
         elif code == "99 99":  # emergency mode off
             set_param_fn("emergency_mode", False)
@@ -1325,9 +1343,9 @@ def cellular_up(connection: str, timeout_s: int = 90) -> bool:
     powered takes 20-40 s to show up in NetworkManager; until then nmcli
     finds no device for the connection, so it is retried within timeout_s.
     """
-    from tools.usb_power import usb_power_on, wait_for
+    from tools.usb_power import acquire, wait_for
     end = time.monotonic() + timeout_s
-    if usb_power_on():
+    if acquire("cellular"):
         wait_for("/dev/cdc-wdm*", timeout_s)
     while True:
         wait = max(round(end - time.monotonic()), 5)
@@ -1350,12 +1368,17 @@ def cellular_up(connection: str, timeout_s: int = 90) -> bool:
 
 
 def cellular_down(connection: str) -> None:
-    """Deactivate the connection again; never raises."""
+    """Deactivate the connection again and give USB back; never raises."""
     try:
         subprocess.run(["nmcli", "connection", "down", connection],
                        capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.TimeoutExpired) as exc:
         logger.warning("nmcli connection down %s failed: %s", connection, exc)
+    try:
+        from tools.usb_power import release
+        release("cellular")
+    except Exception as exc:   # noqa: BLE001
+        logger.warning("USB release after cellular failed: %s", exc)
 
 
 def _err_result(

@@ -106,6 +106,8 @@ class LoRaRuntimeManager:
         'bitmap_refresh_hours':             (0, 168),     # tools/bitmap_policy.py; 0 = every capture
         'ip_fallback_after_hours':          (0, 168),     # tools/ip_fallback.py; 0 = off
         'ip_fallback_min_interval_hours':   (0, 168),
+        'gps_fix_interval_h':               (1, 720),     # tools/gps_window.py: a live fix this often
+        'gps_cache_max_age_h':              (0, 8760),    # tools/get_gps.py: how old a cached fix may be
     }
 
     # Parameters that must be stored as integers (not floats).

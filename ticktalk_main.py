@@ -208,6 +208,14 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         data.update(move_fields)
     except Exception as e:
         print(f"⚠️ GPS movement check failed: {e}")
+        move_fields = {}
+    # Knocked, removed or tilted enough to spoil georeferencing? (tools/pose_monitor.py)
+    try:
+        from tools import pose_monitor
+        data.update(pose_monitor.fields(pose_monitor.check(
+            dirname, gps_moved=bool(move_fields.get('movement_threshold')))))
+    except Exception as e:
+        print(f"⚠️ Pose check failed: {e}")
     
     # Get WittyPi temperature and voltage diagnostics
     wittypi_data = None
@@ -838,15 +846,19 @@ def record_audio(trigger, directory):
     so a hard WittyPi power-cut loses at most the in-progress segment rather
     than the whole wake window. See tools/audio_recorder.py.
 
-    Also makes sure USB is on: usb-power-off.service cuts it early in boot and
-    usb-power-on.timer restores it 8 s after boot; this covers a timer that
-    didn't run. See tools/usb_power.py.
+    USB stays off unless something needs it (tools/usb_power.py): the GPS
+    window when a live fix is due (tools/gps_window.py, on its own thread), and
+    the microphone here, only when recording is on.
     """
     from tools.audio_recorder import get_audio_recorder
     from tools.lora_runtime_integration import get_parameter
-    from tools.usb_power import usb_power_on, wait_for_usb_mic
+    from tools.usb_power import acquire, wait_for_usb_mic
 
-    usb_power_on()
+    try:
+        from tools import gps_window
+        gps_window.start_if_due()
+    except Exception as e:
+        print(f"⚠️ GPS window not started: {e}")
     # Photos: past data_retention_days (0, the default, keeps them), or the oldest
     # when the card is 80 % full
     # (tools/data_retention.py). The capture starting now is left alone.
@@ -857,6 +869,7 @@ def record_audio(trigger, directory):
         print(f"⚠️ Photo retention failed: {e}")
     if not get_parameter('audio_recording_enabled', False):
         return "disabled"
+    acquire("audio")
     wait_for_usb_mic()
 
     retention_days = get_parameter('data_retention_days', 0)
@@ -1938,6 +1951,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             data['movement_threshold'] = move_fields['movement_threshold']
         except Exception as e:
             print(f"⚠️ IP uplink: GPS unavailable: {e}")
+        try:
+            from tools import pose_monitor   # the reading the LoRa path took for this capture
+            data.update(pose_monitor.fields(pose_monitor.check(
+                dirname, gps_moved=bool(data.get('movement_threshold')))))
+        except Exception as e:
+            print(f"⚠️ IP uplink: pose check failed: {e}")
 
         try:
             from tools.battery_manager import get_battery_status
@@ -2024,6 +2043,11 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             _add("01 0C", lambda: {"payload_hex": struct.pack(">I", _u32(data['sf_dropped'])).hex()})
         if data.get('clock_unverified') is not None:
             _add("01 0D", lambda: {"payload_hex": struct.pack(">B", 1 if data['clock_unverified'] else 0).hex()})
+        # 01 0E / 01 0F — pose level and tilt from the reference, 0.1 deg (tools/pose_monitor.py)
+        if data.get('pose_level') is not None:
+            _add("01 0E", lambda: {"payload_hex": struct.pack(">I", _u32(data['pose_level'])).hex()})
+        if data.get('pose_tilt_tenths') is not None:
+            _add("01 0F", lambda: {"payload_hex": struct.pack(">I", _u32(data['pose_tilt_tenths'])).hex()})
 
         # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
         lat = data.get('gps_lat')

@@ -29,6 +29,8 @@ deduplicated, and acked as `ak: 0`.
 | `18 98` / `18 99` / `18 9A` | 1 | remote debug session, NN x 10 min (cellular / WiFi only / WiFi else cellular) | 0 ends |
 | `21 91` | 1 | emergency mode on for HH hours | 0 = `emergency_max_hours`; capped at 168 |
 | `50 01` | 0 | status request: the ack is the node's status reply | |
+| `19 99` | 0 | take a live GPS fix at the next wake (`tools/gps_window.py`) | |
+| `19 9A` | 0 | accept the current orientation as the reference, after re-georeferencing (`tools/pose_monitor.py`) | |
 | `99 99` | 0 | emergency mode off | |
 
 The table is `DOWNLINK_CODE_LENGTHS` in `tools/transmit_ip.py`. A value outside its
@@ -95,3 +97,19 @@ The node (`tools/schedule_control.py`, as `pi`, no root needed) writes `~/wittyp
 Start and end can follow the sun: an hour byte of `F0` means sunrise and `F1` sunset, with the minute byte a signed offset in minutes (-120..120), e.g. `F0 1E F1 F1` = sunrise+30 to sunset-15. The node computes sunrise and sunset itself (`tools/sun.py`, no network) from its learned home position, else its last GPS fix (08:00-16:15 until it has one), and rewrites the schedule once the window has moved 10 min or more; `sc` then also carries today's window (`SR+30-SS-15/60/10 0742-1751`).
 
 The Witty Pi counts seconds from BEGIN, so the node rewrites the file when the local UTC offset changes (DST): `ticktalk.service` runs `tools/schedule_control.py --refresh` before it starts. The active schedule is reported as `09 79` (the same 7 bytes) in sensor packets and IP uplinks, and as `sc` ("HHMM-HHMM/interval/awake") in the status reply.
+
+## Pose levels and GPS on demand
+
+Every capture compares the IMU's orientation with a reference adopted once the unit is mounted (`tools/pose_monitor.py`) and reports a pose level as `01 0E` (u8; IP u32) with the tilt from the reference as `01 0F` (0.1 deg, u16; IP u32), and in the status reply as `pl`:
+
+| Level | Meaning | Trigger |
+|---|---|---|
+| 0 | ok | |
+| 1 | re-check georeferencing | tilt >= 1 deg (heading >= 3 deg with the magnetometer calibrated) for 3 captures in a row |
+| 2 | knocked | tilt >= 5 deg or heading >= 15 deg for 2 captures in a row; a GPS fix that wake |
+| 3 | removed or being handled | tilt >= 20 deg, the samples within one capture spread 3 deg or more, or GPS moved; at once, and a GPS fix that wake and the next two |
+| 255 | no reference yet | adopted after 3 stable captures |
+
+Levels stay until the reference is reset (`19 9A`, or `tools/pose_monitor.py --reset`). On 006's mount, consecutive readings differed by at most 0.25 deg pitch and 0.6 deg roll 95 % of the time, and about 1 % jumped 8-15 deg for one reading, hence the runs. With the camera 3 m up, 1 deg of pitch moves a point 20 m away by about 2 m and one 40 m away by about 9 m.
+
+USB (the modem and its GPS, the microphone) is off unless something needs it (`tools/usb_power.py`). A live GPS fix is taken at a wake when the last one is `gps_fix_interval_h` old (default 24 h), after a knock or removal, on `19 99`, or when there is none (`tools/gps_window.py`, on a thread during the captures); otherwise the cached fix is used, marked as cached. The status reply's `ga` is the hours since the last live fix.
