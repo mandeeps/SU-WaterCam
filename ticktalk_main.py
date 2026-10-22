@@ -1774,8 +1774,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     IP fallback (tools/ip_fallback.py): this capture goes over IP even with
     ip_upload.enabled false or LoRa healthy when the server asked for it
     (downlink 17 97 NN, one upload per wake) or when no bitmap was delivered for
-    ip_fallback_after_hours while LoRa holds bitmaps back. A cellular connection
-    brought up for it goes down again afterwards unless IP upload is enabled.
+    ip_fallback_after_hours while LoRa holds bitmaps back.
+
+    A cellular connection this wake brought up goes down again once the upload and
+    the command poll are done (or on any failure). It isn't brought up when WiFi is
+    connected and Tailscale shows the server online: only the server is down then.
+    On cellular only a few queued readings are sent per wake (tools/transmit_ip.py).
 
     After a reading is delivered, any pending command is collected: the uplink
     asks for it (want_command) and the reply carries it, or, from a server that
@@ -1940,90 +1944,92 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         data['audio_recording_enabled']           = 1 if get_parameter('audio_recording_enabled', False) else 0
 
         # ── Build channel list ─────────────────────────────────────────────────
+        # Every channel is built on its own: a value that can't be encoded (None,
+        # NaN, out of range) drops that channel and nothing else.
         channels = []
 
+        def _add(code, build):
+            try:
+                channels.append(dict(code=code, **build()))
+            except Exception as e:
+                print(f"⚠️ IP uplink: channel {code} skipped: {e}")
+
+        def _hex(fmt, *values):
+            return lambda: {"payload_hex": struct.pack(fmt, *values).hex()}
+
+        # Clamped to the uint32 range so struct.pack never raises; NaN and non-numbers raise
+        _u32 = lambda v: max(0, min(0xFFFFFFFF, int(v)))
+
         # 00 01 — device timestamp (8-byte uint64)
-        channels.append({"code": "00 01", "payload_hex": struct.pack(">Q", ts_now).hex()})
+        _add("00 01", _hex(">Q", ts_now))
+
+        # 01 04 — emergency status (uint32 0/1), in every upload; the same runtime
+        # flag the LoRa packet's 01 04 carries
+        _add("01 04", lambda: {"payload_hex": struct.pack(">I", 1 if get_parameter('emergency_mode', False) else 0).hex()})
 
         # 02 01 — battery percent from battery_manager (source varies by hardware); omitted when unavailable
         batt_pct = data.get('battery_percent')
         if batt_pct is not None:
-            channels.append({"code": "02 01", "payload_hex": struct.pack(">I", batt_pct).hex()})
+            _add("02 01", lambda: {"payload_hex": struct.pack(">I", _u32(batt_pct)).hex()})
 
         # 01 07 — raw Pi throttled register (uint32, vcgencmd layout); omitted when unreadable
         pi_throttled = data.get('pi_throttled')
         if pi_throttled is not None:
-            channels.append({"code": "01 07", "payload_hex": struct.pack(">I", pi_throttled).hex()})
+            _add("01 07", lambda: {"payload_hex": struct.pack(">I", _u32(pi_throttled)).hex()})
         # 01 08 — registration orientation check (tools/registration_orientation.py); omitted when absent
         registration_status = data.get('registration_status')
         if registration_status is not None:
-            channels.append({"code": "01 08", "payload_hex": struct.pack(">I", registration_status).hex()})
+            _add("01 08", lambda: {"payload_hex": struct.pack(">I", _u32(registration_status)).hex()})
         # 01 09 / 01 0A / 01 0B — software release, commit and model (tools/node_version.py)
         for code, key in (("01 09", "software_version"), ("01 0A", "software_commit"),
                           ("01 0B", "model_id")):
             if data.get(key) is not None:
-                channels.append({"code": code, "payload_hex": struct.pack(">I", data[key]).hex()})
+                _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(data[key])).hex()})
         # 01 0C — store-and-forward entries dropped unsent (tools/drop_counter.py), u32
         # 01 0D — 1 if this capture was taken before the clock was verified, u8
         if data.get('sf_dropped') is not None:
-            channels.append({"code": "01 0C", "payload_hex": struct.pack(">I", min(data['sf_dropped'], 0xFFFFFFFF)).hex()})
+            _add("01 0C", lambda: {"payload_hex": struct.pack(">I", _u32(data['sf_dropped'])).hex()})
         if data.get('clock_unverified') is not None:
-            channels.append({"code": "01 0D", "payload_hex": struct.pack(">B", 1 if data['clock_unverified'] else 0).hex()})
+            _add("01 0D", lambda: {"payload_hex": struct.pack(">B", 1 if data['clock_unverified'] else 0).hex()})
 
         # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
         lat = data.get('gps_lat')
         lon = data.get('gps_lon')
         if lat is not None and lon is not None:
-            try:
-                channels.append({
-                    "code": "04 01",
-                    "payload_hex": struct.pack(">ii",
-                        int(round(lat * 1_000_000)),
-                        int(round(lon * 1_000_000)),
-                    ).hex(),
-                })
-            except struct.error as e:
-                print(f"⚠️ IP uplink: GPS encoding error (lat={lat}, lon={lon}): {e}")
+            _add("04 01", lambda: {"payload_hex": struct.pack(
+                ">ii", int(round(lat * 1_000_000)), int(round(lon * 1_000_000))).hex()})
             # 04 02 — age of that fix in seconds: 0 live, more when it's the saved
             # fix (tools/get_gps.py), so the server can tell a stale position
-            channels.append({"code": "04 02",
-                             "payload_hex": struct.pack(">I", max(0, min(data.get('gps_fix_age_s', 0), 0xFFFFFFFF))).hex()})
+            _add("04 02", lambda: {"payload_hex": struct.pack(">I", _u32(data.get('gps_fix_age_s', 0))).hex()})
         # 01 06 — moved from the mount position (tools/gps_home.py), and 04 03 how far, in metres
         if data.get('movement_threshold') is not None:
-            channels.append({"code": "01 06", "payload_hex": struct.pack(">I", 1 if data['movement_threshold'] else 0).hex()})
+            _add("01 06", lambda: {"payload_hex": struct.pack(">I", 1 if data['movement_threshold'] else 0).hex()})
         if move_info.get("distance_m") is not None:
-            channels.append({"code": "04 03",
-                             "payload_hex": struct.pack(">I", int(min(move_info["distance_m"], 0xFFFFFFFF))).hex()})
+            _add("04 03", lambda: {"payload_hex": struct.pack(">I", _u32(move_info["distance_m"])).hex()})
 
         # 05 01 — temperature (int16, value × 100)
         temp = data.get('temperature_celsius')
         if temp is not None:
-            try:
-                channels.append({"code": "05 01",
-                                  "payload_hex": struct.pack(">h", int(round(temp * 100))).hex()})
-            except struct.error as e:
-                print(f"⚠️ IP uplink: temperature encoding error (temp={temp}): {e}")
+            _add("05 01", lambda: {"payload_hex": struct.pack(">h", int(round(temp * 100))).hex()})
 
         # 06 01 — humidity (uint8, 0–100 %)
         hum = data.get('relative_humidity')
         if hum is not None:
-            channels.append({"code": "06 01",
-                             "payload_hex": struct.pack(">B", max(0, min(100, int(round(hum))))).hex()})
+            _add("06 01", lambda: {"payload_hex": struct.pack(">B", max(0, min(100, int(round(hum))))).hex()})
 
         # 07 17 / 07 27 — flood detected / growing (tools/flood_baseline.py), only
         # when detection is on and a baseline is set; 07 37 — water % of the mask
         # (uint8, 0-100) whenever the capture has one
         for code, key in (("07 17", "camera_flood_detected"), ("07 27", "camera_flood_growing")):
             if key in flood:
-                channels.append({"code": code, "payload_hex": struct.pack(">I", flood[key]).hex()})
+                _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(flood[key])).hex()})
         if flood.get('camera_water_pct') is not None:
-            channels.append({"code": "07 37",
-                             "payload_hex": struct.pack(">B", flood['camera_water_pct']).hex()})
+            _add("07 37", lambda: {"payload_hex": struct.pack(">B", flood['camera_water_pct']).hex()})
 
-        # 08 18 — flood bitmap (variable length). Over IP the mask goes at its
-        # full resolution, lossless (methods 0/1); the LoRa-sized bitmap is the
-        # fallback when there is no mask or it compresses to more than
-        # FULL_RES_MAX_BYTES (tools/compress_segmented.py).
+        # 08 18 — flood bitmap (variable length), sent as base64 (a third smaller on
+        # the wire than hex). Over IP the mask goes at its full resolution, lossless
+        # (methods 0/1); the LoRa-sized bitmap is the fallback when there is no mask
+        # or it compresses to more than FULL_RES_MAX_BYTES (tools/compress_segmented.py).
         ip_bitmap = bitmap
         try:
             from tools.flood_baseline import mask_path
@@ -2038,25 +2044,16 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         except Exception as e:
             print(f"⚠️ IP uplink: full-resolution bitmap failed ({e}) — sending the LoRa bitmap")
         if ip_bitmap:
-            channels.append({"code": "08 18", "payload_hex": bytes(ip_bitmap).hex()})
+            import base64
+            _add("08 18", lambda: {"payload_b64": base64.b64encode(bytes(ip_bitmap)).decode("ascii")})
 
-        # 09 xx — status reports; clamped to uint32 range so struct.pack never raises
-        _u32 = lambda v: max(0, min(0xFFFFFFFF, int(v)))
-        channels.append({"code": "09 19",
-                         "payload_hex": struct.pack(">I", _u32(data['area_threshold'])).hex()})
+        # 09 xx — status reports
         # stage_threshold is reserved: reported, but nothing on the node uses it
-        channels.append({"code": "09 29",
-                         "payload_hex": struct.pack(">I", _u32(data['stage_threshold'])).hex()})
-        channels.append({"code": "09 39",
-                         "payload_hex": struct.pack(">I", _u32(data['monitoring_frequency'])).hex()})
-        channels.append({"code": "09 49",
-                         "payload_hex": struct.pack(">I", _u32(data['emergency_frequency'])).hex()})
-        channels.append({"code": "09 59",
-                         "payload_hex": struct.pack(">I",
-                             _u32(data['neighborhood_emergency_frequency'])).hex()})
-        channels.append({"code": "09 69",
-                         "payload_hex": struct.pack(">I",
-                             _u32(data['audio_recording_enabled'])).hex()})
+        for code, key in (("09 19", "area_threshold"), ("09 29", "stage_threshold"),
+                          ("09 39", "monitoring_frequency"), ("09 49", "emergency_frequency"),
+                          ("09 59", "neighborhood_emergency_frequency"),
+                          ("09 69", "audio_recording_enabled")):
+            _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(data[key])).hex()})
 
         # ── Reachability check (after data is ready so we can queue on failure) ─
         # WiFi first; cellular only as the last resort.  A cellular session
@@ -2078,6 +2075,11 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             reachable = tx.wait_reachable(tx.wifi_grace_s)
             if reachable:
                 print("📶 Server reachable over WiFi — cellular not needed")
+        if not reachable and on_demand and not cellular_active and tx.server_only_down():
+            # WiFi is up and Tailscale shows the server's peer online (or no peer
+            # to check): the server itself is failing, and cellular wouldn't help
+            print(f"⚠️ IP uplink: WiFi is up but the server isn't answering — not spending {cell} data")
+            on_demand = False
         if not reachable and on_demand and not cellular_active:
             print(f"📶 IP uplink: server unreachable — bringing up {cell}")
             power.acquire("cellular upload", 60)
@@ -2095,7 +2097,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             return {"status": "queued", "success": False, "channels_queued": len(channels)}
 
         # ── Drain any previously queued readings ───────────────────────────────
-        drain = tx._drain_queue()
+        # On cellular each wake sends only a few queued readings (tools/transmit_ip.py)
+        drain = tx._drain_queue(metered=cellular_started or cellular_active)
         delivered_ts = list(drain.get("drained_ts", []))
         if drain["drained"]:
             print(f"✅ IP uplink: drained {drain['drained']} queued reading(s)")
@@ -2104,8 +2107,6 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                 _lsf.remove_delivered(delivered_ts)
             print(f"⚠️ IP uplink: drain failed on {drain['failed_file']} — queuing live reading")
             tx._enqueue(channels, ts_now)
-            if cellular_started and not delivered_ts:
-                cellular_down(cell)   # never reached the server: stop Tailscale using data
             return {
                 "status": "queued_drain_failed",
                 "success": False,
@@ -2149,8 +2150,6 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             print(f"⚠️ IP uplink failed after {result.get('attempts', '?')} attempt(s): "
                   f"{result.get('error', 'unknown error')} — queuing reading")
             tx._enqueue(channels, ts_now)
-            if cellular_started and not delivered_ts:
-                cellular_down(cell)   # never reached the server: stop Tailscale using data
             if tx.fallback_to_lora:
                 print("📡 LoRa fallback is enabled — data may also be sent via the LoRa path")
 
@@ -2179,9 +2178,14 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                                           label="IP downlink after uplink", ack_fn=tx.post_acks)
             except Exception as exc:
                 print(f"⚠️ IP downlink after uplink failed: {exc}")
-        if fallback and cellular_started and not tx.enabled:
-            cellular_down(cell)     # brought up only for the fallback upload
-            print(f"📶 IP fallback done — {cell} taken down")
+        if cellular_started:
+            # This wake brought cellular up: it goes down now the upload and the
+            # command poll are done, or on any failure, so Tailscale stops using data
+            try:
+                cellular_down(cell)
+                print(f"📶 IP uplink done — {cell} taken down")
+            except Exception as exc:
+                print(f"⚠️ IP uplink: could not take {cell} down: {exc}")
         tx.close()
         power.release()
 

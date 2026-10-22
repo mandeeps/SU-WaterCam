@@ -107,7 +107,7 @@ channels = [
     {"code": "06 01", "payload_hex": "3D"},                # humidity 61%
     {"code": "04 01", "payload_hex": "028F5C2AFAD47800"},  # GPS lat/lon
     {"code": "07 17", "payload_hex": "00000001"},          # flood detected
-    {"code": "08 18", "payload_hex": "FF00FF00..."},       # flood bitmap (variable)
+    {"code": "08 18", "payload_b64": "/wD/AA=="},          # flood bitmap (variable; base64)
 ]
 result = tx.send_uplink(channels, device_ts=int(time.time()))
 ```
@@ -186,7 +186,9 @@ whether to attempt IP or fall back to LoRa.
 
 The server's `CHANNEL_REGISTRY` maps 2-byte codes to sensor fields.  The
 `payload_hex` for each channel must be exactly the right length and use
-**big-endian byte order**.
+**big-endian byte order**. Any channel may carry `payload_b64` (base64 of the
+same bytes) instead; the node sends the `08 18` bitmap that way, a third smaller
+than hex.
 
 | Code | Field | Bytes | Encoding |
 |---|---|---|---|
@@ -308,7 +310,7 @@ Receive sensor data from an IP device.
 ```
 
 - `device_ts` — optional; if omitted, server time is used.
-- `channels` — at least one required (or provide `payload_hex` for raw TTLoRa hex).
+- `channels` — at least one required (or provide `payload_hex` for raw TTLoRa hex); a channel has `payload_hex` or `payload_b64`.
 - Side effect: device `transport_type` is set to `"ip"` on first call.
 
 **Response (201):**
@@ -430,10 +432,13 @@ On by default. Each capture's IP uplink:
    WiFi's route (metric 600) to the modem's (700). If a cellular session is up
    and WiFi has reconnected, the session is taken down first.
 3. **Cellular.** If the server is still unreachable, `nmcli connection up`
-   brings the modem's data connection up and the reading and queued backlog
-   are sent. The connection then stays up for the session, until LoRa or WiFi
-   returns or the Pi powers off. If the server can't be reached over it either,
-   it is taken down straight away.
+   brings the modem's data connection up and the reading and a capped part of
+   the queued backlog are sent (5 readings or 200 KB a wake on cellular, the
+   rest waits; WiFi sends it all). A wake that brought cellular up takes it down
+   again once the upload and the command poll are done, or on any failure, so
+   Tailscale stops using data. Cellular isn't brought up when WiFi is connected
+   and Tailscale shows the server's peer online: the server is failing, not the
+   link, and the reading is queued.
 
 Whichever way it went, once a reading is delivered over IP the node collects
 and applies the commands waiting. The uplink asks for them (`want_command`) and the
@@ -444,6 +449,11 @@ posted ride on the next uplink as `acks`. The wake-start poll runs
 before the uplink and never brings up cellular, so a unit without WiFi gets its
 commands here, after the capture rather than before it. Polling twice is safe:
 the server offers a command until it is acked, and the node applies a frame once.
+
+Queued readings keep only the newest bitmap: queuing one removes the `08 18`
+channel from older entries. An entry the server rejects as wrong (a 4xx other
+than 401, 403 and 429) or that can't be read is dropped rather than blocking the
+queue. Entries are written with an fsync (`config_io.write_json`).
 
 Only a connection with autoconnect **off** is managed. A unit whose `Quectel`
 connection still autoconnects keeps cellular up as before, so a field unit

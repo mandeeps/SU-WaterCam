@@ -448,6 +448,17 @@ class IPTransmitter:
                 return False
             time.sleep(2)
 
+    def server_only_down(self) -> bool:
+        """True when WiFi is connected and Tailscale shows the server's peer online
+        (``tailscale status``, nothing sent): the server isn't answering over a
+        working path, so cellular wouldn't reach it either and would only cost
+        data. False when that can't be told (not a tailnet name, peer unknown)."""
+        from urllib.parse import urlparse
+        host = (urlparse(self.server_url).hostname or "").lower()
+        if not host.endswith(".ts.net") or not wifi_connected():
+            return False
+        return tailscale_online(host) is True
+
     def close(self) -> None:
         """Close the underlying requests.Session and release pooled connections."""
         self._session.close()
