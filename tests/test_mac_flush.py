@@ -20,7 +20,11 @@ def _serial_lines(*lines):
 
 def _make_handler():
     import tools.lora_handler_concurrent as lhc
-    return lhc.LoRaHandler()
+    h = lhc.LoRaHandler()
+    # These fakes keep in_waiting at 1 and feed read_until() the reply, so the
+    # drain before the write would eat it; the drain has its own tests.
+    h._drain_input = lambda: None
+    return h
 
 
 # ── _flush_mac_commands ───────────────────────────────────────────────────────

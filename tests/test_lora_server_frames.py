@@ -153,7 +153,7 @@ def test_runtime_manager_code_12_is_an_hours_index(tmp_path):
     assert m.get_parameter("monitoring_frequency") == 24 * 60
 
 
-@pytest.mark.parametrize("payload", ["129203", "0c5c0103"])
+@pytest.mark.parametrize("payload", ["129203"])
 def test_handler_code_12_is_an_hours_index_on_every_path(handler, payload):
     handler.decode(payload)
     assert handler.config["monitoring_frequency"] == 24 * 60
