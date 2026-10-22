@@ -271,6 +271,15 @@ def _gps_pose_usb_state(monkeypatch, tmp_path, request):
 
 
 @pytest.fixture(autouse=True)
+def _no_real_backstop_alarms(monkeypatch, request):
+    """Emergency off (99 99) replaces the backstop's alarms on the Witty Pi; tests
+    other than its own must not reach the hardware (or wait for it to time out)."""
+    if request.module.__name__.split(".")[-1] != "test_emergency_backstop_end":
+        from tools import wittypi_control
+        monkeypatch.setattr(wittypi_control, "end_emergency_backstop", lambda: "stubbed in tests")
+
+
+@pytest.fixture(autouse=True)
 def _reset_singletons():
     """Reset module-level singletons before every test so tests are isolated."""
     # Import lazily to avoid triggering hardware init at collection time.

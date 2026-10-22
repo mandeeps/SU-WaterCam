@@ -1003,6 +1003,11 @@ class LoRaHandler:
                 self.update_config('emergency_mode', False)
                 print('✅ Emergency mode deactivated')
                 applied.append('emergency_mode=False')
+                try:
+                    from tools.transmit_ip import _end_emergency_backstop
+                except ImportError:
+                    from transmit_ip import _end_emergency_backstop
+                _end_emergency_backstop()
             else:
                 rest.append(part)
         if rest:

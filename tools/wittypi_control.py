@@ -114,6 +114,27 @@ def arm_emergency_backstop(since=None, max_hours=None):
     return deadline
 
 
+def end_emergency_backstop():
+    """Emergency mode was turned off: replace the backstop's alarms now.
+
+    The backstop's shutdown alarm would otherwise still cut power at the old
+    emergency's deadline, even on a unit that stays up for another reason (a
+    remote session). With a schedule installed, its alarms are re-armed (they
+    replace both of the backstop's); without one, both alarms are cleared.
+    Never raises; returns what it did.
+    """
+    try:
+        _backstop_armed_for['deadline'] = None
+        if installed_schedule_exists():
+            return f"schedule re-armed, next startup {rearm_schedule()}"
+        _require_wittypi()
+        witty_pi_4.clear_shutdown_time()
+        witty_pi_4.clear_startup_time()
+        return "alarms cleared (no schedule installed)"
+    except Exception as e:   # noqa: BLE001 - turning emergency off must not fail on this
+        return f"backstop not replaced: {e}"
+
+
 def installed_schedule_exists():
     """True if a schedule.wpi is installed in the Witty Pi folder."""
     import os
