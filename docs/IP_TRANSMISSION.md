@@ -166,7 +166,14 @@ off. LoRa needs no poll: Class C downlinks reach the mDot as soon as they're sen
 ```
 
 A server that is not trusted (not on the tailnet, not HTTPS) is not polled:
-`commands` is empty and `untrusted` is true.
+`commands` is empty and `untrusted` is true. Nothing is uploaded to it either:
+readings stay queued until the server is trusted (a `*.ts.net` name counts only
+once it resolves into the tailnet, i.e. Tailscale is up), because whoever
+answered could read them, positions included, and a 2xx answer would make the
+node drop them. An upload counts as delivered only when the reply is the API's
+own JSON for this device, so a captive portal's 200 page doesn't swallow a
+reading; `/health` must answer `{"status":"ok"}` likewise. The health check
+warns `ip_server_untrusted`, and the status reply carries `"ut":1`.
 
 ### `post_acks(acks) → bool`
 

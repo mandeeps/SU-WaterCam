@@ -194,6 +194,9 @@ class IPTransmitter:
     ``tx.enabled`` themselves if they want to respect the flag.
     """
 
+    _key_refused_logged = False
+    _untrusted_logged = False
+
     @property
     def trusted(self) -> bool:
         """Whether this server's replies may carry commands and the time (trusted_server)."""
@@ -255,6 +258,7 @@ class IPTransmitter:
         self._session = requests.Session()
         self._session.headers.update({"Content-Type": "application/json"})
         self._key_refused_logged = False
+        self._untrusted_logged = False
 
     # ------------------------------------------------------------------ #
     # Public API                                                           #
@@ -334,9 +338,13 @@ class IPTransmitter:
                 resp = self._session.post(f"{self.server_url}/ip/ack",
                                           json={"device_id": self.device_id, "acks": acks},
                                           timeout=self.timeout_s, headers=self._auth_headers())
-                ok = 200 <= resp.status_code < 300
+                try:
+                    body = resp.json()
+                except ValueError:
+                    body = None
+                ok = 200 <= resp.status_code < 300 and isinstance(body, dict) and "acked" in body
                 if not ok:
-                    logger.warning("POST /ip/ack: HTTP %s", resp.status_code)
+                    logger.warning("POST /ip/ack: HTTP %s, not the API's reply", resp.status_code)
             except requests.exceptions.RequestException as exc:
                 logger.warning("POST /ip/ack failed: %s", exc)
         if not ok:
@@ -410,8 +418,11 @@ class IPTransmitter:
         t = timeout_s if timeout_s is not None else self.timeout_s
         try:
             resp = self._session.get(f"{self.server_url}/health", timeout=t)  # no key needed
-            return resp.status_code == 200
-        except requests.exceptions.RequestException:
+            if resp.status_code != 200:
+                return False
+            body = resp.json()          # a captive portal's 200 page is not our server
+            return isinstance(body, dict) and body.get("status") == "ok"
+        except (requests.exceptions.RequestException, ValueError):
             return False
 
     def wait_reachable(self, deadline_s: float, probe_timeout_s: float = 5) -> bool:
@@ -636,6 +647,17 @@ class IPTransmitter:
         last_error: str = "unknown error"
         last_status: Optional[int] = None
 
+        if not self.trusted:
+            # Plain http to an address that isn't the tailnet: whoever answers could
+            # read the reading (with its position) and, by answering 2xx, make the
+            # node drop it from its queue. Keep it queued until the server is trusted.
+            if not self._untrusted_logged:
+                logger.warning("Not uploading to %s: not https and not a tailnet address; "
+                               "readings stay queued", self.server_url)
+                self._untrusted_logged = True
+            return {"success": False, "status_code": None, "response": None, "untrusted": True,
+                    "error": "untrusted server (not https, not a tailnet address)", "attempts": 0}
+
         for attempt in range(1, self.retry_attempts + 1):
             try:
                 sent_at = time.monotonic()
@@ -649,7 +671,14 @@ class IPTransmitter:
                     try:
                         body = resp.json()
                     except ValueError:
-                        body = {"raw": resp.text}
+                        body = None
+                    if not _is_api_reply(body, self.device_id):
+                        # A captive portal or another server answering 200 with its own
+                        # page: not delivered, so the reading stays queued
+                        logger.warning("IP uplink: HTTP %s but not the API's reply (%s); not delivered",
+                                       resp.status_code, resp.text[:80].replace("\n", " "))
+                        return _err_result("reply is not the API's (captive portal?)",
+                                           status_code=resp.status_code, attempts=attempt)
                     logger.info(
                         "IP uplink OK (attempt %d/%d): %s",
                         attempt, self.retry_attempts, resp.status_code,
@@ -741,6 +770,11 @@ def poll_downlink(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
         return tx.poll_downlink()
     finally:
         tx.close()
+
+
+def _is_api_reply(body: Any, device_id: str) -> bool:
+    """True for the API's /ip/uplink reply about this device (app/models.IPUplinkResponse)."""
+    return isinstance(body, dict) and body.get("device_id") == device_id and "decoded" in body
 
 
 def post_acks(acks: List[Dict[str, Any]], config_path: str = _DEFAULT_CONFIG_PATH) -> bool:
