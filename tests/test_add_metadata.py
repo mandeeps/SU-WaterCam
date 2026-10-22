@@ -45,6 +45,7 @@ def _patch_deps(tmp_path, monkeypatch):
     monkeypatch.setattr(imu, "get_values", lambda: {})
     monkeypatch.setattr(imu, "get_euler_stable", lambda **kw: {})
     monkeypatch.setattr(imu, "_get_sensor", lambda: None)
+    monkeypatch.setattr(imu, "get_pose", lambda: {})
 
 
 @pytest.fixture
@@ -190,3 +191,113 @@ class TestDeviceID:
         import tools.add_metadata as am
         am.add_metadata(tmp_jpeg)
         assert "DeviceID" not in _xmp_props(xmp_capture)
+
+
+# ── quaternion, gravity and read time ────────────────────────────────────────
+
+def _enable_pose(monkeypatch, q=(0.7, 0.1, -0.2, 0.68), g=(0.5, -9.7, 1.2)):
+    import tools.bno055_imu as imu
+    monkeypatch.setattr(imu, "get_pose", lambda: {
+        "quaternion": q, "gravity": g, "euler": (70.0, 2.0, -1.0),
+        "calibration_status": (3, 3, 2, 3)})
+
+
+class TestPose:
+    def test_quaternion_gravity_and_time_in_xmp(self, tmp_jpeg, xmp_capture, monkeypatch):
+        _enable_imu(monkeypatch)
+        _enable_pose(monkeypatch)
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        props = _xmp_props(xmp_capture)
+        assert [props[f"Quaternion{a}"] for a in "WXYZ"] == ["0.70000", "0.10000", "-0.20000", "0.68000"]
+        assert [props[f"Gravity{a}"] for a in "XYZ"] == ["0.5000", "-9.7000", "1.2000"]
+        assert props["PoseReadTime"][:2] == "20" and ("+" in props["PoseReadTime"] or "-" in props["PoseReadTime"][10:])
+        assert props["CalibMag"] == "3"
+
+    def test_user_comment_carries_them_after_the_old_fields(self, tmp_jpeg, xmp_capture, monkeypatch):
+        _enable_imu(monkeypatch, mag=2)
+        _enable_pose(monkeypatch)
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        raw = piexif.load(tmp_jpeg)["Exif"][piexif.ExifIFD.UserComment]
+        comment = piexif.helper.UserComment.load(raw)
+        assert comment.startswith("Roll 2.0 Pitch -1.0 Yaw 70.0 HeadingStd 0.3")
+        assert "CalibMag 2" in comment
+        assert "Quaternion 0.70000,0.10000,-0.20000,0.68000" in comment
+        assert "Gravity 0.5000,-9.7000,1.2000" in comment
+        assert "PoseTime " in comment
+
+    def test_no_pose_when_the_sensor_gives_none(self, tmp_jpeg, xmp_capture, monkeypatch):
+        import tools.bno055_imu as imu
+        _enable_imu(monkeypatch)
+        monkeypatch.setattr(imu, "get_pose", lambda: {})
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        props = _xmp_props(xmp_capture)
+        assert "QuaternionW" not in props and "GravityX" not in props and "PoseReadTime" not in props
+        assert props["Yaw"] == "70.0"                      # the Euler angles are unaffected
+
+    def test_incomplete_pose_is_not_written(self, tmp_jpeg, xmp_capture, monkeypatch):
+        _enable_imu(monkeypatch)
+        _enable_pose(monkeypatch, q=(0.7, None, 0.0, 0.0))
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        props = _xmp_props(xmp_capture)
+        assert "QuaternionW" not in props and props["GravityX"] == "0.5000"
+
+
+# ── GPS: live, cached, and never GPSTrack ────────────────────────────────────
+
+class _Packet:
+    lat, lon, alt, mode, track = 43.05, -76.15, 120.4, 3, 271.0
+
+
+def _gps(monkeypatch, location, packet, source, age=None):
+    import tools.add_metadata as am
+    monkeypatch.setattr(am, "get_location_with_retry", lambda: (location, packet))
+    monkeypatch.setattr(am, "last_fix", {"source": source, "age_s": age})
+
+
+def _gps_ifd(path):
+    return piexif.load(path)["GPS"]
+
+
+class TestGPS:
+    def test_live_fix_has_no_track(self, tmp_jpeg, xmp_capture, monkeypatch):
+        _gps(monkeypatch, {"gps_lat": 43.05}, _Packet(), "live", 0.0)
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        gps = _gps_ifd(tmp_jpeg)
+        assert piexif.GPSIFD.GPSTrack not in gps and piexif.GPSIFD.GPSImgDirection not in gps
+        assert piexif.GPSIFD.GPSLatitude in gps and gps[piexif.GPSIFD.GPSAltitude] == (120, 1)
+        assert gps[piexif.GPSIFD.GPSProcessingMethod].endswith(b"GPS")
+        assert _xmp_props(xmp_capture)["GPSFixSource"] == "live"
+
+    def test_cached_fix_is_written_and_marked(self, tmp_jpeg, xmp_capture, monkeypatch):
+        loc = {"gps_lat": 43.5, "gps_lon": -76.5, "gps_alt": 120.4}
+        _gps(monkeypatch, loc, None, "cached", 7300.4)
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        gps = _gps_ifd(tmp_jpeg)
+        assert gps[piexif.GPSIFD.GPSProcessingMethod] == b"ASCII\x00\x00\x00CACHED"
+        assert gps[piexif.GPSIFD.GPSLatitudeRef] == b"N" and gps[piexif.GPSIFD.GPSLongitudeRef] == b"W"
+        assert gps[piexif.GPSIFD.GPSAltitude] == (120, 1) and piexif.GPSIFD.GPSTrack not in gps
+        lat = gps[piexif.GPSIFD.GPSLatitude]
+        assert lat[0] == (43, 1) and lat[1] == (30, 1)
+        props = _xmp_props(xmp_capture)
+        assert props["GPSFixSource"] == "cached" and props["GPSFixAgeSeconds"] == "7300"
+        comment = piexif.helper.UserComment.load(piexif.load(tmp_jpeg)["Exif"][piexif.ExifIFD.UserComment])
+        assert "GPSFix CACHED AgeS 7300" in comment
+
+    def test_cached_fix_without_altitude(self, tmp_jpeg, xmp_capture, monkeypatch):
+        _gps(monkeypatch, {"gps_lat": 43.05, "gps_lon": -76.15, "gps_alt": None}, None, "cached", 60.0)
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        assert piexif.GPSIFD.GPSAltitude not in _gps_ifd(tmp_jpeg)
+
+    def test_no_fix_writes_no_gps(self, tmp_jpeg, xmp_capture, monkeypatch):
+        _gps(monkeypatch, {}, None, "none")
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        assert _gps_ifd(tmp_jpeg) == {}
+        assert "GPSFixSource" not in _xmp_props(xmp_capture)

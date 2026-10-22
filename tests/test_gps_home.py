@@ -21,7 +21,7 @@ def home(tmp_path, monkeypatch):
 
 def learn(h):
     for _ in range(3):
-        h.check_movement(HOME, live=True)
+        h.check_movement(HOME, live=True, error_m=5)
 
 
 def test_distance():
@@ -29,16 +29,16 @@ def test_distance():
 
 
 def test_home_learned_from_three_agreeing_fixes(home):
-    home.check_movement(HOME, live=True)
-    home.check_movement(NEAR, live=True)
+    home.check_movement(HOME, live=True, error_m=5)
+    home.check_movement(NEAR, live=True, error_m=5)
     assert not home.load().get("home")
-    home.check_movement(HOME, live=True)
+    home.check_movement(HOME, live=True, error_m=5)
     assert home.load()["home"] == pytest.approx([10.0000333, 20.0], abs=1e-6)
 
 
 def test_scattered_fixes_dont_become_home(home):
     for loc in (HOME, FAR, HOME):
-        home.check_movement(loc, live=True)
+        home.check_movement(loc, live=True, error_m=5)
     assert not home.load().get("home")
 
 
@@ -95,3 +95,30 @@ def test_reset(home, capsys):
     learn(home)
     assert home.main(["--reset"]) == 0
     assert home.load() == {}
+
+
+@pytest.mark.parametrize("error_m", [None, 16, 200, -1, True])
+def test_fixes_without_a_small_reported_error_are_not_candidates(home, error_m):
+    for _ in range(5):
+        home.check_movement(HOME, live=True, error_m=error_m)
+    state = home.load()
+    assert not state.get("home") and not state.get("candidates")
+
+
+def test_a_fix_exactly_at_the_error_limit_counts(home):
+    for _ in range(3):
+        home.check_movement(HOME, live=True, error_m=home.HOME_MAX_ERROR_M)
+    assert home.load().get("home")
+
+
+def test_candidates_must_be_a_gap_apart(home, monkeypatch):
+    t = [2_000_000]
+    monkeypatch.setattr(home.time, "time", lambda: t[0])
+    for _ in range(5):                  # five reads in the same wake
+        t[0] += 2
+        home.check_movement(HOME, live=True, error_m=5)
+    assert len(home.load()["candidates"]) == 1 and not home.load().get("home")
+    for _ in range(2):                  # later wakes
+        t[0] += home.HOME_GAP_S
+        home.check_movement(HOME, live=True, error_m=5)
+    assert home.load().get("home")
