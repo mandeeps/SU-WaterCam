@@ -1023,7 +1023,8 @@ def call_shutdown(state):
     except Exception as e:
         print(f"⚠️ Failed to update iteration count: {e}")
 
-    # Emergency mode keeps the unit awake and moves the Witty Pi shutdown alarm
+    # Emergency mode captures every emergency_frequency minutes, sleeping in
+    # between (tools/emergency_sleep.py), and moves the Witty Pi shutdown alarm
     # to a backstop an hour after its end (tools/wittypi_control.py), so a stray
     # or forgotten command can't run the battery flat. End it after
     # emergency_max_hours (0 = never).
@@ -1054,12 +1055,25 @@ def call_shutdown(state):
             arm_emergency_backstop(emergency_since, emergency_max_hours)
         except Exception as e:
             print(f"⚠️ Could not set the emergency shutdown backstop: {e}")
-        print("🚨 EMERGENCY MODE ACTIVE - Ignoring shutdown limit, continuing data collection")
-        return "emergency_mode_active"
-
-    print(f"🔍 Shutdown check: count={new_count}, limit={shutdown_limit}, enabled={auto_shutdown_enabled}")
-
-    if auto_shutdown_enabled and new_count >= shutdown_limit:
+        # Sleep until the next capture rather than stay up (tools/emergency_sleep.py)
+        try:
+            from tools.emergency_sleep import prepare as prepare_emergency_sleep
+            sleep = prepare_emergency_sleep()
+        except Exception as e:
+            print(f"⚠️ Emergency sleep check failed: {e}")
+            sleep = {"action": "stay", "why": str(e)}
+        if sleep["action"] == "continue":
+            print(f"✅ {sleep['why']}: back to the normal shutdown count")
+            return "continue"
+        if sleep["action"] == "stay":
+            print(f"🚨 EMERGENCY MODE ACTIVE - staying up ({sleep['why']}), continuing data collection")
+            return "emergency_mode_active"
+        print(f"\n🚨 EMERGENCY MODE: sleeping until the {sleep['why']}\n")
+    else:
+        print(f"🔍 Shutdown check: count={new_count}, limit={shutdown_limit}, enabled={auto_shutdown_enabled}")
+        if not (auto_shutdown_enabled and new_count >= shutdown_limit):
+            print(f"✅ Continuing: count={new_count} < limit={shutdown_limit} or shutdown disabled")
+            return "continue"
         # The monitoring work is done and the connection is up: pick up any
         # command sent during the cycle before powering off. One may say not to
         # (emergency on, a remote access session) -- tools/last_downlink_check.py
@@ -1073,41 +1087,38 @@ def call_shutdown(state):
             print(f"📬 Not shutting down: {last.get('why')} (set by the last downlink check)")
             return "kept_awake_by_downlink"
         print(f"\n🚨 SHUTDOWN TRIGGERED: {new_count} iterations >= {shutdown_limit} limit\n")
-        try:
-            # Finalize the in-progress audio segment so its WAV header is
-            # written correctly before the OS goes down.
-            from tools.audio_recorder import stop_recording_if_active
-            stop_recording_if_active()
-        except Exception as e:
-            print(f"⚠️ Failed to finalize audio recording before shutdown: {e}")
-        # Graceful OS shutdown via doas (configured in /etc/doas.conf for user pi).
-        # Check that it worked: if doas is missing or misconfigured, try sudo
-        # rather than fall through to a restart loop that captures until the
-        # Witty Pi cuts power. runrtm.py keeps the count across restarts within
-        # one boot, so a restarted runtime asks for shutdown again after a cycle.
-        for cmd in (["doas", "/usr/sbin/shutdown", "-h", "now"],
-                    ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"]):
-            try:
-                rc = call(cmd, timeout=30)
-            except Exception as e:
-                rc = e
-            if rc == 0:
-                break
-            print(f"⚠️ {' '.join(cmd[:2])} shutdown failed: {rc}")
-        else:
-            print("🚨 Could not shut down: the Witty Pi will cut power at the end of the window")
-            # Exit with an error: systemd restarts the runtime (Restart=on-failure),
-            # and the next cycle asks for shutdown again.
-            sys.exit("shutdown")
-        # The OS is going down: end the runtime with status 0. The execute
-        # process re-raises this from the SQ's worker thread and exits 0, and
-        # the ensemble (ticktalkpython/Ensemble.py) treats that as a requested
-        # stop, so runrtm.py exits without a ProcessError traceback.
-        sys.exit(0)
-    else:
-        print(f"✅ Continuing: count={new_count} < limit={shutdown_limit} or shutdown disabled")
 
-    return "continue"
+    try:
+        # Finalize the in-progress audio segment so its WAV header is
+        # written correctly before the OS goes down.
+        from tools.audio_recorder import stop_recording_if_active
+        stop_recording_if_active()
+    except Exception as e:
+        print(f"⚠️ Failed to finalize audio recording before shutdown: {e}")
+    # Graceful OS shutdown via doas (configured in /etc/doas.conf for user pi).
+    # Check that it worked: if doas is missing or misconfigured, try sudo
+    # rather than fall through to a restart loop that captures until the
+    # Witty Pi cuts power. runrtm.py keeps the count across restarts within
+    # one boot, so a restarted runtime asks for shutdown again after a cycle.
+    for cmd in (["doas", "/usr/sbin/shutdown", "-h", "now"],
+                ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"]):
+        try:
+            rc = call(cmd, timeout=30)
+        except Exception as e:
+            rc = e
+        if rc == 0:
+            break
+        print(f"⚠️ {' '.join(cmd[:2])} shutdown failed: {rc}")
+    else:
+        print("🚨 Could not shut down: the Witty Pi will cut power at the end of the window")
+        # Exit with an error: systemd restarts the runtime (Restart=on-failure),
+        # and the next cycle asks for shutdown again.
+        sys.exit("shutdown")
+    # The OS is going down: end the runtime with status 0. The execute
+    # process re-raises this from the SQ's worker thread and exits 0, and
+    # the ensemble (ticktalkpython/Ensemble.py) treats that as a requested
+    # stop, so runrtm.py exits without a ProcessError traceback.
+    sys.exit(0)
 
 @SQify
 def compress_bitmap(segmented_file):

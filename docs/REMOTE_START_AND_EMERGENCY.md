@@ -43,9 +43,21 @@ so the command arrives before the normal cycle ends.
   first within a minute of starting, and uploads each capture. A remote access session
   holds the unit the same way once its wake's captures are done. A change of
   `emergency_frequency` applies from the next capture.
+- Between captures the Pi is off (`tools/emergency_sleep.py`): after each
+  capture and its uploads it picks up commands, arms the startup alarm for the
+  next capture (this boot plus `emergency_frequency`, at least 3 minutes away)
+  and shuts down; the shutdown keeps that alarm rather than the schedule's next
+  slot (`tools/ensure_next_wake.py` never moves a wake later). It stays up and
+  captures on the loop's period instead when the interval is under 3 minutes,
+  during a remote access session, with `emergency_sleep` false, or if the alarm
+  doesn't read back. The mDot listens meanwhile, and a command sent while the Pi
+  is off is delivered at the next wake, at most one interval later. At each
+  boot the runtime re-arms the backstop below before capturing, replacing the
+  shutdown `runScript.sh` arms for the end of the schedule's current ON window.
 - `call_shutdown` skips the iteration limit, and the Witty Pi's shutdown alarm moves
   from the schedule to a backstop an hour after emergency mode should end, with
-  the startup alarm 10 minutes after that, so the unit keeps capturing.
+  the startup alarm 10 minutes after that (each sleep then sets the startup alarm
+  for its next capture).
   `call_shutdown` re-arms the backstop each iteration, so a resend moves it out
   too. Three layers end emergency mode: the graph at the time limit,
   `max_awake.py` 15 minutes plus one capture interval later if the graph hangs, and the Witty Pi's backstop
