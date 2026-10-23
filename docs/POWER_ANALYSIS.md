@@ -39,18 +39,54 @@ All figures are the Witty Pi's output (Vout × Iout), from the power logger
 | Two captures, from the first photo to the shutdown request | **3.3–3.8 W** mean, **75–87 mWh** in 73–87 s | measured: five real ticktalk wakes on 006, 2026-10-06, sampled at 5 Hz |
 | Peaks during a real wake | **7.5–8 W** (1.50–1.67 A) | measured: same five wakes, stock clocks |
 | Brief peaks under synthetic load (camera, inference, 4-core stress, modem) | **8–10 W** (1.8–2.2 A) | measured: 006 load tests at 2000 MHz |
-| Off: Witty Pi standby plus the mDot listening | **under about 0.05 W** | below the resolution of two USB meters, on 005 and 006 (2026-10-22) |
+| Off: Witty Pi standby plus the mDot listening | **under about 0.05 W** on the meters; **about 0.08–0.13 W** estimated | the meters' reading is below what the mDot's radio alone draws, so they don't resolve it; see [The mDot's always-on draw](#the-mdots-always-on-draw) |
 
-**The off-state figure is uncertain, and it matters.** The mDot's datasheet
-(MultiTech mDot Developer Guide, electrical characteristics, at 3.3 V) gives
-32 mA idle with the processor active and 43 mA receiving; in Class C it
-receives continuously. 43 mA at 3.3 V is about 0.14 W, or 3.4 Wh/day, more
-than the whole off-state budget below. The USB meters showed less than that,
-but they display nothing below 10–20 mA, so they can't say how much less. Our
-firmware idles the processor between events, which should bring it under the
-datasheet's figure. Measure the mDot's supply current in series with its VDD
-wire on the bench, while the Pi is off. Until then, the off-state estimates
-below may be low by up to about 3 Wh/day.
+### The mDot's always-on draw
+
+*Estimate from the firmware and the datasheets; not measured.* Options for
+lowering it, and a Class B variant, are in the documentation repo's
+`LORAWAN_CLASS_B_OPTION.md`. The off-state
+draw is most of a unit's daily use, and the mDot is most of the off-state draw.
+
+In Class C (`CPROC 1`; the firmware opens a continuous receive window at
+start-up) the mDot listens all the time, so its 40 µA sleep modes are never used.
+
+| Part | Draw at 3.3 V | Basis |
+|---|---|---|
+| Radio (SX1272) receiving, 125 kHz | about 10.5–11 mA | SX1272 datasheet |
+| Processor (STM32F411 at 96 MHz) | about 3–10 mA, plus short run bursts | The build isn't tickless, so the RTOS idle thread uses plain sleep (WFI; deep sleep is locked, `mbed_rtx_idle.cpp`), woken by the 1 kHz SysTick. The AT loop polls every 10 ms and the self watchdog runs every 5 s. Sleep current at this clock depends on which peripheral clocks are on (STM32F411 datasheet). |
+| The rest of the module (its 3.0 V regulator, SPI flash in standby) | about 1 mA | estimate |
+| **Total** | **about 15–25 mA** | The datasheet's 43 mA "RX" figure has the processor running flat out: an upper bound. |
+
+**Transmissions don't matter.** A wake sends a sensor packet and a bitmap per
+capture, two captures per wake:
+- Near a gateway at DR4 (242 B), as on 005, that's 4 uplinks and about 0.4 s on air.
+- At the edge of coverage at DR0 (11 B), the bitmap doesn't fit and waits for IP, and the sensor packet goes in up to 3 chunks of about 0.37 s each: about 2.2 s per wake.
+
+At 20 dBm (130 mA at 3.3 V) that's 0.05–0.26 mWh per wake, under 3 mWh a day
+at 9–15 wakes: about 0.1% of the receive draw. The receive windows after
+each uplink cost nothing extra in Class C.
+
+**From the battery:** the mDot runs from the Witty Pi's 3.3 V. That most likely
+comes from a linear regulator off the 5 V input (an assumption; the Witty Pi
+manual doesn't say), so the current is drawn at 5 V:
+- 15–25 mA is 75–125 mW, **1.8–3.0 Wh/day**;
+- at the datasheet's 43 mA it would be 5.2 Wh/day.
+
+pcb-designs' planned direct 5 V feed (`Schematic_Remaining_Work.md` #20) goes
+into the mDot's own linear regulator, which costs the same. A switching
+regulator to about 3.6 V would save about a quarter of it.
+
+**The USB meters can't settle it:** their "under about 0.05 W" is less than the
+radio alone (11 mA at 5 V is 55 mW), which fits their dead zone at low
+currents. Measure the mDot's current with a multimeter in series with its VDD,
+with the Pi off.
+
+**The other off-state draws:**
+- the Witty Pi's standby, about 0.5 mA (manual): 0.06 Wh/day;
+- the V75's own draw in Always On, about 26 mW: 0.6 Wh/day.
+
+**Off-state total: about 2.5–3.7 Wh/day** (5.9 at the datasheet's mDot figure).
 
 The one-minute logger is too coarse to integrate a wake, so the 2026-10-06
 figures come from a 5 Hz sampler of the same Witty Pi registers. The sampler
@@ -112,16 +148,18 @@ assumed 2–3 minutes. See
 
 ## Daily use by schedule
 
-*Estimates.* The off-state draw (0.05–0.1 W, unmeasured) is 1.2–2.4 Wh/day on
-its own, so it matters as much as the wakes do. If the mDot draws near its
-datasheet's receive current, add up to about 3 Wh/day (see above). The V75's own draw in Always On
-(about 26 mW, 0.6 Wh/day) comes on top; the totals below include it.
+*Estimates.* The off-state draw, about 2.5–3.7 Wh/day with the V75's own draw
+([The mDot's always-on draw](#the-mdots-always-on-draw)), is more than the
+wakes on every schedule below. If the mDot draws its datasheet's 43 mA, add
+about 2.2 Wh/day.
 
 | Schedule | Wakes/day | Wakes | Off-state | Total |
 |---|---|---|---|---|
-| `watercam_on15_off1h45_offnight.wpi` (every 2 h, 06:00–22:00) | 9 | 1.1 Wh | 1.8–3.0 Wh | **about 3–4 Wh/day** |
-| `watercam_10minutes_per_hour.wpi` | 24 | 2.9 Wh | 1.8–3.0 Wh | **about 4.5–6 Wh/day** |
-| `watercam_daylight_2h.wpi` (every 2 h, 08:00–16:00 EST, daylight only) | 5 | 0.6 Wh | 1.8–3.0 Wh | **about 2.5–3.5 Wh/day** |
+| `watercam_on15_off1h45_offnight.wpi` (every 2 h, 06:00–22:00) | 9 | 1.1 Wh | 2.5–3.7 Wh | **about 3.5–5 Wh/day** |
+| `watercam_10minutes_per_hour.wpi` | 24 | 2.9 Wh | 2.5–3.7 Wh | **about 5.5–6.5 Wh/day** |
+| `watercam_daylight_2h.wpi` (every 2 h, 08:00–16:00 EST, daylight only) | 5 | 0.6 Wh | 2.5–3.7 Wh | **about 3–4.5 Wh/day** |
+| Dashboard `15 95`: hourly, sunrise+30 to sunset−15, 10 min (winter, Syracuse) | 9 | 1.1–1.4 Wh | 2.5–3.7 Wh | **about 3.5–5 Wh/day** |
+| The same in midsummer | 15 | 1.8–2.3 Wh | 2.5–3.7 Wh | **about 4.5–6 Wh/day** |
 
 **These are best cases.** The schedules assume every wake ends with a clean
 shutdown.
@@ -157,13 +195,41 @@ alarm doesn't read back.
 
 ## Solar input and storage
 
-- **The input is capped at about 10 W.** The 20 W panel peaks at 23 W (5.21 V, 4.46 A), but the pack's solar input accepts at most 2 A (V75: 5–6 V, 2 A, maximum power point 5.2 V). *From the spec.* Deployed, the panel goes into the V75's 3.5 × 1.1 mm jack.
+- **The input is capped at about 10 W.** The 20 W panel (Voltaic P120: SunPower monocrystalline cells, 23.2 W, Vmp 5.21 V, Imp 4.46 A, Voc 6.61 V) peaks at 23 W, but the pack's solar input accepts at most 2 A (V75: 5–6 V, 2 A, maximum power point 5.2 V, minimum charge current 5 mA). *From the spec.* Deployed, the panel goes into the V75's 3.5 × 1.1 mm jack.
 - **Temperature limits (V75 spec):** no charging below 0 °C or above 45 °C, so no solar charge on freezing days, and a sun-heated enclosure can stop charging in summer. The output cuts below −15 °C or above 60 °C; the pack then recovers into Always On, and the Witty Pi's power-restore boot plus the recovery boot (#98) handle the restart. Not yet tested in the cold.
 - **Clear day:** about 20–30 Wh. **Overcast:** about 3–6 Wh. *Estimates* for Syracuse, NY (43°N), June–September; winter yield hasn't been measured.
-- **Storage:** 72 Wh on the V75 (48 Wh on the V50).
-  - At 3–4 Wh/day that's about **18–24 days with no sun**, best case.
-  - At the field figure of 12–15 Wh/day, about **5 days**.
+- **Storage:** 72 Wh on the V75 (48 Wh on the V50), about 60 Wh usable after the pack's conversion to 5 V (*estimate*).
+  - At 3.5–5 Wh/day that's about **12–17 days with no sun**, best case.
+  - At the field figure of 12–15 Wh/day, about **4–5 days**.
 - **Storage between deployments:** a switched-off unit left plugged into its V75 keeps the Witty Pi powered and the pack's own 7 mA running, and drains it in a month or two. Unplug the Y-cable; plugging it back in turns Always On on again.
+
+### Winter: hourly daylight wakes (006)
+
+*Estimates.* For 006's deployment: the 20 W panel on Voltaic's fixed large bracket (BK103: 50° from horizontal; the older large bracket is 40°), with thin, bare deciduous branches across part of the southern sky, and the dashboard's hourly sun-following schedule.
+
+- **Use:** about **3.5–5 Wh/day**: 9 wakes in December (about 08:05–16:20) and the off-state draw.
+- **The angle suits winter.** The December noon sun stands about 24° high, and the best fixed winter tilt at 43°N is about 55–60°.
+  - At 50° the noon sun is 16° off the panel's facing direction, a loss of about 4%; at 40°, about 10%.
+  - 50° sheds snow better.
+- **Overcast:** about 0.3–0.6 kWh/m² a day, all of it diffuse.
+  - A 50° panel sees about 82% of the sky, plus light reflected off snow on the ground, so it collects about what a flat panel would.
+  - Thin branches cost 5–15%.
+  - After the losses of weak light and slow charging: **about 2–3.5 Wh**.
+  - The V75 charges from as little as 5 mA of input (Voltaic's spec), about 25 mW, so weak overcast light still counts.
+- **Clear day:** the sun is half a degree wide, so a twig a few metres away casts only a soft blur. Thin branches dim the whole panel by 10–25% rather than casting hard shadows across cells wired in series. **About 12–22 Wh.**
+- **Below 0 °C** (the pack's cell temperature) **or with snow on the panel:** 0.
+
+| Day | Yield | Net, against 3.5–5 Wh |
+|---|---|---|
+| Overcast | 2–3.5 Wh | about 0 to −3 Wh |
+| Clear | 12–22 Wh | about +7 to +18 Wh |
+| Freezing, or snow on the panel | 0 | −3.5 to −5 Wh |
+
+- **The balance:** with one clear day in four, the average is slightly positive. Cloud and branches don't decide winter; freezing spells do.
+- **With no charge,** about 60 Wh usable lasts **12–17 days**. At the datasheet's mDot draw it's about 8 days, and cold also cuts the pack's capacity.
+- **What would firm this up:**
+  - the mDot's measured current, which moves daily use between about 3.5 and 7 Wh;
+  - a winter day's yield measured at the site.
 
 On current software, energy is not usually the limit. 006's failure came from:
 - **brownouts at wake time**, under fast current peaks
@@ -383,9 +449,9 @@ So the modem draws about 0.6-0.9 W while powered, even in low power, and the mic
 
 ## Still to measure
 
-1. **Off-state draw:** below what two USB meters could read (2026-10-22); a meter with mA resolution would pin it down. The V75's own 7 mA is on top.
+1. **Off-state draw, above all the mDot's:** below what two USB meters could read (2026-10-22), though the radio alone should show. Measure the mDot's current in series with its VDD with a multimeter, Pi off; it moves daily use by up to 2 Wh ([The mDot's always-on draw](#the-mdots-always-on-draw)). The V75's own 7 mA is on top.
 2. **Energy per wake, boot and shutdown included:** captures sampled at 5 Hz on 2026-10-06; boot and shutdown measured on 005 on 2026-10-22 (below). Still missing: the first ~14 s after power-on (bootloader and kernel, before any sampler can run), estimated.
 3. **WiFi's draw:** idle looked about 0.3–0.6 W lower with WiFi disconnected, in one session.
 4. **Solar charging through the V75's solar jack:** a load test while it charges from the real panel in sun.
-5. **Winter yield** at the 10 W input cap.
+5. **Winter yield** at the 10 W input cap, at the site, on an overcast and a clear day. (The V75 charges from 5 mA of input, per Voltaic.)
 6. **The V75 in the cold and the heat:** whether output and Always On come back by themselves after a cutoff below −15 °C or above 60 °C, and the enclosure temperature on a sunny day (charging stops above 45 °C).
