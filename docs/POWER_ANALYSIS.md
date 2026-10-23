@@ -43,7 +43,9 @@ All figures are the Witty Pi's output (Vout × Iout), from the power logger
 
 ### The mDot's always-on draw
 
-*Estimate from the firmware and the datasheets; not measured.* The off-state
+*Estimate from the firmware and the datasheets; not measured.* Options for
+lowering it, and a Class B variant, are in the documentation repo's
+`LORAWAN_CLASS_B_OPTION.md`. The off-state
 draw is most of a unit's daily use, and the mDot is most of the off-state draw.
 
 In Class C (`CPROC 1`; the firmware opens a continuous receive window at
@@ -193,7 +195,7 @@ alarm doesn't read back.
 
 ## Solar input and storage
 
-- **The input is capped at about 10 W.** The 20 W panel peaks at 23 W (5.21 V, 4.46 A), but the pack's solar input accepts at most 2 A (V75: 5–6 V, 2 A, maximum power point 5.2 V). *From the spec.* Deployed, the panel goes into the V75's 3.5 × 1.1 mm jack.
+- **The input is capped at about 10 W.** The 20 W panel (Voltaic P120: SunPower monocrystalline cells, 23.2 W, Vmp 5.21 V, Imp 4.46 A, Voc 6.61 V) peaks at 23 W, but the pack's solar input accepts at most 2 A (V75: 5–6 V, 2 A, maximum power point 5.2 V, minimum charge current 5 mA). *From the spec.* Deployed, the panel goes into the V75's 3.5 × 1.1 mm jack.
 - **Temperature limits (V75 spec):** no charging below 0 °C or above 45 °C, so no solar charge on freezing days, and a sun-heated enclosure can stop charging in summer. The output cuts below −15 °C or above 60 °C; the pack then recovers into Always On, and the Witty Pi's power-restore boot plus the recovery boot (#98) handle the restart. Not yet tested in the cold.
 - **Clear day:** about 20–30 Wh. **Overcast:** about 3–6 Wh. *Estimates* for Syracuse, NY (43°N), June–September; winter yield hasn't been measured.
 - **Storage:** 72 Wh on the V75 (48 Wh on the V50), about 60 Wh usable after the pack's conversion to 5 V (*estimate*).
@@ -213,7 +215,7 @@ alarm doesn't read back.
   - A 50° panel sees about 82% of the sky, plus light reflected off snow on the ground, so it collects about what a flat panel would.
   - Thin branches cost 5–15%.
   - After the losses of weak light and slow charging: **about 2–3.5 Wh**.
-  - Whether the V75 charges at all at very low input currents isn't known; if not, the darkest days give 0.
+  - The V75 charges from as little as 5 mA of input (Voltaic's spec), about 25 mW, so weak overcast light still counts.
 - **Clear day:** the sun is half a degree wide, so a twig a few metres away casts only a soft blur. Thin branches dim the whole panel by 10–25% rather than casting hard shadows across cells wired in series. **About 12–22 Wh.**
 - **Below 0 °C** (the pack's cell temperature) **or with snow on the panel:** 0.
 
@@ -451,5 +453,5 @@ So the modem draws about 0.6-0.9 W while powered, even in low power, and the mic
 2. **Energy per wake, boot and shutdown included:** captures sampled at 5 Hz on 2026-10-06; boot and shutdown measured on 005 on 2026-10-22 (below). Still missing: the first ~14 s after power-on (bootloader and kernel, before any sampler can run), estimated.
 3. **WiFi's draw:** idle looked about 0.3–0.6 W lower with WiFi disconnected, in one session.
 4. **Solar charging through the V75's solar jack:** a load test while it charges from the real panel in sun.
-5. **Winter yield** at the 10 W input cap, at the site, on an overcast and a clear day; and whether the V75 charges at all at very low input current.
+5. **Winter yield** at the 10 W input cap, at the site, on an overcast and a clear day. (The V75 charges from 5 mA of input, per Voltaic.)
 6. **The V75 in the cold and the heat:** whether output and Always On come back by themselves after a cutoff below −15 °C or above 60 °C, and the enclosure temperature on a sunny day (charging stops above 45 °C).
