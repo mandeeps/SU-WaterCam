@@ -65,11 +65,25 @@ def read_wittypi_voltages() -> Dict[str, float]:
         return {}
 
 
-def read_gps_location() -> Dict[str, Any]:
-    """Return GPS lat/lon/alt dict if available, else empty dict."""
+def read_gps_location(window_s: float = 120) -> Dict[str, Any]:
+    """A live GPS lat/lon/alt dict if one can be had, else empty dict.
+
+    The modem (and its GPS) is on USB, which is off unless something holds it
+    (tools/usb_power.py). With it off, this opens a GPS window as a wake would
+    (tools/gps_window.py): USB on, up to `window_s` for a live fix, USB off again.
+    A fix found then is saved as the cached fix too.
+    """
     try:
-        from tools.get_gps import get_lat_lon_alt
-        gps = get_lat_lon_alt()
+        import os
+        from tools import get_gps
+        if not os.path.exists(get_gps.GNSS_DEVICE):
+            from tools import gps_window
+            print(f"GPS: modem off; powering it for up to {window_s:.0f} s for a live fix...", flush=True)
+            if not gps_window.run_window(["health check"], timeout_s=window_s):
+                return {}
+            loc, _ = get_gps.get_location_with_retry(use_cache=True)
+            return loc if isinstance(loc, dict) else {}
+        gps = get_gps.get_lat_lon_alt()
         return gps if isinstance(gps, dict) else {}
     except Exception:
         return {}
