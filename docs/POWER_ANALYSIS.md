@@ -41,6 +41,17 @@ All figures are the Witty Pi's output (Vout × Iout), from the power logger
 | Brief peaks under synthetic load (camera, inference, 4-core stress, modem) | **8–10 W** (1.8–2.2 A) | measured: 006 load tests at 2000 MHz |
 | Off: Witty Pi standby plus the mDot listening | **under about 0.05 W** | below the resolution of two USB meters, on 005 and 006 (2026-10-22) |
 
+**The off-state figure is uncertain, and it matters.** The mDot's datasheet
+(MultiTech mDot Developer Guide, electrical characteristics, at 3.3 V) gives
+32 mA idle with the processor active and 43 mA receiving; in Class C it
+receives continuously. 43 mA at 3.3 V is about 0.14 W, or 3.4 Wh/day, more
+than the whole off-state budget below. The USB meters showed less than that,
+but they display nothing below 10–20 mA, so they can't say how much less. Our
+firmware idles the processor between events, which should bring it under the
+datasheet's figure. Measure the mDot's supply current in series with its VDD
+wire on the bench, while the Pi is off. Until then, the off-state estimates
+below may be low by up to about 3 Wh/day.
+
 The one-minute logger is too coarse to integrate a wake, so the 2026-10-06
 figures come from a 5 Hz sampler of the same Witty Pi registers. The sampler
 itself adds some load, which is in every one of those figures equally.
@@ -102,7 +113,8 @@ assumed 2–3 minutes. See
 ## Daily use by schedule
 
 *Estimates.* The off-state draw (0.05–0.1 W, unmeasured) is 1.2–2.4 Wh/day on
-its own, so it matters as much as the wakes do. The V75's own draw in Always On
+its own, so it matters as much as the wakes do. If the mDot draws near its
+datasheet's receive current, add up to about 3 Wh/day (see above). The V75's own draw in Always On
 (about 26 mW, 0.6 Wh/day) comes on top; the totals below include it.
 
 | Schedule | Wakes/day | Wakes | Off-state | Total |
