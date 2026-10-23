@@ -69,3 +69,21 @@ def test_main_ok_exit_code(monkeypatch, capsys):
     monkeypatch.setattr(hc, 'read_imu_orientation', lambda: IMU)
     assert hc.main([]) == 0
     assert 'Health check: OK' in capsys.readouterr().out
+
+
+def test_gps_opens_a_window_when_the_modem_is_off(monkeypatch):
+    from tools import get_gps, gps_window
+    monkeypatch.setattr(get_gps, "GNSS_DEVICE", "/nonexistent/ttyUSB1")
+    ran = []
+    monkeypatch.setattr(gps_window, "run_window", lambda why, timeout_s=0: ran.append((why, timeout_s)) or True)
+    monkeypatch.setattr(get_gps, "get_location_with_retry",
+                        lambda use_cache=True: ({"gps_lat": 1.0, "gps_lon": 2.0, "gps_alt": 3.0}, None))
+    assert hc.read_gps_location(window_s=5)["gps_lat"] == 1.0
+    assert ran == [(["health check"], 5)]
+
+
+def test_gps_without_a_fix_in_the_window_is_empty(monkeypatch):
+    from tools import get_gps, gps_window
+    monkeypatch.setattr(get_gps, "GNSS_DEVICE", "/nonexistent/ttyUSB1")
+    monkeypatch.setattr(gps_window, "run_window", lambda why, timeout_s=0: False)
+    assert hc.read_gps_location(window_s=5) == {}
