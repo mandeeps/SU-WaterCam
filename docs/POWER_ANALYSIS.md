@@ -120,17 +120,26 @@ shutdown.
 
 ### Emergency mode
 
-Emergency mode keeps the unit on: `call_shutdown()` ignores the iteration
-limit, and the Witty Pi's scheduled shutdown is replaced by a backstop an hour
-after emergency mode's end. It captures every
-`emergency_frequency` minutes (default 10, 1-240) for as long as it lasts, the first
-capture within a minute of it starting; `photo_interval` applies to normal wakes
-only (`tools/photo_interval_watcher.py`).
+Emergency mode captures every `emergency_frequency` minutes (default 10,
+1-240) for as long as it lasts, the first capture within a minute of it
+starting. Between captures the unit **sleeps** (`tools/emergency_sleep.py`):
+each wake takes one capture, sends it, picks up commands, arms the Witty Pi's
+startup alarm for the next capture (this boot plus the interval) and shuts
+down. It stays up instead, capturing on the loop's period as before, when the
+interval is under 3 minutes (a boot costs more than it saves), during a remote
+access session, with `emergency_sleep` false in `runtime_config.json`, or if the
+alarm doesn't read back.
 
-- **Draw:** about 3–4.5 W continuously, idle plus a capture every 10 minutes (it was every minute before the interval was applied), more with the modem. *Estimate.*
-- **Per day:** about 70–110 Wh.
-- **On the V75 alone:** 72 Wh lasts about **16–24 hours** with no sun (the V50's 48 Wh, about 11–16 hours).
-- **Solar can't sustain it:** a clear day's 20–30 Wh doesn't cover it. Emergency mode needs a time limit (see below).
+- **Per capture cycle:** boot (25–35 mWh), one capture and its uploads with the
+  Pi idling at about 2 W for 2–3 minutes (70–100 mWh), shutdown (10–15 mWh):
+  about 100–150 mWh. *Estimate from the measured parts.*
+- **Per day at 10 minutes:** 144 cycles, about **15–22 Wh**, plus the off-state
+  draw. Kept on, as before, it was about 70–110 Wh.
+- **On the V75 alone:** 72 Wh lasts about **3–4 days** with no sun (kept on: 16–24 hours).
+- **Solar:** a clear day's 20–30 Wh about covers it; an overcast day's 3–6 Wh
+  doesn't. Emergency mode still has a time limit (see below).
+- **Not yet measured end to end** on a unit: one full cycle on the 5 Hz logger
+  will replace these estimates.
 
 ---
 

@@ -158,6 +158,17 @@ def run_application_rtm(name,
         rtm.send_to_runtime(instantiate_graph_msg)
 
  #       time.sleep(2)
+        # An emergency wake boots between schedule slots, and runScript.sh may
+        # have armed a shutdown a minute away: put the emergency backstop back
+        # before capturing (tools/emergency_sleep.py)
+        try:
+            from tools.emergency_sleep import rearm_backstop_at_boot
+            _note = rearm_backstop_at_boot()
+            if _note:
+                print(_note)
+        except Exception as e:
+            print(f"Warning: emergency backstop not re-armed: {e}")
+
         # Start capturing as soon as the sensors are up (get_time fires on
         # arrival, TTStartOnArrival) rather than at the next minute boundary.
         try:

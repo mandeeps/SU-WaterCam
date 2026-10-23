@@ -155,6 +155,8 @@ class LoRaRuntimeManager:
         
         # System control parameters
         'emergency_mode': False,        # Emergency mode flag
+        # Off between emergency captures instead of staying up (tools/emergency_sleep.py)
+        'emergency_sleep': True,
         'debug_mode': False,            # Debug logging mode
         
         # Performance parameters
