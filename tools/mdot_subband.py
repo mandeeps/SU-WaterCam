@@ -7,7 +7,14 @@ with sub-band 0, "all 64 channels", so only about one join request in eight
 reaches the gateway and a join can take 15 minutes. With the right sub-band it
 joins in seconds (005, 2026-10-14: 6.6 s).
 
-    python3 tools/mdot_subband.py               # set sub-band 1 if needed, save it
+It also turns off the sub-band search (AT+JR=0). With join retries above 0, an
+mDot that keeps failing to join (out of range, or at the edge of coverage)
+moves to the next sub-band after that many tries, and so on round all eight:
+006 drifted from 1 to 8 in a day out of range, and to 3 at its site
+(2026-10-24). On another sub-band it can't join our gateway even when back in
+range. With 0 it keeps trying on the sub-band set here.
+
+    python3 tools/mdot_subband.py               # set sub-band 1 and no sub-band search if needed, save
     python3 tools/mdot_subband.py --check       # only report
     python3 tools/mdot_subband.py --sub-band 2  # a site whose gateway uses another
     python3 tools/mdot_subband.py --from-mask   # take it from the joined network's channel mask
@@ -16,7 +23,7 @@ joins in seconds (005, 2026-10-14: 6.6 s).
 It stops lora_daemon (which owns the port) and starts it again. Settings are
 saved with AT&W, which saves every current setting, so the data-rate and ADR
 settings are printed first. Joining spends a DevNonce: --rejoin only when
-needed. Nothing changes if the sub-band is already right.
+needed. Nothing changes if the sub-band and join retries are already right.
 """
 import argparse
 import re
@@ -100,6 +107,16 @@ class MDot:
         return False
 
 
+def changes_needed(fsb: str, join_retries: str, want: int) -> list:
+    """The AT commands that set sub-band `want` and no sub-band search; [] if both are right."""
+    cmds = []
+    if fsb != str(want):
+        cmds.append(f'AT+FSB={want}')
+    if join_retries != '0':
+        cmds.append('AT+JR=0')
+    return cmds
+
+
 def value(answer: str) -> str:
     """'1\\nOK' -> '1'."""
     return answer.split('\n')[0] if answer.endswith('OK') else ''
@@ -119,7 +136,9 @@ def run(a) -> int:
         print('No AT prompt: the mDot stayed in its join loop')
         return 1
     fsb, joined, chm = value(m.at('AT+FSB?')), value(m.at('AT+NJS?')), value(m.at('AT+CHM?'))
-    print(f"mDot {value(m.at('AT+DI?'))}: sub-band {fsb or '?'}, joined {joined or '?'}, channel mask {chm or '?'}")
+    jr = value(m.at('AT+JR?'))
+    print(f"mDot {value(m.at('AT+DI?'))}: sub-band {fsb or '?'}, joined {joined or '?'}, channel mask {chm or '?'}, "
+          f"sub-band search (join retries) {jr or '?'}")
     print(f"  data rate {value(m.at('AT+TXDR?'))}, ADR {value(m.at('AT+ADR?'))}")
 
     want = a.sub_band
@@ -129,20 +148,20 @@ def run(a) -> int:
             print('--from-mask: the mDot must be joined and its mask enable exactly one sub-band')
             return 1
         print(f"  the network's channel mask is sub-band {want}")
+    cmds = changes_needed(fsb, jr, want)
     if a.check:
-        ok = fsb == str(want)
-        print('OK' if ok else f'sub-band {fsb}, wanted {want}')
-        return 0 if ok else 2
+        print('OK' if not cmds else f'sub-band {fsb} (wanted {want}), join retries {jr} (wanted 0)')
+        return 0 if not cmds else 2
 
-    if fsb == str(want):
-        print(f'Sub-band already {want}: nothing to change')
+    if not cmds:
+        print(f'Sub-band already {want} with no sub-band search: nothing to change')
     else:
-        if not m.at(f'AT+FSB={want}').endswith('OK') or not m.at('AT&W').endswith('OK'):
-            print(f'Could not set and save sub-band {want}')
+        if not all(m.at(c).endswith('OK') for c in cmds) or not m.at('AT&W').endswith('OK'):
+            print(f"Could not set and save {', '.join(cmds)}")
             return 1
-        now = value(m.at('AT+FSB?'))
-        print(f'Sub-band {fsb} -> {now}, saved')
-        if now != str(want):
+        now_fsb, now_jr = value(m.at('AT+FSB?')), value(m.at('AT+JR?'))
+        print(f'Sub-band {fsb} -> {now_fsb}, join retries {jr} -> {now_jr}, saved')
+        if changes_needed(now_fsb, now_jr, want):
             return 1
 
     if a.rejoin:
