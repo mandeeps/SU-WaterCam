@@ -82,6 +82,27 @@ def test_write_is_read_back_and_retried(monkeypatch):
     assert len(imu.writes) == 2 * 22
 
 
+def test_write_is_checked_before_fusion_changes_the_offsets(monkeypatch):
+    # In NDOF the sensor zeroes the magnetometer radius (bytes 20-21) until it
+    # re-confirms calibration: a read-back after switching to NDOF never matches
+    imu = _driver(monkeypatch)
+    state = {"mode": cal.MODE_CONFIG, "fused": False}
+
+    def set_mode(mode):
+        state["mode"] = mode
+        if mode == cal.MODE_NDOF:
+            state["fused"] = True
+
+    def read_bytes(reg, n):
+        return GOOD[:20] + bytes(2) if state["fused"] else GOOD
+
+    imu._set_mode = set_mode
+    imu._write_byte = lambda reg, val: state.update(fused=False)
+    imu._read_bytes = read_bytes
+    imu.write_offsets(GOOD)
+    assert state["mode"] == cal.MODE_NDOF          # fusion is back on afterwards
+
+
 def test_write_that_never_reads_back_fails(monkeypatch):
     imu = _driver(monkeypatch, blocks=[bytes(22)] * 6)
     with pytest.raises(IOError, match="read back"):
