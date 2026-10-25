@@ -278,7 +278,11 @@ class BNO055:
         the calibration procedure. Must be in CONFIG mode.
 
         Reads the block back and writes it again if it differs (I2C glitch);
-        IOError if it never matches.
+        IOError if it never matches. The read-back stays in CONFIG mode
+        (read_offsets returns to NDOF afterwards): once fusion runs, the sensor
+        refines the offsets itself and reads the magnetometer radius as 0 until
+        it re-confirms calibration, so a read-back in NDOF never matched
+        (006 at its site, 2026-10-24).
         """
         if len(offsets) != CALIB_OFFSET_LEN:
             raise ValueError(f"Expected {CALIB_OFFSET_LEN} bytes, got {len(offsets)}")
@@ -286,8 +290,6 @@ class BNO055:
             self._set_mode(MODE_CONFIG)
             for i, byte in enumerate(offsets):
                 self._write_byte(REG_CALIB_OFFSET_START + i, byte)
-            self._set_mode(MODE_NDOF)
-            time.sleep(0.1)
             try:
                 if self.read_offsets() == offsets:
                     return
