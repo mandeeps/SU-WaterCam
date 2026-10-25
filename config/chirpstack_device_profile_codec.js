@@ -2,6 +2,10 @@
  * Decode uplink function
  * 
  * Data Format:
+ * A payload of one 00 byte is the node's MAC-flush probe (tools/lora_handler_concurrent.py
+ * _flush_mac_commands): sent when the mDot answers "Tx buffer filled by MAC Commands", it
+ * carries only the mDot's MAC command answers, typically after a join at DR0.
+ *
  * Channel 00 Type 01: Timestamp (UNIX)
  * Channel 01 Type 04: Emergency status (0/1)
  * Channel 01 Type 05: Health status (0/1) 
@@ -43,6 +47,9 @@
  */
 function decodeUplink(input) {
   const bytes = input.bytes;
+  if (bytes.length === 1 && bytes[0] === 0) {
+    return { data: { mac_flush_probe: true } };
+  }
   const view = new DataView(Uint8Array.from(bytes).buffer);
   let offset = 0;
 
