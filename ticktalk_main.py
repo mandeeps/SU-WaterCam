@@ -267,6 +267,13 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     if registration_status is not None:
         data['registration_status'] = registration_status
 
+    # Whether the IR-cut filter moved between this capture's NIR-OFF and NIR-ON
+    # frames (0 yes, 1 no); absent in the dark or without a pair (tools/nir_filter_check.py).
+    from tools.nir_filter_check import status_code_for_capture as nir_filter_status_for
+    nir_filter_status = nir_filter_status_for(dirname)
+    if nir_filter_status is not None:
+        data['nir_filter_status'] = nir_filter_status
+
     # Water % of this capture's mask, and the flood flags when detection is on
     # (tools/flood_baseline.py); absent when there is no mask.
     try:
@@ -1983,6 +1990,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         data['pi_throttled'] = get_throttled()
         from tools.registration_orientation import status_code_for_capture
         data['registration_status'] = status_code_for_capture(dirname)
+        from tools.nir_filter_check import status_code_for_capture as nir_filter_status_for
+        data['nir_filter_status'] = nir_filter_status_for(dirname)
         from tools.node_version import uplink_fields
         data.update(uplink_fields())
         try:
@@ -2093,6 +2102,10 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                 _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(flood[key])).hex()})
         if flood.get('camera_water_pct') is not None:
             _add("07 37", lambda: {"payload_hex": struct.pack(">B", flood['camera_water_pct']).hex()})
+        # 07 47 — IR-cut filter check (tools/nir_filter_check.py, uint8: 0 moved, 1 not); omitted without a verdict
+        nir_filter_status = data.get('nir_filter_status')
+        if nir_filter_status is not None:
+            _add("07 47", lambda: {"payload_hex": struct.pack(">B", nir_filter_status).hex()})
 
         # 08 18 — flood bitmap (variable length), sent as base64 (a third smaller on
         # the wire than hex). Over IP the mask goes at its full resolution, lossless

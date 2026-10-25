@@ -142,6 +142,10 @@ function decodeUplink(input) {
         // Share of the camera mask classed as water, 0-100 %
         result.camera_water_pct = view.getUint8(offset++);
         break;
+      case '7-47':
+        // IR-cut filter check: 0 the filter moved between the NIR pair, 1 it did not
+        result.nir_filter_status = view.getUint8(offset++);
+        break;
       case '8-18': {
         const len = view.getUint16(offset, false);
         offset += 2;
