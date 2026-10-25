@@ -57,6 +57,15 @@ def test_codec_decodes_compact_packet():
     assert out["temperature_celsius"] == -3 and out["relative_humidity"] == 55
 
 
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_codec_accepts_the_mac_flush_probe():
+    # 006 at its site, 2026-10-24: the 1-byte probe made the codec throw "out of bound"
+    js = ("const fs=require('fs');eval(fs.readFileSync(process.argv[1],'utf8'));"
+          "console.log(JSON.stringify(decodeUplink({bytes:JSON.parse(process.argv[2]),fPort:1}).data));")
+    out = json.loads(subprocess.check_output(["node", "-e", js, CODEC, "[0]"], text=True))
+    assert out == {"mac_flush_probe": True}
+
+
 class FakeHandler:
     def __init__(self, fail_on=()):
         self.sent, self.fail_on = [], set(fail_on)
