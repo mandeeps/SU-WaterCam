@@ -535,9 +535,15 @@ sub-band 0 (all 64 channels) and our gateway listens on sub-band 1, so only abou
 one join request in eight is heard and a join can take 15 minutes. On the Pi:
 
 ```bash
-python3 tools/mdot_subband.py            # sets and saves sub-band 1 (nothing if already set)
+python3 tools/mdot_subband.py            # sets and saves sub-band 1 and no sub-band search (nothing if already set)
 python3 tools/mdot_subband.py --check    # report only
 ```
+
+It also sets join retries to 0 (`AT+JR=0`). Otherwise an mDot that keeps
+failing to join, out of range or at the edge of coverage, moves on to the next
+sub-band after a few tries, round all eight. Then it can't join our gateway even
+once it's back in range. 006 drifted from 1 to 8 in a day on the bench out of
+range, and to 3 at its site.
 
 It stops and restarts `lora_daemon` around it. A gateway on another sub-band:
 `--sub-band N`, or `--from-mask` on a unit that has joined and sent an uplink.
@@ -1029,9 +1035,12 @@ for the site:
 - [ ] **Power feed:** on the P2 harness, or the USB-C plug passed a push and
       wiggle test with no new boot; then tilt the closed box in every direction,
       including the mounting angle, again with no new boot (1.11.1).
-- [ ] **mDot:** `ATI` shows `4.1.5-wc2610-sw3` or later, `AT+FSB?` is 1,
-      `AT+WDOG?` starts with 20, and `AT+SILENCE?` shows `60,1,…` after the LoRa
-      daemon has run 5 minutes (stop it to query, then start it again; 1.6).
+- [ ] **mDot:** `AT+FSB?` is 1 and `AT+JR?` is 0 (`tools/mdot_subband.py --check`),
+      `AT+WDOG?` starts with 20. On `4.1.5-wc2610-sw3` or later, `AT+SILENCE?` shows
+      `60,1,…` after the LoRa daemon has run 5 minutes (stop it to query, then start
+      it again; 1.6). Those builds restart every 20 s when they can't join (seen with
+      sw6 and sw7, 2026-10-22; mDot-AT-firmware #22). A unit that may be out of LoRa
+      range when it starts stays on `4.1.5-wc2610` until that is fixed, as 006 does.
 - [ ] `sudo doas -C /etc/doas.conf` passes and `/etc/doas.conf` matches
       `config/doas.conf` (`sudo diff config/doas.conf /etc/doas.conf`).
 - [ ] Witty Pi output voltage is at least 4.7 V under load: `vout` in
