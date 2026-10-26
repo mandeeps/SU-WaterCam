@@ -297,12 +297,37 @@ def test_uplink_model_id_names_the_model_that_made_the_mask(tmp_path, monkeypatc
     import json
     from tools import node_version as nv
     info = tmp_path / "model.json"
-    info.write_text(json.dumps({"name": "m.onnx", "sha256": "11223344" + "0" * 56}))
+    info.write_text(json.dumps({"name": "m.onnx", "sha256": "11223344" + "0" * 56, "bands": 5}))
     monkeypatch.setattr(nv, "MODEL_INFO_PATH", str(info))
     monkeypatch.setattr(nv, "software_version", lambda: None)
     capture = tmp_path / "cap"
     capture.mkdir()
-    assert nv.uplink_fields(str(capture))["model_id"] == 0x11223344
+    assert nv.uplink_fields(str(capture)) == {"model_id": 0x11223344, "model_bands": 5}
     capture_status.mark(str(capture), segmentation_model_sha256="4ca62324" + "0" * 56)
-    assert nv.uplink_fields(str(capture))["model_id"] == 0x4CA62324
-    assert nv.uplink_fields()["model_id"] == 0x11223344
+    assert nv.uplink_fields(str(capture)) == {"model_id": 0x4CA62324, "model_bands": 3}
+    assert nv.uplink_fields() == {"model_id": 0x11223344, "model_bands": 5}
+
+
+def test_model_without_a_band_count_sends_no_model_bands(tmp_path, monkeypatch):
+    import json
+    from tools import node_version as nv
+    info = tmp_path / "model.json"
+    info.write_text(json.dumps({"name": "m.onnx", "sha256": "11223344" + "0" * 56}))   # older daemon
+    monkeypatch.setattr(nv, "MODEL_INFO_PATH", str(info))
+    monkeypatch.setattr(nv, "software_version", lambda: None)
+    assert nv.uplink_fields() == {"model_id": 0x11223344}
+
+
+def test_daemon_records_how_many_bands_its_model_reads(tmp_path):
+    import json
+    daemon = _daemon()
+    model = tmp_path / "m.onnx"
+    model.write_bytes(b"onnx")
+    info = tmp_path / "model.json"
+
+    class Session:
+        def get_inputs(self):
+            return [type("I", (), {"shape": [1, 5, "h", "w"]})()]
+    daemon.record_model(str(model), str(info), {}, daemon.model_bands(Session(), {}))
+    assert json.loads(info.read_text())["bands"] == 5
+    assert daemon.model_bands(Session(), {"bands": "red,green,blue"}) == 3

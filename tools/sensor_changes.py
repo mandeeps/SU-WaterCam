@@ -33,7 +33,7 @@ LAST_FULL_KEY = "_last_full_send"
 ANGLE_FIELDS = ("tilt_roll_yaw",)
 #: Identifiers packed into integers (tools/node_version.py): any change matters,
 #: and a relative threshold would miss v2026.10.0 -> v2026.10.1.
-EXACT_FIELDS = ("software_version", "software_commit", "model_id", "sf_dropped", "clock_unverified")
+EXACT_FIELDS = ("software_version", "software_commit", "model_id", "model_bands", "sf_dropped", "clock_unverified")
 #: The unit's position, [lat, lon, alt]: sent when it moved POSITION_THRESHOLD_M,
 #: so GPS jitter doesn't put 12 bytes in every LoRa packet. A unit away from its
 #: mount sends it every time anyway (tools/gps_home.py).

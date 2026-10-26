@@ -96,6 +96,10 @@ function decodeUplink(input) {
         result.model_id = view.getUint32(offset, false);
         offset += 4;
         break;
+      case '1-10':
+        // Bands the segmentation model that made the mask reads: 5 five-band, 3 RGB
+        result.model_bands = view.getUint8(offset++);
+        break;
       case '1-c':
         // Store-and-forward entries dropped (LoRa + IP queues, since install)
         result.sf_dropped = view.getUint32(offset, false);

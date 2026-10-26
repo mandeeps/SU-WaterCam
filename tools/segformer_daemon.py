@@ -292,6 +292,12 @@ def run_inference(session, tiff_path: str, output_path: str, rgb_only: bool = Fa
 # Socket server
 # ---------------------------------------------------------------------------
 
+def model_bands(session, meta: dict) -> int | None:
+    """How many bands the model reads: the ones it declares, else its graph's channels."""
+    declared = [b for b in (meta.get("bands") or "").split(",") if b.strip()]
+    return len(declared) or graph_input_channels(session)
+
+
 def reads_rgb_only(meta: dict) -> bool:
     """Does the model declare exactly bands=red,green,blue?"""
     return [b.strip().lower() for b in (meta.get("bands") or "").split(",")] == ["red", "green", "blue"]
@@ -474,11 +480,13 @@ def parse_args():
 MODEL_INFO_NAME = "model.json"
 
 
-def record_model(model_path: str, info_path: str, meta: dict | None = None) -> None:
+def record_model(model_path: str, info_path: str, meta: dict | None = None,
+                 bands: int | None = None) -> None:
     """Write which model is loaded ({"name", "path", "sha256"}); never raises.
 
     `meta` (the model's metadata_props) adds "model_name" and "model_version"
-    when the model declares them; "name" stays the file name.
+    when the model declares them; "name" stays the file name. `bands`, the
+    number of bands the model reads, is sent as model_bands (tools/node_version.py).
 
     The model can change with no git change at all (a new file, or a drop-in
     pointing --model elsewhere), so the node reports the file's own hash.
@@ -498,6 +506,8 @@ def record_model(model_path: str, info_path: str, meta: dict | None = None) -> N
             for k in ("model_name", "model_version"):
                 if (meta or {}).get(k):
                     rec[k] = meta[k]
+            if bands:
+                rec["bands"] = bands
             json.dump(rec, f)
         os.replace(tmp, info_path)
         log.info("Model %s%s sha256 %s", os.path.basename(real),
@@ -546,7 +556,7 @@ def main():
     rgb_fallback = None if reads_rgb_only(meta) else RgbFallback(args.rgb_model)
     serve(session, args.socket,
           on_listening=lambda: threading.Thread(
-              target=record_model, args=(model_path, info_path, meta),
+              target=record_model, args=(model_path, info_path, meta, model_bands(session, meta)),
               name="record-model", daemon=True).start(),
           rgb_fallback=rgb_fallback)
 
