@@ -194,11 +194,22 @@ def run_inference(session, tiff_path: str, output_path: str, rgb_only: bool = Fa
     # field node offline.
     bands = model_band_indices(session, descriptions, tiff_tags)
     if rgb_only:
-        # The thermal band of this TIFF is a placeholder. Only a model that
-        # reads its three optical bands by name may be run on it.
+        # The thermal or NIR band of this TIFF holds no data. Only a model
+        # that reads its three optical bands by name may be run on it.
         got = tiff_band_order(descriptions, tiff_tags)
         if bands is None or any(got[b] not in ("red", "green", "blue") for b in bands):
-            raise ValueError("this model reads the thermal or NIR band and the capture has no thermal frame")
+            raise ValueError("this model reads the thermal or NIR band and the capture lacks one")
+    # A band the capture lacks (INVALID_BANDS, written by co-registration: no
+    # thermal frame, or an IR-cut filter that did not move) holds zeros or noise.
+    # A model that reads it would return a plausible mask from it, so refuse,
+    # whatever the request said.
+    invalid = {b.strip().lower() for b in (tiff_tags.get("INVALID_BANDS") or "").split(",") if b.strip()}
+    if invalid:
+        got = tiff_band_order(descriptions, tiff_tags)
+        reads = got if bands is None else [got[b] for b in bands]
+        lacking = sorted(invalid.intersection(b for b in reads if b))
+        if lacking:
+            raise ValueError(f"this model reads the {', '.join(lacking)} band, which this capture lacks (INVALID_BANDS)")
     problem = band_order_problem(session, descriptions, tiff_tags)
     if problem and problem != _band_warning[0]:
         _band_warning[0] = problem

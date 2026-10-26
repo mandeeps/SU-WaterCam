@@ -26,12 +26,26 @@ Sent to the server as nir_filter_status (channel 07 47, both transports):
 0 the filter moved, 1 it did not (the frames are the same though lit). No value
 when there is no verdict: no pair, a frame unreadable, or too dark.
 
+Co-registration records the verdict in the capture's capture_status.json
+(judge_capture) and, when the filter did not move, marks the TIFFs it writes:
+INVALID_BANDS=nir and OPTICAL=unfiltered. A filter that is stuck stays stuck
+after dark, so a capture too dark to judge takes the last lit capture's verdict
+(kept in data/nir_filter_last.json) and names where it came from; the server
+still gets a value only for captures judged on their own frames.
+
     python -m tools.nir_filter_check <capture dir>...    (from ~/SU-WaterCam)
 """
 import glob
+import json
 import os
 import sys
 from typing import Any, Dict, Optional
+
+try:
+    from tools import capture_status
+except ImportError:                      # run as a script from tools/
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from tools import capture_status
 
 LIT_MIN_MEAN = 20.0
 SAME_MAX_DIFF = 5.0
@@ -39,6 +53,10 @@ _DRAFT_SIZE = (324, 243)
 
 STATUS_OK = 0
 STATUS_NOT_SWITCHING = 1
+_VERDICT = {STATUS_OK: "ok", STATUS_NOT_SWITCHING: "not_switching"}
+
+LAST_LIT_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "data", "nir_filter_last.json")
 
 
 def _small(path: str):
@@ -70,10 +88,57 @@ def _pair_paths(dirname: str):
     return (off[0], on[0]) if off and on else (None, None)
 
 
+def _last_lit(path: str) -> Optional[Dict[str, Any]]:
+    try:
+        with open(path) as f:
+            data = json.load(f)
+        return data if data.get("nir_filter") in _VERDICT.values() else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def _save_last_lit(path: str, data: Dict[str, Any]) -> None:
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            json.dump(data, f)
+        os.replace(tmp, path)
+    except OSError as exc:
+        print(f"NIR filter check: could not save the last verdict: {exc}")
+
+
+def judge_capture(dirname: str, last_lit_path: Optional[str] = None) -> Optional[str]:
+    """Record the capture's verdict in its capture_status.json and return it.
+
+    "ok", "not_switching", or None when there is neither a verdict of its own
+    nor an earlier lit capture to take one from.
+    """
+    last_lit_path = last_lit_path or LAST_LIT_PATH
+    off, on = _pair_paths(dirname)
+    result = check_pair(off, on) if off else None
+    if result is not None:
+        verdict = _VERDICT[result["status"]]
+        capture_status.mark(dirname, nir_filter=verdict, nir_filter_diff=result["diff"])
+        _save_last_lit(last_lit_path, {"nir_filter": verdict,
+                                       "capture": os.path.basename(os.path.normpath(dirname))})
+        return verdict
+    last = _last_lit(last_lit_path)
+    if last is None:
+        return None
+    capture_status.mark(dirname, nir_filter=last["nir_filter"], nir_filter_from=last.get("capture"))
+    return last["nir_filter"]
+
+
 def status_code_for_capture(dirname: str) -> Optional[int]:
     """nir_filter_status for the capture in dirname, or None (see the module doc)."""
     if not dirname:
         return None
+    status = capture_status.read(dirname)
+    if status.get("nir_filter") in _VERDICT.values():
+        if status.get("nir_filter_from"):
+            return None                   # borrowed from an earlier capture: no verdict of its own
+        return STATUS_NOT_SWITCHING if status["nir_filter"] == "not_switching" else STATUS_OK
     off, on = _pair_paths(dirname)
     if off is None:
         return None

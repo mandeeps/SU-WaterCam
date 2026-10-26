@@ -15,9 +15,9 @@ def segformer_via_daemon(tiff_path: str, output_path: str,
     Returns True on success. The daemon keeps the ONNX model resident in
     memory, cutting the per-cycle cold-start cost of ~10–20 s.
 
-    rgb_only: the TIFF's thermal band is a placeholder (the Lepton gave no
-    frame). The daemon then runs only a model that reads the RGB bands alone and
-    answers with an error otherwise.
+    rgb_only: the TIFF's thermal or NIR band holds no data (the Lepton gave no
+    frame, or the IR-cut filter did not move). The daemon then runs only a model
+    that reads the RGB bands alone and answers with an error otherwise.
     """
     import json
     import os as _os
