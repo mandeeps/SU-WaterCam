@@ -10,11 +10,13 @@ has local edits can't pass for the release:
     v2026.10.1-dirty              local edits (005's no-shutdown patch, say)
     abc12345                      no release tag reachable
 
-It is sent on three channels (u32 each over IP; LoRa sends the first and last):
+It is sent on these channels (LoRa sends all but the commit):
 
-    01 09  software_version  (year-2000)<<24 | month<<16 | patch<<8 | flags
-    01 0A  software_commit   first 8 hex digits of the commit
-    01 0B  model_id          first 8 hex digits of the loaded ONNX file's SHA-256
+    01 09  software_version  u32 (year-2000)<<24 | month<<16 | patch<<8 | flags
+    01 0A  software_commit   u32 first 8 hex digits of the commit
+    01 0B  model_id          u32 first 8 hex digits of the loaded ONNX file's SHA-256
+    01 10  model_bands       u8  how many bands that model reads: 5 for the
+                                 five-band model, 3 for an RGB one
 
 flags: bit 0 dirty, bit 1 past the tag, bit 2 no release tag (the version
 bytes are then 0). The API's app/decoders.py must decode the same layout.
@@ -22,8 +24,8 @@ bytes are then 0). The API's app/decoders.py must decode the same layout.
 The model is whatever segformer_daemon loaded, which it records in
 /run/segformer/model.json; a model file can change with no git change at all.
 A capture the daemon segmented with its RGB fallback (a band missing) records
-that model in its capture_status.json, and model_id then names it instead: the
-id goes with the mask it describes.
+that model in its capture_status.json, and model_id and model_bands (3) then
+describe it instead: they go with the mask they describe.
 
     python -m tools.node_version        prints both
 """
@@ -157,16 +159,22 @@ def capture_model_sha256(dirname: Optional[str]) -> Optional[str]:
 
 
 def uplink_fields(dirname: Optional[str] = None) -> Dict[str, int]:
-    """software_version, software_commit and model_id for the uplinks; only those
-    that can be read. Never raises. With the capture's directory, model_id names
-    the model that made its mask (the RGB fallback, say)."""
+    """software_version, software_commit, model_id and model_bands for the uplinks;
+    only those that can be read. Never raises. With the capture's directory, the
+    model fields describe the model that made its mask (the RGB fallback, say)."""
     out: Dict[str, int] = {}
     try:
         version = software_version()
-        model_sha = capture_model_sha256(dirname) or (model_info() or {}).get("sha256")
+        fallback_sha = capture_model_sha256(dirname)
+        loaded = model_info() or {}
+        model_sha = fallback_sha or loaded.get("sha256")
+        bands = 3 if fallback_sha else loaded.get("bands")
+        if not isinstance(bands, int) or isinstance(bands, bool) or not 0 < bands < 256:
+            bands = None
         for key, value in (("software_version", encode_version_u32(version)),
                            ("software_commit", hex8_u32((version or {}).get("commit"))),
-                           ("model_id", hex8_u32(model_sha))):
+                           ("model_id", hex8_u32(model_sha)),
+                           ("model_bands", bands)):
             if value is not None:
                 out[key] = value
     except Exception as exc:   # noqa: BLE001 - the uplink must never fail over this

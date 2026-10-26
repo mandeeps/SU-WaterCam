@@ -2085,6 +2085,9 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                           ("01 0B", "model_id")):
             if data.get(key) is not None:
                 _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(data[key])).hex()})
+        # 01 10 — bands the mask's model reads (5 five-band, 3 RGB), u8 (tools/node_version.py)
+        if data.get('model_bands') is not None:
+            _add("01 10", lambda: {"payload_hex": struct.pack(">B", _u32(data['model_bands']) & 0xFF).hex()})
         # 01 11 — cellular KiB used since install, first wake of each day (tools/cellular_usage.py), u32
         if data.get('cellular_kib_total') is not None:
             _add("01 11", lambda: {"payload_hex": struct.pack(">I", _u32(data['cellular_kib_total'])).hex()})
