@@ -18,6 +18,9 @@ run in their own process.
                    "skipped_no_thermal"  not segmented: no thermal frame and no
                                RGB-only model; camera_water_pct is absent
                    "skipped_no_nir"  the same for an empty NIR band
+                   "rgb_fallback"  the loaded model reads a band this capture
+                               lacks, so the daemon's RGB-only fallback made the
+                               mask; segmentation_model_sha256 names that model
                    "skipped_no_daemon"   not segmented: segformer_daemon was
                                not running (no socket); camera_water_pct is absent
                    "daemon_failed"       not segmented: the daemon refused or

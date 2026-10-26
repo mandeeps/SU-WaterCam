@@ -21,7 +21,10 @@ flood. The count restarts at the first capture that does not meet it.
 Masks of frames whose mean brightness (0-255) is below MIN_BRIGHTNESS or above
 MAX_BRIGHTNESS (night, dense fog, a covered or blown-out lens) are not trusted:
 they still report camera_water_pct, but raise no flags and count for neither
-the previous water % nor the streaks.
+the previous water % nor the streaks. Nor are masks the segmentation daemon's
+RGB fallback made (a band missing, capture_status.json segmentation
+"rgb_fallback"): the baseline and the previous water % come from the loaded
+model, and two models put the water line in different places.
 
 The previous water percentage persists across wakes in data/flood_state.json.
 
@@ -186,6 +189,10 @@ def flood_fields(dirname: str, state_path: Optional[str] = None) -> dict:
     if pct is None:
         return {}
     fields = {"camera_water_pct": pct}
+    from tools import capture_status
+    if capture_status.read(dirname).get("segmentation") == "rgb_fallback":
+        print(f"🌊 Water {pct}%: mask from the RGB fallback model, not used for flood flags")
+        return fields
     brightness = frame_brightness(dirname)
     if brightness is not None and not MIN_BRIGHTNESS <= brightness <= MAX_BRIGHTNESS:
         print(f"🌙 Water {pct}%: frame brightness {brightness:.0f} is outside "
