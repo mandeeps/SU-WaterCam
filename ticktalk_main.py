@@ -285,7 +285,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     # Node software release and loaded model (tools/node_version.py); sent when
     # they change and in the periodic full send.
     from tools.node_version import uplink_fields
-    data.update(uplink_fields())
+    data.update(uplink_fields(dirname))
     # Entries the store-and-forward queues dropped unsent (tools/drop_counter.py) and
     # whether this capture predates a verified clock (tools/capture_time.py).
     try:
@@ -955,9 +955,10 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
     # A band this capture lacks: no thermal frame (tt_take_photos.flir), so the
     # TIFF's thermal band is zeros, or an IR-cut filter that did not move, so its
     # NIR band is empty (tools/nir_filter_check.py). Only a model that reads the
-    # RGB bands alone may run on it, and only the daemon can say whether the
-    # loaded one does. Otherwise skip, and say so (capture_status.json, this
-    # log): no mask, so no camera_water_pct either.
+    # RGB bands alone may run on it: the loaded one if it does, else the daemon's
+    # RGB fallback, and only the daemon knows which it has. With neither, skip
+    # and say so (capture_status.json, this log): no mask, so no
+    # camera_water_pct either.
     from tools import capture_status
     invalid = capture_status.invalid_bands(filepath)
     if "thermal" in invalid:
@@ -969,10 +970,18 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
         # Prefer the persistent daemon — no cold-start, model stays loaded.
         # Not while a cellular upload runs: together they pull the Pi under-voltage.
         if os.path.exists(socket_path):
+            reply = {}
             with power_exclusive("segmentation", 120):
-                ok = segformer_via_daemon(tiff_path, output_path, socket_path, rgb_only=bool(invalid))
+                ok = segformer_via_daemon(tiff_path, output_path, socket_path,
+                                          rgb_only=bool(invalid), info=reply)
             if ok:
-                if invalid:
+                if reply.get("model") == "rgb_fallback":
+                    # The uplink's model_id names this model for this capture
+                    # (tools/node_version.uplink_fields).
+                    print(f"⚠️ {lacking}: segmented with the RGB fallback model")
+                    capture_status.mark(filepath, segmentation="rgb_fallback",
+                                        segmentation_model_sha256=reply.get("model_sha256"))
+                elif invalid:
                     print(f"⚠️ {lacking}: segmented with the RGB-only model")
                     capture_status.mark(filepath, segmentation="rgb_only")
                 return output_path
@@ -1999,7 +2008,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         from tools.nir_filter_check import status_code_for_capture as nir_filter_status_for
         data['nir_filter_status'] = nir_filter_status_for(dirname)
         from tools.node_version import uplink_fields
-        data.update(uplink_fields())
+        data.update(uplink_fields(dirname))
         try:
             from tools import drop_counter
             from tools.capture_time import clock_unverified

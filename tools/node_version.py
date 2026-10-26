@@ -21,6 +21,9 @@ bytes are then 0). The API's app/decoders.py must decode the same layout.
 
 The model is whatever segformer_daemon loaded, which it records in
 /run/segformer/model.json; a model file can change with no git change at all.
+A capture the daemon segmented with its RGB fallback (a band missing) records
+that model in its capture_status.json, and model_id then names it instead: the
+id goes with the mask it describes.
 
     python -m tools.node_version        prints both
 """
@@ -142,15 +145,28 @@ def model_info(path: Optional[str] = None) -> Optional[Dict[str, Any]]:
         return None
 
 
-def uplink_fields() -> Dict[str, int]:
+def capture_model_sha256(dirname: Optional[str]) -> Optional[str]:
+    """The model that made this capture's mask, when it was not the loaded one."""
+    if not dirname:
+        return None
+    try:
+        from tools import capture_status
+        return capture_status.read(dirname).get("segmentation_model_sha256") or None
+    except Exception:          # noqa: BLE001 - fall back to the loaded model
+        return None
+
+
+def uplink_fields(dirname: Optional[str] = None) -> Dict[str, int]:
     """software_version, software_commit and model_id for the uplinks; only those
-    that can be read. Never raises."""
+    that can be read. Never raises. With the capture's directory, model_id names
+    the model that made its mask (the RGB fallback, say)."""
     out: Dict[str, int] = {}
     try:
         version = software_version()
+        model_sha = capture_model_sha256(dirname) or (model_info() or {}).get("sha256")
         for key, value in (("software_version", encode_version_u32(version)),
                            ("software_commit", hex8_u32((version or {}).get("commit"))),
-                           ("model_id", hex8_u32((model_info() or {}).get("sha256")))):
+                           ("model_id", hex8_u32(model_sha))):
             if value is not None:
                 out[key] = value
     except Exception as exc:   # noqa: BLE001 - the uplink must never fail over this

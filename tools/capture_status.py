@@ -18,6 +18,9 @@ run in their own process.
                    "skipped_no_thermal"  not segmented: no thermal frame and no
                                RGB-only model; camera_water_pct is absent
                    "skipped_no_nir"  the same for an empty NIR band
+                   "rgb_fallback"  the loaded model reads a band this capture
+                               lacks, so the daemon's RGB-only fallback made the
+                               mask; segmentation_model_sha256 names that model
 
 The bands a capture lacks are also written into its TIFFs as the INVALID_BANDS
 tag (tools/coreg_multiple.py), so a copy of the TIFF says so on its own.

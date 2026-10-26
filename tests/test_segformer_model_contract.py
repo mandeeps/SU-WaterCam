@@ -123,7 +123,8 @@ def test_model_hash_is_recorded_after_the_socket_is_serving(tmp_path, monkeypatc
     """Hashing the model reads the whole file; it must not delay the socket."""
     events = []
     monkeypatch.setattr(daemon, "parse_args", lambda: type("A", (), {
-        "model": "m.onnx", "fallback_fp32": None, "socket": str(tmp_path / "s.sock")})())
+        "model": "m.onnx", "fallback_fp32": None, "rgb_model": "",
+        "socket": str(tmp_path / "s.sock")})())
     monkeypatch.setattr(daemon, "load_first_usable", lambda c: ("m.onnx", object()))
     monkeypatch.setattr(daemon, "model_metadata", lambda s: {})
     done = daemon.threading.Event()
@@ -132,7 +133,7 @@ def test_model_hash_is_recorded_after_the_socket_is_serving(tmp_path, monkeypatc
         events.append("hash")
         done.set()
 
-    def serve(session, sock, on_listening=None):
+    def serve(session, sock, on_listening=None, rgb_fallback=None):
         events.append("listening")
         on_listening()
         done.wait(5)

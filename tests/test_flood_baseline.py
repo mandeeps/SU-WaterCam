@@ -121,6 +121,18 @@ def test_dark_or_blown_out_frames_raise_no_flags_and_leave_no_trace(tmp_path, gr
     assert state["capture"] == "20261015-100000" and state["water_pct"] == 10
 
 
+def test_rgb_fallback_mask_raises_no_flags_and_leaves_no_trace(tmp_path):
+    from tools import capture_status
+    s = tmp_path / "s.json"
+    on = dict(camera_flood_detection_enabled=True, flood_baseline_water_pct=0)
+    _fields(_capture(tmp_path, "20261015-100000", 0.10), s, **on)
+    fallback = _capture(tmp_path, "20261015-110000", 0.90)
+    capture_status.mark(fallback, segmentation="rgb_fallback")
+    assert _fields(fallback, s, **on) == {"camera_water_pct": 90}  # reported, no flags
+    state = json.loads(s.read_text())
+    assert state["capture"] == "20261015-100000" and state["water_pct"] == 10
+
+
 def test_normal_brightness_frame_is_used(tmp_path):
     s = tmp_path / "s.json"
     d = _capture(tmp_path, "20261015-100000", 0.50)
