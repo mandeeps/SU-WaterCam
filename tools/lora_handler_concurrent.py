@@ -268,6 +268,8 @@ _SENSOR_FIELDS = (
     # Software release and loaded model (tools/node_version.py); the commit is IP only
     ('software_version', _u32_field(0x01, 0x09, 'software_version')),
     ('model_id', _u32_field(0x01, 0x0B, 'model_id')),
+    # Cellular KiB used since install, once a day (tools/cellular_usage.py)
+    ('cellular_kib_total', _u32_field(0x01, 0x11, 'cellular_kib_total')),
     # Dropped store-and-forward entries and the unverified-clock flag
     ('sf_dropped', lambda d: bytes([0x01, 0x0C]) + struct.pack(">I", min(_int_in(d['sf_dropped'], 0, 1 << 64), 0xFFFFFFFF))),
     ('clock_unverified', lambda d: bytes([0x01, 0x0D, 1 if d['clock_unverified'] else 0])),
@@ -292,7 +294,7 @@ _CHUNK_PRIORITY = (
     'lat_lon_z', 'tilt_roll_yaw', 'pose_tilt_tenths', 'registration_status', 'sf_dropped',
     'status_area_threshold', 'stage_threshold', 'monitoring_frequency', 'emergency_frequency',
     'neighborhood_emergency_frequency', 'audio_recording_enabled', 'schedule',
-    'software_version', 'model_id',
+    'software_version', 'model_id', 'cellular_kib_total',
 )
 
 

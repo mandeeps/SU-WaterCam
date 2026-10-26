@@ -486,6 +486,19 @@ sudo nft list table netdev watercam_cellular                     # shows the two
 Don't enable the stock `nftables.service`: its `/etc/nftables.conf` starts with
 `flush ruleset`, which would also remove Tailscale's own firewall rules.
 
+Count the cellular data the unit uses, so the server can track it against the SIM's
+allowance (`tools/cellular_usage.py`). The total is reported on the first wake of
+each day:
+
+```bash
+sudo install -m 644 config/watercam-cellular-usage.service /etc/systemd/system/
+sudo install -m 755 config/networkmanager/dispatcher.d/90-watercam-cellular-usage \
+    /etc/NetworkManager/dispatcher.d/
+sudo systemctl daemon-reload
+sudo systemctl enable watercam-cellular-usage.service   # runs whenever wwan0 exists
+venv/bin/python -m tools.cellular_usage show            # after a cellular session
+```
+
 Check it, as `pi` and without `sudo`:
 
 ```bash
