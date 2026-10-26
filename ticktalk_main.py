@@ -956,36 +956,42 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
         print(f"⚠️ Skipping segmentation: no co-registered image ({tiff_path})")
         return None
 
-    # No thermal frame this capture (tt_take_photos.flir): the TIFF's thermal band
-    # is zeros. Only a model that reads the RGB bands alone may run on it, and only
-    # the daemon can say whether the loaded one does. Otherwise skip, and say so
-    # (capture_status.json, this log): no mask, so no camera_water_pct either.
+    # A band this capture lacks: no thermal frame (tt_take_photos.flir), so the
+    # TIFF's thermal band is zeros, or an IR-cut filter that did not move, so its
+    # NIR band is empty (tools/nir_filter_check.py). Only a model that reads the
+    # RGB bands alone may run on it, and only the daemon can say whether the
+    # loaded one does. Otherwise skip, and say so (capture_status.json, this
+    # log): no mask, so no camera_water_pct either.
     from tools import capture_status
-    no_thermal = capture_status.thermal_missing(filepath)
+    invalid = capture_status.invalid_bands(filepath)
+    if "thermal" in invalid:
+        lacking, skipped = "No thermal frame", "skipped_no_thermal"
+    else:
+        lacking, skipped = "IR-cut filter stuck (NIR band empty)", "skipped_no_nir"
 
     try:
         # The ONNX daemon (segformer_daemon.service) is the only segmentation path.
         # The conda torch fallback is gone: it is not used, ONNX performs better,
         # and its ~40 s cold load at the end of a wake only cost energy.
         if not os.path.exists(socket_path):
-            if no_thermal:
-                print("⚠️ No thermal frame and no segmentation daemon: segmentation skipped for this capture")
-                capture_status.mark(filepath, segmentation="skipped_no_thermal")
+            if invalid:
+                print(f"⚠️ {lacking} and no segmentation daemon: segmentation skipped for this capture")
+                capture_status.mark(filepath, segmentation=skipped)
             else:
                 print("⚠️ No segmentation daemon: segmentation skipped for this capture")
                 capture_status.mark(filepath, segmentation="skipped_no_daemon")
             return None
         # Not while a cellular upload runs: together they pull the Pi under-voltage.
         with power_exclusive("segmentation", 120):
-            ok = segformer_via_daemon(tiff_path, output_path, socket_path, rgb_only=no_thermal)
+            ok = segformer_via_daemon(tiff_path, output_path, socket_path, rgb_only=bool(invalid))
         if ok:
-            if no_thermal:
-                print("⚠️ No thermal frame: segmented with the RGB-only model")
+            if invalid:
+                print(f"⚠️ {lacking}: segmented with the RGB-only model")
                 capture_status.mark(filepath, segmentation="rgb_only")
             return output_path
-        if no_thermal:
-            print("⚠️ No thermal frame and no RGB-only model: segmentation skipped for this capture")
-            capture_status.mark(filepath, segmentation="skipped_no_thermal")
+        if invalid:
+            print(f"⚠️ {lacking} and no RGB-only model: segmentation skipped for this capture")
+            capture_status.mark(filepath, segmentation=skipped)
         else:
             print("⚠️ Segmentation daemon call failed: segmentation skipped for this capture")
             capture_status.mark(filepath, segmentation="daemon_failed")
