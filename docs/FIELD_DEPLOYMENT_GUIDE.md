@@ -884,6 +884,17 @@ sudo cp config/journald-volatile.conf /etc/systemd/journald.conf.d/
 sudo systemctl restart systemd-journald
 ```
 
+The LoRa handler's `DEBUG:` lines (every AT command, payload hex) and the
+per-poll GPS lines are off by default. Turn them on for a test or problem unit
+with a flag file; it survives software updates, and a change applies at the
+next start of each service:
+
+```bash
+sudo mkdir -p /etc/watercam && sudo touch /etc/watercam/debug-logs   # off: sudo rm it
+```
+
+005 (test unit) and 006 keep the flag for now.
+
 Rotate the logs that otherwise only grow: the power log, the bench
 `~/throttle_log.csv`, ticktalk's `output.log` and `data/temp_humidity.csv`
 (each kept to four 5 MB compressed copies). `~/wittypi/wittyPi.log` is left

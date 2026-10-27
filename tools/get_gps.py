@@ -9,8 +9,10 @@ import time
 
 try:
     from tools import config_io
+    from tools.debug_log import debug
 except ImportError:     # run from tools/ as a script
     import config_io
+    from debug_log import debug
 
 # The last good fix, for when there is no live one. A unit is stationary, and the
 # modem's GNSS takes 40-50 s to fix after USB comes on, so a wake's first LoRa
@@ -28,6 +30,7 @@ _REFRESH_S = 3600               # or when the cached fix is this old
 # the fix's age in seconds (0 when live) and its horizontal error in metres
 # when gpsd reports one. The IP uplink sends the age (channel 04 02).
 last_fix = {"source": "none", "age_s": None, "error_m": None}
+_cached_note_shown = False   # "using the last fix" printed once per process
 
 # gpsd connection. Every request (connect, welcome, ?WATCH, ?POLL) times out
 # after REQUEST_TIMEOUT_S: py-gpsd2's own connect() and get_current() block on a
@@ -97,7 +100,7 @@ def _get_packet():
     except Exception:
         _disconnect()       # timeout or a broken stream: connect again next time
         raise
-    print(f'Current packet mode: {packet.mode}')
+    debug(f'Current packet mode: {packet.mode}')
     if packet.mode < 2:
         return None
     return packet
@@ -224,6 +227,7 @@ def get_location_with_retry(max_retries: int = 3, delay: float = 1.0,
         tuple: (dict, packet) where dict contains GPS data (or empty dict if unavailable)
                and packet is the raw GPS packet (or None if unavailable or cached)
     """
+    global _cached_note_shown
     # With USB off there is no GNSS: don't spend seconds asking gpsd
     if os.path.exists(GNSS_DEVICE) and _ensure_connected():
         for attempt in range(max_retries):
@@ -242,7 +246,11 @@ def get_location_with_retry(max_retries: int = 3, delay: float = 1.0,
     if use_cache:
         location, age = cached_fix()
         if location:
-            print(f"GPS: no live fix; using the last fix from {age / 3600:.1f} h ago")
+            if not _cached_note_shown:     # once per process: every read in a wake says the same
+                print(f"GPS: no live fix; using the last fix from {age / 3600:.1f} h ago")
+                _cached_note_shown = True
+            else:
+                debug(f"GPS: no live fix; using the last fix from {age / 3600:.1f} h ago")
             last_fix.update(source="cached", age_s=age, error_m=None)
             return (location, None)
     last_fix.update(source="none", age_s=None, error_m=None)
