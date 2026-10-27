@@ -1,4 +1,4 @@
-"""tools/debug_log.py: debug output only with "debug_logs": true or WATERCAM_DEBUG=1."""
+"""tools/debug_log.py: debug output only with "debug_mode": true or WATERCAM_DEBUG=1."""
 import json
 
 from tools import debug_log
@@ -18,8 +18,8 @@ def test_off_by_default(tmp_path, monkeypatch):
 
 def test_on_with_runtime_config_key(tmp_path, monkeypatch):
     monkeypatch.delenv("WATERCAM_DEBUG", raising=False)
-    assert debug_log._enabled(_config(tmp_path, {"debug_logs": True})) is True
-    assert debug_log._enabled(_config(tmp_path, {"debug_logs": "yes"})) is False   # only true
+    assert debug_log._enabled(_config(tmp_path, {"debug_mode": True})) is True
+    assert debug_log._enabled(_config(tmp_path, {"debug_mode": "yes"})) is False   # only true
 
 
 def test_on_with_env(tmp_path, monkeypatch):

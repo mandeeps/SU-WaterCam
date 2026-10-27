@@ -1,8 +1,9 @@
 """Optional debug output, off on production units.
 
-On when `"debug_logs": true` is in runtime_config.json (the unit's own config in
-the app directory, kept across software updates, so test and problem units keep
-their debug lines) or WATERCAM_DEBUG=1 is set in the service's environment.
+On when the runtime parameter `debug_mode` is true in runtime_config.json (the
+unit's own config in the app directory, kept across software updates, so test
+and problem units keep their debug lines) or WATERCAM_DEBUG=1 is set in the
+service's environment.
 Read once per process: a change applies at the next start.
 """
 import json
@@ -17,7 +18,7 @@ def _enabled(path: str = RUNTIME_CONFIG) -> bool:
         return True
     try:
         with open(path, encoding="utf-8") as f:
-            return json.load(f).get("debug_logs") is True
+            return json.load(f).get("debug_mode") is True
     except (OSError, ValueError, AttributeError):
         return False
 
