@@ -374,18 +374,10 @@ Remove and purge udhcpcd and openresolv: `sudo apt purge udhcpcd openresolv`
 Reconfigure current network devices with network manager to retain local networking during setup - `sudo nmtui` is easiest way
 Make sure /etc/network/interfaces has no references to devices you want NM to manage
 
-Override automatic device renaming: Create /etc/systemd/network/10-wwan.link with the contents 
-
-[Match]
-Driver=qmi_wwan
-Path=platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.4
-
-[Link]
-Name=wwan0
-
-Then run 'sudo udevadm control --reload' 
-
-'sudo udevadm trigger --action=add /sys/class/net/wwp1s0u1u3i4' or whatever the device name is
+Override automatic device renaming: install `config/systemd-network/10-wwan.link` as
+`/etc/systemd/network/10-wwan.link`, which keeps the modem's interface named `wwan0`
+on any USB port (docs/FIELD_DEPLOYMENT_GUIDE.md, 1.5.1). Then run
+`sudo udevadm control --reload`; it applies the next time the modem comes up.
 
 Then configure the cellular modem and verify everything works as expected after restarts
 `sudo mmcli -m 0 --simple-connect='apn=iot.1nce.net'` Replace apn as appropriate

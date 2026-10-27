@@ -471,6 +471,19 @@ connection up and down, and switch the WiFi radio off while LoRa works (1.9.1).
 Changing the connection's settings still needs `sudo`. Check it with
 `nmcli general permissions`: `network-control` and `enable-disable-wifi` both `yes`.
 
+Keep the modem's interface named `wwan0`. Since Trixie, udev renames it to a name
+like `wwp1s0u1u4i4`, and the cellular filter, the data counter and the checks below
+all expect `wwan0`. Without this file they never see the modem, and cellular traffic
+goes out unfiltered:
+
+```bash
+sudo install -D -m 644 config/systemd-network/10-wwan.link /etc/systemd/network/10-wwan.link
+sudo udevadm control --reload      # applies the next time USB power brings the modem up
+```
+
+After the next cellular session, `journalctl -k -b | grep "renamed from wwan0"` prints
+nothing. A line there means the file didn't match and the interface was renamed.
+
 Keep Tailscale's probes to private addresses off the modem. Tailscale tries every
 address the API server advertises, including LAN and Docker ones that can never
 answer over cellular, and each try costs data ([CELLULAR_DATA.md](CELLULAR_DATA.md)):
