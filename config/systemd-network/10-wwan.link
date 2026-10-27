@@ -1,0 +1,12 @@
+# Keep the modem's data interface named wwan0 (/etc/systemd/network/10-wwan.link).
+# Since Trixie (systemd 257), udev renames it to a path-based name such as
+# wwp1s0u1u4i4, and everything bound to wwan0 then misses the modem: the cellular
+# filter (watercam-cellular-filter.service), the data counter
+# (watercam-cellular-usage.service, tools/cellular_usage.py) and the docs' checks.
+# Matched on the driver only, not the USB path, so it works on any port. A unit
+# has one modem, so this can't name two interfaces wwan0.
+[Match]
+Driver=qmi_wwan
+
+[Link]
+Name=wwan0
