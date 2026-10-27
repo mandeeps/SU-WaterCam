@@ -115,6 +115,13 @@ def release(name: str) -> bool:
         pass
     if holders():
         return False
+    # Powering off removes the modem's interface and its byte counters with it:
+    # count them first (tools/cellular_usage.py).
+    try:
+        from tools.cellular_usage import sample
+        sample()
+    except Exception as e:               # noqa: BLE001 - never block the power-off
+        print(f"⚠️ cellular usage not sampled before USB off: {e}")
     off = _switch("off")
     _powered = False
     if off:

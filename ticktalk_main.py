@@ -279,6 +279,12 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     # they change and in the periodic full send.
     from tools.node_version import uplink_fields
     data.update(uplink_fields())
+    # Cellular KiB used since install, on the first wake of each day only
+    # (tools/cellular_usage.py); absent on other wakes and on units without a modem.
+    from tools.cellular_usage import daily_report_kib
+    cellular_kib = daily_report_kib()
+    if cellular_kib is not None:
+        data['cellular_kib_total'] = cellular_kib
     # Entries the store-and-forward queues dropped unsent (tools/drop_counter.py) and
     # whether this capture predates a verified clock (tools/capture_time.py).
     try:
@@ -1985,6 +1991,10 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         data['registration_status'] = status_code_for_capture(dirname)
         from tools.node_version import uplink_fields
         data.update(uplink_fields())
+        from tools.cellular_usage import daily_report_kib
+        cellular_kib = daily_report_kib()
+        if cellular_kib is not None:
+            data['cellular_kib_total'] = cellular_kib
         try:
             from tools import drop_counter
             from tools.capture_time import clock_unverified
@@ -2048,6 +2058,9 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                           ("01 0B", "model_id")):
             if data.get(key) is not None:
                 _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(data[key])).hex()})
+        # 01 11 — cellular KiB used since install, first wake of each day (tools/cellular_usage.py), u32
+        if data.get('cellular_kib_total') is not None:
+            _add("01 11", lambda: {"payload_hex": struct.pack(">I", _u32(data['cellular_kib_total'])).hex()})
         # 01 0C — store-and-forward entries dropped unsent (tools/drop_counter.py), u32
         # 01 0D — 1 if this capture was taken before the clock was verified, u8
         if data.get('sf_dropped') is not None:

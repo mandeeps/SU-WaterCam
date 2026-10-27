@@ -35,6 +35,7 @@ model, so this is reported separately from the software version.
 | `01 0B` | `model_id` | first 8 hex digits of the model's SHA-256 | LoRa, IP |
 | `01 0C` | `sf_dropped` | store-and-forward entries (LoRa + IP queues) dropped unsent for age or depth, since install (`tools/drop_counter.py`; debug status key `sd`) | LoRa, IP |
 | `01 0D` | `clock_unverified` | u8, 1 if the capture was taken before the clock was verified by network, GPS or server time (`tools/capture_time.py`) | LoRa, IP |
+| `01 11` | `cellular_kib_total` | KiB sent and received over cellular since install, counted on the node; on the first wake of each day only (`tools/cellular_usage.py`) | LoRa, IP |
 
 Flags: bit 0 dirty, bit 1 past the tag, bit 2 no release tag (the version bytes are
 then 0). Over LoRa the fields go at the end of the packet, only when they change and

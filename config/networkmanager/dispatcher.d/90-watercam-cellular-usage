@@ -1,0 +1,10 @@
+#!/bin/sh
+# Count cellular bytes when the modem's connection goes up or down
+# (tools/cellular_usage.py). NetworkManager runs this as root for every
+# connection; only the modem's (wwan* data interface, cdc-wdm* control device) is
+# of interest. Its counters outlive "down": the interface stays until USB power
+# goes off, and tools/usb_power.py samples again before that.
+case "$1 $DEVICE_IP_IFACE" in wwan*|cdc-wdm*|*" wwan"*) ;; *) exit 0 ;; esac
+case "$2" in up|down) ;; *) exit 0 ;; esac
+exec /usr/sbin/runuser -u pi -- /home/pi/SU-WaterCam/venv/bin/python \
+    /home/pi/SU-WaterCam/tools/cellular_usage.py sample >/dev/null 2>&1
