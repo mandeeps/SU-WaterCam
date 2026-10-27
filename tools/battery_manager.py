@@ -40,11 +40,15 @@ Wiring — INA260 path:
   INA260 SDA/SCL ──────► RPi GPIO 2/3 (shared I2C1 bus)
 """
 
-import json
 import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional
+
+try:
+    from tools import config_io
+except ImportError:     # run from tools/ as a script
+    import config_io
 
 # ── ADS1115 constants ──────────────────────────────────────────────────────
 ADS1115_I2C_ADDRESS = 0x48
@@ -268,8 +272,7 @@ def _elapsed_seconds_since(iso_timestamp: Optional[str]) -> float:
 
 def _load_state() -> dict:
     try:
-        with open(STATE_FILE, "r", encoding="utf-8") as f:
-            state = json.load(f)
+        state = config_io.read_json(STATE_FILE)   # falls back to the .bak if the file is damaged
         state.setdefault("mah_remaining", VOLTAIC_V50_MAH)
         return state
     except FileNotFoundError:
@@ -281,10 +284,9 @@ def _load_state() -> dict:
 
 def _save_state(state: dict) -> None:
     try:
-        tmp = STATE_FILE + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2)
-        os.replace(tmp, STATE_FILE)
+        # atomic and fsynced, keeping the previous file as .bak: a power cut
+        # right after a plain rename can leave the file empty
+        config_io.write_json(STATE_FILE, state)
     except Exception as e:
         logging.warning("Could not save battery state: %s", e)
 
