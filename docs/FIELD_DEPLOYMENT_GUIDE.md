@@ -886,14 +886,15 @@ sudo systemctl restart systemd-journald
 
 The LoRa handler's `DEBUG:` lines (every AT command, payload hex) and the
 per-poll GPS lines are off by default. Turn them on for a test or problem unit
-with a flag file; it survives software updates, and a change applies at the
-next start of each service:
+with `"debug_logs": true` in `runtime_config.json` (the unit's own config,
+kept across software updates). A change applies at the next start of each
+service. For one service only, set `Environment=WATERCAM_DEBUG=1` in its unit.
 
 ```bash
-sudo mkdir -p /etc/watercam && sudo touch /etc/watercam/debug-logs   # off: sudo rm it
+cd ~/SU-WaterCam && venv/bin/python -c "import json; p='runtime_config.json'; c=json.load(open(p)); c['debug_logs']=True; json.dump(c, open(p, 'w'), indent=2)"
 ```
 
-005 (test unit) and 006 keep the flag for now.
+005 (test unit) and 006 keep debug output on for now.
 
 Rotate the logs that otherwise only grow: the power log, the bench
 `~/throttle_log.csv`, ticktalk's `output.log` and `data/temp_humidity.csv`
