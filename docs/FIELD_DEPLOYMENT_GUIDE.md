@@ -673,6 +673,13 @@ python tools/gps_home.py --reset
 `python tools/gps_home.py` shows whether a position has been learned and
 whether the unit counts as moved.
 
+Any wake with a good fix learns a position, including the bench tests in 1.10
+and 1.11 next to a window. So clear it again as the last bench step (1.14), and
+at the site check that it was learned there (2.4). A home learned at the bench
+makes every `04 03` distance on the dashboard the distance from the bench to
+the site and, if that is more than `gps_move_alert_m`, the unit alerts as
+moved once it is mounted.
+
 Clear any flood baseline from a previous site the same way
 (`python tools/flood_baseline.py --reset`); the new one is set at the site
 (section 2.4.1).
@@ -1074,6 +1081,9 @@ for the site:
 - [ ] **Tailscale:** the unit appears in the admin console with the
       `tag:watercam` tag and no personal owner (the ACL itself is kept by the
       tailnet admin, outside this repository).
+- [ ] **Last:** clear the mount position learned during the bench tests,
+      `venv/bin/python tools/gps_home.py --reset`, then shut down without
+      another test cycle (1.7.1).
 
 ## Phase 2: Field Installation
 
@@ -1109,6 +1119,13 @@ GPS acquiring a fix outdoors from a cold start can take a few minutes (longer wi
 ### 2.4 Confirm data is flowing from the final position
 
 Check the dashboard again for a reading with GPS coordinates matching the actual install location, and confirm the WittyPi schedule is triggering boots as expected.
+
+Check the mount position: `venv/bin/python tools/gps_home.py` should show a
+home set after the unit was mounted, with no moved state, and the dashboard's
+move distance should stay well under `gps_move_alert_m`. If the home was set before the
+install (a wake on the way, or a bench home that was never cleared), run
+`venv/bin/python tools/gps_home.py --reset` so it learns the mount position on
+its next wakes.
 
 ### 2.4.1 Set the flood baseline
 

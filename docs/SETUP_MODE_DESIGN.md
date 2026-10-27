@@ -210,7 +210,7 @@ the existing Python tools rather than reimplementing them.
 | 9. Markers | Capture a still; tap each marker on the screen and name it; at least 4 required | port of Georeferencing `label_gcp.py` to touch |
 | 10. Pose | **With RTK:** import the marker survey, refine the pose on the node, show per-marker residuals and pass/fail. **Without RTK:** save the photo, labels and IMU readings; the pose is marked *provisional* | Georeferencing `refine_pose_from_gcps`, vendored as `camera_calibration.py` already is |
 | 11. First capture | One capture cycle with the shutdown held off (as `~/test_wake.sh` does on the bench): the mask and water %, the registration reference adopted at the new pose, an uplink seen by the server. The collaborator confirms normal conditions and sets the flood baseline from it | the capture graph, `tools/flood_baseline.py --set-from-latest` |
-| 12. Save and deploy | Writes the node's `unit_config` and sends it (and the pose) to the API; installs the wake schedule and re-arms the Witty Pi; enables the capture service (and recovery boot, if the site wants it); lowers the setup network's priority so the site network is used for reporting; copies the session's logs; marks setup complete and leaves maintenance mode | `unit_config` loader, `runScript.sh`, systemd, NetworkManager |
+| 12. Save and deploy | Writes the node's `unit_config` and sends it (and the pose) to the API; installs the wake schedule and re-arms the Witty Pi; enables the capture service (and recovery boot, if the site wants it); lowers the setup network's priority so the site network is used for reporting; clears the GPS home, always, so the node learns the mount position from its first good fixes after this (a home learned at the bench, in transit or at the magnetometer spot would put every later `04 03` distance off by that much); copies the session's logs; marks setup complete and leaves maintenance mode | `unit_config` loader, `runScript.sh`, systemd, NetworkManager, `tools/gps_home.py --reset` |
 
 Every step records its result. The summary page lists anything skipped or
 failed, and the dashboard shows the node as installed with those noted, so a
@@ -235,7 +235,7 @@ past them.
 | B7. IMU gyro and accelerometer | The six faces at 90°, one per screen, with live bars and where gravity points; saved only when good enough (#229) | installer | 1.7, `tools/bno055_calibration.py --stages gyro,accel` |
 | B8. Camera | Lens calibration present; a test photo in focus | installer | 1.8 |
 | B9. Full cycle | Health check, then one capture cycle with the shutdown held off: captures, segmentation, an uplink the server saw | installer | 1.10, 1.11 |
-| B10. Site prep | If the unit has been deployed before: back up and clear the old site's learned values (field step 2 can do it at the site instead) | installer | 1.7.1 |
+| B10. Site prep | If the unit has been deployed before: back up and clear the old site's learned values (field step 2 can do it at the site instead). The GPS home is cleared again at field step 12 in any case, since the full cycle (B9) learns one at the bench | installer | 1.7.1 |
 | B11. Pack | Save the team's setup network (phone hotspot) with a higher priority; weatherproofing done; a packing list (serial adapter, meter, tape, RTK, towel) | installer | 1.12 |
 
 The bench summary must be all green, or show only the admin steps as pending,
