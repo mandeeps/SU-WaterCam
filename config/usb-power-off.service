@@ -3,7 +3,8 @@ Description=Keep USB (cellular modem, microphone) off through boot (tools/usb_po
 # Without it the modem's start-up current adds to the kernel's and early
 # userspace's. USB then stays off until something needs it (tools/usb_power.py:
 # the daily GPS fix, a cellular upload, a recording). On a bench unit that
-# needs USB from the start, touch /etc/watercam/usb-on-at-boot.
+# needs USB from the start: sudo systemctl mask usb-power-off.service (unmask to
+# undo; masking survives updates). The old flag file below is still honoured.
 DefaultDependencies=no
 After=systemd-udev-trigger.service
 Before=sysinit.target

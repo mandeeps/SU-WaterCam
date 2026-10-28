@@ -115,9 +115,6 @@ class TestSetParameterRanges(unittest.TestCase):
     def test_photo_interval_fractional_rejected(self):
         self.assertFalse(self.mgr.set_parameter('photo_interval', 30.1))
 
-    def test_max_retransmissions_fractional_rejected(self):
-        self.assertFalse(self.mgr.set_parameter('max_retransmissions', 3.5))
-
     def test_shutdown_iteration_limit_fractional_rejected(self):
         self.assertFalse(self.mgr.set_parameter('shutdown_iteration_limit', 2.9))
 
@@ -211,30 +208,11 @@ class TestSetParameterRanges(unittest.TestCase):
         self.assertIsInstance(result, float)
         self.assertEqual(result, 100.0)
 
-    # ---- compression_level (1–10, integer) ------------------------------------
+    # ---- removed keys (no effect) are refused --------------------------------
 
-    def test_compression_level_min_accepted(self):
-        self.assertTrue(self.mgr.set_parameter('compression_level', 1))
-        self.assertEqual(self.mgr.get_parameter('compression_level'), 1)
-
-    def test_compression_level_max_accepted(self):
-        self.assertTrue(self.mgr.set_parameter('compression_level', 10))
-        self.assertEqual(self.mgr.get_parameter('compression_level'), 10)
-
-    def test_compression_level_below_min_rejected(self):
-        self.assertFalse(self.mgr.set_parameter('compression_level', 0))
-
-    def test_compression_level_above_max_rejected(self):
-        self.assertFalse(self.mgr.set_parameter('compression_level', 11))
-
-    def test_compression_level_fractional_rejected(self):
-        self.assertFalse(self.mgr.set_parameter('compression_level', 5.5))
-
-    def test_compression_level_stored_as_int(self):
-        self.mgr.set_parameter('compression_level', 5)
-        result = self.mgr.get_parameter('compression_level')
-        self.assertIsInstance(result, int)
-        self.assertEqual(result, 5)
+    def test_removed_keys_refused(self):
+        for key, value in (('compression_level', 5), ('max_retransmissions', 3), ('backup_enabled', True)):
+            self.assertFalse(self.mgr.set_parameter(key, value))
 
     # ---- overflow-safe float conversion ----------------------------------------
 

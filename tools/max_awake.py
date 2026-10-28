@@ -15,8 +15,8 @@ fault.
 Never shuts down while
 - a remote debug session is active (data/remote_debug.json, tools/remote_debug.py;
   sessions end on their own, at most 240 min),
-- the hold flag exists: /etc/watercam/hold-awake (`sudo touch` it to keep a unit
-  up for bench work, remove it to release; same directory as usb-on-at-boot), or
+- `hold_awake` is true in runtime_config.json (bench work; the old flag file
+  /etc/watercam/hold-awake is still honoured), or
 - emergency mode is on, until its deadline: emergency_since + emergency_max_hours
   (runtime_config; 24 h when unset, as `21 91 00` leaves it; 0 = no expiry) plus
   EMERGENCY_MARGIN_MIN. call_shutdown() normally ends emergency mode at
@@ -51,7 +51,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 REPO = os.environ.get("WATERCAM_REPO", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 RUNTIME_CONFIG = os.path.join(REPO, "runtime_config.json")
 SESSION_STATE = os.path.join(REPO, "data", "remote_debug.json")
-HOLD_FLAG = "/etc/watercam/hold-awake"
+HOLD_FLAG = "/etc/watercam/hold-awake"   # old switch, still honoured; hold_awake replaces it
 DEFAULT_MAX_MINUTES = 60
 # Same default as RuntimeParameterManager.EMERGENCY_MAX_HOURS and call_shutdown()
 EMERGENCY_DEFAULT_HOURS = 24
@@ -166,7 +166,7 @@ def decide(uptime_min: Optional[float], limit_min: float, session_active: bool,
     if session_active:
         return "stay: remote debug session active"
     if hold:
-        return f"stay: hold flag {HOLD_FLAG} present"
+        return "stay: held for bench work (hold_awake)"
     if emergency and not emergency_over:
         return "stay: emergency mode"
     return "shutdown"
@@ -180,7 +180,7 @@ def check(dry_run: bool = False) -> str:
     verdict = decide(
         uptime, max_minutes(cfg),
         session_active=bool(_read_json(SESSION_STATE).get("active")),
-        hold=os.path.exists(HOLD_FLAG),
+        hold=cfg.get("hold_awake") is True or os.path.exists(HOLD_FLAG),
         emergency=emergency, emergency_over=over,
     )
     print(f"max_awake: {verdict}", flush=True)

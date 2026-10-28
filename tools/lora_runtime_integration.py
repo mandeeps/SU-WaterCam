@@ -498,9 +498,6 @@ class LoRaRuntimeManager:
         print(f"  Emergency Mode: {params['emergency_mode']}")
         print(f"  Debug Mode: {params['debug_mode']}")
         
-        print("\nPerformance:")
-        print(f"  Max Retransmissions: {params['max_retransmissions']}")
-        
         print(f"\nLoRa Status: {status['lora_status']}")
         print("=" * 50)
     

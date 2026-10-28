@@ -203,3 +203,9 @@ def test_lora_packet_carries_new_fields():
     pkt = compressed_encoding({"timestamp": 1, "sf_dropped": 7, "clock_unverified": 1})
     assert bytes([0x01, 0x0C]) + struct.pack(">I", 7) in pkt
     assert pkt.endswith(bytes([0x01, 0x0D, 0x01]))
+
+
+def test_hold_awake_parameter_keeps_the_unit_up(tmp_path, monkeypatch):
+    calls = _setup_check(monkeypatch, tmp_path, 500, cfg={"max_awake_minutes": 60, "hold_awake": True})
+    assert max_awake.check().startswith("stay: held for bench work")
+    assert calls == []
