@@ -770,7 +770,7 @@ _BAND_DESCRIPTIONS = {
 }
 
 
-def save_multiband_tiff(image_data: np.ndarray, output_path: str, transform_params: Tuple = config.DEFAULT_TRANSFORM_ORIGIN + config.DEFAULT_TRANSFORM_SCALE) -> None:
+def save_multiband_tiff(image_data: np.ndarray, output_path: str, transform_params: Tuple = config.DEFAULT_TRANSFORM_ORIGIN + config.DEFAULT_TRANSFORM_SCALE, extra_tags: Optional[dict] = None) -> None:
     """Write final_5_band.tiff — **legacy output, no longer read by anything.**
 
     Kept so older captures and external tooling keep working. It is B,G,R at a
@@ -791,11 +791,12 @@ def save_multiband_tiff(image_data: np.ndarray, output_path: str, transform_para
                                 "B,G,R at a squashed 512x512 — OpenCV's native channel "
                                 "order. Use color_preserved_5_band.tiff instead.",
                 CREATOR="Coregistration Script",
+                **(extra_tags or {}),
             )
     print(f"Saved multiband TIFF: {output_path}")
 
 
-def save_color_preserved_tiff(rgb_data: np.ndarray, thermal_data: np.ndarray, nir_data: np.ndarray, output_path: str, transform_params: Tuple = config.DEFAULT_TRANSFORM_ORIGIN + config.DEFAULT_TRANSFORM_SCALE) -> None:
+def save_color_preserved_tiff(rgb_data: np.ndarray, thermal_data: np.ndarray, nir_data: np.ndarray, output_path: str, transform_params: Tuple = config.DEFAULT_TRANSFORM_ORIGIN + config.DEFAULT_TRANSFORM_SCALE, extra_tags: Optional[dict] = None) -> None:
     transform = from_origin(*transform_params)
     rgb_uint8 = np.clip(rgb_data, 0, 255).astype(np.uint8)
     thermal_uint8 = np.clip(thermal_data, 0, 255).astype(np.uint8)
@@ -817,7 +818,8 @@ def save_color_preserved_tiff(rgb_data: np.ndarray, thermal_data: np.ndarray, ni
             CREATOR="Coregistration Script",
             DESCRIPTION="Color-preserved multispectral data with RGB, Thermal, and NIR bands",
             BAND_COUNT=str(stacked_data.shape[0]),
-            DATA_SOURCES="Optical (RGB), Thermal (LWIR), NIR (NIR-ON/NIR-OFF difference)")
+            DATA_SOURCES="Optical (RGB), Thermal (LWIR), NIR (NIR-ON/NIR-OFF difference)",
+            **(extra_tags or {}))
     print(f"Saved color-preserved TIFF: {output_path}")
 
 
@@ -919,6 +921,12 @@ def coreg(directory: str, position_changed: bool = False, calibration_file: str 
             if lwir_image is None:
                 raise RuntimeError(f"Could not load LWIR image: {lwir_path}")
             lwir_normalized = normalize_image(lwir_image, 0, 255)
+        # Did the IR-cut filter move? Not moving, the NIR band below is empty and
+        # the RGB bands carry infrared; both TIFFs are tagged so (capture_status.tiff_tags).
+        from tools.nir_filter_check import judge_capture
+        if judge_capture(directory) == "not_switching":
+            print("⚠️ IR-cut filter did not move: NIR band empty, RGB unfiltered (TIFFs tagged)")
+        validity_tags = capture_status.tiff_tags(directory)
         output_filenames = {"registered": "registered.jpg", "nir_band": "NIR_band.png", "five_band": "final_5_band.tiff", "color_preserved": "color_preserved_5_band.tiff", "metadata": "coregistration_metadata.json"}
         output_paths = {name: os.path.join(directory, filename) for name, filename in output_filenames.items()}
         five_band_stale = False
@@ -965,7 +973,7 @@ def coreg(directory: str, position_changed: bool = False, calibration_file: str 
                     cv2.resize(final_five_band_reordered[i], infer_wh, interpolation=cv2.INTER_AREA)
                     for i in range(final_five_band_reordered.shape[0])
                 ], axis=0)
-                save_multiband_tiff(inference_bands, output_paths["five_band"])
+                save_multiband_tiff(inference_bands, output_paths["five_band"], extra_tags=validity_tags)
                 # Five-band GeoTIFF saved
             except Exception as e:
                 raise RuntimeError(f"Failed to create/save five-band image: {e}")
@@ -973,7 +981,7 @@ def coreg(directory: str, position_changed: bool = False, calibration_file: str 
             try:
                 rgb_data = four_band[:, :, :3]
                 thermal_data = four_band[:, :, 3]
-                save_color_preserved_tiff(rgb_data, thermal_data, nir_band, output_paths["color_preserved"])
+                save_color_preserved_tiff(rgb_data, thermal_data, nir_band, output_paths["color_preserved"], extra_tags=validity_tags)
                 # Color-preserved TIFF saved
             except Exception as e:
                 raise RuntimeError(f"Failed to create/save color-preserved image: {e}")

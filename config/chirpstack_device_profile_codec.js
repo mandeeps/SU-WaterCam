@@ -96,6 +96,10 @@ function decodeUplink(input) {
         result.model_id = view.getUint32(offset, false);
         offset += 4;
         break;
+      case '1-10':
+        // Bands the segmentation model that made the mask reads: 5 five-band, 3 RGB
+        result.model_bands = view.getUint8(offset++);
+        break;
       case '1-11':
         // Cellular KiB used since install (sent on the first wake of each day)
         result.cellular_kib_total = view.getUint32(offset, false);
@@ -146,6 +150,10 @@ function decodeUplink(input) {
       case '7-37':
         // Share of the camera mask classed as water, 0-100 %
         result.camera_water_pct = view.getUint8(offset++);
+        break;
+      case '7-47':
+        // IR-cut filter check: 0 the filter moved between the NIR pair, 1 it did not
+        result.nir_filter_status = view.getUint8(offset++);
         break;
       case '8-18': {
         const len = view.getUint16(offset, false);

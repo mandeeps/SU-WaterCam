@@ -14,7 +14,15 @@ Client → server (newline-terminated JSON):
 
 Server → client (newline-terminated JSON):
     {"status": "ok",   "inference_ms": 1234}
+    {"status": "ok",   "inference_ms": 1234, "model": "rgb_fallback",
+     "model_sha256": "..."}
     {"status": "error","message": "..."}
+
+RGB fallback: when the loaded model needs a band the capture lacks (no thermal
+frame, or an IR-cut filter that did not move: the TIFF's INVALID_BANDS tag, or
+"rgb_only": true in the request), the daemon runs the RGB-only model given by
+--rgb-model instead, loading it the first time it is needed, and says so in
+the reply. Without one the request fails as before.
 
 Usage
 -----
@@ -62,6 +70,8 @@ from segformer_preprocess import (ModelContractError, band_order_problem,
 SOCKET_PATH = "/run/segformer/segformer.sock"
 LOG_FORMAT = "%(asctime)s [segformer_daemon] %(levelname)s: %(message)s"
 MAX_REQUEST_BYTES = 8192
+#: The RGB fallback: segformer_type_pool's model, exported with its metadata.
+RGB_MODEL_PATH = "/home/pi/segformer_type_pool/type_pool_b0_dyn_meta.onnx"
 
 logging.basicConfig(level=logging.INFO, format=LOG_FORMAT)
 log = logging.getLogger(__name__)
@@ -176,6 +186,10 @@ def input_geometry(input_shape, ori_h: int, ori_w: int) -> tuple[int, int, int, 
 _band_warning = [""]
 
 
+class BandUnavailable(ValueError):
+    """The model reads a band this capture lacks; the RGB fallback may still run."""
+
+
 def run_inference(session, tiff_path: str, output_path: str, rgb_only: bool = False) -> float:
     import cv2
     import rasterio
@@ -194,11 +208,22 @@ def run_inference(session, tiff_path: str, output_path: str, rgb_only: bool = Fa
     # field node offline.
     bands = model_band_indices(session, descriptions, tiff_tags)
     if rgb_only:
-        # The thermal band of this TIFF is a placeholder. Only a model that
-        # reads its three optical bands by name may be run on it.
+        # The thermal or NIR band of this TIFF holds no data. Only a model
+        # that reads its three optical bands by name may be run on it.
         got = tiff_band_order(descriptions, tiff_tags)
         if bands is None or any(got[b] not in ("red", "green", "blue") for b in bands):
-            raise ValueError("this model reads the thermal or NIR band and the capture has no thermal frame")
+            raise BandUnavailable("this model reads the thermal or NIR band and the capture lacks one")
+    # A band the capture lacks (INVALID_BANDS, written by co-registration: no
+    # thermal frame, or an IR-cut filter that did not move) holds zeros or noise.
+    # A model that reads it would return a plausible mask from it, so refuse,
+    # whatever the request said.
+    invalid = {b.strip().lower() for b in (tiff_tags.get("INVALID_BANDS") or "").split(",") if b.strip()}
+    if invalid:
+        got = tiff_band_order(descriptions, tiff_tags)
+        reads = got if bands is None else [got[b] for b in bands]
+        lacking = sorted(invalid.intersection(b for b in reads if b))
+        if lacking:
+            raise BandUnavailable(f"this model reads the {', '.join(lacking)} band, which this capture lacks (INVALID_BANDS)")
     problem = band_order_problem(session, descriptions, tiff_tags)
     if problem and problem != _band_warning[0]:
         _band_warning[0] = problem
@@ -267,7 +292,53 @@ def run_inference(session, tiff_path: str, output_path: str, rgb_only: bool = Fa
 # Socket server
 # ---------------------------------------------------------------------------
 
-def handle_connection(conn: socket.socket, session) -> None:
+def model_bands(session, meta: dict) -> int | None:
+    """How many bands the model reads: the ones it declares, else its graph's channels."""
+    declared = [b for b in (meta.get("bands") or "").split(",") if b.strip()]
+    return len(declared) or graph_input_channels(session)
+
+
+def reads_rgb_only(meta: dict) -> bool:
+    """Does the model declare exactly bands=red,green,blue?"""
+    return [b.strip().lower() for b in (meta.get("bands") or "").split(",")] == ["red", "green", "blue"]
+
+
+class RgbFallback:
+    """The RGB-only model, loaded the first time a capture needs it.
+
+    Most captures never do, so a unit with all its bands pays nothing for it. A
+    file that is missing or refused is logged once and not tried again until
+    the daemon restarts.
+    """
+
+    def __init__(self, path: str | None):
+        self.path = path or None
+        self.session = None
+        self.sha256 = None
+        self._failed = not self.path
+
+    def get(self):
+        if self.session is None and not self._failed:
+            import hashlib
+            try:
+                if not os.path.exists(self.path):
+                    raise FileNotFoundError(self.path)
+                session = load_session(self.path)
+                if not reads_rgb_only(model_metadata(session)):
+                    raise ModelContractError("does not declare bands=red,green,blue")
+                digest = hashlib.sha256()
+                with open(os.path.realpath(self.path), "rb") as f:
+                    for chunk in iter(lambda: f.read(1 << 20), b""):
+                        digest.update(chunk)
+                self.session, self.sha256 = session, digest.hexdigest()
+                log.info("RGB fallback loaded: %s sha256 %s", self.path, self.sha256[:8])
+            except Exception as e:                    # noqa: BLE001
+                self._failed = True
+                log.error("no RGB fallback: cannot use %s: %s", self.path, e)
+        return self.session
+
+
+def handle_connection(conn: socket.socket, session, rgb_fallback: RgbFallback | None = None) -> None:
     try:
         conn.settimeout(30)
         data = bytearray()
@@ -294,11 +365,22 @@ def handle_connection(conn: socket.socket, session) -> None:
         if not os.path.exists(tiff_path):
             raise FileNotFoundError(f"TIFF not found: {tiff_path}")
 
-        elapsed_ms = run_inference(session, tiff_path, output_path,
-                                   rgb_only=req.get("rgb_only") is True)
-        log.info("Segmented %s in %.0f ms → %s", tiff_path, elapsed_ms, output_path)
+        reply = {"status": "ok"}
+        try:
+            elapsed_ms = run_inference(session, tiff_path, output_path,
+                                       rgb_only=req.get("rgb_only") is True)
+        except BandUnavailable as exc:
+            fallback = rgb_fallback.get() if rgb_fallback else None
+            if fallback is None:
+                raise
+            log.warning("%s: using the RGB fallback model", exc)
+            elapsed_ms = run_inference(fallback, tiff_path, output_path, rgb_only=True)
+            reply.update(model="rgb_fallback", model_sha256=rgb_fallback.sha256)
+        log.info("Segmented %s in %.0f ms → %s%s", tiff_path, elapsed_ms, output_path,
+                 " (RGB fallback)" if "model" in reply else "")
 
-        resp = json.dumps({"status": "ok", "inference_ms": round(elapsed_ms)}) + "\n"
+        reply["inference_ms"] = round(elapsed_ms)
+        resp = json.dumps(reply) + "\n"
         conn.sendall(resp.encode())
 
     except Exception as exc:
@@ -312,7 +394,7 @@ def handle_connection(conn: socket.socket, session) -> None:
         conn.close()
 
 
-def serve(session, socket_path: str, on_listening=None) -> None:
+def serve(session, socket_path: str, on_listening=None, rgb_fallback: RgbFallback | None = None) -> None:
     if os.path.exists(socket_path):
         # lstat avoids following a symlink planted in /tmp by another user.
         if not stat.S_ISSOCK(os.lstat(socket_path).st_mode):
@@ -361,7 +443,7 @@ def serve(session, socket_path: str, on_listening=None) -> None:
             conn, _ = server.accept()
         except OSError:
             break
-        handle_connection(conn, session)
+        handle_connection(conn, session, rgb_fallback)
 
 
 # ---------------------------------------------------------------------------
@@ -381,6 +463,12 @@ def parse_args():
         help=f"Unix socket path (default: {SOCKET_PATH})",
     )
     p.add_argument(
+        "--rgb-model",
+        default=RGB_MODEL_PATH,
+        help="RGB-only ONNX run on captures that lack a band the main model reads "
+             "(no thermal frame, IR-cut filter stuck); '' for none",
+    )
+    p.add_argument(
         "--fallback-fp32",
         default="/home/pi/segformer_5band/segformer_5band_fp32.onnx",
         help="FP32 ONNX to use if INT8 model is not found",
@@ -392,11 +480,13 @@ def parse_args():
 MODEL_INFO_NAME = "model.json"
 
 
-def record_model(model_path: str, info_path: str, meta: dict | None = None) -> None:
+def record_model(model_path: str, info_path: str, meta: dict | None = None,
+                 bands: int | None = None) -> None:
     """Write which model is loaded ({"name", "path", "sha256"}); never raises.
 
     `meta` (the model's metadata_props) adds "model_name" and "model_version"
-    when the model declares them; "name" stays the file name.
+    when the model declares them; "name" stays the file name. `bands`, the
+    number of bands the model reads, is sent as model_bands (tools/node_version.py).
 
     The model can change with no git change at all (a new file, or a drop-in
     pointing --model elsewhere), so the node reports the file's own hash.
@@ -416,6 +506,8 @@ def record_model(model_path: str, info_path: str, meta: dict | None = None) -> N
             for k in ("model_name", "model_version"):
                 if (meta or {}).get(k):
                     rec[k] = meta[k]
+            if bands:
+                rec["bands"] = bands
             json.dump(rec, f)
         os.replace(tmp, info_path)
         log.info("Model %s%s sha256 %s", os.path.basename(real),
@@ -460,10 +552,13 @@ def main():
     # background once the socket is serving.
     info_path = os.path.join(os.path.dirname(args.socket), MODEL_INFO_NAME)
     meta = model_metadata(session)
+    # A model that already reads only RGB needs no fallback.
+    rgb_fallback = None if reads_rgb_only(meta) else RgbFallback(args.rgb_model)
     serve(session, args.socket,
           on_listening=lambda: threading.Thread(
-              target=record_model, args=(model_path, info_path, meta),
-              name="record-model", daemon=True).start())
+              target=record_model, args=(model_path, info_path, meta, model_bands(session, meta)),
+              name="record-model", daemon=True).start(),
+          rgb_fallback=rgb_fallback)
 
 
 if __name__ == "__main__":

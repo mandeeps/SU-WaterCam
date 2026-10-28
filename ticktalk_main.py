@@ -267,6 +267,13 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     if registration_status is not None:
         data['registration_status'] = registration_status
 
+    # Whether the IR-cut filter moved between this capture's NIR-OFF and NIR-ON
+    # frames (0 yes, 1 no); absent in the dark or without a pair (tools/nir_filter_check.py).
+    from tools.nir_filter_check import status_code_for_capture as nir_filter_status_for
+    nir_filter_status = nir_filter_status_for(dirname)
+    if nir_filter_status is not None:
+        data['nir_filter_status'] = nir_filter_status
+
     # Water % of this capture's mask, and the flood flags when detection is on
     # (tools/flood_baseline.py); absent when there is no mask.
     try:
@@ -278,7 +285,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     # Node software release and loaded model (tools/node_version.py); sent when
     # they change and in the periodic full send.
     from tools.node_version import uplink_fields
-    data.update(uplink_fields())
+    data.update(uplink_fields(dirname))
     # Cellular KiB used since install, on the first wake of each day only
     # (tools/cellular_usage.py); absent on other wakes and on units without a modem.
     from tools.cellular_usage import daily_report_kib
@@ -951,32 +958,47 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
         print(f"⚠️ Skipping segmentation: no co-registered image ({tiff_path})")
         return None
 
-    # No thermal frame this capture (tt_take_photos.flir): the TIFF's thermal band
-    # is zeros. Only a model that reads the RGB bands alone may run on it, and only
-    # the daemon can say whether the loaded one does. Otherwise skip, and say so
-    # (capture_status.json, this log): no mask, so no camera_water_pct either.
+    # A band this capture lacks: no thermal frame (tt_take_photos.flir), so the
+    # TIFF's thermal band is zeros, or an IR-cut filter that did not move, so its
+    # NIR band is empty (tools/nir_filter_check.py). Only a model that reads the
+    # RGB bands alone may run on it: the loaded one if it does, else the daemon's
+    # RGB fallback, and only the daemon knows which it has. With neither, skip
+    # and say so (capture_status.json, this log): no mask, so no
+    # camera_water_pct either.
     from tools import capture_status
-    no_thermal = capture_status.thermal_missing(filepath)
+    invalid = capture_status.invalid_bands(filepath)
+    if "thermal" in invalid:
+        lacking, skipped = "No thermal frame", "skipped_no_thermal"
+    else:
+        lacking, skipped = "IR-cut filter stuck (NIR band empty)", "skipped_no_nir"
 
     try:
         # Prefer the persistent daemon — no cold-start, model stays loaded.
         # Not while a cellular upload runs: together they pull the Pi under-voltage.
         if os.path.exists(socket_path):
+            reply = {}
             with power_exclusive("segmentation", 120):
-                ok = segformer_via_daemon(tiff_path, output_path, socket_path, rgb_only=no_thermal)
+                ok = segformer_via_daemon(tiff_path, output_path, socket_path,
+                                          rgb_only=bool(invalid), info=reply)
             if ok:
-                if no_thermal:
-                    print("⚠️ No thermal frame: segmented with the RGB-only model")
+                if reply.get("model") == "rgb_fallback":
+                    # The uplink's model_id names this model for this capture
+                    # (tools/node_version.uplink_fields).
+                    print(f"⚠️ {lacking}: segmented with the RGB fallback model")
+                    capture_status.mark(filepath, segmentation="rgb_fallback",
+                                        segmentation_model_sha256=reply.get("model_sha256"))
+                elif invalid:
+                    print(f"⚠️ {lacking}: segmented with the RGB-only model")
                     capture_status.mark(filepath, segmentation="rgb_only")
                 return output_path
-            if no_thermal:
-                print("⚠️ No thermal frame and no RGB-only model: segmentation skipped for this capture")
-                capture_status.mark(filepath, segmentation="skipped_no_thermal")
+            if invalid:
+                print(f"⚠️ {lacking} and no RGB-only model: segmentation skipped for this capture")
+                capture_status.mark(filepath, segmentation=skipped)
                 return None
             print("⚠️ Daemon call failed, falling back to subprocess")
-        elif no_thermal:
-            print("⚠️ No thermal frame and no segmentation daemon: segmentation skipped for this capture")
-            capture_status.mark(filepath, segmentation="skipped_no_thermal")
+        elif invalid:
+            print(f"⚠️ {lacking} and no segmentation daemon: segmentation skipped for this capture")
+            capture_status.mark(filepath, segmentation=skipped)
             return None
 
         # Legacy fallback: spawn a fresh Python process each cycle.
@@ -1989,8 +2011,10 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         data['pi_throttled'] = get_throttled()
         from tools.registration_orientation import status_code_for_capture
         data['registration_status'] = status_code_for_capture(dirname)
+        from tools.nir_filter_check import status_code_for_capture as nir_filter_status_for
+        data['nir_filter_status'] = nir_filter_status_for(dirname)
         from tools.node_version import uplink_fields
-        data.update(uplink_fields())
+        data.update(uplink_fields(dirname))
         from tools.cellular_usage import daily_report_kib
         cellular_kib = daily_report_kib()
         if cellular_kib is not None:
@@ -2058,6 +2082,9 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                           ("01 0B", "model_id")):
             if data.get(key) is not None:
                 _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(data[key])).hex()})
+        # 01 10 — bands the mask's model reads (5 five-band, 3 RGB), u8 (tools/node_version.py)
+        if data.get('model_bands') is not None:
+            _add("01 10", lambda: {"payload_hex": struct.pack(">B", _u32(data['model_bands']) & 0xFF).hex()})
         # 01 11 — cellular KiB used since install, first wake of each day (tools/cellular_usage.py), u32
         if data.get('cellular_kib_total') is not None:
             _add("01 11", lambda: {"payload_hex": struct.pack(">I", _u32(data['cellular_kib_total'])).hex()})
@@ -2106,6 +2133,10 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                 _add(code, lambda key=key: {"payload_hex": struct.pack(">I", _u32(flood[key])).hex()})
         if flood.get('camera_water_pct') is not None:
             _add("07 37", lambda: {"payload_hex": struct.pack(">B", flood['camera_water_pct']).hex()})
+        # 07 47 — IR-cut filter check (tools/nir_filter_check.py, uint8: 0 moved, 1 not); omitted without a verdict
+        nir_filter_status = data.get('nir_filter_status')
+        if nir_filter_status is not None:
+            _add("07 47", lambda: {"payload_hex": struct.pack(">B", nir_filter_status).hex()})
 
         # 08 18 — flood bitmap (variable length), sent as base64 (a third smaller on
         # the wire than hex). Over IP the mask goes at its full resolution, lossless
