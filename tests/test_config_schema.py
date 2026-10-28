@@ -1,9 +1,10 @@
 """tools/config_schema.py is the one definition of the node's settings.
 
 The tables in lora_runtime_integration and runtime_config.example.json are
-built from it. The snapshots below are the tables as they were written out by
-hand before the schema, so a change to a default, range or settable key shows
-up here as a deliberate edit.
+built from it. The snapshots below started as the tables written out by hand before the
+schema, so a change to a default, range or settable key shows up here as a
+deliberate edit. Since then: max_retransmissions, backup_enabled and
+compression_level removed (no effect); hold_awake added.
 """
 import os
 
@@ -16,25 +17,25 @@ DEFAULTS_BEFORE = {
     'area_threshold': 10, 'camera_flood_detection_enabled': False, 'bitmap_refresh_hours': 24,
     'bitmap_method2_enabled': True, 'stage_threshold': 50, 'monitoring_frequency': 60,
     'emergency_frequency': 10, 'photo_interval': 60, 'neighborhood_emergency_frequency': 30,
-    'emergency_mode': False, 'emergency_sleep': True, 'debug_mode': False, 'max_retransmissions': 3,
+    'emergency_mode': False, 'emergency_sleep': True, 'debug_mode': False,
     'auto_shutdown_enabled': True, 'shutdown_iteration_limit': 3, 'data_retention_days': 0,
-    'storage_low_free_pct': 20, 'storage_target_free_pct': 30, 'backup_enabled': True,
+    'storage_low_free_pct': 20, 'storage_target_free_pct': 30,
     'audio_recording_enabled': False, 'iteration_count': 0, 'ip_fallback_after_hours': 12,
-    'ip_fallback_min_interval_hours': 6,
+    'ip_fallback_min_interval_hours': 6, 'hold_awake': False,
 }
 RANGES_BEFORE = {
     'area_threshold': (0, 100), 'stage_threshold': (0, 65535), 'monitoring_frequency': (1, 10080),
     'emergency_frequency': (1, 240), 'photo_interval': (30, 1440),
-    'neighborhood_emergency_frequency': (1, 1440), 'max_retransmissions': (0, 10),
-    'shutdown_iteration_limit': (1, 100), 'data_retention_days': (0, 365), 'compression_level': (1, 10),
+    'neighborhood_emergency_frequency': (1, 1440),
+    'shutdown_iteration_limit': (1, 100), 'data_retention_days': (0, 365),
     'emergency_max_hours': (0, 168), 'flood_baseline_water_pct': (0, 100), 'bitmap_refresh_hours': (0, 168),
     'ip_fallback_after_hours': (0, 168), 'ip_fallback_min_interval_hours': (0, 168),
     'gps_fix_interval_h': (1, 720), 'gps_cache_max_age_h': (0, 8760),
 }
 INTS_BEFORE = frozenset({
     'area_threshold', 'monitoring_frequency', 'emergency_frequency', 'photo_interval',
-    'neighborhood_emergency_frequency', 'max_retransmissions', 'shutdown_iteration_limit',
-    'data_retention_days', 'compression_level', 'emergency_max_hours', 'flood_baseline_water_pct',
+    'neighborhood_emergency_frequency', 'shutdown_iteration_limit',
+    'data_retention_days', 'emergency_max_hours', 'flood_baseline_water_pct',
     'bitmap_refresh_hours',
 })
 
@@ -69,6 +70,11 @@ def test_template_layout_names_real_settings():
     assert listed == {s.key for s in cs.SETTINGS if s.section is None and s.in_template}
     for name, keys in cs.TEMPLATE_SECTIONS:
         assert set(keys) == {s.key for s in cs.SETTINGS if s.section == name and s.in_template}
+
+
+def test_removed_keys_are_refused():
+    for key in ("max_retransmissions", "backup_enabled", "compression_level"):
+        assert key not in M._SETTABLE_PARAMS
 
 
 def test_known_mismatches_are_listed():

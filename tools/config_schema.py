@@ -88,8 +88,6 @@ SETTINGS: List[Setting] = [
       in_defaults=True, readers=("emergency_sleep",)),
     S("debug_mode", False, "Debug output: status prints, and the LoRa handler's DEBUG: and per-poll GPS lines (read once per process)",
       in_defaults=True, readers=("ticktalk_main", "debug_status_command", "debug_log"), in_template=True),
-    S("max_retransmissions", 3, "Echoed in a status print only; the LoRa handler has its own",
-      range=(0, 10), integer=True, in_defaults=True, readers=(), status=NO_EFFECT, in_template=True),
     S("auto_shutdown_enabled", True, "Shut down after shutdown_iteration_limit captures",
       in_defaults=True, readers=("ticktalk_main", "lora_runtime_integration"), in_template=True),
     S("shutdown_iteration_limit", DEFAULT_SHUTDOWN_LIMIT, "Captures per wake before shutdown",
@@ -100,7 +98,6 @@ SETTINGS: List[Setting] = [
       in_defaults=True, readers=("data_retention",)),
     S("storage_target_free_pct", 30, "... until this much is free",
       in_defaults=True, readers=("data_retention",)),
-    S("backup_enabled", True, "Nothing acts on it", in_defaults=True, readers=(), status=NO_EFFECT, in_template=True),
     S("audio_recording_enabled", False, "USB microphone recording (only some units have one)",
       in_defaults=True, remote="16 96", readers=("ticktalk_main", "audio_recorder"), in_template=True),
     S("iteration_count", 0, "Wake cycles since boot (reset each boot)",
@@ -111,7 +108,6 @@ SETTINGS: List[Setting] = [
       range=(0, 168), in_defaults=True, readers=("ip_fallback",), in_template=True),
 
     # --- top level, ranged but not in _DEFAULT_PARAMS ---
-    S("compression_level", None, "Nothing reads it", range=(1, 10), integer=True, readers=(), status=NO_EFFECT),
     S("emergency_max_hours", 24, "Emergency mode ends after this many hours; 0 = no expiry",
       range=(0, 168), integer=True, remote="21 91", readers=("wittypi_control", "max_awake", "emergency_sleep")),
     S("flood_baseline_water_pct", None, "The unit's normal water %, set by tools/flood_baseline.py",
@@ -132,6 +128,8 @@ SETTINGS: List[Setting] = [
     S("coreg_tilt_threshold_deg", 5.0, "Registration orientation check: tilt", settable=False, readers=("ticktalk_main",), in_template=True),
     S("coreg_rotation_threshold_deg", 15.0, "Registration orientation check: rotation", settable=False, readers=("ticktalk_main",), in_template=True),
     S("max_awake_minutes", 60, "Longest a unit stays up; 0 = off", settable=False, readers=("max_awake",), in_template=True),
+    S("hold_awake", False, "Keep the unit up for bench work (max_awake); replaces /etc/watercam/hold-awake, still honoured for now",
+      in_defaults=True, readers=("max_awake",)),
     S("wifi_when_lora_healthy", False, "Join WiFi even when LoRa is healthy", settable=False, readers=("wifi_policy",)),
     S("lora_min_margin_db", 5, "Link margin that counts as healthy", settable=False, readers=("lora_health",)),
     S("gps_move_alert_m", 50.0, "Distance from home that counts as moved", settable=False, readers=("gps_home",)),
@@ -182,8 +180,8 @@ TEMPLATE_GROUPS: List[List[str]] = [
      "emergency_frequency", "photo_interval", "neighborhood_emergency_frequency", "emergency_mode",
      "debug_mode", "always_transmit_sensors", "lora_full_send_hours", "lora_imu_threshold_deg",
      "coreg_tilt_threshold_deg", "coreg_rotation_threshold_deg"],
-    ["max_retransmissions", "auto_shutdown_enabled", "shutdown_iteration_limit", "max_awake_minutes",
-     "data_retention_days", "backup_enabled", "audio_recording_enabled", "ip_fallback_after_hours",
+    ["auto_shutdown_enabled", "shutdown_iteration_limit", "max_awake_minutes",
+     "data_retention_days", "audio_recording_enabled", "ip_fallback_after_hours",
      "ip_fallback_min_interval_hours"],
 ]
 TEMPLATE_SECTIONS: List[Tuple[str, List[str]]] = [

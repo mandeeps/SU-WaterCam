@@ -761,8 +761,9 @@ the uptime and, past `max_awake_minutes` (`runtime_config.json`, default 60,
 `0` turns it off), runs the same `doas /usr/sbin/shutdown -h now` that
 `call_shutdown()` uses, so the Witty Pi sees a normal halt and
 `wittypi-next-wake.service` arms the next slot. It never powers off while a
-remote debug session is active, while `/etc/watercam/hold-awake` exists
-(`sudo touch` it to keep a unit up on the bench, remove it afterwards), or in
+remote debug session is active, while `hold_awake` is true in
+`runtime_config.json` (set it to keep a unit up on the bench, clear it
+afterwards; the old flag file `/etc/watercam/hold-awake` still works), or in
 emergency mode until that has run `emergency_max_hours` (default 24, `0` = no
 expiry) plus 15 minutes from `emergency_since`. The capture graph normally ends
 emergency mode at `emergency_max_hours`; this covers a hung graph, which would
@@ -781,7 +782,7 @@ sudo systemctl enable --now max-awake.timer
 On a unit that is meant to stay on (a development unit, or one held on for bench
 work with `ticktalk` stopped), create the hold flag **before** enabling the
 timer, or it powers the Pi off within 5 minutes of passing the limit:
-`sudo mkdir -p /etc/watercam && sudo touch /etc/watercam/hold-awake`.
+`cd ~/SU-WaterCam && venv/bin/python -c "from tools.lora_runtime_integration import set_parameter; set_parameter('hold_awake', True)"` (`False` to release).
 
 `lora_daemon.service` owns the mDot serial port, and every LoRa send or
 receive in `ticktalk` goes through it. Without it the unit has no LoRa.
@@ -861,7 +862,9 @@ grep watercam-set-clock config/doas.conf | sudo tee -a /etc/doas.conf && sudo do
 
 `quectel-gnss.service` now starts whenever the modem's AT port appears, and
 hands the GPS port to gpsd, which was already running. To keep USB on from the
-start on a bench unit, run `sudo mkdir -p /etc/watercam && sudo touch /etc/watercam/usb-on-at-boot`.
+start on a bench unit, run `sudo systemctl mask usb-power-off.service`
+(`unmask` to undo; masking survives updates). The old flag file
+`/etc/watercam/usb-on-at-boot` still works.
 To turn it on by hand, run `doas uhubctl -l 1-1 -a on`.
 
 Optionally, install the power logger. It writes one line a minute to
@@ -1074,7 +1077,8 @@ for the site:
       pull-down resistor are insulated, and nudging them doesn't restart the unit
       (no new "System starts up" line in `~/wittypi/wittyPi.log`) (1.11.1).
 - [ ] `systemctl is-enabled remote-debug.timer max-awake.timer` prints `enabled`
-      twice (`/etc/watercam/hold-awake` must not exist).
+      twice, `hold_awake` is not true in `runtime_config.json`, and
+      `/etc/watercam/hold-awake` doesn't exist.
 - [ ] `systemctl is-enabled rtc-early-clock.service` prints `enabled`, and after a
       reboot `journalctl -b -u rtc-early-clock` shows `system clock ... -> RTC ...`
       or a `skip:` reason (an RTC that lost power must be set before deploying).

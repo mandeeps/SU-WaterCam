@@ -36,14 +36,12 @@ Defaults are the code's (`tools/lora_runtime_integration.py` `_DEFAULT_PARAMS`, 
 | `emergency_since` | (timestamp) | — | wittypi_control, max_awake, emergency_sleep | set by `21 91` | REMOTE_START_AND_EMERGENCY |
 | `emergency_sleep` | true | — | emergency_sleep | local | REMOTE_START_AND_EMERGENCY, POWER_ANALYSIS (not in the guide 1.5 table) |
 | `debug_mode` | false | false | ticktalk_main (status prints, read live), debug_status_command | local | guide 1.5 |
-| `max_retransmissions` | 3; 0–10 | 3 | echoed in a status print only; the LoRa handler has its own | local | template only. **Review:** no effect. |
 | `auto_shutdown_enabled` | true | true | ticktalk_main, `atomic_increment_iteration_count` | local | template only |
 | `shutdown_iteration_limit` | 3; 1–100 | 3 | ticktalk_main, photo_interval_watcher | local | POWER_ANALYSIS, SETUP_MODE_DESIGN (no table entry) |
 | `max_awake_minutes` | 60 (0 = off) | 60 | max_awake | file | guide 1.9 |
+| `hold_awake` | false | — | max_awake | local | guide 1.9: keeps the unit up for bench work (replaces `/etc/watercam/hold-awake`) |
 | `data_retention_days` | 0; 0–365 (0 = keep all) | 0 | ticktalk_main, data_retention | local | guide 1.9.1 |
 | `storage_low_free_pct` / `storage_target_free_pct` | 20 / 30 % | — | data_retention | file | guide 1.9.1 |
-| `backup_enabled` | true | true | nothing | local | template only. **Review:** no effect. |
-| `compression_level` | (none); 1–10 | — | nothing (in the range list only) | local | none. **Review:** no effect. |
 | `audio_recording_enabled` | false | false | ticktalk_main, audio_recorder | remote `16 96` | IP_TRANSMISSION |
 | `ip_fallback_after_hours` | 12; 0–168 | 12 | ip_fallback, wifi_policy, ticktalk_main | local | guide 1.5, IP_TRANSMISSION |
 | `ip_fallback_min_interval_hours` | 6; 0–168 | 6 | ip_fallback | local | guide 1.5, IP_TRANSMISSION |
@@ -127,10 +125,10 @@ It is no longer written. LoRa commands go to `runtime_config.json` through the d
 
 | Path | Effect | Described in |
 |---|---|---|
-| `/etc/watercam/hold-awake` | Keeps the unit up for bench work (max_awake) | guide 1.9 |
-| `/etc/watercam/usb-on-at-boot` | Leaves USB on at boot (`usb-power-off.service` `ConditionPathExists=!`) | guide 1.9 |
+| `/etc/watercam/hold-awake` | Old switch for `hold_awake`; still honoured | guide 1.9 |
+| `/etc/watercam/usb-on-at-boot` | Old switch; still honoured. Instead: `systemctl mask usb-power-off.service` | guide 1.9 |
 
-**Review:** new switches go in `runtime_config.json` or a unit's `Environment=`, not in `/etc`. Consider moving these two the same way.
+New switches go in `runtime_config.json` or the systemd unit, not in `/etc`. These two have been replaced (`hold_awake`; masking `usb-power-off.service`, because it runs too early in boot to read the config). The old files are still honoured for now: drop them once no unit uses them.
 
 ## Environment variables
 
@@ -172,9 +170,9 @@ These are listed so a reader of `/run` and `/tmp` knows what they are:
 
 1. **Template vs code defaults:** `emergency_frequency` is 5 in the template and 10 in the code, and the template lacks `emergency_sleep`, `bitmap_*`, `storage_*`, `gps_*`, `wifi_when_lora_healthy` and `lora_min_margin_db`.
 2. **`lora_config.json` duplicates:** resolved. The file is no longer written, and its copies are ignored (`lora_queue` section above).
-3. **No effect:** `max_retransmissions`, `backup_enabled`, `compression_level`.
-4. **The `wittypi_*` keys** against the `15 95` schedule: which one wins after emergency mode ends.
+3. **No effect:** resolved. `max_retransmissions`, `backup_enabled` and `compression_level` have been removed (`set_parameter` now refuses them; an existing unit's file may still hold them, harmlessly).
+4. **The `wittypi_*` keys:** only a last resort, used when emergency mode ends with no `schedule.wpi` and no fallback schedule. The repo's daylight preset is always a fallback, so in practice they are never used. `ticktalk_main.get_wittypi_schedule_config` is not called from the graph. They can go when ticktalk_main is next rebuilt.
 5. **Reserved:** `ip_upload.downlink_poll_interval_s` (deployments without Tailscale), and mDot store-and-forward (not built).
 6. **Missing descriptions:** `lora_sf_*`, `recovery_boot.fallback_delay_minutes`, `flood_baseline_water_pct`, `WATERCAM_CALIB_FILE`, `SEGFORMER_DIR`/`SEGFORMER_PYTHON`, `ip_upload.max_queue_*`, and the ticktalk `-d`/`-s` flags.
-7. **The two `/etc/watercam` flag files:** move them to `runtime_config.json` or the unit's environment.
+7. **The two `/etc/watercam` flag files:** replaced (see Flag files); remove the fallback once no unit uses them.
 8. **After #256:** add `WATERCAM_DEBUG` to the environment table, and note that `debug_mode` also controls the LoRa handler's `DEBUG:` lines and the per-poll GPS lines, read once per process.
