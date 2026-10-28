@@ -9,8 +9,8 @@ is taken at a wake when:
 - the last one is gps_fix_interval_h old or more (runtime parameter, default 24 h),
   or there is none at all, and no window was tried in the last interval: one
   try a day, so a unit that can't see the sky doesn't spend every wake on it.
-  Both are counted ATTEMPT_SLACK_H short, so the daily try lands on the same
-  wake each day rather than drifting to its second capture;
+  Both are counted ATTEMPT_SLACK_H (15 min) short, so the daily try lands on
+  the first capture of the same wake each day rather than drifting to its second;
 - the pose monitor saw a knock or removal (tools/pose_monitor.py): that wake,
   and after a removal the next two as well, whenever the last try was;
 - the server asked for one (downlink 19 99), likewise.
@@ -47,8 +47,10 @@ MIN_WINDOW_S = 60
 SHUTDOWN_MARGIN_S = 30
 #: Awake minutes assumed when no schedule is installed
 DEFAULT_AWAKE_MIN = 5
-#: The daily try comes due this much early (one wake's worth at hourly wakes)
-ATTEMPT_SLACK_H = 1
+#: The daily try comes due this much short of the interval: enough for the minute between
+#: a wake's captures and boot jitter, well under the gap to the wake before (an hour at
+#: hourly wakes), so the try stays on the same wake each day and doesn't creep earlier
+ATTEMPT_SLACK_H = 0.25
 POLL_S = 3
 REQUEST_FILE = os.path.join(_REPO, "data", "gps_request.json")
 #: When the last window started (the once-a-day rule)

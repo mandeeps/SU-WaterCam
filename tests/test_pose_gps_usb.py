@@ -236,7 +236,7 @@ def test_a_failed_try_waits_a_day(cache, monkeypatch):
     assert gps_window.reasons(now=now) == []
     assert gps_window.reasons(now=now, pose_wake=True) == ["knocked or removed"]
     assert gps_window.reasons(now=now, requested=True) == ["requested by the server"]
-    assert gps_window.reasons(now=now + 22.5 * 3600)             # 23.5 h after the try: due again
+    assert gps_window.reasons(now=now + 22.8 * 3600)             # 23.8 h after the try: due again
     gps_window._record_attempt(now + 3600)                       # a try "in the future": clock was wrong
     assert gps_window.reasons(now=now)
 
@@ -247,6 +247,14 @@ def test_the_daily_try_does_not_drift_to_the_second_capture(cache):
     cache.update(gps_lat=1.0, gps_lon=2.0, fix_time=now - (24 * 3600 - 60))
     gps_window._record_attempt(now - (24 * 3600 - 90))
     assert gps_window.reasons(now=now)
+
+
+def test_the_daily_try_does_not_creep_to_the_wake_before(cache):
+    # hourly wakes: the wake an hour earlier is 23 h after yesterday's try
+    now = time.time()
+    cache.update(gps_lat=1.0, gps_lon=2.0, fix_time=now - 23 * 3600 - 5)
+    gps_window._record_attempt(now - 23 * 3600 - 5)
+    assert gps_window.reasons(now=now) == []
 
 
 def test_window_length_follows_the_wake():
