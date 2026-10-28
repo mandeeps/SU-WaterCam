@@ -15,6 +15,11 @@ import re
 import os
 from typing import Dict, Any, Optional
 
+try:
+    from tools.debug_log import debug
+except ImportError:     # run from tools/ as a script
+    from debug_log import debug
+
 # Transmission Data Format
 # Channel 00 Type 01 Time stamp UNIX
 # Channel 01 Type 04 emergency status 0/1 where 0 is monitoring & 1 is emergency
@@ -641,14 +646,14 @@ class LoRaHandler:
             return b''
         now = time.time()
         if self._rx_partial and now - self._rx_partial_t > self._RX_PARTIAL_MAX_AGE_S:
-            print(f"DEBUG: Dropping stale partial line: {self._rx_partial[:40]!r}")
+            debug(f"Dropping stale partial line: {self._rx_partial[:40]!r}")
             self._rx_partial = b''
         if not raw:
             return b''
         line = self._rx_partial + bytes(raw)
         if not line.endswith(b'\n'):
             if len(line) > self._RX_PARTIAL_MAX_BYTES:
-                print(f"DEBUG: Dropping oversize partial line ({len(line)} bytes)")
+                debug(f"Dropping oversize partial line ({len(line)} bytes)")
                 self._rx_partial = b''
             else:
                 if not self._rx_partial:
@@ -743,14 +748,14 @@ class LoRaHandler:
                         continue
                     try:
                         res = raw.decode().strip()
-                        print(f"DEBUG: Raw received: '{res}'")
+                        debug(f"Raw received: '{res}'")
                         # Skip empty messages
                         if not res:
                             continue
 
                         # Skip AT+SENDB= messages (these are transmission commands, not incoming data)
                         if res.startswith('AT+SENDB='):
-                            print(f"DEBUG: Skipping transmission command echo: '{res[:50]}...'")
+                            debug(f"Skipping transmission command echo: '{res[:50]}...'")
                             continue
 
                         # Validate message integrity before processing
@@ -766,7 +771,7 @@ class LoRaHandler:
                                 # Store the size limit for use in transmission
                                 self.current_size_limit = size_limit
                             else:
-                                print(f"DEBUG: Could not extract size limit from TXS response: '{res}'")
+                                print(f"⚠️ LoRa: could not read the size limit from the TXS response: '{res}'")
                         # Check for transmission-related responses
                         elif self._is_transmission_response(res):
                             status = self._extract_transmission_status(res)
@@ -785,9 +790,9 @@ class LoRaHandler:
                             # Could trigger callbacks or update transmission status here
                         # Then check if it's an AT command response (lower priority)
                         elif self._is_at_response(res):
-                            print(f"DEBUG: AT response (ignoring): '{res}'")
+                            debug(f"AT response (ignoring): '{res}'")
                         else:
-                            print(f"DEBUG: Non-LoRa message (ignoring): '{res}'")
+                            debug(f"Non-LoRa message (ignoring): '{res}'")
                     except UnicodeDecodeError:
                         print(f"Received binary data (hex): {raw.hex()}")
                 else:
@@ -854,13 +859,13 @@ class LoRaHandler:
                         return False
                     try:
                         if attempt > 0:
-                            print(f"DEBUG: Retry attempt {attempt}/{max_retries}")
+                            debug(f"Retry attempt {attempt}/{max_retries}")
                             if not self._clear_mdot_input():
                                 print("ERROR: Failed to clear mDot input, aborting retry")
                                 return False
 
-                        print(f"DEBUG: Starting transmission of {len(content)} bytes (attempt {attempt + 1})")
-                        print(f"DEBUG: Content to send: {content}")
+                        debug(f"Starting transmission of {len(content)} bytes (attempt {attempt + 1})")
+                        debug(f"Content to send: {content}")
 
                         # Use the stored size limit (kept current by the listener loop).
                         # Do NOT send AT+TXS here — it pollutes the RX buffer with "242\r\nOK\r\n"
@@ -870,7 +875,7 @@ class LoRaHandler:
                             print(f"WARNING: Stored size limit {size_limit}B is invalid; refreshing from mDot")
                             self._query_txs_locked()
                             size_limit = self.current_size_limit
-                        print(f"DEBUG: Using stored size limit: {size_limit} bytes")
+                        debug(f"Using stored size limit: {size_limit} bytes")
 
                         if left() < window:
                             print(f"ERROR: Transmit deadline ({deadline_s:.0f} s) reached: giving up")
@@ -892,20 +897,20 @@ class LoRaHandler:
                                     # confirms a clean drain (or a small round cap is
                                     # hit) before retrying, rather than assuming success
                                     # after exactly one attempt.
-                                    print("DEBUG: MAC buffer full — flushing LoRaWAN MAC queue with probe uplink...")
+                                    debug("MAC buffer full — flushing LoRaWAN MAC queue with probe uplink...")
                                     for flush_round in range(1, MAC_FLUSH_MAX_ROUNDS + 1):
                                         # leave room for the retry itself
                                         if left() < MAC_FLUSH_WINDOW_S + window:
-                                            print("DEBUG: MAC flush skipped: not enough time left before the deadline")
+                                            debug("MAC flush skipped: not enough time left before the deadline")
                                             break
                                         if self._flush_mac_commands():
-                                            print(f"DEBUG: MAC queue confirmed clear after {flush_round} flush round(s)")
+                                            debug(f"MAC queue confirmed clear after {flush_round} flush round(s)")
                                             break
-                                        print(f"DEBUG: MAC flush round {flush_round}/{MAC_FLUSH_MAX_ROUNDS} "
+                                        debug(f"MAC flush round {flush_round}/{MAC_FLUSH_MAX_ROUNDS} "
                                               f"did not confirm a clean drain")
                                         if flush_round < MAC_FLUSH_MAX_ROUNDS:
                                             time.sleep(0.3)
-                                print(f"DEBUG: Will retry transmission (attempt {attempt + 2}/{max_retries + 1})")
+                                debug(f"Will retry transmission (attempt {attempt + 2}/{max_retries + 1})")
                                 time.sleep(1)
                                 continue
                             else:
@@ -917,7 +922,7 @@ class LoRaHandler:
                         import traceback
                         traceback.print_exc()
                         if attempt < max_retries:
-                            print(f"DEBUG: Will retry transmission after exception (attempt {attempt + 2}/{max_retries + 1})")
+                            print(f"⚠️ LoRa: retrying the transmission after an exception (attempt {attempt + 2}/{max_retries + 1})")
                             time.sleep(1)
                             continue
                         else:
@@ -1104,11 +1109,11 @@ class LoRaHandler:
         try:
             # If it's a string, assume it's hex data and send directly
             if isinstance(binary_data, str):
-                print(f"DEBUG: Detected hex string, queuing as hex data: {binary_data[:50]}...")
+                debug(f"Detected hex string, queuing as hex data: {binary_data[:50]}...")
                 self.transmit_queue.put(('hex_string', binary_data))
             else:
                 # For bytes/bytearray, queue as binary
-                print(f"DEBUG: Detected binary data, queuing as binary: {len(binary_data)} bytes")
+                debug(f"Detected binary data, queuing as binary: {len(binary_data)} bytes")
                 self.transmit_queue.put(('binary', binary_data))
             return True
         except Exception as e:
@@ -1119,16 +1124,16 @@ class LoRaHandler:
         """Automatically detect data type and queue appropriately"""
         try:
             if isinstance(data, dict):
-                print("DEBUG: Auto-detected dictionary, using queue_transmit")
+                debug("Auto-detected dictionary, using queue_transmit")
                 return self.queue_transmit(data)
             elif isinstance(data, (bytes, bytearray)):
-                print("DEBUG: Auto-detected bytes, using queue_binary_transmit")
+                debug("Auto-detected bytes, using queue_binary_transmit")
                 return self.queue_binary_transmit(data)
             elif isinstance(data, str):
-                print("DEBUG: Auto-detected string, assuming hex data and using queue_binary_transmit")
+                debug("Auto-detected string, assuming hex data and using queue_binary_transmit")
                 return self.queue_binary_transmit(data)  # Will be handled as hex_string
             else:
-                print(f"DEBUG: Auto-detected {type(data)}, converting to string then using queue_binary_transmit")
+                debug(f"Auto-detected {type(data)}, converting to string then using queue_binary_transmit")
                 return self.queue_binary_transmit(str(data))  # Will be handled as hex_string
         except Exception as e:
             print(f"Error in auto-queue: {e}")
@@ -1139,15 +1144,15 @@ class LoRaHandler:
         while not self.transmit_queue.empty():
             try:
                 item = self.transmit_queue.get_nowait()
-                print(f"DEBUG: Processing queue item: {item}, type: {type(item)}")
+                debug(f"Processing queue item: {item}, type: {type(item)}")
                 
                 if isinstance(item, tuple) and len(item) == 2:
                     data_type, packet = item
-                    print(f"DEBUG: Processing {data_type} packet, type: {type(packet)}")
+                    debug(f"Processing {data_type} packet, type: {type(packet)}")
                     
                     if data_type == 'hex_string':
                         # Hex string data - send directly without conversion
-                        print(f"DEBUG: Sending hex string: {len(packet)} chars")
+                        debug(f"Sending hex string: {len(packet)} chars")
                         self.transmit(packet)
                     else:
                         # For other data types, ensure packet is bytes
@@ -1160,15 +1165,15 @@ class LoRaHandler:
                         
                         if data_type == 'sensor':
                             # Sensor data from compressed_encoding() - already bytes
-                            print(f"DEBUG: Sending sensor data: {len(packet)} bytes")
+                            debug(f"Sending sensor data: {len(packet)} bytes")
                             self.transmit(packet)
                         elif data_type == 'file':
                             # File data - already bytes
-                            print(f"DEBUG: Sending file data: {len(packet)} bytes")
+                            debug(f"Sending file data: {len(packet)} bytes")
                             self.transmit(packet)
                         elif data_type == 'binary':
                             # Arbitrary binary data - already bytes
-                            print(f"DEBUG: Sending binary data: {len(packet)} bytes")
+                            debug(f"Sending binary data: {len(packet)} bytes")
                             self.transmit(packet)
                         else:
                             print(f"Unknown data type: {data_type}")
@@ -1176,12 +1181,12 @@ class LoRaHandler:
                 else:
                     # Handle legacy format (backward compatibility)
                     packet = item
-                    print(f"DEBUG: Processing legacy packet, type: {type(packet)}")
+                    debug(f"Processing legacy packet, type: {type(packet)}")
                     
                     try:
                         # Check if this looks like a hex string
                         if isinstance(packet, str) and all(c in '0123456789abcdefABCDEF' for c in packet):
-                            print(f"DEBUG: Legacy packet appears to be hex string, treating as hex")
+                            debug(f"Legacy packet appears to be hex string, treating as hex")
                             # Treat as hex string instead of trying UTF-8 conversion
                             self.transmit(packet)
                         else:
@@ -1193,7 +1198,7 @@ class LoRaHandler:
                                 print(f"WARNING: Converting legacy {type(packet)} packet to bytes: {packet}")
                                 packet = str(packet).encode('utf-8')
                             
-                            print(f"DEBUG: Legacy packet converted to bytes: {type(packet)}, length: {len(packet)}")
+                            debug(f"Legacy packet converted to bytes: {type(packet)}, length: {len(packet)}")
                             # Use transmit method which will verify OK response
                             result = self.transmit(packet)
                             if not result:
@@ -1227,11 +1232,11 @@ class LoRaHandler:
     def decode(self, payload: str):
         """Decode incoming payload and update configuration"""
         try:
-            print(f"DEBUG: Decoding payload: '{payload}'")
-            print(f"DEBUG: Payload type: {type(payload)}")
-            print(f"DEBUG: Payload length: {len(payload)}")
-            print(f"DEBUG: Payload hex: {payload.encode().hex()}")
-            print(f"DEBUG: Payload repr: {repr(payload)}")
+            debug(f"Decoding payload: '{payload}'")
+            debug(f"Payload type: {type(payload)}")
+            debug(f"Payload length: {len(payload)}")
+            debug(f"Payload hex: {payload.encode().hex()}")
+            debug(f"Payload repr: {repr(payload)}")
             
             from datetime import datetime
             print(f"📡 LoRa command received at {datetime.now().strftime('%H:%M:%S')}")
@@ -1265,7 +1270,7 @@ class LoRaHandler:
     def check_mdot_status(self):
         """Check mDot status and mode"""
         try:
-            print("DEBUG: Checking mDot status...")
+            debug("Checking mDot status...")
             
             # Clear buffers first
             self._drain_input()
@@ -1276,7 +1281,7 @@ class LoRaHandler:
             time.sleep(0.1)
             
             # Check if mDot responds to basic AT command
-            print("DEBUG: Sending AT command...")
+            debug("Sending AT command...")
             self.ser.write('AT\r\n'.encode())
             time.sleep(1)
             
@@ -1288,21 +1293,21 @@ class LoRaHandler:
                     try:
                         response = res.decode('utf-8').strip()
                         responses.append(response)
-                        print(f"DEBUG: AT response: '{response}'")
+                        debug(f"AT response: '{response}'")
                         if 'OK' in response:
                             ver_success = True
-                            print("DEBUG: AT command successful")
+                            debug("AT command successful")
                     except UnicodeDecodeError:
                         response_hex = res.hex()
                         responses.append(f"BINARY:{response_hex}")
-                        print(f"DEBUG: Binary AT response (hex): {response_hex}")
+                        debug(f"Binary AT response (hex): {response_hex}")
                         if b'OK' in res:
                             ver_success = True
-                            print("DEBUG: AT command successful (binary)")
+                            debug("AT command successful (binary)")
            
            
             # Check join status
-            print("DEBUG: Sending AT+NJS? command...")
+            debug("Sending AT+NJS? command...")
             self.ser.flush()
             # Send newline to clear any partial commands
             self.ser.write('\r\n'.encode())
@@ -1318,24 +1323,24 @@ class LoRaHandler:
                     try:
                         response = res.decode('utf-8').strip()
                         responses.append(response)
-                        print(f"DEBUG: Join status response: '{response}'")
+                        debug(f"Join status response: '{response}'")
                         if 'OK' in response:
                             njs_success = True
-                            print("DEBUG: AT+NJS? command successful")
+                            debug("AT+NJS? command successful")
                     except UnicodeDecodeError:
                         response_hex = res.hex()
                         responses.append(f"BINARY:{response_hex}")
-                        print(f"DEBUG: Binary join status response (hex): {response_hex}")
+                        debug(f"Binary join status response (hex): {response_hex}")
                         if b'OK' in res:
                             njs_success = True
-                            print("DEBUG: AT+NJS? command successful (binary)")
+                            debug("AT+NJS? command successful (binary)")
             
             if not njs_success:
                 print("WARNING: AT+NJS? command did not receive OK response")
             
             return ver_success and njs_success
         except Exception as e:
-            print(f"DEBUG: Error checking mDot status: {e}")
+            print(f"⚠️ LoRa: error checking mDot status: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1343,7 +1348,7 @@ class LoRaHandler:
     def check_reception_status(self):
         """Check if the LoRa handler is properly receiving data"""
         try:
-            print("DEBUG: Checking LoRa reception status...")
+            debug("Checking LoRa reception status...")
             
             # Check if listener thread is running
             if not self.listening:
@@ -1361,7 +1366,7 @@ class LoRaHandler:
             
             # Check if there's data waiting
             if self.ser.in_waiting > 0:
-                print(f"DEBUG: {self.ser.in_waiting} bytes waiting in serial buffer")
+                debug(f"{self.ser.in_waiting} bytes waiting in serial buffer")
                 
                 # Read and display waiting data
                 while self.ser.in_waiting > 0:
@@ -1369,18 +1374,18 @@ class LoRaHandler:
                     if res:
                         try:
                             response = res.decode('utf-8').strip()
-                            print(f"DEBUG: Waiting data: '{response}'")
+                            debug(f"Waiting data: '{response}'")
                         except UnicodeDecodeError:
                             response_hex = res.hex()
-                            print(f"DEBUG: Waiting binary data (hex): {response_hex}")
+                            debug(f"Waiting binary data (hex): {response_hex}")
             else:
-                print("DEBUG: No data waiting in serial buffer")
+                debug("No data waiting in serial buffer")
             
-            print("DEBUG: LoRa reception status check completed")
+            debug("LoRa reception status check completed")
             return True
             
         except Exception as e:
-            print(f"DEBUG: Error checking reception status: {e}")
+            print(f"⚠️ LoRa: error checking reception status: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1388,7 +1393,7 @@ class LoRaHandler:
     def check_mdot_data_config(self):
         """Check mDot data reception configuration"""
         try:
-            print("DEBUG: Checking mDot data reception configuration...")
+            debug("Checking mDot data reception configuration...")
             
             # Clear buffers first
             self._drain_input()
@@ -1399,7 +1404,7 @@ class LoRaHandler:
             time.sleep(0.1)
             
             # Check current data format configuration
-            print("DEBUG: Checking data format configuration...")
+            debug("Checking data format configuration...")
             self.ser.write('AT+DFORMAT?\r\n'.encode())
             time.sleep(1)
             
@@ -1410,14 +1415,14 @@ class LoRaHandler:
                     try:
                         response = res.decode('utf-8').strip()
                         responses.append(response)
-                        print(f"DEBUG: DFORMAT response: '{response}'")
+                        debug(f"DFORMAT response: '{response}'")
                     except UnicodeDecodeError:
                         response_hex = res.hex()
                         responses.append(f"BINARY:{response_hex}")
-                        print(f"DEBUG: Binary DFORMAT response (hex): {response_hex}")
+                        debug(f"Binary DFORMAT response (hex): {response_hex}")
             
             # Check if there are any pending messages
-            print("DEBUG: Checking for pending messages...")
+            debug("Checking for pending messages...")
             self.ser.write('AT+MSG?\r\n'.encode())
             time.sleep(1)
             
@@ -1426,16 +1431,16 @@ class LoRaHandler:
                 if res:
                     try:
                         response = res.decode('utf-8').strip()
-                        print(f"DEBUG: MSG response: '{response}'")
+                        debug(f"MSG response: '{response}'")
                     except UnicodeDecodeError:
                         response_hex = res.hex()
-                        print(f"DEBUG: Binary MSG response (hex): {response_hex}")
+                        debug(f"Binary MSG response (hex): {response_hex}")
             
-            print("DEBUG: mDot data configuration check completed")
+            debug("mDot data configuration check completed")
             return True
             
         except Exception as e:
-            print(f"DEBUG: Error checking mDot data config: {e}")
+            print(f"⚠️ LoRa: error checking mDot data config: {e}")
             import traceback
             traceback.print_exc()
             return False
@@ -1537,12 +1542,12 @@ class LoRaHandler:
     def _clear_mdot_input(self):
         """Clear mDot input buffer and send blank AT command to reset state"""
         try:
-            print("DEBUG: Clearing mDot input buffer...")
+            debug("Clearing mDot input buffer...")
             self._drain_input()
             self.ser.reset_output_buffer()
             
             # Send blank AT command to clear any partial state
-            print("DEBUG: Sending blank AT command to clear mDot state...")
+            debug("Sending blank AT command to clear mDot state...")
             self.ser.write('AT\r\n'.encode())
             time.sleep(0.5)
             
@@ -1552,12 +1557,12 @@ class LoRaHandler:
                 if res:
                     try:
                         response = res.decode('utf-8').strip()
-                        print(f"DEBUG: Blank AT response: '{response}'")
+                        debug(f"Blank AT response: '{response}'")
                     except UnicodeDecodeError:
                         response_hex = res.hex()
-                        print(f"DEBUG: Blank AT binary response: {response_hex}")
+                        debug(f"Blank AT binary response: {response_hex}")
             
-            print("DEBUG: mDot input cleared successfully")
+            debug("mDot input cleared successfully")
             return True
         except Exception as e:
             print(f"ERROR: Failed to clear mDot input: {e}")
@@ -1573,7 +1578,7 @@ class LoRaHandler:
         the next AT+SENDB for the actual payload can proceed.
         """
         try:
-            print("DEBUG: MAC flush: sending 1-byte probe to drain MAC command queue...")
+            debug("MAC flush: sending 1-byte probe to drain MAC command queue...")
             self._drain_input()
             self.ser.write(b'AT+SENDB=00\r\n')
             deadline = time.time() + MAC_FLUSH_WINDOW_S
@@ -1587,19 +1592,19 @@ class LoRaHandler:
                     except UnicodeDecodeError:
                         response = ""
                     if response:
-                        print(f"DEBUG: MAC flush response: '{response}'")
+                        debug(f"MAC flush response: '{response}'")
                     if 'OK' in response:
-                        print("DEBUG: MAC flush OK — MAC queue drained")
+                        debug("MAC flush OK — MAC queue drained")
                         return True
                     if 'ERROR' in response.upper():
-                        print("DEBUG: MAC flush ERROR — continuing anyway")
+                        print("⚠️ LoRa: MAC flush ERROR — continuing anyway")
                         return False
                 else:
                     time.sleep(0.1)
-            print("DEBUG: MAC flush timed out")
+            print("⚠️ LoRa: MAC flush timed out")
             return False
         except Exception as e:
-            print(f"DEBUG: MAC flush failed: {e}")
+            print(f"⚠️ LoRa: MAC flush failed: {e}")
             return False
 
     def _attempt_transmission(self, content: bytes, size_limit: int) -> tuple[bool, str]:
@@ -1628,7 +1633,7 @@ class LoRaHandler:
                     try:
                         res = self._read_line()
                     except Exception as exc:
-                        print(f"DEBUG: Serial read error: {exc}")
+                        print(f"⚠️ LoRa: serial read error: {exc}")
                         time.sleep(0.1)
                         continue
                     if not res:
@@ -1638,11 +1643,11 @@ class LoRaHandler:
                     except UnicodeDecodeError:
                         response_hex = res.hex()
                         final_responses.append(f"BINARY:{response_hex}")
-                        print(f"DEBUG: Binary response (hex): {response_hex}")
+                        debug(f"Binary response (hex): {response_hex}")
                         if b'OK' in res:
                             success = True
                             got_real_response = True
-                            print("DEBUG: mDot confirmed OK (binary)")
+                            debug("mDot confirmed OK (binary)")
                         elif b'ERROR' in res or b'INVALID' in res:
                             error_message = f"mDot reported error in binary response: {response_hex}"
                             got_real_response = True
@@ -1658,14 +1663,14 @@ class LoRaHandler:
                     final_responses.append(response)
 
                     if is_cmd_echo:
-                        print(f"DEBUG: mDot echo: '{response[:80]}'")
+                        debug(f"mDot echo: '{response[:80]}'")
                     else:
-                        print(f"DEBUG: mDot response: '{response}'")
+                        debug(f"mDot response: '{response}'")
                         got_real_response = True
 
                         if 'OK' in response:
                             success = True
-                            print("DEBUG: mDot confirmed command execution with OK")
+                            debug("mDot confirmed command execution with OK")
                         elif 'INVALID COMMAND' in response.upper():
                             error_message = f"mDot reported invalid command: {response}"
                             print(f"ERROR: {error_message}")
@@ -1697,7 +1702,7 @@ class LoRaHandler:
                     return False, f"Invalid hex string format: {content}"
 
                 payload_size = len(content) // 2
-                print(f"DEBUG: Hex string length: {len(content)} chars, payload size: {payload_size} bytes")
+                debug(f"Hex string length: {len(content)} chars, payload size: {payload_size} bytes")
 
                 if payload_size > size_limit:
                     return False, f"Payload size {payload_size} bytes exceeds limit {size_limit} bytes"
@@ -1707,15 +1712,15 @@ class LoRaHandler:
                 self._drain_input()
 
                 at_command = f"AT+SENDB={content}\r\n".encode()
-                print(f"DEBUG: Sending AT command: {at_command}")
+                debug(f"Sending AT command: {at_command}")
                 self.ser.write(at_command)
-                print("DEBUG: AT command sent, polling for response (up to 15 s)...")
+                debug("AT command sent, polling for response (up to 15 s)...")
 
                 success, error_message, final_responses = _read_mdot_response(SENDB_WINDOW_HEX_S)
 
             else:
                 payload_size = len(content)
-                print(f"DEBUG: Bytes length: {payload_size} bytes")
+                debug(f"Bytes length: {payload_size} bytes")
 
                 if payload_size > size_limit:
                     return False, f"Payload size {payload_size} bytes exceeds limit {size_limit} bytes"
@@ -1727,9 +1732,9 @@ class LoRaHandler:
                 # Discard stale RX bytes before sending
                 self._drain_input()
 
-                print(f"DEBUG: Sending data payload...")
+                debug(f"Sending data payload...")
                 self.ser.write(f'AT+SENDB={hex_content}\r\n'.encode())
-                print("DEBUG: Data payload sent, polling for response (up to 20 s)...")
+                debug("Data payload sent, polling for response (up to 20 s)...")
 
                 success, error_message, final_responses = _read_mdot_response(SENDB_WINDOW_BYTES_S)
 
@@ -1937,14 +1942,14 @@ class LoRaHandler:
                         size_limit = self._extract_txs_size_limit(response)
                     if size_limit is not None:
                         self.current_size_limit = size_limit
-                        print(f"DEBUG: Size limit refreshed to: {size_limit} bytes")
+                        debug(f"Size limit refreshed to: {size_limit} bytes")
                 except UnicodeDecodeError:
                     pass
 
     def refresh_size_limit(self) -> bool:
         """Manually refresh the size limit by sending AT+TXS command"""
         try:
-            print("DEBUG: Manually refreshing size limit...")
+            debug("Manually refreshing size limit...")
             # Temporarily disable listening to avoid interference
             was_listening = self.listening
             if was_listening:
@@ -1973,14 +1978,14 @@ class LoRaHandler:
                             try:
                                 response = res.decode('utf-8').strip()
                                 responses.append(response)
-                                print(f"DEBUG: Manual TXS response: '{response}'")
+                                debug(f"Manual TXS response: '{response}'")
 
                                 size_limit = self._extract_txs_size_limit(response)
                                 if size_limit is not None:
                                     self.current_size_limit = size_limit
-                                    print(f"DEBUG: Size limit refreshed to: {size_limit} bytes")
+                                    debug(f"Size limit refreshed to: {size_limit} bytes")
                             except UnicodeDecodeError:
-                                print(f"DEBUG: Binary manual TXS response (hex): {res.hex()}")
+                                debug(f"Binary manual TXS response (hex): {res.hex()}")
                 finally:
                     fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
             
