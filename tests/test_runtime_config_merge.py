@@ -96,11 +96,10 @@ def test_wake_setup_no_longer_copies_lora_config_over_runtime_config(cfg):
     assert _read(cfg)["shutdown_iteration_limit"] == 4
 
 
-def test_explicit_sync_merges_only_the_synced_keys(cfg):
+def test_sync_with_lora_config_changes_nothing(cfg):
+    """runtime_config.json is the one config file: an old LoRa copy is never copied over it."""
     m = _manager(cfg)
-    other = _manager(cfg)
-    assert other.set_parameter("area_threshold", 70)        # m's copy is stale
-    m.lora_handler = SimpleNamespace(config={"photo_interval": 120})
+    before = _read(cfg)
+    m.lora_handler = SimpleNamespace(config={"photo_interval": 120, "shutdown_iteration_limit": 2})
     assert m.sync_with_lora_config()
-    assert _read(cfg)["photo_interval"] == 120
-    assert _read(cfg)["area_threshold"] == 70
+    assert _read(cfg) == before

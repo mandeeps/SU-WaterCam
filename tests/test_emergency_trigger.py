@@ -25,6 +25,9 @@ from tools.lora_runtime_integration import LoRaRuntimeManager
 @pytest.fixture
 def handler(tmp_path):
     h = LoRaHandler(config_file=str(tmp_path / "lora_config.json"))
+    # h.config stands in for runtime_config.json: commands reach it through the runtime callback
+    h.config = {}
+    h.runtime_callback = h.config.__setitem__
     h.update_config("emergency_mode", False)
     return h
 

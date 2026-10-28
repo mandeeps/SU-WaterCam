@@ -22,7 +22,9 @@ from tools.transmit_ip import parse_downlink_frame  # noqa: E402
 @pytest.fixture
 def handler():
     h = LoRaHandler.__new__(LoRaHandler)
-    h.config, h.config_file, h.runtime_callback = {}, os.path.join(tempfile.mkdtemp(), "c.json"), None
+    # h.config stands in for runtime_config.json: commands reach it through the runtime callback
+    h.config, h.config_file = {}, os.path.join(tempfile.mkdtemp(), "c.json")
+    h.runtime_callback = h.config.__setitem__
     with patch.object(LoRaHandler, "_reply_with_status") as reply:
         h.reply = reply
         yield h

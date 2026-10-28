@@ -8,7 +8,7 @@ The settings themselves are defined once, in `tools/config_schema.py`: the runti
 | Place | What | Kept across software updates? |
 |---|---|---|
 | `~/SU-WaterCam/runtime_config.json` | The unit's operating settings: the runtime parameters below, plus the `ip_upload` and `recovery_boot` sections. Created from `runtime_config.example.json` at setup (guide 1.5). | Yes (git-ignored). Merge writes keep keys the code doesn't know. |
-| `~/SU-WaterCam/lora_config.json` | The LoRa handler's own copy of some parameters, plus the LoRa queue settings (`lora_sf_*`). Created by `tools/lora_handler_concurrent.py` if missing. | Yes (git-ignored) |
+| `~/SU-WaterCam/lora_config.json` | Legacy: no longer written. Read only for old `lora_sf_*` values until `runtime_config.json` has a `lora_queue` section (below). | Yes (git-ignored) |
 | `~/SU-WaterCam/bno055_calibration.json`, `config/camera_calibration.json`, `images/registration_transform.json` | Calibration and the registration cache | Yes |
 | `config/*.service` | Service command lines and `Environment=`. Installed into `/etc/systemd/system`. | Reinstalled from the repo by the update steps |
 | `/etc/watercam/` | Two bench flag files (below) | Yes (outside the repo) |
@@ -92,17 +92,26 @@ Described in WITTYPI_SCHEDULING "Recovery boot".
 | `fallback_delay_minutes` | 120 | Not described |
 | `scheduled_wake_window_minutes` | 20 | |
 
-## `lora_config.json`
+## `lora_queue` section (`runtime_config.json`)
 
-| Key | Default | Read by | Notes |
+The Pi-side LoRa queue (`tools/lora_store_forward.py`): frames the handler couldn't send, or sent while the mDot wasn't joined, are kept on disk and sent later. Callers still ask for `lora_sf_*` (`get_config_value`); `tools/lora_handler_concurrent.lookup_setting` maps those to this section.
+
+| Key | Default | Read as | Notes |
 |---|---|---|---|
-| `lora_sf_enabled` | true | ticktalk_main | Pi-side LoRa queue (`tools/lora_store_forward.py`): frames the handler couldn't send, or sent while the mDot wasn't joined, are kept on disk and sent later. Not described in the docs yet. |
-| `lora_sf_max_depth` | 96 | ticktalk_main | Pi-side queue |
-| `lora_sf_max_age_days` | 7 | ticktalk_main | Pi-side queue |
-| `lora_sf_drain_per_cycle` | 2 | ticktalk_main | Pi-side queue |
-| copies of `area_threshold`, `emergency_frequency` (10), `shutdown_iteration_limit` (**2**), `debug_mode`, … | | lora_handler_concurrent | **Review:** duplicates of the runtime parameters. `shutdown_iteration_limit` differs (2 here, 3 in the runtime defaults). |
+| `enabled` | true | `lora_sf_enabled` | |
+| `max_depth` | 96 | `lora_sf_max_depth` | |
+| `max_age_days` | 7 | `lora_sf_max_age_days` | |
+| `drain_per_cycle` | 2 | `lora_sf_drain_per_cycle` | |
 
-**Reserved:** store-and-forward on the mDot itself (a queue in the mDot firmware, which would send while the Pi is off) is not built and has no settings yet. The settings above are for the Pi's queue.
+The section isn't in the template yet, so units use the defaults.
+
+**Reserved:** store-and-forward on the mDot itself (a queue in the mDot firmware, which would send while the Pi is off) is not built and has no settings yet.
+
+### `lora_config.json` (legacy)
+
+The LoRa handler used to keep its own copy of the runtime parameters here. Only LoRa commands updated it, so it went stale; that is how the node once reported emergency mode as still on after it had ended.
+
+It is no longer written. LoRa commands go to `runtime_config.json` through the daemon's validating callback (`set_parameter`). An existing file is read only for `lora_sf_*` values, and only while `runtime_config.json` has no `lora_queue` section. Its copies of runtime parameters (including `shutdown_iteration_limit` 2) are ignored. Once units have a `lora_queue` section, or keep the defaults, the file can be deleted.
 
 ## Other config files
 
@@ -162,7 +171,7 @@ These are listed so a reader of `/run` and `/tmp` knows what they are:
 ## To review later
 
 1. **Template vs code defaults:** `emergency_frequency` is 5 in the template and 10 in the code, and the template lacks `emergency_sleep`, `bitmap_*`, `storage_*`, `gps_*`, `wifi_when_lora_healthy` and `lora_min_margin_db`.
-2. **`lora_config.json` duplicates:** the runtime parameters, with `shutdown_iteration_limit` 2 against 3.
+2. **`lora_config.json` duplicates:** resolved. The file is no longer written, and its copies are ignored (`lora_queue` section above).
 3. **No effect:** `max_retransmissions`, `backup_enabled`, `compression_level`.
 4. **The `wittypi_*` keys** against the `15 95` schedule: which one wins after emergency mode ends.
 5. **Reserved:** `ip_upload.downlink_poll_interval_s` (deployments without Tailscale), and mDot store-and-forward (not built).

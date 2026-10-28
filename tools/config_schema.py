@@ -1,3 +1,4 @@
+#!/home/pi/SU-WaterCam/venv/bin/python
 """The one definition of the node's settings (docs/CONFIGURATION.md).
 
 Each Setting gives a key, its code default, how it may be set, which module
@@ -166,11 +167,13 @@ SETTINGS: List[Setting] = [
     S("fallback_delay_minutes", 120, "Recovery wake when no schedule slot fits", section="recovery_boot", settable=False, readers=("recovery_boot",), in_template=True),
     S("scheduled_wake_window_minutes", 20, "A schedule slot this close is used instead", section="recovery_boot", settable=False, readers=("recovery_boot",), in_template=True),
 
-    # --- lora_config.json (the LoRa handler's file) ---
-    S("lora_sf_enabled", True, "Pi-side LoRa queue (tools/lora_store_forward.py)", file="lora_config.json", settable=False, readers=("ticktalk_main",)),
-    S("lora_sf_drain_per_cycle", 2, "Queued frames sent per cycle", file="lora_config.json", settable=False, readers=("ticktalk_main",)),
-    S("lora_sf_max_depth", 96, "Queue depth", file="lora_config.json", settable=False, readers=("ticktalk_main",)),
-    S("lora_sf_max_age_days", 7, "Queue age limit", file="lora_config.json", settable=False, readers=("ticktalk_main",)),
+    # --- runtime_config.json, lora_queue section: the Pi-side LoRa queue (tools/lora_store_forward.py) ---
+    # Read through get_config_value('lora_sf_*'); an old lora_config.json's values
+    # are used when the section is missing (tools/lora_handler_concurrent.lookup_setting)
+    S("enabled", True, "Queue LoRa frames that couldn't be sent and send them later", section="lora_queue", settable=False, readers=("ticktalk_main",)),
+    S("drain_per_cycle", 2, "Queued frames sent per cycle", section="lora_queue", settable=False, readers=("ticktalk_main",)),
+    S("max_depth", 96, "Queue depth", section="lora_queue", settable=False, readers=("ticktalk_main",)),
+    S("max_age_days", 7, "Queue age limit", section="lora_queue", settable=False, readers=("ticktalk_main",)),
 ]
 
 # runtime_config.example.json: top-level groups (a blank line between them), then the sections

@@ -471,48 +471,14 @@ class LoRaRuntimeManager:
         }
     
     def sync_with_lora_config(self):
-        """Synchronize runtime parameters with LoRa handler configuration"""
-        if not self.lora_handler:
-            print("No LoRa handler available for sync")
-            return False
-        
-        try:
-            # Get current LoRa config
-            lora_config = self.lora_handler.config
-            
-            # Validate/coerce all changes in-memory first, then persist once.
-            # Avoids one save_parameters() call per changed key on constrained hardware.
-            changes = []
-            prior_values = {}
-            for key, value in lora_config.items():
-                if key in self.parameters and self.parameters[key] != value:
-                    old_value = self.parameters[key]
-                    if self._validate_param(key, value):
-                        coerced = self._coerce_param(key, value)
-                        prior_values[key] = old_value
-                        self.parameters[key] = coerced
-                        changes.append(f"{key}: {old_value} → {coerced}")
-                    else:
-                        print(f"  Warning: skipped out-of-range value for '{key}': {value!r}")
+        """Nothing to sync: runtime_config.json is the one config file.
 
-            if changes:
-                if not self.save_parameters({k: self.parameters[k] for k in prior_values}, merge=True):
-                    for key, old_value in prior_values.items():
-                        self.parameters[key] = old_value
-                    print(f"Warning: failed to persist {len(changes)} synced parameter(s) to disk")
-                    return False
-                print(f"🔄 Synced {len(changes)} parameters from LoRa config:")
-                for change in changes:
-                    print(f"  {change}")
-                return True
-            else:
-                print("✓ Runtime parameters already in sync with LoRa config")
-                return True
-                
-        except Exception as e:
-            print(f"Error syncing with LoRa config: {e}")
-            return False
-    
+        The LoRa handler used to keep its own copy (lora_config.json); copying
+        it over runtime_config.json reverted IP-downlink and hand-made changes.
+        Kept so older callers (ticktalk_main's lora_parameter_monitor) still work.
+        """
+        return True
+
     def print_status(self):
         """Print current system status"""
         status = self.get_system_status()

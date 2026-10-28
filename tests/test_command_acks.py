@@ -393,7 +393,9 @@ class TestPollDownlink:
 @pytest.fixture
 def handler():
     h = LoRaHandler.__new__(LoRaHandler)
-    h.config, h.config_file, h.runtime_callback = {}, os.path.join(tempfile.mkdtemp(), "c.json"), None
+    # h.config stands in for runtime_config.json: commands reach it through the runtime callback
+    h.config, h.config_file = {}, os.path.join(tempfile.mkdtemp(), "c.json")
+    h.runtime_callback = h.config.__setitem__
     with patch.object(LoRaHandler, "_reply_with_status") as reply:
         h.reply = reply
         yield h
@@ -452,7 +454,8 @@ class TestLoRaFrames:
 
     def test_ack_leads_the_status_reply_sent_on_air(self):
         h = LoRaHandler.__new__(LoRaHandler)
-        h.config, h.config_file, h.runtime_callback = {}, os.path.join(tempfile.mkdtemp(), "c.json"), None
+        h.config, h.config_file = {}, os.path.join(tempfile.mkdtemp(), "c.json")
+        h.runtime_callback = h.config.__setitem__
         h.current_size_limit = 242
         sent = []
         with patch.object(LoRaHandler, "_send_debug_reply", lambda self, data: sent.append(data)), \
