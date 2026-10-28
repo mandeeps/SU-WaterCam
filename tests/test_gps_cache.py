@@ -88,3 +88,13 @@ def test_last_fix_records_the_source(gps, monkeypatch):
 def test_default_cache_is_thirty_days():
     # a live fix is taken once a day (tools/gps_window.py); the cache covers the rest
     assert get_gps.DEFAULT_CACHE_MAX_AGE_H == 720
+
+
+def test_cached_fix_note_is_printed_once_per_process(gps, monkeypatch, capsys):
+    monkeypatch.setattr(gps, "_cached_note_shown", False)
+    monkeypatch.setattr(gps, "debug", lambda *a, **k: None)
+    json.dump({**FIX, "fix_time": time.time()}, open(gps.CACHE_PATH, "w"))
+    monkeypatch.setattr(gps, "_get_lat_lon_alt_with_packet", lambda: ({}, None))
+    for _ in range(3):
+        assert gps.get_location_with_retry()[0] == FIX
+    assert capsys.readouterr().out.count("using the last fix") == 1

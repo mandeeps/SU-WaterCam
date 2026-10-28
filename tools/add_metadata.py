@@ -33,6 +33,11 @@ except ImportError:
 except Exception:
     print("BNO055 hardware issue")
 
+try:
+    from tools.debug_log import debug
+except ImportError:     # run from tools/ as a script
+    from debug_log import debug
+
 last_fix: dict = {}   # replaced by tools.get_gps.last_fix when that imports
 try:
     from tools.get_gps import get_location_with_retry, get_loc, last_fix
@@ -174,7 +179,8 @@ def add_metadata(image):
         # Get formatted GPS data for logging
         formatted_gps_data = get_loc()
     except Exception as error:
-        print(f"No GPS data returned from get_loc: {error}")
+        # "GPS not active" is the normal case with USB off between daily fixes (#239)
+        (debug if "not active" in str(error) else print)(f"No GPS data returned from get_loc: {error}")
 
     # save formatted GPS data to text file
     if formatted_gps_data:
@@ -317,7 +323,7 @@ def add_metadata(image):
 
         # Since we have GPS data, add to Exif
         gps_exif = {"GPS": gps_ifd}
-        print(gps_exif)
+        debug(gps_exif)
         # add gps tag to original exif data
         exif_data.update(gps_exif)
 
