@@ -43,7 +43,9 @@ from tools.registration_orientation import rotation_deg, tilt_deg  # noqa: E402
 STATE_FILE = os.path.join(_REPO, "data", "pose_state.json")
 
 GEOREF_TILT_DEG, GEOREF_ROTATION_DEG, GEOREF_CAPTURES = 1.0, 3.0, 3
-KNOCK_TILT_DEG, KNOCK_ROTATION_DEG, KNOCK_CAPTURES = 5.0, 15.0, 2
+# 10/25, raised from 5/15 (2026-10-28): 005 drifted 8 deg tilt and 11 deg rotation
+# on the bench, and a knock means a GPS fix at once
+KNOCK_TILT_DEG, KNOCK_ROTATION_DEG, KNOCK_CAPTURES = 10.0, 25.0, 2
 REMOVED_TILT_DEG = 20.0
 HANDLING_SPREAD_DEG = 3.0
 REFERENCE_CAPTURES, REFERENCE_STABLE_DEG = 3, 0.5

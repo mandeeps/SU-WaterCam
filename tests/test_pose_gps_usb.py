@@ -1,6 +1,8 @@
 """Pose levels (tools/pose_monitor.py), the GPS window (tools/gps_window.py) and
 USB holders (tools/usb_power.py)."""
+import json
 import math
+import os
 import time
 from unittest.mock import MagicMock, patch
 
@@ -65,9 +67,17 @@ def test_a_single_glitch_raises_nothing():
 
 def test_knock_needs_two_captures_and_asks_for_a_gps_fix():
     state = _with_reference()
-    assert pm.assess(_samples(7), state)["level"] == pm.OK
-    assert pm.assess(_samples(7), state)["level"] == pm.KNOCKED
+    assert pm.assess(_samples(12), state)["level"] == pm.OK
+    assert pm.assess(_samples(12), state)["level"] == pm.KNOCKED
     assert state["gps_wakes"] == 1
+
+
+def test_bench_drift_is_not_a_knock():
+    # 005 on the bench, 2026-10-28: 8 deg of tilt for hours
+    state = _with_reference()
+    for _ in range(5):
+        pm.assess(_samples(8), state)
+    assert state["level"] == pm.GEOREF and not state.get("gps_wakes")
 
 
 def test_removal_is_immediate():
@@ -214,3 +224,71 @@ def test_a_holder_whose_process_ended_does_not_keep_usb_on(monkeypatch, tmp_path
     usb_power.acquire("gps")
     assert usb_power.holders() == ["gps"]
     assert usb_power.release("gps") is True and switched[-1] == "off"
+
+
+# ── Once a day, as long as the wake allows (2026-10-28) ──
+
+def test_a_failed_try_waits_a_day(cache, monkeypatch):
+    now = time.time()
+    cache.update(gps_lat=1.0, gps_lon=2.0, fix_time=now - 30 * 3600)
+    assert gps_window.reasons(now=now)
+    gps_window._record_attempt(now - 3600)                       # tried (and failed) an hour ago
+    assert gps_window.reasons(now=now) == []
+    assert gps_window.reasons(now=now, pose_wake=True) == ["knocked or removed"]
+    assert gps_window.reasons(now=now, requested=True) == ["requested by the server"]
+    assert gps_window.reasons(now=now + 22.5 * 3600)             # 23.5 h after the try: due again
+    gps_window._record_attempt(now + 3600)                       # a try "in the future": clock was wrong
+    assert gps_window.reasons(now=now)
+
+
+def test_the_daily_try_does_not_drift_to_the_second_capture(cache):
+    # 006: yesterday's fix came at 10:56, so 10:55 today was 1 min short of 24 h
+    now = time.time()
+    cache.update(gps_lat=1.0, gps_lon=2.0, fix_time=now - (24 * 3600 - 60))
+    gps_window._record_attempt(now - (24 * 3600 - 90))
+    assert gps_window.reasons(now=now)
+
+
+def test_window_length_follows_the_wake():
+    assert gps_window.window_s(uptime_s=25, awake_min=10) == gps_window.FIX_TIMEOUT_S
+    assert gps_window.window_s(uptime_s=25, awake_min=5) == 5 * 60 - gps_window.SHUTDOWN_MARGIN_S - 25
+    assert gps_window.window_s(uptime_s=290, awake_min=5) == 0
+    assert gps_window.window_s(uptime_s=3600, awake_min=5) == gps_window.FIX_TIMEOUT_S  # always on
+
+
+def test_too_little_wake_left_keeps_the_request(monkeypatch, cache):
+    monkeypatch.setattr(gps_window, "_uptime_s", lambda: 280.0)
+    monkeypatch.setattr(gps_window, "window_s", lambda *a, **k: 10.0)
+    gps_window.request()
+    with patch("tools.pose_monitor.take_gps_wake", return_value=False) as take:
+        assert gps_window.start_if_due(background=False) is None
+        take.assert_not_called()
+    assert os.path.exists(gps_window.REQUEST_FILE)
+    assert gps_window.last_attempt() is None
+
+
+def test_shutdown_waits_for_the_window(monkeypatch, cache):
+    ran = []
+    monkeypatch.setattr(gps_window, "run_window", lambda why, **kw: ran.append(kw["timeout_s"]) or True)
+    with patch("tools.pose_monitor.take_gps_wake", return_value=False):
+        assert gps_window.start_if_due(background=False) == ["no fix yet"]
+    assert ran and gps_window.last_attempt() is not None
+    assert gps_window.wait_until_done() is None                  # done: nothing to wait for
+
+    with open(gps_window.BOOT_MARK, "w") as f:                    # a window still running
+        json.dump({"at": 0, "deadline": 100.0}, f)
+    clock = [50.0]
+
+    def sleep(s):
+        clock[0] += s
+        if clock[0] >= 60:
+            gps_window._mark({"done": True})
+    assert gps_window.wait_until_done(now=lambda: clock[0], sleep=sleep) == "window ended"
+    with open(gps_window.BOOT_MARK, "w") as f:                    # one that never says it's done
+        json.dump({"at": 0, "deadline": 100.0}, f)
+    clock[0] = 50.0
+    assert gps_window.wait_until_done(now=lambda: clock[0], sleep=lambda s: clock.__setitem__(0, clock[0] + s)) \
+        == "deadline passed"
+    assert clock[0] >= 110
+    os.unlink(gps_window.BOOT_MARK)
+    assert gps_window.wait_until_done() is None                  # no window this boot

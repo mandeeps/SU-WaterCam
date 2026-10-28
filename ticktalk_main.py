@@ -1095,6 +1095,15 @@ def call_shutdown(state):
         print(f"\n🚨 SHUTDOWN TRIGGERED: {new_count} iterations >= {shutdown_limit} limit\n")
 
     try:
+        # A GPS window that opened late in the wake runs to its end
+        # (tools/gps_window.py: up to the wake's awake time)
+        from tools import gps_window
+        waited = gps_window.wait_until_done()
+        if waited:
+            print(f"🛰️ GPS window: {waited}")
+    except Exception as e:
+        print(f"⚠️ GPS window wait failed: {e}")
+    try:
         # Finalize the in-progress audio segment so its WAV header is
         # written correctly before the OS goes down.
         from tools.audio_recorder import stop_recording_if_active
