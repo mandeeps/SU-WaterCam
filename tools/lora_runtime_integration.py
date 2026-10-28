@@ -28,14 +28,22 @@ from datetime import datetime
 import sys
 import os
 
-# Defaults shared with ticktalk_main.py and the watchers
-DEFAULT_SHUTDOWN_LIMIT = 3          # captures per wake before the node shuts down
-DEFAULT_EMERGENCY_FREQUENCY = 10    # minutes between captures in emergency mode / holds
-MIN_EMERGENCY_FREQUENCY = 1
-MAX_EMERGENCY_FREQUENCY = 240
-
 _current_dir = os.path.dirname(os.path.abspath(__file__))
 _parent_dir = os.path.dirname(_current_dir)
+
+# The settings themselves are defined once, in tools/config_schema.py
+try:
+    from tools import config_schema
+except ImportError:     # run from tools/ as a script
+    if _current_dir not in sys.path:
+        sys.path.insert(0, _current_dir)
+    import config_schema
+
+# Defaults shared with ticktalk_main.py and the watchers
+DEFAULT_SHUTDOWN_LIMIT = config_schema.DEFAULT_SHUTDOWN_LIMIT
+DEFAULT_EMERGENCY_FREQUENCY = config_schema.DEFAULT_EMERGENCY_FREQUENCY
+MIN_EMERGENCY_FREQUENCY = config_schema.MIN_EMERGENCY_FREQUENCY
+MAX_EMERGENCY_FREQUENCY = config_schema.MAX_EMERGENCY_FREQUENCY
 
 try:
     # Prefer the package-qualified import so this module shares the same
@@ -88,98 +96,16 @@ class LoRaRuntimeManager:
     # emergency_max_hours, 0 = never) so a stray command can't drain the battery.
     EMERGENCY_MAX_HOURS = 24
 
-    # Inclusive (min, max) bounds for each settable parameter.
-    # Values outside these ranges are rejected with a warning.
-    _PARAM_RANGES: dict = {
-        'area_threshold':                   (0, 100),
-        'stage_threshold':                  (0, 65535),
-        'monitoring_frequency':             (1, 10080),
-        'emergency_frequency':              (MIN_EMERGENCY_FREQUENCY, MAX_EMERGENCY_FREQUENCY),
-        'photo_interval':                   (30, 1440),   # seconds
-        'neighborhood_emergency_frequency': (1, 1440),
-        'max_retransmissions':              (0, 10),
-        'shutdown_iteration_limit':         (1, 100),
-        'data_retention_days':              (0, 365),   # 0 keeps everything
-        'compression_level':                (1, 10),
-        'emergency_max_hours':              (0, 168),     # 0 = no expiry
-        'flood_baseline_water_pct':         (0, 100),     # tools/flood_baseline.py
-        'bitmap_refresh_hours':             (0, 168),     # tools/bitmap_policy.py; 0 = every capture
-        'ip_fallback_after_hours':          (0, 168),     # tools/ip_fallback.py; 0 = off
-        'ip_fallback_min_interval_hours':   (0, 168),
-        'gps_fix_interval_h':               (1, 720),     # tools/gps_window.py: a live fix this often
-        'gps_cache_max_age_h':              (0, 8760),    # tools/get_gps.py: how old a cached fix may be
-    }
-
-    # Parameters that must be stored as integers (not floats).
-    _INT_PARAMS: frozenset = frozenset({
-        'area_threshold',
-        'monitoring_frequency',
-        'emergency_frequency',
-        'photo_interval',
-        'neighborhood_emergency_frequency',
-        'max_retransmissions',
-        'shutdown_iteration_limit',
-        'data_retention_days',
-        'compression_level',
-        'emergency_max_hours',
-        'flood_baseline_water_pct',
-        'bitmap_refresh_hours',
-    })
-
-    # The one list of runtime_config defaults (written on first run, merged under
-    # a loaded file).
-    _DEFAULT_PARAMS: dict = {
-        # Flood detection parameters
-        # area_threshold: percentage points of water above the unit's baseline
-        # (flood_baseline_water_pct) that count as a flood, and the rise between
-        # captures that counts as growing (tools/flood_baseline.py)
-        'area_threshold': 10,
-        'camera_flood_detection_enabled': False,  # node-side flood flags 07 17 / 07 27
-        # LoRa sends the mask bitmap (08 18) when the water % moved by
-        # area_threshold, a flood flag is set or changed, in emergency mode, or
-        # once this many hours have passed; 0 sends it every capture
-        # (tools/bitmap_policy.py). IP uploads send it every capture.
-        'bitmap_refresh_hours': 24,
-        # LoRa bitmap method 2 (lossless context model, up to 640 px). Turn on only
-        # once the API and dashboard decode it (docs/BITMAP_DECODING_SPEC.md)
-        'bitmap_method2_enabled': True,
-        # Reserved: kept and reported (09 29) but unused on the node; the
-        # server applies its own thresholds to stream gauge readings.
-        'stage_threshold': 50,          # Water stage threshold (cm)
-        
-        # Timing parameters
-        'monitoring_frequency': 60,     # Monitoring frequency (minutes)
-        'emergency_frequency': DEFAULT_EMERGENCY_FREQUENCY,  # Minutes between captures in emergency mode and keep-awake holds
-        'photo_interval': 60,           # Capture period within a wake (seconds)
-        'neighborhood_emergency_frequency': 30,  # Neighborhood emergency frequency
-        
-        # System control parameters
-        'emergency_mode': False,        # Emergency mode flag
-        # Off between emergency captures instead of staying up (tools/emergency_sleep.py)
-        'emergency_sleep': True,
-        'debug_mode': False,            # Debug logging mode
-        
-        # Performance parameters
-        'max_retransmissions': 3,       # Maximum retransmission attempts
-        
-        # Advanced parameters
-        'auto_shutdown_enabled': True,  # Enable automatic shutdown after iterations
-        'shutdown_iteration_limit': DEFAULT_SHUTDOWN_LIMIT,  # Number of iterations before shutdown
-        'data_retention_days': 0,       # Days to keep photos (JPEG, TIFF) and audio; 0 keeps all
-        'storage_low_free_pct': 20,     # Below this free space, remove the oldest photos...
-        'storage_target_free_pct': 30,  # ... until this much is free (tools/data_retention.py)
-        'backup_enabled': True,         # Enable data backup
-        'audio_recording_enabled': False,  # USB microphone recording; only some units have one
-        'iteration_count': 0,           # Wake cycles since boot (atomic_increment_iteration_count)
-        # One IP upload, even with ip_upload off, when no bitmap was delivered for
-        # this long and LoRa is holding bitmaps back (tools/ip_fallback.py); 0 = off
-        'ip_fallback_after_hours': 12,
-        'ip_fallback_min_interval_hours': 6,  # at most one such upload this often
-    }
-
-    # Keys set_parameter() accepts: the defaults, the ranged keys, and the
-    # emergency timestamp it writes itself. Anything else is refused.
-    _SETTABLE_PARAMS: frozenset = frozenset(_DEFAULT_PARAMS) | frozenset(_PARAM_RANGES) | {'emergency_since', 'schedule'}
+    # Built from tools/config_schema.py, where each setting's default, range and
+    # meaning are defined (docs/CONFIGURATION.md):
+    # inclusive (min, max) bounds; values outside are rejected with a warning
+    _PARAM_RANGES: dict = config_schema.param_ranges()
+    # stored as integers (not floats)
+    _INT_PARAMS: frozenset = config_schema.int_params()
+    # the runtime_config defaults (written on first run, merged under a loaded file)
+    _DEFAULT_PARAMS: dict = config_schema.default_params()
+    # keys set_parameter() accepts; anything else is refused
+    _SETTABLE_PARAMS: frozenset = config_schema.settable_params()
 
     def __init__(self, config_file='runtime_config.json', lora_handler=None):
         self.config_file = config_file
