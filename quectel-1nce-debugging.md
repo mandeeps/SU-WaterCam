@@ -131,22 +131,17 @@ If the SIM shows as active with remaining data but the modem still won't registe
 
 After upgrading from Bookworm to Trixie (systemd 257, ModemManager 1.24):
 
-**Interface rename:** systemd renames `wwan0` to a predictable name like `wwp1s0u1u3i4`. Fix with a `.link` file:
+**Interface rename:** systemd renames `wwan0` to a predictable name like `wwp1s0u1u3i4`. Fix with a `.link` file, `config/systemd-network/10-wwan.link`, installed as `/etc/systemd/network/10-wwan.link` (docs/FIELD_DEPLOYMENT_GUIDE.md, 1.5.1):
 
-`/etc/systemd/network/10-wwan.link`
 ```ini
 [Match]
 Driver=qmi_wwan
-Path=platform-fd500000.pcie-pci-0000:01:00.0-usb-0:1.3:1.4
 
 [Link]
 Name=wwan0
 ```
 
-Confirm the correct `Path=` value with:
-```bash
-udevadm info /sys/class/net/<interface> | grep "^E: ID_PATH="
-```
+An earlier version also matched `Path=...usb-0:1.3:1.4`, which only works with the modem in that one USB port (005's is on 1.4). The driver alone is enough: a unit has one modem.
 
 **Initial EPS bearer APN:** Newer ModemManager is stricter about the LTE attach APN. Set it explicitly before connecting:
 

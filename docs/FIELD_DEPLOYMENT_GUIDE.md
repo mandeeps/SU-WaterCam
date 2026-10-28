@@ -389,7 +389,9 @@ The required change is to set a unique name. The system hostname or something de
 }
 ```
 
-The other top-level fields control monitoring behavior. From
+The other top-level fields control monitoring behavior. The full list of
+settings, with defaults and where each lives, is in
+[CONFIGURATION.md](CONFIGURATION.md). The main ones, from
 `tools/lora_runtime_integration.py`'s parameter definitions:
 
 | Field                              | Units   | Range   | Meaning                                                                                           |
@@ -408,7 +410,7 @@ The other top-level fields control monitoring behavior. From
 
 Also confirm before deploying:
 
-- `emergency_mode: false` and `debug_mode: false` — both should be off for a normal deployment
+- `emergency_mode: false` and `debug_mode: false` — both should be off for a normal deployment (`debug_mode` also turns on the LoRa handler's `DEBUG:` lines and the per-poll GPS lines, see 1.9.1)
 - `ip_upload.enabled` — `true` if this site will use cellular/IP upload in addition to (or instead of) LoRa; if so, fill in `server_url` for the WaterCam API server this unit reports to (already set for our tailnet), and give it this unit's own token: on the dashboard, Management → select the unit → IP access token → Generate (the token is shown once), then run `venv/bin/python tools/set_ip_token.py` on the unit and paste it at the hidden prompt (docs/IP_TRANSMISSION.md, "Installing the IP token"). Once the server enforces tokens (`IP_AUTH=enforce`), a unit without one can't send over IP.
 - **LoRa sensor packet:** each capture sends the capture time plus only the fields
   that changed by 5% or more since they were last sent (`data/lora_last_sent.json`).
@@ -471,6 +473,19 @@ connection up and down, and switch the WiFi radio off while LoRa works (1.9.1).
 Changing the connection's settings still needs `sudo`. Check it with
 `nmcli general permissions`: `network-control` and `enable-disable-wifi` both `yes`.
 
+Keep the modem's interface named `wwan0`. Since Trixie, udev renames it to a name
+like `wwp1s0u1u4i4`, and the cellular filter, the data counter and the checks below
+all expect `wwan0`. Without this file they never see the modem, and cellular traffic
+goes out unfiltered:
+
+```bash
+sudo install -D -m 644 config/systemd-network/10-wwan.link /etc/systemd/network/10-wwan.link
+sudo udevadm control --reload      # applies the next time USB power brings the modem up
+```
+
+After the next cellular session, `journalctl -k -b | grep "renamed from wwan0"` prints
+nothing. A line there means the file didn't match and the interface was renamed.
+
 Keep Tailscale's probes to private addresses off the modem. Tailscale tries every
 address the API server advertises, including LAN and Docker ones that can never
 answer over cellular, and each try costs data ([CELLULAR_DATA.md](CELLULAR_DATA.md)):
@@ -485,6 +500,19 @@ sudo nft list table netdev watercam_cellular                     # shows the two
 
 Don't enable the stock `nftables.service`: its `/etc/nftables.conf` starts with
 `flush ruleset`, which would also remove Tailscale's own firewall rules.
+
+Count the cellular data the unit uses, so the server can track it against the SIM's
+allowance (`tools/cellular_usage.py`). The total is reported on the first wake of
+each day:
+
+```bash
+sudo install -m 644 config/watercam-cellular-usage.service /etc/systemd/system/
+sudo install -m 755 config/networkmanager/dispatcher.d/90-watercam-cellular-usage \
+    /etc/NetworkManager/dispatcher.d/
+sudo systemctl daemon-reload
+sudo systemctl enable watercam-cellular-usage.service   # runs whenever wwan0 exists
+venv/bin/python -m tools.cellular_usage show            # after a cellular session
+```
 
 Check it, as `pi` and without `sudo`:
 
@@ -659,6 +687,13 @@ python tools/gps_home.py --reset
 
 `python tools/gps_home.py` shows whether a position has been learned and
 whether the unit counts as moved.
+
+Any wake with a good fix learns a position, including the bench tests in 1.10
+and 1.11 next to a window. So clear it again as the last bench step (1.14), and
+at the site check that it was learned there (2.4). A home learned at the bench
+makes every `04 03` distance on the dashboard the distance from the bench to
+the site and, if that is more than `gps_move_alert_m`, the unit alerts as
+moved once it is mounted.
 
 Clear any flood baseline from a previous site the same way
 (`python tools/flood_baseline.py --reset`); the new one is set at the site
@@ -850,6 +885,19 @@ sudo mkdir -p /etc/systemd/journald.conf.d
 sudo cp config/journald-volatile.conf /etc/systemd/journald.conf.d/
 sudo systemctl restart systemd-journald
 ```
+
+The LoRa handler's `DEBUG:` lines (every AT command, payload hex) and the
+per-poll GPS lines are off by default. Turn them on for a test or problem unit
+with the runtime parameter `debug_mode: true` in `runtime_config.json` (the
+unit's own config, kept across software updates). A change applies at the next
+start of each service. For one service only, set `Environment=WATERCAM_DEBUG=1`
+in its unit.
+
+```bash
+cd ~/SU-WaterCam && venv/bin/python -c "from tools.lora_runtime_integration import set_parameter; set_parameter('debug_mode', True)"
+```
+
+005 (test unit) and 006 keep debug output on for now.
 
 Rotate the logs that otherwise only grow: the power log, the bench
 `~/throttle_log.csv`, ticktalk's `output.log` and `data/temp_humidity.csv`
@@ -1061,6 +1109,9 @@ for the site:
 - [ ] **Tailscale:** the unit appears in the admin console with the
       `tag:watercam` tag and no personal owner (the ACL itself is kept by the
       tailnet admin, outside this repository).
+- [ ] **Last:** clear the mount position learned during the bench tests,
+      `venv/bin/python tools/gps_home.py --reset`, then shut down without
+      another test cycle (1.7.1).
 
 ## Phase 2: Field Installation
 
@@ -1096,6 +1147,13 @@ GPS acquiring a fix outdoors from a cold start can take a few minutes (longer wi
 ### 2.4 Confirm data is flowing from the final position
 
 Check the dashboard again for a reading with GPS coordinates matching the actual install location, and confirm the WittyPi schedule is triggering boots as expected.
+
+Check the mount position: `venv/bin/python tools/gps_home.py` should show a
+home set after the unit was mounted, with no moved state, and the dashboard's
+move distance should stay well under `gps_move_alert_m`. If the home was set before the
+install (a wake on the way, or a bench home that was never cleared), run
+`venv/bin/python tools/gps_home.py --reset` so it learns the mount position on
+its next wakes.
 
 ### 2.4.1 Set the flood baseline
 

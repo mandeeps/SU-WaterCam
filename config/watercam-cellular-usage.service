@@ -1,0 +1,21 @@
+[Unit]
+Description=Count cellular bytes while the modem is up (tools/cellular_usage.py)
+# Like watercam-cellular-filter.service: runs while wwan0 exists. It samples every
+# 5 minutes, which bounds what a power cut can lose, and once more when stopped,
+# which covers shutdown (NetworkManager leaves the connection up then).
+BindsTo=sys-subsystem-net-devices-wwan0.device
+After=sys-subsystem-net-devices-wwan0.device
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/tools/cellular_usage.py watch
+TimeoutStopSec=15
+# Writes only data/cellular_usage.json (and its lock) under /home/pi.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/home/pi /tmp /run/lock
+
+[Install]
+WantedBy=sys-subsystem-net-devices-wwan0.device

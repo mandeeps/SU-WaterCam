@@ -127,7 +127,7 @@ FULL_SENSOR_DATA = {
     'relative_humidity': 35, 'wittypi_temperature': 30.625,
     'wittypi_internal_voltage': 4.88, 'wittypi_vin': 4.49, 'pi_throttled': 0,
     'registration_status': 0, 'nir_filter_status': 1, 'software_version': 5, 'model_id': 320164049,
-    'model_bands': 3,
+    'model_bands': 3, 'cellular_kib_total': 70000,
     'sf_dropped': 3, 'clock_unverified': 1, 'camera_water_pct': 70,
     'camera_flood_detected': 1, 'camera_flood_growing': 0,
     'status_area_threshold': 10, 'stage_threshold': 50, 'monitoring_frequency': 60,
@@ -165,7 +165,7 @@ def test_codec_decodes_every_sensor_channel():
     assert out["temperature_celsius"] == 22.2
     # The Witty Pi temperature and output voltage aren't sent over LoRa
     assert "wittypi_temperature" not in out and "wittypi_internal_voltage" not in out
-    assert len(pkt) == 91   # 104 with the float32 and Witty Pi channels (before 07 47 and 01 10)
+    assert len(pkt) == 97   # 110 with the float32 and Witty Pi channels (before 07 47, 01 10 and 01 11)
 
 
 def test_compact_fields_layout_and_limits():
