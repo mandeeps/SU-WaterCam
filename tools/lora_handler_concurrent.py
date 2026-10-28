@@ -121,6 +121,56 @@ def _config_io():
     return config_io
 
 
+def _runtime():
+    """tools/lora_runtime_integration (imported late: it imports this module)."""
+    try:
+        from tools import lora_runtime_integration
+    except ImportError:
+        import lora_runtime_integration
+    return lora_runtime_integration
+
+
+# The Pi-side LoRa queue (tools/lora_store_forward.py): the keys callers ask for,
+# and their names in runtime_config.json's lora_queue section
+LORA_QUEUE_KEYS = {
+    'lora_sf_enabled': 'enabled',
+    'lora_sf_drain_per_cycle': 'drain_per_cycle',
+    'lora_sf_max_depth': 'max_depth',
+    'lora_sf_max_age_days': 'max_age_days',
+}
+LEGACY_CONFIG_FILE = 'lora_config.json'
+
+
+def _read_legacy_config(path: str = LEGACY_CONFIG_FILE) -> Dict[str, Any]:
+    """The old lora_config.json, if a unit still has one: read only, for the
+    queue settings it may hold. Everything else in it is a stale copy of the
+    runtime parameters and is ignored."""
+    try:
+        return _config_io().read_json(path)
+    except FileNotFoundError:
+        return {}
+    except Exception as e:
+        print(f"⚠️ LoRa: couldn't read {path}: {e}")
+        return {}
+
+
+def lookup_setting(key: str, default: Any = None, legacy: Optional[Dict[str, Any]] = None) -> Any:
+    """A setting the LoRa code reads, from runtime_config.json (the one config file).
+
+    Queue settings come from its lora_queue section, else an old
+    lora_config.json, else the default; anything else is a runtime parameter.
+    """
+    rt = _runtime()
+    if key in LORA_QUEUE_KEYS:
+        section = rt.get_parameter('lora_queue', None)
+        name = LORA_QUEUE_KEYS[key]
+        if isinstance(section, dict) and name in section:
+            return section[name]
+        old = _read_legacy_config() if legacy is None else legacy
+        return old.get(key, default)
+    return rt.get_parameter(key, default)
+
+
 class LoRaSerialPortConflict(RuntimeError):
     """Raised when another OS process already owns the LoRa serial port."""
 
@@ -362,10 +412,10 @@ def encode_sensor_chunks(data: Dict[str, Any], limit: int) -> list:
 
 
 class LoRaHandler:
-    def __init__(self, port='/dev/ttyAMA5', config_file='lora_config.json'):
+    def __init__(self, port='/dev/ttyAMA5', config_file=LEGACY_CONFIG_FILE):
         self.port = port
-        self.config_file = config_file
-        self.config = self.load_config()
+        self.config_file = config_file      # the old lora_config.json, read only
+        self._legacy = _read_legacy_config(config_file)
         
         # Threading components
         self.transmit_queue = queue.Queue()
@@ -437,72 +487,26 @@ class LoRaHandler:
                 "LoRa serial port already owned by another process"
             ) from None
     
-    def load_config(self) -> Dict[str, Any]:
-        """Load configuration from file or create default"""
-        default_config = {
-            'area_threshold': 10,
-            'stage_threshold': 50,
-            'monitoring_frequency': 60,
-            'emergency_frequency': 10,
-            'neighborhood_emergency_frequency': 30,
-            'photo_interval': 60,
-            'debug_mode': False,
-            'max_retransmissions': 3,
-            'auto_shutdown_enabled': True,
-            'shutdown_iteration_limit': 2,
-            'data_retention_days': 0,   # keep everything (tools/data_retention.py)
-            'backup_enabled': True,
-            'emergency_mode': False,
-            'lora_sf_enabled': True,
-            'lora_sf_drain_per_cycle': 2,
-            'lora_sf_max_depth': 96,
-            'lora_sf_max_age_days': 7,
-        }
-        
-        config_io = _config_io()
-        try:
-            # restores lora_config.json from its .bak if a power cut damaged it
-            return {**default_config, **config_io.read_json(self.config_file)}
-        except FileNotFoundError:
-            self.save_config(default_config)
-            return default_config
-        except Exception as e:
-            print(f"Error loading config: {e}, using defaults")
-            return default_config
-    
-    def save_config(self, config: Dict[str, Any]):
-        """Save configuration to file (atomically: a power cut leaves old or new)"""
-        config_io = _config_io()
-        try:
-            with config_io.locked(self.config_file):
-                config_io.write_json(self.config_file, config)
-        except Exception as e:
-            print(f"Error saving config: {e}")
-    
     def update_config(self, key: str, value: Any):
-        """Update a configuration value and save to file"""
-        self.config[key] = value
-        self.save_config(self.config)
-        print(f"Updated {key} to {value}")
-        
-        # Call runtime callback if registered
-        debug(f"Runtime callback registered: {self.runtime_callback is not None}")
+        """Set a runtime parameter from a LoRa command, in runtime_config.json.
+
+        The daemon's runtime callback validates and stores it (set_parameter);
+        without one (a handler used on its own), set_parameter is called here.
+        """
         if self.runtime_callback:
             try:
-                debug(f"Calling runtime callback with key='{key}', value={value}")
                 self.runtime_callback(key, value)
-                debug(f"Runtime callback completed successfully")
             except Exception as e:
-                print(f"Error in runtime callback for {key}: {e}")
+                print(f"⚠️ LoRa: error storing {key}={value!r}: {e}")
                 import traceback
                 traceback.print_exc()
-        else:
-            debug(f"No runtime callback registered")
-    
+        elif not _runtime().set_parameter(key, value):
+            print(f"⚠️ LoRa: {key}={value!r} not stored")
+
     def get_config(self, key: str, default: Any = None) -> Any:
-        """Get a configuration value"""
-        return self.config.get(key, default)
-    
+        """A setting, from runtime_config.json (see lookup_setting)."""
+        return lookup_setting(key, default, legacy=getattr(self, "_legacy", None))
+
     def set_runtime_callback(self, callback):
         """Set callback for runtime integration updates"""
         self.runtime_callback = callback
@@ -1048,16 +1052,11 @@ class LoRaHandler:
     def _emergency_mode(self) -> bool:
         """Emergency mode as the node acts on it: runtime_config.json.
 
-        This handler's lora_config.json keeps its own copy, which only LoRa
-        commands update, so it stays True after emergency mode ends some other
-        way (the time limit in call_shutdown, the IP downlink, the dashboard).
-        Reporting that copy told the server emergency mode was still on.
+        (lora_config.json used to keep its own copy, which only LoRa commands
+        updated, so the server was told emergency mode was still on after it
+        ended some other way.)
         """
-        try:
-            from tools.lora_runtime_integration import get_parameter
-            return bool(get_parameter('emergency_mode', False))
-        except Exception:
-            return bool(self.get_config('emergency_mode', False))
+        return bool(self.get_config('emergency_mode', False))
 
     def _reply_with_status(self, ack=None) -> None:
         """Send the node status JSON from a helper thread; ack = (seq, result) leads it."""
@@ -2251,33 +2250,13 @@ class LoRaHandlerClient:
     _SHORT_TIMEOUT_S = 8
     _LONG_TIMEOUT_S = 90
 
-    def __init__(self, socket_path: str = LORA_DAEMON_SOCKET_PATH, config_file: str = 'lora_config.json'):
+    def __init__(self, socket_path: str = LORA_DAEMON_SOCKET_PATH, config_file: str = LEGACY_CONFIG_FILE):
         self.socket_path = socket_path
         self.config_file = config_file
 
-    @property
-    def config(self) -> Dict[str, Any]:
-        """Read lora_config.json fresh on every access.
-
-        Not proxied over IPC: this file is written by LoRaHandler.save_config()
-        (fcntl-locked) and read here the same way LoRaHandler.load_config()
-        does, so any process can see the current config without round-
-        tripping through the daemon -- consistent with get_config_value()/
-        get_config(), which stay local for the same reason.
-        """
-        try:
-            with open(self.config_file, 'r') as f:
-                fcntl.flock(f, fcntl.LOCK_SH)
-                try:
-                    return json.load(f)
-                finally:
-                    fcntl.flock(f, fcntl.LOCK_UN)
-        except Exception as e:
-            print(f"Error loading config: {e}, using empty config")
-            return {}
-
     def get_config(self, key: str, default: Any = None) -> Any:
-        return self.config.get(key, default)
+        """Read locally, not over IPC: runtime_config.json is the one config file."""
+        return lookup_setting(key, default)
 
     def _call(self, action: str, timeout: float, **params):
         req = json.dumps({"action": action, "params": _jsonify_bytes(params)}) + "\n"
@@ -2455,11 +2434,11 @@ def transmit_auto(data) -> bool:
     return handler.queue_auto(data)
 
 def get_config_value(key: str, default: Any = None) -> Any:
-    """Convenience function to get configuration values"""
-    handler = get_lora_handler()
-    if handler is None:
-        return default
-    return handler.get_config(key, default)
+    """A setting the LoRa code reads, from runtime_config.json (lookup_setting).
+
+    Needs no daemon: the file is read directly.
+    """
+    return lookup_setting(key, default)
 
 def check_lora_reception():
     """Convenience function to check LoRa reception status"""
