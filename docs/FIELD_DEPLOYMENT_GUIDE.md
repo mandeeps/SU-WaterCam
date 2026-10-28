@@ -408,7 +408,7 @@ The other top-level fields control monitoring behavior. From
 
 Also confirm before deploying:
 
-- `emergency_mode: false` and `debug_mode: false` — both should be off for a normal deployment
+- `emergency_mode: false` and `debug_mode: false` — both should be off for a normal deployment (`debug_mode` also turns on the LoRa handler's `DEBUG:` lines and the per-poll GPS lines, see 1.9.1)
 - `ip_upload.enabled` — `true` if this site will use cellular/IP upload in addition to (or instead of) LoRa; if so, fill in `server_url` for the WaterCam API server this unit reports to (already set for our tailnet), and give it this unit's own token: on the dashboard, Management → select the unit → IP access token → Generate (the token is shown once), then run `venv/bin/python tools/set_ip_token.py` on the unit and paste it at the hidden prompt (docs/IP_TRANSMISSION.md, "Installing the IP token"). Once the server enforces tokens (`IP_AUTH=enforce`), a unit without one can't send over IP.
 - **LoRa sensor packet:** each capture sends the capture time plus only the fields
   that changed by 5% or more since they were last sent (`data/lora_last_sent.json`).
@@ -883,6 +883,19 @@ sudo mkdir -p /etc/systemd/journald.conf.d
 sudo cp config/journald-volatile.conf /etc/systemd/journald.conf.d/
 sudo systemctl restart systemd-journald
 ```
+
+The LoRa handler's `DEBUG:` lines (every AT command, payload hex) and the
+per-poll GPS lines are off by default. Turn them on for a test or problem unit
+with the runtime parameter `debug_mode: true` in `runtime_config.json` (the
+unit's own config, kept across software updates). A change applies at the next
+start of each service. For one service only, set `Environment=WATERCAM_DEBUG=1`
+in its unit.
+
+```bash
+cd ~/SU-WaterCam && venv/bin/python -c "from tools.lora_runtime_integration import set_parameter; set_parameter('debug_mode', True)"
+```
+
+005 (test unit) and 006 keep debug output on for now.
 
 Rotate the logs that otherwise only grow: the power log, the bench
 `~/throttle_log.csv`, ticktalk's `output.log` and `data/temp_humidity.csv`
