@@ -389,7 +389,9 @@ The required change is to set a unique name. The system hostname or something de
 }
 ```
 
-The other top-level fields control monitoring behavior. From
+The other top-level fields control monitoring behavior. The full list of
+settings, with defaults and where each lives, is in
+[CONFIGURATION.md](CONFIGURATION.md). The main ones, from
 `tools/lora_runtime_integration.py`'s parameter definitions:
 
 | Field                              | Units   | Range   | Meaning                                                                                           |

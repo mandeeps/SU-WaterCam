@@ -1,5 +1,7 @@
 # System reference
 
+Settings (runtime parameters, config files, flag files, environment, service flags) are listed in [CONFIGURATION.md](CONFIGURATION.md).
+
 ## Command frames
 
 The server controls a node with command frames. A frame is the same over LoRa
