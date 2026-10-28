@@ -260,6 +260,8 @@ def _gps_pose_usb_state(monkeypatch, tmp_path, request):
     from tools import gps_window, pose_monitor, usb_power
     monkeypatch.setattr(gps_window, "BOOT_MARK", str(tmp_path / "gps-window-mark"))
     monkeypatch.setattr(gps_window, "REQUEST_FILE", str(tmp_path / "gps_request.json"))
+    monkeypatch.setattr(gps_window, "ATTEMPT_FILE", str(tmp_path / "gps_window_attempt.json"))
+    monkeypatch.setattr(gps_window, "_uptime_s", lambda: 30.0)      # early in a wake
     monkeypatch.setattr(gps_window, "_thread", None)
     monkeypatch.setattr(gps_window, "run_window", lambda why, **kw: False)
     monkeypatch.setattr(pose_monitor, "STATE_FILE", str(tmp_path / "pose_state.json"))

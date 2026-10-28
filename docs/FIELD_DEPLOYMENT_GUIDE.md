@@ -815,8 +815,9 @@ whenever it has power, even idle, and the microphone about 0.1 W
 (docs/POWER_ANALYSIS.md). `usb-power-off.service` turns USB off about 5 s into
 boot and nothing turns it back on by default: `tools/usb_power.py` turns it on
 for the daily GPS fix (`tools/gps_window.py`: once the last live fix is
-`gps_fix_interval_h` old, default 24 h, after a knock or removal, or when the
-server asks), for a cellular upload or remote session, and for recording, and
+`gps_fix_interval_h` old, default 24 h, at most one try a day; at once after a
+knock or removal, or when the server asks; up to 5 minutes, within the wake's
+awake time, with the shutdown waiting for it), for a cellular upload or remote session, and for recording, and
 off again when the last of these is done. Wakes in between use the last saved
 fix (`gps_last_fix.json`, kept for `gps_cache_max_age_h`, default 30 days),
 marked as cached. A Pi 4's USB ports share one power switch, so the modem and
