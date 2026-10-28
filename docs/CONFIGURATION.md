@@ -1,6 +1,7 @@
 # Configuration reference
 
-All the switches the node reads, where each one lives, and where it is described in more detail. Compiled 2026-10-27 from main. It is a list to review, not a design. Items marked **reserved** belong to features or kinds of deployment that aren't used yet. Items marked **review** look unused or inconsistent.
+All the switches the node reads, where each one lives, and where it is described in more detail.
+The settings themselves are defined once, in `tools/config_schema.py`: the runtime parameter tables in `tools/lora_runtime_integration.py` and `runtime_config.example.json` are built from it, and `tests/test_config_schema.py` checks they match. Add or change a setting there. `python tools/config_schema.py --mismatches` lists where the template differs from the code defaults. Compiled 2026-10-27 from main. It is a list to review, not a design. Items marked **reserved** belong to features or kinds of deployment that aren't used yet. Items marked **review** look unused or inconsistent.
 
 ## Where settings live
 
