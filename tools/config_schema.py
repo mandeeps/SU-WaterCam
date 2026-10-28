@@ -1,3 +1,4 @@
+#!/home/pi/SU-WaterCam/venv/bin/python
 """The one definition of the node's settings (docs/CONFIGURATION.md).
 
 Each Setting gives a key, its code default, how it may be set, which module
