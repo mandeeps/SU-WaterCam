@@ -16,7 +16,9 @@ and 0xF1 sunset, and the minute byte is then a signed offset in minutes
 sunrise and sunset itself (tools/sun.py) from its learned home position, else
 its last GPS fix; with neither it uses FALLBACK_WINDOW until it has one. The
 window is checked at every start of ticktalk and the schedule rewritten once it
-has moved SUN_REWRITE_MIN or more.
+has moved SUN_REWRITE_MIN or more. A sun-following start is rounded up to the
+interval's clock grid (on_grid): SR+30 at a 07:25 sunrise with hourly wakes
+starts at 08:00, not 07:55.
 
 The node turns it into ~/wittypi/schedule.wpi: one day of ON/OFF durations from
 BEGIN, as config/wittypi/*.wpi do, and arms the Witty Pi's startup alarm for the
@@ -33,6 +35,7 @@ the offset has changed, so wakes stay at local times all year.
 The active schedule is in runtime_config.json (`schedule`), reported in sensor
 packets (09 79, same 7 bytes) and in the status reply (`sc`).
 """
+import math
 import os
 import struct
 import sys
@@ -138,6 +141,15 @@ def location() -> Optional[Tuple[float, float]]:
         return None
 
 
+def on_grid(minute: int, interval: int) -> int:
+    """minute rounded up to the clock grid the interval runs on: the hour for hourly
+    wakes, :00 and :30 for 30 or 90 minutes (the gcd with 60). A sun-following start
+    is rounded this way, so the wakes fall on round times (08:00, 09:00, ...)
+    instead of sunrise + offset (07:55, 08:55, ...), and never before it."""
+    g = math.gcd(int(interval), 60) or 60
+    return (-(-int(minute) // g) * g) % DAY
+
+
 def resolve(s: Schedule, day, where: Optional[Tuple[float, float]]) -> Tuple[Schedule, str]:
     """(the schedule in clock times for `day`, how the window was found)."""
     if not s.follows_sun:
@@ -153,7 +165,10 @@ def resolve(s: Schedule, day, where: Optional[Tuple[float, float]]) -> Tuple[Sch
         if ref == "clock":
             return v
         return ((rise if ref == "sunrise" else sset) + v) % DAY
-    return Schedule(at(s.start_ref, s.start), at(s.end_ref, s.end), s.interval, s.awake), \
+    start = at(s.start_ref, s.start)
+    if s.start_ref != "clock":
+        start = on_grid(start, s.interval)
+    return Schedule(start, at(s.end_ref, s.end), s.interval, s.awake), \
         f"sunrise {rise // 60:02d}:{rise % 60:02d}, sunset {sset // 60:02d}:{sset % 60:02d}"
 
 

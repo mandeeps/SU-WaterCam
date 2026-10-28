@@ -177,9 +177,26 @@ def test_sun_offset_out_of_range():
 def test_resolve_follows_the_seasons(utc):
     summer, _ = sc.resolve(SUN, date(2026, 6, 21), WHERE)
     winter, _ = sc.resolve(SUN, date(2026, 12, 21), WHERE)
-    assert (summer.start, summer.end) == (3 * 60 + 42 + 30, 20 * 60 + 20 - 15)
-    assert (winter.start, winter.end) == (8 * 60 + 2 + 30, 15 * 60 + 52 - 15)
+    # sunrise + 30 rounded up to the hour (on_grid): 04:12 -> 05:00, 08:32 -> 09:00
+    assert (summer.start, summer.end) == (5 * 60, 20 * 60 + 20 - 15)
+    assert (winter.start, winter.end) == (9 * 60, 15 * 60 + 52 - 15)
     assert len(sc.wakes(summer)) > len(sc.wakes(winter))
+
+
+def test_sun_start_on_the_interval_grid():
+    assert sc.on_grid(7 * 60 + 55, 60) == 8 * 60          # 006, October: 07:55 -> 08:00
+    assert sc.on_grid(8 * 60, 60) == 8 * 60                # already on the hour
+    assert sc.on_grid(7 * 60 + 55, 30) == 8 * 60
+    assert sc.on_grid(7 * 60 + 10, 30) == 7 * 60 + 30
+    assert sc.on_grid(7 * 60 + 10, 90) == 7 * 60 + 30      # gcd(90, 60) = 30
+    assert sc.on_grid(7 * 60 + 10, 120) == 8 * 60
+    assert sc.on_grid(7 * 60 + 2, 10) == 7 * 60 + 10
+    assert sc.on_grid(23 * 60 + 50, 60) == 0               # past midnight wraps
+
+
+def test_clock_start_is_left_alone(utc):
+    s = sc.Schedule(7 * 60 + 55, -15, 60, 10, "clock", "sunset")
+    assert sc.resolve(s, date(2026, 6, 21), WHERE)[0].start == 7 * 60 + 55
 
 
 def test_resolve_without_a_location_uses_the_fallback(utc):
@@ -194,11 +211,11 @@ def test_sun_schedule_applies_with_todays_window(tmp_path, monkeypatch, utc):
     ok, msg = sc.apply(SUN, wittypi_dir=str(tmp_path), now=now, arm=armed.append,
                        set_param=params.__setitem__, clock=lambda: now.timestamp(), where=WHERE)
     assert ok, msg
-    assert params["schedule"]["window"] == [4 * 60 + 12, 20 * 60 + 5]
+    assert params["schedule"]["window"] == [5 * 60, 20 * 60 + 5]
     assert params["schedule"]["start_ref"] == "sunrise"
-    assert "BEGIN 2026-06-21 04:12:00" in (tmp_path / "schedule.wpi").read_text()
-    assert datetime.fromtimestamp(armed[0]) == datetime(2026, 6, 21, 12, 12)
-    assert sc.status_label(lambda k, d=None: params.get(k, d)) == "SR+30-SS-15/60/10 0412-2005"
+    assert "BEGIN 2026-06-21 05:00:00" in (tmp_path / "schedule.wpi").read_text()
+    assert datetime.fromtimestamp(armed[0]) == datetime(2026, 6, 21, 13, 0)
+    assert sc.status_label(lambda k, d=None: params.get(k, d)) == "SR+30-SS-15/60/10 0500-2005"
 
 
 def test_sun_schedule_rewritten_only_when_the_window_moves_10_min(tmp_path, monkeypatch, utc):
