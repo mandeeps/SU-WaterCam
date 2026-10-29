@@ -300,3 +300,48 @@ def test_shutdown_waits_for_the_window(monkeypatch, cache):
     assert clock[0] >= 110
     os.unlink(gps_window.BOOT_MARK)
     assert gps_window.wait_until_done() is None                  # no window this boot
+
+
+# ── Longer window, back-off after failures (2026-10-29) ──
+
+def test_failures_are_counted_and_a_fix_resets_them(cache):
+    now = time.time()
+    for n in (1, 2):
+        gps_window._record_attempt(now)
+        gps_window._record_result(False)
+        assert gps_window.failed_tries() == n
+    gps_window._record_attempt(now)
+    assert gps_window.failed_tries() == 2           # a new try keeps the count
+    gps_window._record_result(True)
+    assert gps_window.failed_tries() == 0
+
+
+def test_after_three_failures_the_try_waits_three_days(cache):
+    now = time.time()
+    cache.update(gps_lat=1.0, gps_lon=2.0, fix_time=now - 5 * 24 * 3600)
+    for _ in range(gps_window.BACKOFF_AFTER):
+        gps_window._record_attempt(now)
+        gps_window._record_result(False)
+    assert gps_window.reasons(now=now + 24 * 3600) == []          # a day later: not yet
+    assert gps_window.reasons(now=now + 71 * 3600) == []          # the hourly wake before: not yet
+    assert gps_window.reasons(now=now + 72 * 3600)                # three days later: due
+    assert gps_window.reasons(now=now + 3600, pose_wake=True) == ["knocked or removed"]
+
+
+def test_two_failures_still_try_daily(cache):
+    now = time.time()
+    cache.update(gps_lat=1.0, gps_lon=2.0, fix_time=now - 5 * 24 * 3600)
+    for _ in range(gps_window.BACKOFF_AFTER - 1):
+        gps_window._record_attempt(now)
+        gps_window._record_result(False)
+    assert gps_window.reasons(now=now + 24 * 3600)
+
+
+def test_the_window_result_is_recorded(cache, monkeypatch, tmp_path):
+    monkeypatch.setattr(gps_window, "BOOT_MARK", str(tmp_path / "mark2"))
+    monkeypatch.setattr(gps_window, "REQUEST_FILE", str(tmp_path / "req2.json"))
+    monkeypatch.setattr(gps_window, "window_s", lambda: 400.0)
+    monkeypatch.setattr(gps_window, "run_window", lambda why, **kw: False)
+    with patch("tools.pose_monitor.take_gps_wake", return_value=False):
+        assert gps_window.start_if_due(background=False) == ["no fix yet"]
+    assert gps_window.failed_tries() == 1
