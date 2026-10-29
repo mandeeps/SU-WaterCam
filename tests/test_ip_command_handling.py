@@ -68,10 +68,12 @@ class TestAreaThreshold(unittest.TestCase):
         apply_downlink_command(_cmd(("10 90", struct.pack("B", 0))), fn)
         self.assertEqual(store["area_threshold"], 0)
 
-    def test_max_value(self):
-        store, fn = _accumulator()
-        apply_downlink_command(_cmd(("10 90", struct.pack("B", 255))), fn)
-        self.assertEqual(store["area_threshold"], 255)
+    def test_rejected_value_is_skipped(self):
+        # set_parameter returns False for a value outside _PARAM_RANGES (0-100)
+        result = apply_downlink_command(_cmd(("10 90", struct.pack("B", 255))),
+                                        lambda name, value: False)
+        self.assertEqual(result["applied"], [])
+        self.assertIn("10 90", result["skipped"])
 
     def test_wrong_payload_length_skipped(self):
         store, fn = _accumulator()
@@ -82,6 +84,12 @@ class TestAreaThreshold(unittest.TestCase):
 
 class TestStageThreshold(unittest.TestCase):
     """11 91 — stage_threshold_cm: u16 big-endian."""
+
+    def test_rejected_value_is_skipped(self):
+        result = apply_downlink_command(_cmd(("11 91", struct.pack(">H", 60000))),
+                                        lambda name, value: False)
+        self.assertEqual(result["applied"], [])
+        self.assertIn("11 91", result["skipped"])
 
     def test_applies_value(self):
         store, fn = _accumulator()
