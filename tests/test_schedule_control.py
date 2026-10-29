@@ -177,21 +177,35 @@ def test_sun_offset_out_of_range():
 def test_resolve_follows_the_seasons(utc):
     summer, _ = sc.resolve(SUN, date(2026, 6, 21), WHERE)
     winter, _ = sc.resolve(SUN, date(2026, 12, 21), WHERE)
-    # sunrise + 30 rounded up to the hour (on_grid): 04:12 -> 05:00, 08:32 -> 09:00
+    # sunrise + 30 to the nearest hour, not before sunrise + 20 (on_grid): 04:12 -> 04:00 is 18 min
+    # after a 03:42 sunrise, so 05:00; 08:32 -> 09:00
     assert (summer.start, summer.end) == (5 * 60, 20 * 60 + 20 - 15)
     assert (winter.start, winter.end) == (9 * 60, 15 * 60 + 52 - 15)
     assert len(sc.wakes(summer)) > len(sc.wakes(winter))
 
 
 def test_sun_start_on_the_interval_grid():
-    assert sc.on_grid(7 * 60 + 55, 60) == 8 * 60          # 006, October: 07:55 -> 08:00
-    assert sc.on_grid(8 * 60, 60) == 8 * 60                # already on the hour
-    assert sc.on_grid(7 * 60 + 55, 30) == 8 * 60
-    assert sc.on_grid(7 * 60 + 10, 30) == 7 * 60 + 30
-    assert sc.on_grid(7 * 60 + 10, 90) == 7 * 60 + 30      # gcd(90, 60) = 30
-    assert sc.on_grid(7 * 60 + 10, 120) == 8 * 60
-    assert sc.on_grid(7 * 60 + 2, 10) == 7 * 60 + 10
+    assert sc.on_grid(7 * 60 + 57, 60) == 8 * 60           # 006, October: 07:57 -> 08:00
+    assert sc.on_grid(8 * 60 + 2, 60) == 8 * 60            # nearest, not up: no wake lost
+    assert sc.on_grid(8 * 60 + 30, 60) == 9 * 60           # halves round up
+    assert sc.on_grid(7 * 60 + 10, 30) == 7 * 60
+    assert sc.on_grid(7 * 60 + 20, 90) == 7 * 60 + 30      # gcd(90, 60) = 30
+    assert sc.on_grid(7 * 60 + 10, 120) == 7 * 60
     assert sc.on_grid(23 * 60 + 50, 60) == 0               # past midnight wraps
+
+
+def test_sun_start_leaves_charging_time_after_sunrise(utc):
+    rise = lambda h, m: h * 60 + m + sc.MIN_AFTER_SUNRISE          # noqa: E731
+    assert sc.MIN_AFTER_SUNRISE == 20
+    assert sc.on_grid(7 * 60 + 57, 60, not_before=rise(7, 27)) == 8 * 60     # 006: 33 min after sunrise
+    assert sc.on_grid(8 * 60 + 2, 60, not_before=rise(7, 32)) == 8 * 60      # 28 min after: kept
+    assert sc.on_grid(8 * 60 + 20, 60, not_before=rise(7, 50)) == 9 * 60     # 08:00 is only 10 min after
+    assert sc.on_grid(8 * 60 + 20, 30, not_before=rise(7, 50)) == 8 * 60 + 30
+    assert sc.on_grid(0 * 60 + 10, 60, not_before=rise(23, 55)) == 1 * 60    # across midnight
+    for rise_min in range(0, 24 * 60, 7):                  # always in [SR+20, SR+80)
+        t = sc.on_grid(rise_min + 30, 60, not_before=(rise_min + sc.MIN_AFTER_SUNRISE) % sc.DAY)
+        after = (t - rise_min) % sc.DAY
+        assert sc.MIN_AFTER_SUNRISE <= after < sc.MIN_AFTER_SUNRISE + 60, (rise_min, t)
 
 
 def test_clock_start_is_left_alone(utc):
