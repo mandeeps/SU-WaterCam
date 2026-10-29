@@ -80,3 +80,14 @@ def test_removed_keys_are_refused():
 def test_known_mismatches_are_listed():
     # Decided in review, key by key; until then the template keeps its values
     assert ("emergency_frequency", 10, 5) in cs.template_mismatches()
+
+
+def test_lora_thresholds_section_defaults():
+    assert cs.lora_threshold_defaults() == {
+        "temperature_celsius": 0.5, "relative_humidity": 3, "camera_water_pct": 5,
+        "battery_percent": 2, "pose_tilt_tenths": 10}
+    with open(os.path.join(REPO, "runtime_config.example.json"), encoding="utf-8") as f:
+        import json
+        assert json.load(f)["lora_thresholds"] == cs.lora_threshold_defaults()
+    for key in cs.lora_threshold_defaults():
+        assert not cs.get(key, section="lora_thresholds").accepts_set    # edit the file, not remote

@@ -45,5 +45,13 @@
     "min_delay_minutes": 120,
     "fallback_delay_minutes": 120,
     "scheduled_wake_window_minutes": 20
+  },
+
+  "lora_thresholds": {
+    "temperature_celsius": 0.5,
+    "relative_humidity": 3,
+    "camera_water_pct": 5,
+    "battery_percent": 2,
+    "pose_tilt_tenths": 10
   }
 }

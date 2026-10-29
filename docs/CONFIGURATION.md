@@ -105,6 +105,20 @@ The section isn't in the template yet, so units use the defaults.
 
 **Reserved:** store-and-forward on the mDot itself (a queue in the mDot firmware, which would send while the Pi is off) is not built and has no settings yet.
 
+## `lora_thresholds` section (`runtime_config.json`)
+
+Which sensor fields go out over LoRa (`tools/sensor_changes.py`): a field is sent when it differs from the value last sent by at least this step, in the field's own unit. A field with no entry (or an entry that isn't a positive number) keeps the relative 5 %. Edit the file; these are not settable remotely. Missing keys use the defaults below. Orientation (`lora_imu_threshold_deg`, 2 degrees) and position (`POSITION_THRESHOLD_M`, 25 m) keep their own settings.
+
+| Key | Default | Unit |
+|---|---|---|
+| `temperature_celsius` | 0.5 | degrees C |
+| `relative_humidity` | 3 | percentage points |
+| `camera_water_pct` | 5 | percentage points |
+| `battery_percent` | 2 | percentage points |
+| `pose_tilt_tenths` | 10 | tenths of a degree (1 degree) |
+
+`clock_unverified` is not in this list and is not tracked: the node sends it only when it is 1.
+
 ### `lora_config.json` (legacy)
 
 The LoRa handler used to keep its own copy of the runtime parameters here. Only LoRa commands updated it, so it went stale; that is how the node once reported emergency mode as still on after it had ended.
