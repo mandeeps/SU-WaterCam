@@ -201,11 +201,15 @@ sudo systemctl enable --now quectel-gnss.service
 cat /dev/ttyUSB1
 ```
 
-**`gpsd` must read from `ttyUSB1`** — set in `/etc/default/gpsd`:
+**`gpsd` must read from `ttyUSB1`**, but it is handed the port when the modem
+appears (`gpsdctl add /dev/ttyUSB1`, run by `quectel-gnss.service`), not through
+`/etc/default/gpsd`, where `DEVICES` stays empty (the port only exists while USB
+power is on, and a fixed device makes gpsd log an error at boot):
 ```ini
-DEVICES="/dev/ttyUSB1"
+DEVICES=""
 GPSD_OPTIONS="-n"
 ```
+To attach it by hand: `sudo gpsdctl add /dev/ttyUSB1`.
 
 ---
 
