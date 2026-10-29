@@ -16,9 +16,13 @@ and 0xF1 sunset, and the minute byte is then a signed offset in minutes
 sunrise and sunset itself (tools/sun.py) from its learned home position, else
 its last GPS fix; with neither it uses FALLBACK_WINDOW until it has one. The
 window is checked at every start of ticktalk and the schedule rewritten once it
-has moved SUN_REWRITE_MIN or more. A sun-following start is rounded up to the
-interval's clock grid (on_grid): SR+30 at a 07:25 sunrise with hourly wakes
-starts at 08:00, not 07:55.
+has moved SUN_REWRITE_MIN or more. A sun-following start is rounded to the
+nearest point of the interval's clock grid (on_grid): SR+30 at a 07:25 sunrise
+with hourly wakes starts at 08:00, not 07:55, and at a 07:32 sunrise also at
+08:00 (28 min after sunrise). A sunrise start is never earlier than
+MIN_AFTER_SUNRISE (20 min) after sunrise, so it doesn't wake at first light:
+SR+30 at a 07:50 sunrise would round to 08:00, only 10 min after sunrise, so it
+starts at 09:00.
 
 The node turns it into ~/wittypi/schedule.wpi: one day of ON/OFF durations from
 BEGIN, as config/wittypi/*.wpi do, and arms the Witty Pi's startup alarm for the
@@ -65,6 +69,12 @@ FALLBACK_WINDOW = (8 * 60, 16 * 60 + 15)
 #: Sunrise moves at most about 2 min a day, so this is a rewrite every few days
 #: around the equinoxes and rarely near the solstices.
 SUN_REWRITE_MIN = 10
+#: A sunrise start is never earlier than this after sunrise (the rounding to the hour
+#: could otherwise put it at first light). With SR+30 the first wake falls 20-80 min
+#: after sunrise, about 30 on average. It doesn't protect a drained pack: on an overcast
+#: winter morning one wake's charge takes 1-2 h; the recovery boot covers that
+#: (tools/recovery_boot.py: after power returns, the next slot at least 2 h away)
+MIN_AFTER_SUNRISE = 20
 _REFS = {"clock": None, "sunrise": SUNRISE, "sunset": SUNSET}
 
 
@@ -141,13 +151,21 @@ def location() -> Optional[Tuple[float, float]]:
         return None
 
 
-def on_grid(minute: int, interval: int) -> int:
-    """minute rounded up to the clock grid the interval runs on: the hour for hourly
-    wakes, :00 and :30 for 30 or 90 minutes (the gcd with 60). A sun-following start
-    is rounded this way, so the wakes fall on round times (08:00, 09:00, ...)
-    instead of sunrise + offset (07:55, 08:55, ...), and never before it."""
+def on_grid(minute: int, interval: int, not_before: Optional[int] = None) -> int:
+    """minute rounded to the nearest point of the clock grid the interval runs on:
+    the hour for hourly wakes, :00 and :30 for 30 or 90 minutes (the gcd with 60).
+    A sun-following start is rounded this way, so the wakes fall on round times
+    (08:00, 09:00, ...) instead of sunrise + offset (07:55, 08:55, ...), within
+    half a grid step of it. not_before (minutes after midnight) moves it on by
+    whole steps until it is at or after that time: sunrise + MIN_AFTER_SUNRISE."""
     g = math.gcd(int(interval), 60) or 60
-    return (-(-int(minute) // g) * g) % DAY
+    t = (int(minute) + g // 2) // g * g          # halves round up
+    if not_before is not None:
+        # signed minutes from not_before, across midnight
+        d = (t - int(not_before) + DAY // 2) % DAY - DAY // 2
+        if d < 0:
+            t += -(-(-d) // g) * g
+    return t % DAY
 
 
 def resolve(s: Schedule, day, where: Optional[Tuple[float, float]]) -> Tuple[Schedule, str]:
@@ -167,7 +185,9 @@ def resolve(s: Schedule, day, where: Optional[Tuple[float, float]]) -> Tuple[Sch
         return ((rise if ref == "sunrise" else sset) + v) % DAY
     start = at(s.start_ref, s.start)
     if s.start_ref != "clock":
-        start = on_grid(start, s.interval)
+        # a sunrise start leaves the battery some charging time first
+        start = on_grid(start, s.interval,
+                        not_before=(rise + MIN_AFTER_SUNRISE) % DAY if s.start_ref == "sunrise" else None)
     return Schedule(start, at(s.end_ref, s.end), s.interval, s.awake), \
         f"sunrise {rise // 60:02d}:{rise % 60:02d}, sunset {sset // 60:02d}:{sset % 60:02d}"
 
