@@ -204,6 +204,46 @@ def build_ground_lookup(
     )
 
 
+def build_ground_lookup_auto(
+    K: np.ndarray,
+    D,
+    frame_w: int,
+    frame_h: int,
+    R: np.ndarray,
+    camera_lat: float,
+    camera_lon: float,
+    mount_height_m: float,
+    dem_sampler: Optional[Callable[[np.ndarray, np.ndarray], np.ndarray]] = None,
+    max_range_m: float = DEFAULT_MAX_RANGE_M,
+    cells_across: int = 300,
+    coarse_res_m: float = 0.5,
+    min_res_m: float = 0.02,
+    **kwargs,
+) -> GroundLookup:
+    """
+    build_ground_lookup with the cell size fitted to how far the camera sees.
+
+    A low camera pitched down sees only a few metres, where 0.5 m cells are
+    far too coarse; a high one sees a hundred. A first pass at coarse_res_m
+    finds the farthest ground seen, then the grid is rebuilt over just that
+    distance with about cells_across cells from the camera to it (never
+    finer than min_res_m nor coarser than coarse_res_m).
+    """
+    coarse = build_ground_lookup(K, D, frame_w, frame_h, R, camera_lat, camera_lon, mount_height_m,
+                                 dem_sampler=dem_sampler, res_m=coarse_res_m, max_range_m=max_range_m,
+                                 **kwargs)
+    rows, cols = np.nonzero(coarse.seen())
+    if not rows.size:
+        return coarse
+    reach = float(np.hypot(coarse.east0 + cols * coarse.res_m, coarse.north0 - rows * coarse.res_m).max())
+    reach = min(max_range_m, reach + coarse_res_m)
+    res = min(coarse_res_m, max(min_res_m, reach / cells_across))
+    if res >= coarse_res_m:
+        return coarse
+    return build_ground_lookup(K, D, frame_w, frame_h, R, camera_lat, camera_lon, mount_height_m,
+                               dem_sampler=dem_sampler, res_m=res, max_range_m=reach, **kwargs)
+
+
 def _occluded(idx, east, north, terrain, dist, res_m, n_half, tol_m) -> np.ndarray:
     """
     True for cells whose line of sight from the camera passes below the

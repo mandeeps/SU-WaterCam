@@ -255,19 +255,27 @@ def pixel_to_gps_terrain(
     )
 
 
-def sample_dem_grid(dem_path: str, lat: np.ndarray, lon: np.ndarray) -> np.ndarray:
+def sample_dem_grid(dem_path: str, lat: np.ndarray, lon: np.ndarray,
+                    method: str = "bilinear") -> np.ndarray:
     """
-    Nearest-cell DEM elevations at arrays of WGS84 lat/lon (any matching
-    shape); NaN outside the DEM or on nodata. Reads only the window that
-    covers the points, so a large DEM is fine.
+    DEM elevations at arrays of WGS84 lat/lon (any matching shape); NaN
+    outside the DEM or on nodata. Reads only the window that covers the
+    points, so a large DEM is fine.
+
+    method "bilinear" (default) interpolates between the four cell centres
+    around each point, falling back to the nearest cell next to nodata or
+    the DEM's edge; "nearest" takes the cell the point is in. Nearest turns a
+    1 m DEM's slopes into steps, which block a low camera's line of sight.
     """
     import rasterio
     from pyproj import Transformer
     from rasterio.windows import Window
 
+    if method not in ("bilinear", "nearest"):
+        raise ValueError(f"unknown method {method!r}")
     lat = np.asarray(lat, dtype=np.float64)
     lon = np.asarray(lon, dtype=np.float64)
-    out = np.full(lat.shape, np.nan)
+    out = np.full(lat.size, np.nan)
     with rasterio.open(dem_path) as src:
         if src.crs is not None and src.crs.to_epsg() != 4326:
             tf = Transformer.from_crs("EPSG:4326", src.crs, always_xy=True)
@@ -275,17 +283,29 @@ def sample_dem_grid(dem_path: str, lat: np.ndarray, lon: np.ndarray) -> np.ndarr
         else:
             x, y = lon.ravel(), lat.ravel()
         inv = ~src.transform
-        cols = inv.a * np.asarray(x) + inv.b * np.asarray(y) + inv.c
-        rows = inv.d * np.asarray(x) + inv.e * np.asarray(y) + inv.f
-        rows = np.floor(rows).astype(np.int64)
-        cols = np.floor(cols).astype(np.int64)
+        col_f = inv.a * np.asarray(x) + inv.b * np.asarray(y) + inv.c
+        row_f = inv.d * np.asarray(x) + inv.e * np.asarray(y) + inv.f
+        rows = np.floor(row_f).astype(np.int64)
+        cols = np.floor(col_f).astype(np.int64)
         inside = (rows >= 0) & (rows < src.height) & (cols >= 0) & (cols < src.width)
         if not inside.any():
-            return out
-        r0, r1 = rows[inside].min(), rows[inside].max()
-        c0, c1 = cols[inside].min(), cols[inside].max()
+            return out.reshape(lat.shape)
+        r0, r1 = max(rows[inside].min() - 1, 0), min(rows[inside].max() + 1, src.height - 1)
+        c0, c1 = max(cols[inside].min() - 1, 0), min(cols[inside].max() + 1, src.width - 1)
         data = src.read(1, window=Window(c0, r0, c1 - c0 + 1, r1 - r0 + 1),
                         masked=True).astype(np.float64).filled(np.nan)
-    flat = out.ravel()
-    flat[inside] = data[rows[inside] - r0, cols[inside] - c0]
-    return flat.reshape(lat.shape)
+    out[inside] = data[rows[inside] - r0, cols[inside] - c0]
+    if method == "bilinear":
+        # Cell centres sit at integer + 0.5 in (row_f, col_f).
+        rb = np.floor(row_f[inside] - 0.5).astype(np.int64) - r0
+        cb = np.floor(col_f[inside] - 0.5).astype(np.int64) - c0
+        fr = (row_f[inside] - 0.5) - np.floor(row_f[inside] - 0.5)
+        fc = (col_f[inside] - 0.5) - np.floor(col_f[inside] - 0.5)
+        ok = (rb >= 0) & (rb + 1 < data.shape[0]) & (cb >= 0) & (cb + 1 < data.shape[1])
+        rb, cb, fr, fc = rb[ok], cb[ok], fr[ok], fc[ok]
+        z = ((1 - fr) * (1 - fc) * data[rb, cb] + (1 - fr) * fc * data[rb, cb + 1]
+             + fr * (1 - fc) * data[rb + 1, cb] + fr * fc * data[rb + 1, cb + 1])
+        idx = np.flatnonzero(inside)[ok]
+        good = np.isfinite(z)                  # next to nodata: keep the nearest cell
+        out[idx[good]] = z[good]
+    return out.reshape(lat.shape)
