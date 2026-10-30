@@ -493,15 +493,20 @@ class LoRaHandler:
         The daemon's runtime callback validates and stores it (set_parameter);
         without one (a handler used on its own), set_parameter is called here.
         """
+        debug(f"Runtime callback registered: {self.runtime_callback is not None}")
         if self.runtime_callback:
             try:
+                debug(f"Calling runtime callback with key='{key}', value={value}")
                 self.runtime_callback(key, value)
+                debug("Runtime callback completed successfully")
             except Exception as e:
                 print(f"⚠️ LoRa: error storing {key}={value!r}: {e}")
                 import traceback
                 traceback.print_exc()
-        elif not _runtime().set_parameter(key, value):
-            print(f"⚠️ LoRa: {key}={value!r} not stored")
+        else:
+            debug("No runtime callback registered")
+            if not _runtime().set_parameter(key, value):
+                print(f"⚠️ LoRa: {key}={value!r} not stored")
 
     def get_config(self, key: str, default: Any = None) -> Any:
         """A setting, from runtime_config.json (see lookup_setting)."""
