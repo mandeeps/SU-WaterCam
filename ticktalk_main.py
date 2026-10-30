@@ -290,7 +290,8 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     try:
         from tools import drop_counter
         data['sf_dropped'] = drop_counter.total()
-        data['clock_unverified'] = 1 if clock_unverified(dirname) else 0
+        if clock_unverified(dirname):
+            data['clock_unverified'] = 1    # set only when 1: absent decodes as "not set"
     except Exception as e:
         print(f"⚠️ Failed to read drop counter / clock flag: {e}")
 
@@ -350,13 +351,18 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
             # Compared with the values last sent, kept on disk: the tracker token
             # is a fresh copy every capture, and the Pi powers off between wakes.
             # Every lora_full_send_hours, all fields go out (LoRa is unconfirmed).
-            from tools.sensor_changes import changed_fields, full_send_due
+            from tools.sensor_changes import changed_fields, full_send_due, lora_steps
             full_send = full_send_due(get_parameter('lora_full_send_hours', 24))
             if full_send:
                 print("📡 Periodic full send: all sensor fields this capture")
             sensors_to_transmit = changed_fields(
                 data, threshold=sensor_tracker.get('change_threshold', 0.05), everything=full_send,
-                angle_threshold_deg=get_parameter('lora_imu_threshold_deg', 2.0))
+                angle_threshold_deg=get_parameter('lora_imu_threshold_deg', 2.0),
+                steps=lora_steps(get_parameter('lora_thresholds', None)))
+            if data.get('clock_unverified'):
+                # Describes the capture, not a change: sent whenever it is 1
+                sensors_to_transmit['clock_unverified'] = {
+                    'current_value': data['clock_unverified'], 'reason': 'clock_unverified'}
             print(f"📊 Sensor change check: {len(sensors_to_transmit)} sensors qualify for transmission")
         except Exception as e:
             print(f"⚠️ Failed to check sensor changes: {e}")
@@ -2008,7 +2014,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             from tools import drop_counter
             from tools.capture_time import clock_unverified
             data['sf_dropped'] = drop_counter.total()
-            data['clock_unverified'] = 1 if clock_unverified(dirname) else 0
+            if clock_unverified(dirname):
+                data['clock_unverified'] = 1    # set only when 1
         except Exception as e:
             print(f"⚠️ IP uplink: drop counter / clock flag unavailable: {e}")
         flood = {}

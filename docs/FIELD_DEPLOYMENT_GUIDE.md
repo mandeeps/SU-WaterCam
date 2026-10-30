@@ -413,8 +413,12 @@ Also confirm before deploying:
 - `emergency_mode: false` and `debug_mode: false` — both should be off for a normal deployment (`debug_mode` also turns on the LoRa handler's `DEBUG:` lines and the per-poll GPS lines, see 1.9.1)
 - `ip_upload.enabled` — `true` if this site will use cellular/IP upload in addition to (or instead of) LoRa; if so, fill in `server_url` for the WaterCam API server this unit reports to (already set for our tailnet), and give it this unit's own token: on the dashboard, Management → select the unit → IP access token → Generate (the token is shown once), then run `venv/bin/python tools/set_ip_token.py` on the unit and paste it at the hidden prompt (docs/IP_TRANSMISSION.md, "Installing the IP token"). Once the server enforces tokens (`IP_AUTH=enforce`), a unit without one can't send over IP.
 - **LoRa sensor packet:** each capture sends the capture time plus only the fields
-  that changed by 5% or more since they were last sent (`data/lora_last_sent.json`).
-  Orientation (the IMU's heading, roll, pitch) uses an absolute threshold instead,
+  that changed enough since they were last sent (`data/lora_last_sent.json`). Fields
+  in the `lora_thresholds` section of `runtime_config.json` use a step in their own
+  unit (temperature 0.5 °C, humidity 3 points, water % 5 points, battery 2 points,
+  tilt from the reference 10 tenths of a degree); any other field uses 5%, relative.
+  `clock_unverified` is not tracked: it is sent only when it is 1 (a capture taken
+  before the clock was verified) and left out otherwise. Orientation (the IMU's heading, roll, pitch) uses an absolute threshold instead,
   `lora_imu_threshold_deg` (default 2°), allowing for the heading wrapping at 360°.
   Every `lora_full_send_hours` (default 24) all fields go out, since LoRa uplinks are
   unconfirmed and a lost packet would otherwise leave an old value on the server.
@@ -843,7 +847,7 @@ starts with that wrong time and may not connect for part of the wake.
 `rtc-early-clock.service` runs before `tailscaled`, the LoRa daemon and
 `ticktalk`; it only moves the clock forward, ignores an RTC that lost power or
 reads an implausible time, and gives up after 5 s without a Witty Pi. The clock
-still counts as unverified (`clock_unverified`) until network, GPS or server
+still counts as unverified (`clock_unverified`, sent only while it is 1) until network, GPS or server
 time confirms it.
 
 ```bash

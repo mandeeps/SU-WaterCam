@@ -33,8 +33,10 @@ LAST_FULL_KEY = "_last_full_send"
 ANGLE_FIELDS = ("tilt_roll_yaw",)
 #: Identifiers packed into integers (tools/node_version.py): any change matters,
 #: and a relative threshold would miss v2026.10.0 -> v2026.10.1.
-EXACT_FIELDS = ("software_version", "software_commit", "model_id", "sf_dropped", "clock_unverified",
-                "cellular_kib_total")
+EXACT_FIELDS = ("software_version", "software_commit", "model_id", "sf_dropped", "cellular_kib_total")
+#: Describes the capture, not a change: never tracked. The caller sends it when it is 1
+#: and leaves it out otherwise (decoders read a missing value as "not set").
+UNTRACKED_FIELDS = ("clock_unverified",)
 #: The unit's position, [lat, lon, alt]: sent when it moved POSITION_THRESHOLD_M,
 #: so GPS jitter doesn't put 12 bytes in every LoRa packet. A unit away from its
 #: mount sends it every time anyway (tools/gps_home.py).
@@ -82,17 +84,35 @@ def _position_change(cur: Any, prev: Any) -> Optional[float]:
         return None
 
 
+def lora_steps(section: Any = None) -> Dict[str, float]:
+    """Absolute steps per field: the schema defaults, overridden by the
+    runtime_config.json lora_thresholds section. Entries that aren't positive
+    numbers are ignored, so that field falls back to the relative threshold."""
+    try:
+        from tools import config_schema
+    except ImportError:     # run from tools/ as a script
+        import config_schema
+    steps = dict(config_schema.lora_threshold_defaults())
+    if isinstance(section, dict):
+        steps.update(section)
+    return {k: float(v) for k, v in steps.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and v > 0}
+
+
 def changed_fields(data: Dict[str, Any], threshold: float = 0.05,
                    state_path: Optional[str] = None,
                    everything: bool = False,
-                   angle_threshold_deg: float = 2.0) -> Dict[str, Dict[str, Any]]:
+                   angle_threshold_deg: float = 2.0,
+                   steps: Optional[Dict[str, float]] = None) -> Dict[str, Dict[str, Any]]:
     """Fields of data that differ from the last sent value by at least threshold
     (relative; angle_threshold_deg for orientation), or every field if
-    everything (the periodic full send)."""
+    everything (the periodic full send). A field named in steps (see lora_steps)
+    uses that absolute step in its own unit instead of the relative threshold."""
     last = _load(state_path or DEFAULT_STATE_PATH)
+    steps = steps or {}
     out = {}
     for name, cur in data.items():
-        if name in SKIP:
+        if name in SKIP or name in UNTRACKED_FIELDS:
             continue
         if cur is None:
             continue    # no reading (e.g. no battery sensor): nothing to send
@@ -119,6 +139,14 @@ def changed_fields(data: Dict[str, Any], threshold: float = 0.05,
                              "reason": "threshold_exceeded"}
         elif isinstance(cur, (int, float)) and isinstance(prev, (int, float)) \
                 and not isinstance(cur, bool) and not isinstance(prev, bool):
+            step = steps.get(name)
+            if step:
+                moved = abs(cur - prev)
+                if moved >= step - 1e-9:     # tolerance: 20.5 - 20.0 style float error
+                    out[name] = {"current_value": cur, "previous_value": prev, "change_abs": moved,
+                                 "change_percent": (moved / abs(prev) * 100) if prev else 100.0,
+                                 "reason": "threshold_exceeded"}
+                continue
             pct = abs((cur - prev) / prev) if prev != 0 else (1.0 if cur != 0 else 0.0)
             if pct >= threshold:
                 out[name] = {"current_value": cur, "previous_value": prev,

@@ -111,6 +111,94 @@ def _daemon_events(tmp_path):
     return drop_counter.events(str(tmp_path / "sf_dropped.json"))["lora_daemon_unavailable"]
 
 
+class TestAbsoluteSteps:
+    STEPS = {"temperature_celsius": 0.5, "relative_humidity": 3}
+
+    def test_step_replaces_the_relative_threshold(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"temperature_celsius": 1.6, "relative_humidity": 44}, state_path=path)
+        # 1.6 -> 1.7 C is 6 % (sent before), 44 -> 46 is 4.5 %: both below their steps now
+        data = {"temperature_celsius": 1.7, "relative_humidity": 46}
+        assert sc.changed_fields(data, state_path=path) != {}                     # relative: temperature qualifies
+        assert sc.changed_fields(data, state_path=path, steps=self.STEPS) == {}
+
+    def test_step_is_inclusive_and_either_direction(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"temperature_celsius": 20.0, "relative_humidity": 50}, state_path=path)
+        out = sc.changed_fields({"temperature_celsius": 19.5, "relative_humidity": 53}, state_path=path, steps=self.STEPS)
+        assert set(out) == {"temperature_celsius", "relative_humidity"}
+        assert out["temperature_celsius"]["change_abs"] == 0.5
+
+    def test_float_error_does_not_hide_a_full_step(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"temperature_celsius": 0.1}, state_path=path)
+        assert "temperature_celsius" in sc.changed_fields({"temperature_celsius": 0.6}, state_path=path, steps=self.STEPS)
+
+    def test_field_without_a_step_keeps_the_relative_threshold(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"a": 100.0}, state_path=path)
+        assert sc.changed_fields({"a": 104.0}, state_path=path, steps=self.STEPS) == {}
+        assert "a" in sc.changed_fields({"a": 105.0}, state_path=path, steps=self.STEPS)
+
+    def test_small_values_use_the_step_not_the_percentage(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"temperature_celsius": 0.0}, state_path=path)
+        assert sc.changed_fields({"temperature_celsius": 0.3}, state_path=path, steps=self.STEPS) == {}
+
+    def test_first_reading_and_full_send_ignore_steps(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        assert "temperature_celsius" in sc.changed_fields({"temperature_celsius": 1.0}, state_path=path, steps=self.STEPS)
+        sc.mark_sent({"temperature_celsius": 1.0}, state_path=path)
+        assert "temperature_celsius" in sc.changed_fields(
+            {"temperature_celsius": 1.0}, state_path=path, steps=self.STEPS, everything=True)
+
+    def test_lora_steps_defaults_and_overrides(self):
+        assert sc.lora_steps(None) == {"temperature_celsius": 0.5, "relative_humidity": 3.0, "camera_water_pct": 5.0,
+                                       "battery_percent": 2.0, "pose_tilt_tenths": 10.0}
+        steps = sc.lora_steps({"temperature_celsius": 1, "relative_humidity": 0, "battery_percent": "x",
+                               "camera_water_pct": None, "pose_tilt_tenths": True, "other": 7})
+        assert steps["temperature_celsius"] == 1.0 and steps["other"] == 7.0
+        # zero, text, null and bool entries are ignored: those fields use the relative threshold
+        for k in ("relative_humidity", "battery_percent", "camera_water_pct", "pose_tilt_tenths"):
+            assert k not in steps
+        assert sc.lora_steps("junk") == sc.lora_steps(None)
+
+    def test_capture_applies_the_configured_steps(self, tmp_path):
+        _run_capture(tmp_path, 20.0)
+        assert _sensor_packets(_run_capture(tmp_path, 20.4)) == []
+        pkts = _sensor_packets(_run_capture(tmp_path, 20.5))
+        assert len(pkts) == 1 and "temperature_celsius" in pkts[0]
+
+
+class TestClockUnverified:
+    def test_never_tracked(self, tmp_path):
+        path = str(tmp_path / "s.json")
+        sc.mark_sent({"clock_unverified": 1}, state_path=path)
+        assert "clock_unverified" not in sc.changed_fields({"clock_unverified": 0}, state_path=path)
+        assert sc.changed_fields({"clock_unverified": 1}, state_path=str(tmp_path / "new.json")) == {}
+        assert "clock_unverified" not in sc.changed_fields({"clock_unverified": 1}, state_path=path, everything=True)
+
+    def test_encoder_leaves_a_missing_value_out(self):
+        from tools.lora_handler_concurrent import _encode_compressed_packet
+        assert b"\x01\x0d" not in _encode_compressed_packet({"timestamp": 1, "sf_dropped": 7})
+        assert b"\x01\x0d\x01" in _encode_compressed_packet({"timestamp": 1, "clock_unverified": 1})
+
+    def test_sent_when_1_and_absent_when_clock_verified(self, tmp_path):
+        from tools import capture_time as ct
+        with patch.object(ct, "clock_unverified", return_value=True), \
+                patch("ticktalk_main.clock_unverified", ct.clock_unverified, create=True):
+            h = _run_capture(tmp_path, 20.0)
+            first = _sensor_packets(h)[0]
+            assert first["clock_unverified"] == 1
+            # nothing else changed, but the flag describes the capture: sent again
+            pkts = _sensor_packets(_run_capture(tmp_path, 20.0))
+            assert len(pkts) == 1 and pkts[0]["clock_unverified"] == 1
+        h = _run_capture(tmp_path, 20.0)
+        assert _sensor_packets(h) == []
+        h = _run_capture(tmp_path, 25.0)
+        assert "clock_unverified" not in _sensor_packets(h)[0]
+
+
 class TestLoRaDaemonDown:
     @pytest.mark.parametrize("daemon", [False, "raise"])
     def test_cycle_is_queued_and_counted(self, tmp_path, daemon):
@@ -160,9 +248,9 @@ class TestLoRaSend:
 
     def test_unchanged_fields_are_not_sent_again(self, tmp_path):
         _run_capture(tmp_path, 20.0)
-        h = _run_capture(tmp_path, 20.5)          # 2.5 %: below the threshold
+        h = _run_capture(tmp_path, 20.4)          # 0.4 C: below the 0.5 C step
         assert _sensor_packets(h) == []
-        h = _run_capture(tmp_path, 21.5)          # 7.5 % above the value last sent
+        h = _run_capture(tmp_path, 20.5)          # 0.5 C above the value last sent
         pkts = _sensor_packets(h)
         assert len(pkts) == 1 and set(pkts[0]) == {"timestamp", "temperature_celsius"}
 

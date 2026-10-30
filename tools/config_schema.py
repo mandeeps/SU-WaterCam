@@ -172,6 +172,16 @@ SETTINGS: List[Setting] = [
     S("drain_per_cycle", 2, "Queued frames sent per cycle", section="lora_queue", settable=False, readers=("ticktalk_main",)),
     S("max_depth", 96, "Queue depth", section="lora_queue", settable=False, readers=("ticktalk_main",)),
     S("max_age_days", 7, "Queue age limit", section="lora_queue", settable=False, readers=("ticktalk_main",)),
+
+    # --- runtime_config.json, lora_thresholds section: sensor fields sent over LoRa when they move this far (tools/sensor_changes.py) ---
+    # A step in the field's own unit, compared with the value last sent. A field with
+    # no entry (or a value that isn't a positive number) keeps the relative 5 %.
+    # Orientation (lora_imu_threshold_deg) and position (POSITION_THRESHOLD_M) keep their own settings.
+    S("temperature_celsius", 0.5, "Temperature step, in degrees C", section="lora_thresholds", settable=False, readers=("ticktalk_main", "sensor_changes"), in_template=True),
+    S("relative_humidity", 3, "Humidity step, in percentage points", section="lora_thresholds", settable=False, readers=("ticktalk_main", "sensor_changes"), in_template=True),
+    S("camera_water_pct", 5, "Water % step, in percentage points", section="lora_thresholds", settable=False, readers=("ticktalk_main", "sensor_changes"), in_template=True),
+    S("battery_percent", 2, "Battery step, in percentage points", section="lora_thresholds", settable=False, readers=("ticktalk_main", "sensor_changes"), in_template=True),
+    S("pose_tilt_tenths", 10, "Tilt from the reference step, in tenths of a degree (10 = 1 degree)", section="lora_thresholds", settable=False, readers=("ticktalk_main", "sensor_changes"), in_template=True),
 ]
 
 # runtime_config.example.json: top-level groups (a blank line between them), then the sections
@@ -190,7 +200,14 @@ TEMPLATE_SECTIONS: List[Tuple[str, List[str]]] = [
                    "cellular_connect_timeout_s", "wifi_grace_s", "downlink_poll_interval_s",
                    "max_queue_depth", "max_queue_age_days"]),
     ("recovery_boot", ["enabled", "min_delay_minutes", "fallback_delay_minutes", "scheduled_wake_window_minutes"]),
+    ("lora_thresholds", ["temperature_celsius", "relative_humidity", "camera_water_pct",
+                         "battery_percent", "pose_tilt_tenths"]),
 ]
+
+
+def lora_threshold_defaults() -> Dict[str, Any]:
+    """The lora_thresholds section's default steps, {field: step}."""
+    return {s.key: s.default for s in SETTINGS if s.section == "lora_thresholds"}
 
 
 def get(key: str, section: Optional[str] = None, file: str = "runtime_config.json") -> Setting:
