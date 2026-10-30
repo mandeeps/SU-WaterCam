@@ -9,6 +9,7 @@ is taken at a wake when:
 - the last one is gps_fix_interval_h old or more (runtime parameter, default 24 h),
   or there is none at all, and no window was tried in the last interval: one
   try a day, so a unit that can't see the sky doesn't spend every wake on it.
+  After BACKOFF_AFTER failed tries in a row, one every BACKOFF_INTERVALS intervals;
   Both are counted ATTEMPT_SLACK_H (15 min) short, so the daily try lands on
   the first capture of the same wake each day rather than drifting to its second;
 - the pose monitor saw a knock or removal (tools/pose_monitor.py): that wake,
@@ -17,7 +18,8 @@ is taken at a wake when:
 
 start_if_due() runs the window on a thread, once per boot, so the captures go
 on meanwhile: powering USB brings the modem up and quectel-gnss.service starts
-its GNSS (40-50 s to a fix with a clear sky). The window lasts up to
+its GNSS (40-50 s to a fix with a clear sky; a cold start under cover takes
+minutes, as USB off loses the modem's orbit data). The window lasts up to
 FIX_TIMEOUT_S, but never past the wake's awake time (the schedule's `awake`,
 less SHUTDOWN_MARGIN_S), and call_shutdown() waits for it (wait_until_done),
 so a window opened late in a wake isn't cut short. The fix is saved, USB is
@@ -39,8 +41,14 @@ if _REPO not in sys.path:
 from tools import config_io   # noqa: E402
 
 DEFAULT_INTERVAL_H = 24
-#: The most a window lasts: the whole of a 5-minute wake
-FIX_TIMEOUT_S = 300
+#: The most a window lasts. With USB off between wakes every try is a cold start:
+#: 125-272 s from the NMEA port on 008 indoors, once none in 300 s (2026-10-29).
+#: It ends at the fix, so the length only costs when the fix is slow or doesn't come.
+FIX_TIMEOUT_S = 480
+#: After this many failed tries in a row, the daily try comes every BACKOFF_INTERVALS
+#: intervals instead, so a unit that can't see the sky doesn't spend a long window daily
+BACKOFF_AFTER = 3
+BACKOFF_INTERVALS = 3
 #: Too short to be worth a try (the modem alone takes 15 s): the next wake tries instead
 MIN_WINDOW_S = 60
 #: Left at the end of the awake time for the last capture's uplink and the shutdown
@@ -104,12 +112,33 @@ def last_attempt(path: Optional[str] = None) -> Optional[float]:
         return None
 
 
+def failed_tries(path: Optional[str] = None) -> int:
+    """Windows in a row that ended without a fix."""
+    try:
+        with open(path or ATTEMPT_FILE) as f:
+            return max(0, int(json.load(f).get("failures", 0)))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return 0
+
+
 def _record_attempt(now: float, path: Optional[str] = None) -> None:
     try:
         path = path or ATTEMPT_FILE
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        config_io.write_json(path, {"at": now}, mode=0o664)
+        config_io.write_json(path, {"at": now, "failures": failed_tries(path)}, mode=0o664)
     except (OSError, TypeError, ValueError):
+        pass
+
+
+def _record_result(got_fix: bool, path: Optional[str] = None) -> None:
+    """After a window: reset the failure count on a fix, else add one."""
+    try:
+        path = path or ATTEMPT_FILE
+        with open(path) as f:
+            state = json.load(f)
+        state["failures"] = 0 if got_fix else failed_tries(path) + 1
+        config_io.write_json(path, state, mode=0o664)
+    except (OSError, TypeError, ValueError, AttributeError):
         pass
 
 
@@ -118,8 +147,10 @@ def reasons(now: Optional[float] = None, requested: bool = False, pose_wake: boo
     now = time.time() if now is None else now
     out = []
     due_s = max(0.0, _interval_h() - ATTEMPT_SLACK_H) * 3600
+    intervals = BACKOFF_INTERVALS if failed_tries() >= BACKOFF_AFTER else 1
+    wait_s = max(0.0, _interval_h() * intervals - ATTEMPT_SLACK_H) * 3600
     tried = last_attempt()
-    if tried is None or not 0 <= now - tried < due_s:     # a try in the future: the clock was wrong
+    if tried is None or not 0 <= now - tried < wait_s:    # a try in the future: the clock was wrong
         age = last_live_fix_age_s(now)
         if age is None:
             out.append("no fix yet")
@@ -280,7 +311,7 @@ def start_if_due(background: bool = True) -> Optional[List[str]]:
 
     def run():
         try:
-            run_window(why, timeout_s=timeout_s)
+            _record_result(bool(run_window(why, timeout_s=timeout_s)))
         finally:
             _mark({"done": True})
 
