@@ -9,7 +9,7 @@ DEPENDENCIES:
     opencv-python-headless both provide the cv2 module and overwrite each other.
 
         python3 -m venv /tmp/calib-venv
-        /tmp/calib-venv/bin/pip install opencv-python==4.14.0.94 numpy scipy Pillow piexif pyproj
+        /tmp/calib-venv/bin/pip install opencv-python==4.14.0.94 numpy scipy Pillow piexif
         cd SU-WaterCam/tools && /tmp/calib-venv/bin/python camera_calibration.py
         rm -rf /tmp/calib-venv     # when done
 
@@ -487,7 +487,7 @@ def pixel_to_ground_coords(pixel_xy: tuple, intrinsics: CameraIntrinsics,
       1. Convert pixel to a normalized ray in camera space using K^-1
       2. Rotate the ray into the world (ENU) frame using R^T
       3. Find where the ray intersects Z=0 (ground plane)
-      4. Convert ENU offset (meters) to lat/lon using pyproj
+      4. Convert ENU offset (meters) to lat/lon (local tangent plane, ufonet_geo)
 
     PARAMETERS:
         pixel_xy         : (u, v) pixel coordinates in the undistorted image

@@ -93,6 +93,5 @@ urllib3==2.8.0
 #   adafruit-circuitpython-bno08x    BNO085 IMU units (tools/bno08x_imu.py)
 #   adafruit-circuitpython-ads1x15   battery SOC via ADS1115 (tools/battery_manager.py)
 #   adafruit-circuitpython-ina260    battery SOC via INA260 (tools/battery_manager.py)
-#   pyproj                           CRS transforms in tools/geo_core.py
 #   simpy                            TickTalk simulation mode (simulate.py)
 #   networkx matplotlib              TickTalk graph drawing (ticktalkpython/Compiler.py)
