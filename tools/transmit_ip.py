@@ -1012,15 +1012,21 @@ def apply_downlink_command(
 
         if code == "10 90":  # area_threshold_pct — direct u8 value
             val = int.from_bytes(payload_bytes, "big")
-            set_param_fn("area_threshold", val)
-            logger.info("Applied: area_threshold = %d%%", val)
-            applied.append(f"area_threshold={val}%")
+            if set_param_fn("area_threshold", val) is not False:
+                logger.info("Applied: area_threshold = %d%%", val)
+                applied.append(f"area_threshold={val}%")
+            else:
+                logger.warning("apply_downlink_command: area_threshold %d rejected", val)
+                skipped.append(code)
 
         elif code == "11 91":  # stage_threshold_cm — u16 big-endian
             val_cm = int.from_bytes(payload_bytes, "big")
-            set_param_fn("stage_threshold", val_cm)
-            logger.info("Applied: stage_threshold = %dcm", val_cm)
-            applied.append(f"stage_threshold={val_cm}cm")
+            if set_param_fn("stage_threshold", val_cm) is not False:
+                logger.info("Applied: stage_threshold = %dcm", val_cm)
+                applied.append(f"stage_threshold={val_cm}cm")
+            else:
+                logger.warning("apply_downlink_command: stage_threshold %d rejected", val_cm)
+                skipped.append(code)
 
         elif code == "15 95":  # wake schedule: writes schedule.wpi and arms the next wake
             try:
