@@ -3,8 +3,9 @@
 SegFormer inference daemon.
 
 Keeps the ONNX model loaded in memory and accepts inference requests over a
-Unix domain socket, eliminating the 10–20 s cold-start cost that occurs when
-segment_tiff_5band.py is spawned as a fresh subprocess each wake cycle.
+Unix domain socket, eliminating the 10–20 s cold-start cost of the old
+conda segment_tiff_5band.py subprocess (removed). It is the only segmentation
+path ticktalk_main uses.
 
 Protocol
 --------

@@ -383,6 +383,28 @@ def test_with_thermal_the_daemon_is_not_asked_for_rgb_only(tm, tmp_path, monkeyp
     assert "segmentation" not in capture_status.read(d)
 
 
+def test_no_daemon_skips_without_the_conda_fallback(tm, tmp_path, monkeypatch):
+    d = _capture_with_tiff(tmp_path, thermal_missing=False)
+    monkeypatch.setattr("os.path.exists",
+                        lambda p, _real=os.path.exists: False if p.endswith(".sock") else _real(p))
+    with patch("subprocess.run") as run, patch("subprocess.Popen") as popen:
+        assert tm.segformer.__wrapped__(d, True) is None
+    run.assert_not_called()
+    popen.assert_not_called()
+    assert capture_status.read(d)["segmentation"] == "skipped_no_daemon"
+
+
+def test_daemon_failure_skips_without_the_conda_fallback(tm, tmp_path, monkeypatch):
+    d = _capture_with_tiff(tmp_path, thermal_missing=False)
+    _socket_present(monkeypatch)
+    with patch("tools.segformer_client.segformer_via_daemon", return_value=False), \
+         patch("subprocess.run") as run, patch("subprocess.Popen") as popen:
+        assert tm.segformer.__wrapped__(d, True) is None
+    run.assert_not_called()
+    popen.assert_not_called()
+    assert capture_status.read(d)["segmentation"] == "daemon_failed"
+
+
 def test_client_sends_rgb_only_only_when_asked(tmp_path):
     import socket
     import threading

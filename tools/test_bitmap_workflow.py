@@ -23,7 +23,6 @@ Usage:
 
 import argparse
 import os
-import subprocess
 import sys
 
 
@@ -68,25 +67,16 @@ def _segmentation_path(directory: str) -> str:
 
 
 def run_segformer(directory: str) -> str:
-    """Run SegFormer on the five-band TIFF. Same subprocess as ticktalk_main."""
-    segformer_python = os.environ.get(
-        "SEGFORMER_PYTHON", "/home/pi/miniforge3/envs/5band/bin/python"
-    )
-    segformer_script = os.environ.get(
-        "SEGFORMER_SCRIPT", "/home/pi/segformer_5band/segment_tiff_5band.py"
-    )
-    segformer_cwd = os.environ.get("SEGFORMER_CWD", "/home/pi/segformer_5band")
+    """Run SegFormer on the five-band TIFF through segformer_daemon, as ticktalk_main does."""
+    from tools.segformer_client import segformer_via_daemon
+
     tiff_path = os.path.join(directory, MODEL_INPUT_TIFF)
     if not os.path.isfile(tiff_path):
         raise FileNotFoundError(f"Coreg output not found: {tiff_path}")
-    proc = subprocess.Popen(
-        [segformer_python, segformer_script, tiff_path],
-        cwd=segformer_cwd,
-    )
-    proc.wait()
-    if proc.returncode != 0:
-        raise RuntimeError(f"SegFormer exited with code {proc.returncode}")
-    return os.path.join(directory, SEGMENTATION_PNG)
+    out = os.path.join(directory, SEGMENTATION_PNG)
+    if not segformer_via_daemon(tiff_path, out):
+        raise RuntimeError("segformer_daemon did not segment the TIFF (is segformer_daemon.service running?)")
+    return out
 
 
 def generate_bitmap(segmentation_path: str) -> bytes:

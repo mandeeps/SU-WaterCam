@@ -11,6 +11,10 @@ run in their own process.
                                bands=red,green,blue, so it never needed thermal)
                    "skipped_no_thermal"  not segmented: no thermal frame and no
                                RGB-only model; camera_water_pct is absent
+                   "skipped_no_daemon"   not segmented: segformer_daemon was
+                               not running (no socket); camera_water_pct is absent
+                   "daemon_failed"       not segmented: the daemon refused or
+                               failed the request; camera_water_pct is absent
 """
 import json
 import os

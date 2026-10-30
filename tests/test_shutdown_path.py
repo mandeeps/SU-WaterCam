@@ -57,15 +57,17 @@ def test_segformer_skips_when_coreg_failed(tm, tmp_path):
     run.assert_not_called()
 
 
-def test_segformer_fallback_has_a_timeout(tm, tmp_path, monkeypatch):
+def test_segformer_without_a_daemon_returns_at_once(tm, tmp_path, monkeypatch):
+    # Every later step, call_shutdown included, waits for segmentation. With the
+    # conda fallback gone, a missing daemon must not start anything that could hang.
     from tools.coreg_multiple import config as coreg_config
     (tmp_path / coreg_config.MODEL_INPUT_TIFF).write_bytes(b"tiff")
     monkeypatch.setattr("os.path.exists",
                         lambda p, _real=os.path.exists: False if p.endswith(".sock") else _real(p))
-    import subprocess
-    with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("seg", 240)) as run:
+    with patch("subprocess.run") as run, patch("subprocess.Popen") as popen:
         assert tm.segformer.__wrapped__(str(tmp_path), True) is None
-    assert run.call_args.kwargs["timeout"] > 0
+    run.assert_not_called()
+    popen.assert_not_called()
 
 
 # --- call_shutdown ------------------------------------------------------------------------
