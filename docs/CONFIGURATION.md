@@ -150,11 +150,10 @@ New switches go in `runtime_config.json` or the systemd unit, not in `/etc`. The
 |---|---|---|---|
 | `WATERCAM_REPO` | the script's repo, else `/home/pi/SU-WaterCam` | about 25 tools, ticktalk_main | ISSUE_PLAN (design note only) |
 | `WATERCAM_CALIB_FILE` | `bno055_calibration.json` in the repo | bno055_imu | none |
-| `SEGFORMER_DIR` / `SEGFORMER_PYTHON` | `/home/pi/segformer_5band`, the miniforge env's python | ticktalk_main | none. **Review:** `tools/watercam.py` defaults to `/home/pi/git/segformer_5band`. |
 | `COREG_SINGLE_THREAD` | unset | coreg_multiple | CAPTURE_PIPELINE_NOTES |
 | `PYTHONUNBUFFERED=1` | set in the button, lora_daemon, segformer_daemon and ticktalk units | Python | — |
 
-`tools/test_bitmap_workflow.py` reads its own variables (`SU_WATERCAM_IMAGES`, `SEGFORMER_CWD` and others); it is a test tool, not production.
+`tools/test_bitmap_workflow.py` reads its own variable (`SU_WATERCAM_IMAGES`); it is a test tool, not production.
 
 ## Service command lines (`config/*.service`)
 
@@ -187,6 +186,6 @@ These are listed so a reader of `/run` and `/tmp` knows what they are:
 3. **No effect:** resolved. `max_retransmissions`, `backup_enabled` and `compression_level` have been removed (`set_parameter` now refuses them; an existing unit's file may still hold them, harmlessly).
 4. **The `wittypi_*` keys:** only a last resort, used when emergency mode ends with no `schedule.wpi` and no fallback schedule. The repo's daylight preset is always a fallback, so in practice they are never used. `ticktalk_main.get_wittypi_schedule_config` is not called from the graph. They can go when ticktalk_main is next rebuilt.
 5. **Reserved:** `ip_upload.downlink_poll_interval_s` (deployments without Tailscale), and mDot store-and-forward (not built).
-6. **Missing descriptions:** `lora_sf_*`, `recovery_boot.fallback_delay_minutes`, `flood_baseline_water_pct`, `WATERCAM_CALIB_FILE`, `SEGFORMER_DIR`/`SEGFORMER_PYTHON`, `ip_upload.max_queue_*`, and the ticktalk `-d`/`-s` flags.
+6. **Missing descriptions:** `lora_sf_*`, `recovery_boot.fallback_delay_minutes`, `flood_baseline_water_pct`, `WATERCAM_CALIB_FILE`, `ip_upload.max_queue_*`, and the ticktalk `-d`/`-s` flags.
 7. **The two `/etc/watercam` flag files:** replaced (see Flag files); remove the fallback once no unit uses them.
 8. **After #256:** add `WATERCAM_DEBUG` to the environment table, and note that `debug_mode` also controls the LoRa handler's `DEBUG:` lines and the per-poll GPS lines, read once per process.

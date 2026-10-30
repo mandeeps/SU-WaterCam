@@ -39,9 +39,9 @@
 #
 # segformer_daemon.service runs in this venv too. It needs onnxruntime (below),
 # cv2, rasterio, numpy and PIL. Tested on ufo-01-01-005 against the 5band conda
-# env: identical fp32 masks, about 10% faster. The conda env
-# (segformer_5band/5band_environment.yml) is now only for the legacy
-# segment_tiff_5band.py fallback in ticktalk_main.py and for model export.
+# env: identical fp32 masks, about 10% faster. No node code runs in the conda
+# env (segformer_5band/5band_environment.yml) any more; it is left installed
+# and is only needed to export a model from a torch checkpoint.
 
 Adafruit-Blinka==8.62.0
 adafruit-circuitpython-ahtx0==1.0.27

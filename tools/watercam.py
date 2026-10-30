@@ -7,12 +7,12 @@ import time
 from pathlib import Path
 from time import sleep
 from subprocess import call
-from subprocess import Popen
 
 _REPO_ROOT = Path(os.environ.get("WATERCAM_REPO", str(Path(__file__).resolve().parent.parent)))
 import take_nir_photos # has functions for IR-CUT camera and Lepton
 import coreg_multiple
 from compress_segmented import compress_image
+from segformer_client import segformer_via_daemon
 
 try:
     from lora_transmit import transmit_from_watercam, transmit
@@ -32,10 +32,6 @@ def main(autostart:bool = True):
     # setup
     last_print = time.monotonic()
     filepath = str(_REPO_ROOT / "images" / "")
-
-    segformer_location = os.environ.get("SEGFORMER_DIR", "/home/pi/git/segformer_5band")
-    segformer_python = os.environ.get("SEGFORMER_PYTHON", "/home/pi/miniforge3/envs/5band/bin/python")
-    segformer_coreg = os.path.join(segformer_location, "segment_tiff_5band.py")
 
     # Sync time if network available by calling WittyPi script. WittyPi stock software disables other network time software like Chrony and systemd-timesyncd, so either we do time sync their way or use alternative software for the WittyPi 4 like: https://github.com/trackIT-Systems/wittypi4
     #if autostart:
@@ -65,13 +61,14 @@ def main(autostart:bool = True):
         # call coregistration script on new photo
         print("Run coreg")
         coreg_multiple.coreg(directory)
-        # run 5 band SegFormer on coreg photos
+        # run 5 band SegFormer on coreg photos, through segformer_daemon (ONNX)
         # color_preserved_5_band.tiff, not final_5_band.tiff: the latter is
         # B,G,R at a squashed 512x512 and the model trains on RGB at the native
-        # frame. segment_tiff_5band.py names its output after the input, so the
-        # mask name follows from the TIFF name and is not a free choice.
+        # frame. The mask is named after the input TIFF.
         tiff = os.path.join(directory, coreg_multiple.config.MODEL_INPUT_TIFF)
-        Popen([segformer_python, segformer_coreg, tiff], cwd=segformer_location).wait()
+        if not segformer_via_daemon(tiff, os.path.join(directory, coreg_multiple.config.SEGMENTATION_PNG)):
+            print("Segmentation failed: is segformer_daemon.service running?")
+            continue
 
         bitmap_dict = compress_image(coreg_multiple.segmentation_path(directory))
         print(bitmap_dict['compressed_data'])

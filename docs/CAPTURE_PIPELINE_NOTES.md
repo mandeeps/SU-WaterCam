@@ -58,20 +58,18 @@ T.take_two_photos.__wrapped__(None, directory)   # optical pair, IR-cut filter t
 T.flir.__wrapped__(directory)                    # Lepton frame + temperatures CSV
 ```
 
-## The pipeline spans two interpreters
-
-This is by design and matches what `ticktalk_main.segformer()` does with a subprocess:
+## The pipeline runs in one interpreter
 
 | stage | interpreter | why |
 |---|---|---|
 | capture, co-registration | `SU-WaterCam/venv/bin/python3` | picamera2, gpiozero, SimpleITK |
-| segmentation | `~/miniforge3/envs/5band/bin/python` | mmseg, mmcv, onnxruntime |
+| segmentation (`segformer_daemon.service`) | `SU-WaterCam/venv/bin/python3` | onnxruntime, cv2, rasterio, PIL |
 
-Neither environment can run the other's stage. `mmseg` also only imports with the working directory
-set to `segformer_5band`, because the package is vendored there.
-
-This applies to the subprocess fallback (`segment_tiff_5band.py`). `segformer_daemon.service`, the
-normal path, needs only onnxruntime, cv2, rasterio and PIL, so it runs in `SU-WaterCam/venv`.
+`ticktalk_main.segformer()` only asks the daemon. There is no subprocess fallback any more: the old
+`segment_tiff_5band.py` path in the `~/miniforge3/envs/5band` conda env (mmseg, mmcv, torch) is not
+used, because ONNX performs better. The conda env is still installed on the nodes; no node code runs
+in it. If the daemon is down or fails, the capture is marked `skipped_no_daemon` or `daemon_failed`
+in `capture_status.json` and has no mask.
 
 ## The two five-band TIFFs are not interchangeable
 

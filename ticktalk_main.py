@@ -924,15 +924,10 @@ def coregistration(dirname, lepton_state, photo_state):
 @SQify
 def segformer(filepath, coreg_state): # operate on coregistered image file
     import os
-    import subprocess
 
     from tools.coreg_multiple import config as coreg_config
-    from tools.lock_utils import flock_deadline, power_exclusive
+    from tools.lock_utils import power_exclusive
     from tools.segformer_client import segformer_via_daemon
-
-    # The fallback cold-loads the model (~40 s); give it room but not forever, since
-    # every later step, call_shutdown included, waits for this one.
-    FALLBACK_TIMEOUT_S = 240
 
     # Serve color_preserved_5_band.tiff, not final_5_band.tiff. The two files
     # are not the same image: co-registration writes final_5_band in OpenCV's
@@ -942,18 +937,15 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
     # serving final_5_band fed the model swapped red and blue at a distorted
     # aspect ratio.
     #
-    # The mask is named after the input. It has to be: the subprocess fallback
-    # below passes only the TIFF, and segment_tiff_5band.py names its output
-    # `<input stem>_segmentation.png`. While this said final_5_band_segmentation
-    # the daemon path wrote that name and the fallback wrote
-    # color_preserved_5_band_segmentation, then returned the name it had not
-    # written.
+    # The mask is named after the input (`<input stem>_segmentation.png`), the
+    # name the old conda segment_tiff_5band.py wrote and the one everything
+    # downstream (compress_segmented, the uploads) still reads.
     tiff_path = filepath + "/" + coreg_config.MODEL_INPUT_TIFF
     output_path = filepath + "/" + coreg_config.SEGMENTATION_PNG
     socket_path = "/run/segformer/segformer.sock"
 
     if not coreg_state or not os.path.exists(tiff_path):
-        # Without a co-registered TIFF both paths below are a slow, certain failure.
+        # Without a co-registered TIFF the daemon can only fail.
         print(f"⚠️ Skipping segmentation: no co-registered image ({tiff_path})")
         return None
 
@@ -965,37 +957,32 @@ def segformer(filepath, coreg_state): # operate on coregistered image file
     no_thermal = capture_status.thermal_missing(filepath)
 
     try:
-        # Prefer the persistent daemon — no cold-start, model stays loaded.
-        # Not while a cellular upload runs: together they pull the Pi under-voltage.
-        if os.path.exists(socket_path):
-            with power_exclusive("segmentation", 120):
-                ok = segformer_via_daemon(tiff_path, output_path, socket_path, rgb_only=no_thermal)
-            if ok:
-                if no_thermal:
-                    print("⚠️ No thermal frame: segmented with the RGB-only model")
-                    capture_status.mark(filepath, segmentation="rgb_only")
-                return output_path
+        # The ONNX daemon (segformer_daemon.service) is the only segmentation path.
+        # The conda torch fallback is gone: it is not used, ONNX performs better,
+        # and its ~40 s cold load at the end of a wake only cost energy.
+        if not os.path.exists(socket_path):
             if no_thermal:
-                print("⚠️ No thermal frame and no RGB-only model: segmentation skipped for this capture")
+                print("⚠️ No thermal frame and no segmentation daemon: segmentation skipped for this capture")
                 capture_status.mark(filepath, segmentation="skipped_no_thermal")
-                return None
-            print("⚠️ Daemon call failed, falling back to subprocess")
-        elif no_thermal:
-            print("⚠️ No thermal frame and no segmentation daemon: segmentation skipped for this capture")
-            capture_status.mark(filepath, segmentation="skipped_no_thermal")
+            else:
+                print("⚠️ No segmentation daemon: segmentation skipped for this capture")
+                capture_status.mark(filepath, segmentation="skipped_no_daemon")
             return None
-
-        # Legacy fallback: spawn a fresh Python process each cycle.
-        segformer_location = os.environ.get("SEGFORMER_DIR", "/home/pi/segformer_5band")
-        segformer_python = os.environ.get("SEGFORMER_PYTHON", "/home/pi/miniforge3/envs/5band/bin/python")
-        segformer_coreg = os.path.join(segformer_location, "segment_tiff_5band.py")
-        with flock_deadline("/tmp/watercam_segformer.lock", FALLBACK_TIMEOUT_S), \
-                power_exclusive("segmentation", 120):
-            subprocess.run(
-                [segformer_python, segformer_coreg, tiff_path],
-                cwd=segformer_location, timeout=FALLBACK_TIMEOUT_S,
-            )
-        return output_path if os.path.exists(output_path) else None
+        # Not while a cellular upload runs: together they pull the Pi under-voltage.
+        with power_exclusive("segmentation", 120):
+            ok = segformer_via_daemon(tiff_path, output_path, socket_path, rgb_only=no_thermal)
+        if ok:
+            if no_thermal:
+                print("⚠️ No thermal frame: segmented with the RGB-only model")
+                capture_status.mark(filepath, segmentation="rgb_only")
+            return output_path
+        if no_thermal:
+            print("⚠️ No thermal frame and no RGB-only model: segmentation skipped for this capture")
+            capture_status.mark(filepath, segmentation="skipped_no_thermal")
+        else:
+            print("⚠️ Segmentation daemon call failed: segmentation skipped for this capture")
+            capture_status.mark(filepath, segmentation="daemon_failed")
+        return None
     except Exception as e:
         print(f"⚠️ Failed to run segmentation: {e}")
         return None
