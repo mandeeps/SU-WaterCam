@@ -412,7 +412,7 @@ Enable GNSS autostart on modem power-on:
 Turn GNSS on now:
 `AT+QGPS=1`
 
-Enable assisted GPS (XTRA) — requires network access to download assistance data, skip if SIM is exhausted:
+Enable assisted GPS (XTRA). The assistance data itself is loaded separately, see "XTRA assisted GPS data" below:
 `AT+QGPSXTRA=1`
 
 Exit tio with `ctrl-t q`. These settings are saved to NVRAM and only need to be set once per modem.
@@ -459,7 +459,25 @@ print(packet.position())
 
 **XTRA assisted GPS data**
 
-XTRA data speeds up cold-start time-to-first-fix but requires network access to download. If the SIM data is exhausted, XTRA will not update but the receiver still works — expect a longer cold-start fix time (a few minutes outdoors with clear sky view instead of seconds). To manually refresh XTRA when network is available: download `xtra2.bin` and inject it with `sudo mmcli -m 0 --location-inject-assistance-data=xtra2.bin`
+XTRA data (predicted satellite orbits, valid for 7 days) can cut a cold start from minutes to seconds. Every daily fix on a sleeping unit is a cold start: between wakes the Witty Pi cuts power to the Pi, and the modem loses power with it. Without XTRA, a cold start takes about a minute with a clear sky and 2–5 minutes indoors.
+
+> **XTRA does not work on modem firmware `EC25AFAR05A07M4G` (found 2026-10-29).** This firmware places the GPS week in an XTRA file within a fixed 1024-week range, and that range ran out between July 2025 and October 2026. A current `xtra2.bin` loads with a start date exactly 1024 weeks early (a 2026 file shows 2007), so the modem treats it as expired. `xtra3grc.bin` isn't read at all (it shows 1980). The modem's own fix times are not affected. Check the firmware with `AT+GMR` and test a load (below) before relying on XTRA.
+
+To load XTRA by hand, with USB on and the modem listed by `mmcli -L`:
+
+1. Check what is loaded: `AT+QGPSXTRADATA?` answers `<minutes valid>,"<start time>"`. `0` means no data or expired data. A start time years in the past with minutes still left is the firmware problem above.
+2. Download the file (about 34 KB; also on `xtrapath2` and `xtrapath3`):
+   `curl -o /tmp/xtra2.bin http://xtrapath1.izatcloud.net/xtra2.bin`
+3. Find the modem's number with `mmcli -L`. It changes after every USB power cycle, so `-m 0` only works until the first one.
+4. Turn on ModemManager's GPS source. Since ModemManager 1.24 (Trixie), the load fails with "Failed to receive indication with the server update result" without it:
+   `sudo mmcli -m <N> --location-enable-gps-raw`
+5. Load the file: `sudo mmcli -m <N> --location-inject-assistance-data=/tmp/xtra2.bin`
+6. Turn the GPS source off again: `sudo mmcli -m <N> --location-disable-gps-raw`
+7. Check again with `AT+QGPSXTRADATA?`: the start time should be within the last day.
+
+If the answer doesn't change, old data that the modem still counts as valid is blocking the new file. Clear it with GNSS off, then load again and turn GNSS back on: `AT+QGPSEND`, `AT+QGPSDEL=3`, steps 4–6, `AT+QGPS=1`.
+
+Each load is about 34 KB. Over WiFi that costs nothing; over cellular, load only when `AT+QGPSXTRADATA?` shows the data has expired.
 
 sources:
 https://sigquit.wordpress.com/2012/03/29/enabling-gps-location-in-modemmanager/

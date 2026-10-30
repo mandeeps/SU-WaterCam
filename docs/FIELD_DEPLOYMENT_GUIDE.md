@@ -302,8 +302,8 @@ sudo udevadm control --reload && sudo udevadm trigger
 
 The helper turns the GNSS engine on (`AT+QGPS=1`) for `quectel-gnss.service`
 (1.9); the udev rule keeps ModemManager off the modem's GNSS ports so gpsd can
-use them. `config/xtra2.bin` is optional assistance data that speeds up a cold
-GNSS fix (README, "XTRA").
+use them. XTRA assistance data, which can speed up a cold GNSS fix, doesn't load
+correctly on the current modem firmware (README, "XTRA assisted GPS data").
 
 **Witty Pi software** comes from the UUGear installer on our images, in
 `/home/pi/wittypi`. Settings:
@@ -1151,7 +1151,7 @@ ssh <hostname>   # via Tailscale, once it reconnects
 
 Check that the monitoring software is running with `journalctl -u ticktalk.service -f`
 
-GPS acquiring a fix outdoors from a cold start can take a few minutes (longer without recent XTRA assistance data — see the GPS/GNSS setup section of `README.md`). Give it time before troubleshooting.
+GPS acquiring a fix outdoors from a cold start can take a few minutes (XTRA assistance doesn't work on the current modem firmware — see "XTRA assisted GPS data" in `README.md`). Give it time before troubleshooting.
 
 ### 2.4 Confirm data is flowing from the final position
 
