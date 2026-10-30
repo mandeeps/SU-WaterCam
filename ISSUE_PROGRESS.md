@@ -42,7 +42,7 @@ Documents work already in the codebase against each open GitHub issue.
 `tools/transmit_ip.py:398` — `apply_downlink_command()`:
 
 - Standalone (no TickTalkPython dependency); accepts a `set_param_fn` callable
-- Dispatches all recognised codes: `10 90` area_threshold, `11 91` stage_threshold, `12 92` monitoring_freq, `13 93` emergency_freq, `14 94` flood_code_freq
+- Dispatches all recognised codes: `10 90` area_threshold, `11 91` stage_threshold, `13 93` emergency_freq, `14 94` flood_code_freq (plus the other codes in `DOWNLINK_CODE_LENGTHS`; there is no `12 92`)
 - Validates payload length per code; skips malformed parts without crashing
 
 `tests/test_ip_command_handling.py`:

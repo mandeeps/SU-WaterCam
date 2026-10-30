@@ -21,7 +21,7 @@ deduplicated, and acked as `ak: 0`.
 
 | Code | Width (bytes) | Meaning | Accepted values |
 |---|---|---|---|
-| `10 90` | 1 | area threshold, % | 0-255 stored as sent |
+| `10 90` | 1 | area threshold, % | 0-100 (`_PARAM_RANGES`); the node rejects larger values |
 | `11 91` | 2 | stage threshold, cm (u16) | 0-65535 |
 | `15 95` | 7 | wake schedule: start HH MM, end HH MM, interval u16 min, awake u8 min (site local time; `tools/schedule_control.py`) | interval 15-1440, awake 5-60 and < interval |
 | `13 93` | 1 | emergency capture interval, minutes | 1-240 |
@@ -38,7 +38,7 @@ deduplicated, and acked as `ak: 0`.
 The table is `DOWNLINK_CODE_LENGTHS` in `tools/transmit_ip.py`. A value outside its
 range is skipped and the rest of the frame is still applied. Examples (seq `00`,
 as typed by hand): `005001` status request, `00219118` emergency for 24 h,
-`009999` emergency off, `0012920168` monitoring every 360 min.
+`009999` emergency off, `0013933C` emergency capture every 60 min.
 
 The mDot's own frames carry no seq and never reach the Pi: `!` (exactly one byte)
 powers a sleeping Pi on, and `1B 9B HH` sets its watchdog. See
