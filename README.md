@@ -436,10 +436,14 @@ sudo systemctl enable --now quectel-gnss.service
 
 Edit `/etc/default/gpsd`:
 ```
-DEVICES="/dev/ttyUSB1"
+DEVICES=""
 GPSD_OPTIONS="-n"
 START_DAEMON="true"
 ```
+
+Leave `DEVICES` empty: the modem's NMEA port only exists while USB power is on, so
+a fixed device makes gpsd log an error at boot. `quectel-gnss.service` hands the
+port to gpsd with `gpsdctl add /dev/ttyUSB1` when the modem appears.
 
 Then restart gpsd: `sudo systemctl restart gpsd`
 
