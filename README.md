@@ -114,7 +114,7 @@ Test the SD cards with F3: https://github.com/AltraMayor/f3
 
 ![](documentation_assets/cbbc013483ece19e1ff6cbd77a34d63fbe3192e2.png)
 
-Flash the current SD card image file to an unused microSD card: https://github.com/WaterCam-Team/sd-images - NOTE: GPS set up has to be done for each cellular modem individually, this might be automated in the future.
+Flash the current SD card image file to an unused microSD card: https://github.com/WaterCam-Team/sd-images/releases/latest (private repo; see its README) - NOTE: GPS set up has to be done for each cellular modem individually, this might be automated in the future.
 
 You can use the [Raspberry Pi Imager's](https://www.raspberrypi.com/software/) custom OS option to write the image file to a SD card. Simply click "Choose OS", scroll all the way down, select "use custom" and pick the file you downloaded, then click "Choose Storage" and pick your microSD card. You don't need to customize settings or options, just write the image - so select "No" when asked if you want to customize Once it's been written to, you can insert it in a Pi 4B and let it boot. It will automatically expand the filesystem to the full size of the card, so it will take some time on the first boot. Do not interrupt this, just let it run.
 
