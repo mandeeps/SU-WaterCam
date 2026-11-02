@@ -934,7 +934,9 @@ it before cellular (`tools/wifi_policy.py`). NetworkManager remembers the
 radio state, so the next boot starts with WiFi off too. WiFi stays on during a
 remote access session, while the unit counts as moved from its mount, and with
 `"wifi_when_lora_healthy": true` in `runtime_config.json`. **Set that on bench
-units before updating them**, or a unit with good LoRa drops off SSH. To reach
+units before updating them, and before running a test cycle on one**, or a unit
+with good LoRa drops off SSH: a single ticktalk cycle turns the radio off, and it
+stays off until something turns it back on. To reach
 a deployed unit with WiFi off, start a remote access session from the
 dashboard: WiFi only (`18 99`), WiFi then cellular (`18 9A`), or cellular
 directly for units without WiFi (`18 98`).

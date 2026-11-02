@@ -57,6 +57,7 @@ end:   dashboard "End remote debug" (18 98 00), or on the node:
 node:  1. cellular down, if it is managed on demand (Quectel autoconnect off)
        2. re-arm the Witty Pi from the installed schedule.wpi (runScript.sh)
        3. start ticktalk.service: a normal cycle, then its usual shutdown
+          (not if ticktalk.service is disabled, as on a bench unit: it stays up)
        4. LoRa status uplink with rd 0
 ```
 
