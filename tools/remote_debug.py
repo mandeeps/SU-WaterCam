@@ -39,7 +39,7 @@ MIN_MINUTES = 10
 MAX_MINUTES = 240
 DEFAULT_MINUTES = 60
 TAILSCALE_WAIT_S = 120
-WIFI_WAIT_S = 60          # a known network in range joins well within this
+WIFI_WAIT_S = 150         # connect attempts plus one radio cycle
 CONNECTIONS = ("cellular", "wifi", "auto")
 CODE_CONNECTION = {"18 98": "cellular", "18 99": "wifi", "18 9A": "auto"}
 WIFI_TAILSCALE_WAIT_S = 45
@@ -181,19 +181,55 @@ WITTYPI_DIR = "/home/pi/wittypi"
 ALARM_CLEARED = "00 00:00:00"
 
 
+def _wlan0_state():
+    rc, out = _run(["nmcli", "-t", "-f", "DEVICE,STATE", "device"], timeout=10)
+    for line in out.splitlines() if rc == 0 else ():
+        if line.startswith("wlan0:"):
+            return line.split(":", 1)[1]
+    return None
+
+
+def _wlan0_connected():
+    return _wlan0_state() == "connected"
+
+
+def _wait_wlan0_ready(deadline_s=15):
+    """wlan0 is "unavailable" for a moment after radio-on; connecting then fails at once."""
+    end = time.monotonic() + deadline_s
+    while time.monotonic() < end and _wlan0_state() in (None, "unavailable"):
+        time.sleep(1)
+
+
 def wifi_up(deadline_s=WIFI_WAIT_S):
-    """Turn the WiFi radio on and wait for wlan0 to join a known network."""
+    """Turn the WiFi radio on and join a known network.
+
+    Asks NetworkManager to connect wlan0 rather than waiting for its autoconnect,
+    which took two minutes after radio-on. The first attempt often fails while the
+    scan is still running; after a second failure the radio is cycled once, which a
+    driver left refusing to associate can need."""
     try:
         from tools.wifi_policy import radio
     except ImportError:
         from wifi_policy import radio
     radio(True)
-    end = time.time() + deadline_s
-    while time.time() < end:
-        rc, out = _run(["nmcli", "-t", "-f", "DEVICE,STATE", "device"], timeout=10)
-        if rc == 0 and any(line.startswith("wlan0:connected") for line in out.splitlines()):
+    end = time.monotonic() + deadline_s
+    failures = 0
+    _wait_wlan0_ready()
+    while time.monotonic() < end:
+        if _wlan0_connected():
             return True
-        time.sleep(3)
+        _run(["nmcli", "device", "wifi", "rescan", "ifname", "wlan0"], timeout=15)
+        rc, out = _run(["nmcli", "--wait", "30", "device", "connect", "wlan0"], timeout=40)
+        if rc == 0 or _wlan0_connected():
+            return True
+        log(f"wlan0 connect failed: {out or rc}")
+        failures += 1
+        if failures == 2:
+            radio(False)
+            time.sleep(2)
+            radio(True)
+            _wait_wlan0_ready()
+        time.sleep(5)
     return False
 
 
@@ -328,6 +364,10 @@ def start(minutes=DEFAULT_MINUTES, source="cli", handler=None, connection="cellu
             state = {"active": True, "started": time.time(), "source": source,
                      "connection": conn, "cellular_was_up": was_up, "mode": connection}
         extending = bool(state.get("tailscale")) and state.get("boot_id") == _boot_id()
+        if not extending and state.get("mode") != connection:
+            # not connected yet: a new code (say 18 9A after 18 99) picks the connection
+            log(f"connection {state.get('mode', 'cellular')} -> {connection}")
+            state["mode"] = connection
         state["until"] = time.time() + minutes * 60
         log(f"session until {time.strftime('%H:%M', time.localtime(state['until']))} ({minutes} min, from {source})")
         _write_json(STATE_FILE, state)
