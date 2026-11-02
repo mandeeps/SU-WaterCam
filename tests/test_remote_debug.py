@@ -121,6 +121,15 @@ def test_stop_with_shutdown_powers_off_instead(node):
     assert node.run.call_args.args[0][-3:] == ["/usr/sbin/shutdown", "-h", "now"]
 
 
+def test_stop_leaves_a_bench_unit_up(node, monkeypatch):
+    monkeypatch.setattr(rd, "ticktalk_enabled", lambda: False)    # ticktalk.service disabled
+    rd.start(30)
+    assert rd.stop()
+    assert node.systemctl.call_args_list[-1].args == ("stop",)    # not started again
+    node.rearm.assert_called_once()
+    assert _state() is None
+
+
 def test_stop_without_session_is_harmless(node):
     assert rd.stop() is False
     node.rearm.assert_not_called()

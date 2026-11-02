@@ -15,7 +15,8 @@ steps: docs/REMOTE_DEBUG_SESSION.md.
 Starting: clear the Witty Pi shutdown alarm, stop ticktalk.service, bring the
 modem's connection up and wait for Tailscale. Stopping: take cellular down again
 if it is managed on demand, re-arm the Witty Pi from the installed schedule.wpi,
-then start ticktalk (a normal cycle and its usual shutdown) or power off.
+then start ticktalk (a normal cycle and its usual shutdown) or power off. A unit
+with ticktalk.service disabled (a bench unit) stays up instead.
 """
 import argparse
 import fcntl
@@ -366,6 +367,11 @@ def _establish(state):
     _write_json(STATE_FILE, state)
 
 
+def ticktalk_enabled():
+    """False when ticktalk.service is disabled or masked, as on a bench unit."""
+    return _run([SYSTEMCTL, "is-enabled", "ticktalk.service"], timeout=15)[0] == 0
+
+
 def stop(shutdown=False, handler=None, reason="requested"):
     """End the session and restore normal operation."""
     with _Lock():
@@ -387,8 +393,11 @@ def stop(shutdown=False, handler=None, reason="requested"):
         for cmd in (["doas", "/usr/sbin/shutdown", "-h", "now"], ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"]):
             if _run(cmd)[0] == 0:
                 break
-    else:
+    elif ticktalk_enabled():
         _systemctl("start")
+    else:
+        # A bench unit: starting ticktalk would run a cycle and its shutdown
+        log("ticktalk.service is disabled: not started, the node stays up")
     return True
 
 
