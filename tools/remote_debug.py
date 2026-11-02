@@ -43,6 +43,8 @@ WIFI_WAIT_S = 150         # connect attempts plus one radio cycle
 CONNECTIONS = ("cellular", "wifi", "auto")
 CODE_CONNECTION = {"18 98": "cellular", "18 99": "wifi", "18 9A": "auto"}
 WIFI_TAILSCALE_WAIT_S = 45
+RETRY_S = 300             # an unreachable session tries again this often
+REBOOT_AFTER = 3          # failed retries before one reboot
 SYSTEMCTL = "/usr/bin/systemctl"
 
 
@@ -213,7 +215,7 @@ def wifi_up(deadline_s=WIFI_WAIT_S):
         from wifi_policy import radio
     radio(True)
     end = time.monotonic() + deadline_s
-    failures = 0
+    failures, rc, out = 0, None, ""
     _wait_wlan0_ready()
     while time.monotonic() < end:
         if _wlan0_connected():
@@ -222,14 +224,15 @@ def wifi_up(deadline_s=WIFI_WAIT_S):
         rc, out = _run(["nmcli", "--wait", "30", "device", "connect", "wlan0"], timeout=40)
         if rc == 0 or _wlan0_connected():
             return True
-        log(f"wlan0 connect failed: {out or rc}")
         failures += 1
         if failures == 2:
+            log("wlan0 connect failed twice: cycling the radio")
             radio(False)
             time.sleep(2)
             radio(True)
             _wait_wlan0_ready()
-        time.sleep(5)
+        time.sleep(10)
+    log(f"wlan0: no known network joined ({failures} attempts, last: {out or rc})")
     return False
 
 
@@ -388,6 +391,11 @@ def _establish(state):
     _write_json(STATE_FILE, state)           # first, so a crash below still expires
     state["alarm_cleared"] = suspend_shutdown_alarm()
     _systemctl("stop")
+    _connect(state)
+
+
+def _connect(state):
+    """Bring up the session's connection and Tailscale; call with the lock held."""
     conn = state.get("connection") or _cellular_connection()
     mode = state.get("mode", "cellular")
     # WiFi first unless asked for cellular: it costs no data (and is off while LoRa works)
@@ -402,6 +410,7 @@ def _establish(state):
     else:
         state["cellular"] = cellular_state(conn)[0] or cellular_up(conn)
         state["tailscale"] = wait_for_tailscale()
+    state["last_try"] = time.time()
     log(f"wifi {'up' if state['wifi'] else 'down'}, cellular {'up' if state['cellular'] else 'down'}, "
         f"tailscale {'online' if state['tailscale'] else 'NOT online'}")
     _write_json(STATE_FILE, state)
@@ -410,6 +419,48 @@ def _establish(state):
 def ticktalk_enabled():
     """False when ticktalk.service is disabled or masked, as on a bench unit."""
     return _run([SYSTEMCTL, "is-enabled", "ticktalk.service"], timeout=15)[0] == 0
+
+
+def _retry():
+    """Still unreachable: try again every RETRY_S; after REBOOT_AFTER failed retries,
+    reboot once (a WiFi driver can refuse to associate until the Pi restarts).
+    The session survives the reboot: tick() re-establishes it."""
+    with _Lock():
+        state = load_state()
+        if not state or not state.get("active") or state.get("tailscale"):
+            return None
+        if time.time() - state.get("last_try", state.get("started", 0)) < RETRY_S:
+            return None
+        state["retries"] = state.get("retries", 0) + 1
+        if state["retries"] > REBOOT_AFTER and not state.get("rebooted"):
+            state["rebooted"] = True
+            _write_json(STATE_FILE, state)
+            log(f"still unreachable after {REBOOT_AFTER} retries: rebooting")
+            for cmd in (["doas", "/usr/sbin/shutdown", "-r", "now"], ["sudo", "-n", "/usr/sbin/shutdown", "-r", "now"]):
+                if _run(cmd)[0] == 0:
+                    break
+            return None
+        log(f"still unreachable: retry {state['retries']}")
+        _connect(state)
+    return state
+
+
+def _keep_bench_wifi_on():
+    """A bench unit (wifi_when_lora_healthy) should never be left with the radio off."""
+    try:
+        with open(os.path.join(REPO, "runtime_config.json")) as f:
+            keep_on = bool(json.load(f).get("wifi_when_lora_healthy"))
+    except (OSError, ValueError, AttributeError):
+        return
+    if not keep_on:
+        return
+    try:
+        from tools.wifi_policy import radio, radio_is_on
+    except ImportError:
+        from wifi_policy import radio, radio_is_on
+    if radio_is_on() is False:
+        log("bench unit with the WiFi radio off: turning it on")
+        radio(True)
 
 
 def stop(shutdown=False, handler=None, reason="requested"):
@@ -464,6 +515,7 @@ def tick():
             stop(reason=f"request from {req.get('source', '?')}")
         return
     if not state or not state.get("active"):
+        _keep_bench_wifi_on()
         return
     if time.time() >= state.get("until", 0):
         stop(reason="time is up")
@@ -476,6 +528,11 @@ def tick():
             if state and state.get("active"):
                 _establish(state)
         send_status(state)
+        return
+    if not state.get("tailscale"):
+        state = _retry()
+        if state and state.get("tailscale"):
+            send_status(state)                # an uplink only when it got through
 
 
 def main(argv=None):

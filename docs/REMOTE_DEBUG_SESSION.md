@@ -27,7 +27,11 @@ on and wait for a known network and Tailscale. With none in range, `18 99`
 stays unreachable rather than use cellular. The session asks NetworkManager to
 connect and cycles the radio once if that fails. A new code sent while the session
 is still unreachable switches its connection, so `18 9A` after `18 99` falls back
-to cellular. The dashboard's Remote Access panel
+to cellular. A session that is still unreachable tries again every 5 minutes;
+after three failed retries the node reboots once (a WiFi driver can refuse to
+associate until the Pi restarts) and the session carries on after the boot. Outside a
+session, a bench unit (`wifi_when_lora_healthy`) whose radio is off gets it turned
+back on within 30 s. The dashboard's Remote Access panel
 picks the code (Connection). The status uplink adds `"wf"`: 1 when the session
 is on WiFi.
 

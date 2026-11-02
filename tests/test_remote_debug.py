@@ -319,3 +319,59 @@ def test_wifi_up_gives_up_at_the_deadline(wifi, monkeypatch):
     clock = iter(range(0, 1000, 10))
     monkeypatch.setattr(rd.time, "monotonic", lambda: next(clock))
     assert not rd.wifi_up(deadline_s=60)
+
+
+def _rewind_last_try(seconds=rd.RETRY_S):
+    st = rd.load_state()
+    st["last_try"] -= seconds
+    rd._write_json(rd.STATE_FILE, st)
+
+
+def test_tick_retries_an_unreachable_session(node):
+    rd.start(60, connection="wifi")                # no network in range
+    assert not rd.load_state()["tailscale"]
+    node.status.reset_mock()
+    rd.tick()                                      # too soon: no retry
+    assert node.wifi.call_count == 1
+    _rewind_last_try()
+    node.wifi.return_value = True                  # the network answers now
+    rd.tick()
+    st = rd.load_state()
+    assert st["tailscale"] and st["retries"] == 1
+    assert node.status.call_args.args[0]["tailscale"]
+
+
+def test_tick_reboots_once_when_retries_keep_failing(node):
+    rd.start(60, connection="wifi")
+    reboots = lambda: [c for c in node.run.call_args_list if "-r" in c.args[0]]
+    for _ in range(rd.REBOOT_AFTER):
+        _rewind_last_try()
+        rd.tick()
+    assert not reboots()
+    _rewind_last_try()
+    rd.tick()
+    assert len(reboots()) == 1 and rd.load_state()["rebooted"]
+    for _ in range(3):                             # still down: retries, no second reboot
+        _rewind_last_try()
+        rd.tick()
+    assert len(reboots()) == 1
+
+
+def test_tick_leaves_a_connected_session_alone(node):
+    node.wifi.return_value = True
+    rd.start(60, connection="wifi")
+    _rewind_last_try()
+    node.status.reset_mock()
+    rd.tick()
+    assert node.wifi.call_count == 1 and not node.status.called
+
+
+@pytest.mark.parametrize("keep_on, radio_calls", [(True, [True]), (False, [])])
+def test_tick_turns_a_bench_units_radio_back_on(node, tmp_path, monkeypatch, keep_on, radio_calls):
+    (tmp_path / "runtime_config.json").write_text(json.dumps({"wifi_when_lora_healthy": keep_on}))
+    monkeypatch.setattr(rd, "REPO", str(tmp_path))
+    calls = []
+    monkeypatch.setattr("tools.wifi_policy.radio_is_on", lambda: False)
+    monkeypatch.setattr("tools.wifi_policy.radio", lambda on: calls.append(on) or True)
+    rd.tick()                                      # no session
+    assert calls == radio_calls
