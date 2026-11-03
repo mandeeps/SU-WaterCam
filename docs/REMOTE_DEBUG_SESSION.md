@@ -20,11 +20,18 @@ The code picks the connection:
 |---|---|
 | `18 98 NN` | Cellular directly, for units without WiFi (what `18 98` always meant) |
 | `18 99 NN` | WiFi only: never cellular, so no SIM data |
-| `18 9A NN` | WiFi if a known network answers within 60 s, else cellular |
+| `18 9A NN` | WiFi if a known network answers within 2.5 min, else cellular |
 
 WiFi is off while LoRa works (`tools/wifi_policy.py`); the WiFi sessions turn it
 on and wait for a known network and Tailscale. With none in range, `18 99`
-stays unreachable rather than use cellular. The dashboard's Remote Access panel
+stays unreachable rather than use cellular. The session asks NetworkManager to
+connect and cycles the radio once if that fails. A new code sent while the session
+is still unreachable switches its connection, so `18 9A` after `18 99` falls back
+to cellular. A session that is still unreachable tries again every 5 minutes;
+after three failed retries the node reboots once (a WiFi driver can refuse to
+associate until the Pi restarts) and the session carries on after the boot. Outside a
+session, a bench unit (`wifi_when_lora_healthy`) whose radio is off gets it turned
+back on within 30 s. The dashboard's Remote Access panel
 picks the code (Connection). The status uplink adds `"wf"`: 1 when the session
 is on WiFi.
 

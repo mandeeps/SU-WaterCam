@@ -251,3 +251,127 @@ def test_cellular_session_never_tries_wifi(node):
 
 def test_codes_map_to_connections():
     assert rd.CODE_CONNECTION == {"18 98": "cellular", "18 99": "wifi", "18 9A": "auto"}
+
+
+def test_a_new_code_changes_an_offline_session(node):
+    rd.start(60, connection="wifi")                # 18 99, no network in range
+    node.tailscale.return_value = False
+    rd.start(60, connection="auto")                # then 18 9A
+    st = rd.load_state()
+    assert st["mode"] == "auto"
+    node.up.assert_called_once()                   # fell back to cellular
+
+
+def test_a_new_code_leaves_a_connected_session(node):
+    node.wifi.return_value = True
+    rd.start(60, connection="wifi")
+    rd.start(60, connection="cellular")            # already up over WiFi: just extends
+    assert rd.load_state()["mode"] == "wifi"
+    node.up.assert_not_called()
+
+
+@pytest.fixture
+def wifi(monkeypatch):
+    """wifi_up's NetworkManager calls, with wlan0 joining on the `joins_on`-th connect."""
+    sim = MagicMock(connects=0, joins_on=1, radio=[], unavailable=0)
+    monkeypatch.setattr("tools.wifi_policy.radio", lambda on: sim.radio.append(on) or True)
+    monkeypatch.setattr(rd.time, "sleep", lambda s: None)
+
+    def run(cmd, timeout=30):
+        if cmd[-2:] == ["connect", "wlan0"]:
+            sim.connects += 1
+            return (0, "") if sim.connects >= sim.joins_on else (4, "")
+        if "DEVICE,STATE" in cmd:
+            if sim.unavailable:
+                sim.unavailable -= 1
+                return 0, "wlan0:unavailable"
+            return 0, "wlan0:connected" if sim.connects >= sim.joins_on else "wlan0:disconnected"
+        return 0, ""
+    monkeypatch.setattr(rd, "_run", run)
+    return sim
+
+
+def test_wifi_up_asks_networkmanager_to_connect(wifi):
+    assert rd.wifi_up(deadline_s=30)
+    assert wifi.connects == 1 and wifi.radio == [True]
+
+
+def test_wifi_up_waits_for_wlan0_before_connecting(wifi):
+    wifi.unavailable = 2                           # just after radio-on
+    assert rd.wifi_up(deadline_s=30)
+    assert wifi.connects == 1 and wifi.radio == [True]   # no wasted radio cycle
+
+
+def test_wifi_up_retries_a_first_failure_without_cycling(wifi):
+    wifi.joins_on = 2                              # scan not done on the first try
+    assert rd.wifi_up(deadline_s=30)
+    assert wifi.radio == [True]
+
+
+def test_wifi_up_cycles_the_radio_once_after_repeated_failures(wifi):
+    wifi.joins_on = 5
+    assert rd.wifi_up(deadline_s=60)
+    assert wifi.radio == [True, False, True]       # one cycle, not one per failure
+
+
+def test_wifi_up_gives_up_at_the_deadline(wifi, monkeypatch):
+    wifi.joins_on = 99
+    clock = iter(range(0, 1000, 10))
+    monkeypatch.setattr(rd.time, "monotonic", lambda: next(clock))
+    assert not rd.wifi_up(deadline_s=60)
+
+
+def _rewind_last_try(seconds=rd.RETRY_S):
+    st = rd.load_state()
+    st["last_try"] -= seconds
+    rd._write_json(rd.STATE_FILE, st)
+
+
+def test_tick_retries_an_unreachable_session(node):
+    rd.start(60, connection="wifi")                # no network in range
+    assert not rd.load_state()["tailscale"]
+    node.status.reset_mock()
+    rd.tick()                                      # too soon: no retry
+    assert node.wifi.call_count == 1
+    _rewind_last_try()
+    node.wifi.return_value = True                  # the network answers now
+    rd.tick()
+    st = rd.load_state()
+    assert st["tailscale"] and st["retries"] == 1
+    assert node.status.call_args.args[0]["tailscale"]
+
+
+def test_tick_reboots_once_when_retries_keep_failing(node):
+    rd.start(60, connection="wifi")
+    reboots = lambda: [c for c in node.run.call_args_list if "-r" in c.args[0]]
+    for _ in range(rd.REBOOT_AFTER):
+        _rewind_last_try()
+        rd.tick()
+    assert not reboots()
+    _rewind_last_try()
+    rd.tick()
+    assert len(reboots()) == 1 and rd.load_state()["rebooted"]
+    for _ in range(3):                             # still down: retries, no second reboot
+        _rewind_last_try()
+        rd.tick()
+    assert len(reboots()) == 1
+
+
+def test_tick_leaves_a_connected_session_alone(node):
+    node.wifi.return_value = True
+    rd.start(60, connection="wifi")
+    _rewind_last_try()
+    node.status.reset_mock()
+    rd.tick()
+    assert node.wifi.call_count == 1 and not node.status.called
+
+
+@pytest.mark.parametrize("keep_on, radio_calls", [(True, [True]), (False, [])])
+def test_tick_turns_a_bench_units_radio_back_on(node, tmp_path, monkeypatch, keep_on, radio_calls):
+    (tmp_path / "runtime_config.json").write_text(json.dumps({"wifi_when_lora_healthy": keep_on}))
+    monkeypatch.setattr(rd, "REPO", str(tmp_path))
+    calls = []
+    monkeypatch.setattr("tools.wifi_policy.radio_is_on", lambda: False)
+    monkeypatch.setattr("tools.wifi_policy.radio", lambda on: calls.append(on) or True)
+    rd.tick()                                      # no session
+    assert calls == radio_calls
