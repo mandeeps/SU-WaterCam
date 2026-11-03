@@ -16,6 +16,7 @@ from tools import remote_debug as rd  # noqa: E402
 def node(tmp_path, monkeypatch):
     """remote_debug with its files in tmp_path and every system call recorded."""
     monkeypatch.setattr(rd, "DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(rd, "REPO", str(tmp_path))     # runtime_config.json here, if a test writes one
     monkeypatch.setattr(rd, "STATE_FILE", str(tmp_path / "remote_debug.json"))
     monkeypatch.setattr(rd, "REQUEST_FILE", str(tmp_path / "remote_debug_request.json"))
     monkeypatch.setattr(rd, "LOCK_FILE", str(tmp_path / "remote_debug.lock"))
@@ -375,3 +376,66 @@ def test_tick_turns_a_bench_units_radio_back_on(node, tmp_path, monkeypatch, kee
     monkeypatch.setattr("tools.wifi_policy.radio", lambda on: calls.append(on) or True)
     rd.tick()                                      # no session
     assert calls == radio_calls
+
+
+def _emergency(tmp_path, on=True):
+    (tmp_path / "runtime_config.json").write_text(json.dumps({"emergency_mode": on}))
+
+
+def test_stop_in_emergency_mode_keeps_the_alarm_cleared(node, tmp_path):
+    rd.start(30)
+    _emergency(tmp_path)
+    rd.stop()
+    node.rearm.assert_not_called()
+    assert node.systemctl.call_args_list[-1].args == ("start",)    # ticktalk carries on
+
+
+def test_stop_with_shutdown_in_emergency_mode_starts_ticktalk_instead(node, tmp_path):
+    rd.start(30)
+    _emergency(tmp_path)
+    rd.stop(shutdown=True)
+    assert not [c for c in node.run.call_args_list if "/usr/sbin/shutdown" in c.args[0]]
+    assert node.systemctl.call_args_list[-1].args == ("start",)
+
+
+def test_start_records_ticktalk_and_alarm(node, monkeypatch):
+    monkeypatch.setattr(rd, "ticktalk_active", lambda: False)
+    st = rd.start(30)
+    assert st["ticktalk_stopped"] is True and st["alarm_cleared"] is True
+
+
+def test_start_reports_a_ticktalk_that_would_not_stop(node, monkeypatch):
+    monkeypatch.setattr(rd, "ticktalk_active", lambda: True)
+    assert rd.start(30)["ticktalk_stopped"] is False
+
+
+def test_status_uplink_carries_ticktalk_and_alarm(monkeypatch):
+    sent = []
+    handler = MagicMock(current_size_limit=242, transmit=lambda hexed: sent.append(hexed) or True)
+    state = {"active": True, "until": time.time() + 600, "tailscale": True,
+             "ticktalk_stopped": True, "alarm_cleared": True}
+    assert rd.send_status(state, handler)
+    body = json.loads(bytes.fromhex(sent[0]))
+    assert body["tt"] == 1 and body["wa"] == 1 and body["tn"] == 1
+
+
+@pytest.mark.parametrize("value, code, minutes, connection",
+                         [("06", "18 99", 60, "wifi"), ("18", "18 9A", 240, "auto"), ("00", "18 98", 0, "cellular")])
+def test_lora_command_is_queued_for_the_service(node, monkeypatch, value, code, minutes, connection):
+    from tools.lora_handler_concurrent import LoRaHandler
+    started = MagicMock()
+    monkeypatch.setattr(rd, "start", started)
+    monkeypatch.setattr(rd, "stop", started)
+    LoRaHandler._start_remote_debug(LoRaHandler.__new__(LoRaHandler), value, code)
+    req = json.loads(open(rd.REQUEST_FILE).read())
+    assert req["minutes"] == minutes and req["connection"] == connection and req["source"] == "lora"
+    started.assert_not_called()                    # not in lora_daemon: it can't use doas
+
+
+def test_service_units_start_a_request_at_once():
+    cfg = os.path.join(os.path.dirname(__file__), "..", "config")
+    path = open(os.path.join(cfg, "remote-debug.path")).read()
+    assert "PathChanged=/home/pi/SU-WaterCam/data/remote_debug_request.json" in path
+    assert "Unit=remote-debug.service" in path
+    service = open(os.path.join(cfg, "remote-debug.service")).read()
+    assert "NoNewPrivileges=yes" not in service         # it runs doas

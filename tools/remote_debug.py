@@ -16,7 +16,11 @@ Starting: clear the Witty Pi shutdown alarm, stop ticktalk.service, bring the
 modem's connection up and wait for Tailscale. Stopping: take cellular down again
 if it is managed on demand, re-arm the Witty Pi from the installed schedule.wpi,
 then start ticktalk (a normal cycle and its usual shutdown) or power off. A unit
-with ticktalk.service disabled (a bench unit) stays up instead.
+with ticktalk.service disabled (a bench unit) stays up instead. In emergency mode
+the schedule isn't re-armed and ticktalk is started rather than powering off.
+
+Runs in remote-debug.service (timer, or remote-debug.path on a request), never in
+lora_daemon: that daemon has NoNewPrivileges, so doas and sudo fail in it.
 """
 import argparse
 import fcntl
@@ -290,7 +294,9 @@ def _size_limit(handler):
 
 
 def send_status(state, handler=None):
-    """LoRa uplink {"dbg":1,"rd":<min left>,"tn":0/1,"cl":0/1,"ts":<epoch>,"wf":0/1}; best effort.
+    """LoRa uplink {"dbg":1,"rd":<min left>,"tn":0/1,"cl":0/1,"ts":<epoch>,"wf":0/1,
+    "tt":0/1,"wa":0/1}; best effort. tt: ticktalk is stopped for the session; wa: the
+    Witty Pi shutdown alarm is cleared.
 
     Trimmed to the mDot's payload limit like the 5001 reply, dropping fields from
     the end. {"dbg":1,"rd":N} (about 17 B) is the least the server needs to confirm
@@ -301,7 +307,9 @@ def send_status(state, handler=None):
         left = max(0, int((state["until"] - time.time()) // 60))
     fields = [("dbg", 1), ("rd", left), ("tn", int(bool(state and state.get("tailscale")))),
               ("cl", int(bool(state and state.get("cellular")))), ("ts", int(time.time())),
-              ("wf", int(bool(state and state.get("wifi"))))]   # last: dropped first when space is short
+              ("wf", int(bool(state and state.get("wifi")))),
+              ("tt", int(bool(state and state.get("ticktalk_stopped")))),
+              ("wa", int(bool(state and state.get("alarm_cleared"))))]   # last: dropped first when space is short
     try:
         if handler is None:
             from tools.lora_handler_concurrent import get_lora_handler
@@ -391,6 +399,7 @@ def _establish(state):
     _write_json(STATE_FILE, state)           # first, so a crash below still expires
     state["alarm_cleared"] = suspend_shutdown_alarm()
     _systemctl("stop")
+    state["ticktalk_stopped"] = not ticktalk_active()
     _connect(state)
 
 
@@ -421,6 +430,10 @@ def ticktalk_enabled():
     return _run([SYSTEMCTL, "is-enabled", "ticktalk.service"], timeout=15)[0] == 0
 
 
+def ticktalk_active():
+    return _run([SYSTEMCTL, "is-active", "ticktalk.service"], timeout=15)[0] == 0
+
+
 def _retry():
     """Still unreachable: try again every RETRY_S; after REBOOT_AFTER failed retries,
     reboot once (a WiFi driver can refuse to associate until the Pi restarts).
@@ -445,14 +458,17 @@ def _retry():
     return state
 
 
-def _keep_bench_wifi_on():
-    """A bench unit (wifi_when_lora_healthy) should never be left with the radio off."""
+def _runtime_flag(name):
     try:
         with open(os.path.join(REPO, "runtime_config.json")) as f:
-            keep_on = bool(json.load(f).get("wifi_when_lora_healthy"))
+            return bool(json.load(f).get(name))
     except (OSError, ValueError, AttributeError):
-        return
-    if not keep_on:
+        return False
+
+
+def _keep_bench_wifi_on():
+    """A bench unit (wifi_when_lora_healthy) should never be left with the radio off."""
+    if not _runtime_flag("wifi_when_lora_healthy"):
         return
     try:
         from tools.wifi_policy import radio, radio_is_on
@@ -476,10 +492,15 @@ def stop(shutdown=False, handler=None, reason="requested"):
         _, managed = cellular_state(conn)
         if managed and not state.get("cellular_was_up"):
             cellular_down(conn)
-        rearm_schedule()
+        emergency = _runtime_flag("emergency_mode")
+        if emergency:
+            # emergency mode keeps the shutdown alarm cleared; ticktalk carries on with it
+            log("emergency mode is on: Witty Pi schedule not re-armed")
+        else:
+            rearm_schedule()
         _remove(STATE_FILE)
     send_status({"active": False}, handler)
-    if shutdown:
+    if shutdown and not emergency:
         log("powering off; the Witty Pi wakes the Pi at its next slot")
         for cmd in (["doas", "/usr/sbin/shutdown", "-h", "now"], ["sudo", "-n", "/usr/sbin/shutdown", "-h", "now"]):
             if _run(cmd)[0] == 0:

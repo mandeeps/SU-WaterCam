@@ -1,0 +1,13 @@
+[Unit]
+Description=Start a requested WaterCam remote debug session at once (docs/REMOTE_DEBUG_SESSION.md)
+
+# lora_daemon and the IP poll write the request file; remote-debug.service applies it
+# (remote-debug.timer would also pick it up, within 30 s). PathChanged rather than
+# PathExists: a request left while a session start holds the lock would otherwise
+# retrigger the service in a loop until the start finished.
+[Path]
+PathChanged=/home/pi/SU-WaterCam/data/remote_debug_request.json
+Unit=remote-debug.service
+
+[Install]
+WantedBy=multi-user.target

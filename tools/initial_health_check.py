@@ -13,7 +13,7 @@ It also prints WARN lines (they don't change the exit code) for setup mistakes:
 - on a unit with an mDot: GPIO5 (the mDot's "Pi is on" line) not driven high
   (`gpio=5=op,dh` in config.txt), or a Witty Pi L3V7 (firmware ID 0x37), whose
   daemon reconfigures GPIO5;
-- `remote-debug.timer` not enabled.
+- `remote-debug.timer` or `remote-debug.path` not enabled.
 
 On any failure, sends a LoRa packet describing the failed checks.
 
@@ -210,11 +210,13 @@ def read_wittypi_firmware_id():
 
 
 def remote_debug_timer_enabled() -> bool:
+    """remote-debug.timer and remote-debug.path are both enabled (the path unit starts
+    a LoRa-requested session at once; without it the timer takes up to 30 s)."""
     try:
         import subprocess
-        r = subprocess.run(['systemctl', 'is-enabled', 'remote-debug.timer'],
+        r = subprocess.run(['systemctl', 'is-enabled', 'remote-debug.timer', 'remote-debug.path'],
                            capture_output=True, text=True, timeout=10)
-        return r.stdout.strip() == 'enabled'
+        return r.stdout.split() == ['enabled', 'enabled']
     except Exception:
         return False
 
@@ -242,7 +244,7 @@ def setup_warnings(mdot: bool, gpio5: Dict[str, str], wittypi_fw, timer_enabled:
         if wittypi_fw == WITTYPI_FW_L3V7:
             warnings.append('wittypi_l3v7_daemon_reconfigures_gpio5 (firmware ID 0x37)')
     if not timer_enabled:
-        warnings.append('remote_debug_timer_not_enabled (systemctl enable --now remote-debug.timer)')
+        warnings.append('remote_debug_timer_not_enabled (systemctl enable --now remote-debug.timer remote-debug.path)')
     if untrusted_server:
         warnings.append('ip_server_untrusted (server_url is neither https nor a tailnet address, '
                         'or Tailscale is down: IP readings stay queued)')
