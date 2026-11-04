@@ -7,8 +7,8 @@ Type=oneshot
 User=pi
 WorkingDirectory=/home/pi/SU-WaterCam
 ExecStart=/home/pi/SU-WaterCam/venv/bin/python /home/pi/SU-WaterCam/tools/remote_debug.py tick
-# Starting a session waits up to ~3 min for cellular and Tailscale.
-TimeoutStartSec=300
+# Starting a session can take ~8 min: WiFi (2.5 min), then cellular and Tailscale (~5 min).
+TimeoutStartSec=600
 
 # Light sandbox (#207), as ticktalk: it runs doas (systemctl stop/start ticktalk), and doas children
 # inherit these settings, so no NoNewPrivileges or capability limits.

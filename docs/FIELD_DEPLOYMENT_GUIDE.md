@@ -952,10 +952,11 @@ card can't stop the unit. The photos aren't uploaded, so this is the only copy.
 ### 1.9.2 Optional, legacy and bench-only services
 
 - **Remote debug session** (dashboard "Remote access"): install
-  `config/remote-debug.service` and `.timer` and enable the timer, as in
-  [REMOTE_DEBUG_SESSION.md](REMOTE_DEBUG_SESSION.md). Install it on every unit
-  that should accept remote-access requests (`sudo systemctl enable --now
-  remote-debug.timer`); the startup health check (1.10) warns when it isn't enabled.
+  `config/remote-debug.service`, `.timer` and `.path` and enable the timer and
+  path units, as in [REMOTE_DEBUG_SESSION.md](REMOTE_DEBUG_SESSION.md). Install it
+  on every unit that should accept remote-access requests (`sudo systemctl enable
+  --now remote-debug.timer remote-debug.path`); the startup health check (1.10)
+  warns when either isn't enabled.
 - **filebrowser:** off on deployed units (`sudo systemctl disable --now
   filebrowser`), it costs cellular data ([1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
 - **Legacy, never install:** `watercam.service` (replaced by ticktalk; the unit file is gone from `config/`),
@@ -984,7 +985,7 @@ etc.) and resolve them before moving on. GPS will very likely fail indoors, re-c
 After the readings it prints `WARN` lines for setup mistakes (they don't change
 the exit code): on an mDot unit, GPIO5 not driven high (`pinctrl get 5` should say
 `op ... | hi`; see 1.3.3) or a Witty Pi L3V7 (firmware ID 0x37); and
-`remote-debug.timer` not enabled.
+`remote-debug.timer` or `remote-debug.path` not enabled.
 
 ### 1.11 Test a full capture-and-transmit cycle
 
@@ -1083,7 +1084,7 @@ for the site:
 - [ ] Units without the PCB: the switch MOSFET is taped down, its leads and the
       pull-down resistor are insulated, and nudging them doesn't restart the unit
       (no new "System starts up" line in `~/wittypi/wittyPi.log`) (1.11.1).
-- [ ] `systemctl is-enabled remote-debug.timer max-awake.timer` prints `enabled`
+- [ ] `systemctl is-enabled remote-debug.timer remote-debug.path max-awake.timer` prints `enabled`
       twice, `hold_awake` is not true in `runtime_config.json`, and
       `/etc/watercam/hold-awake` doesn't exist.
 - [ ] `systemctl is-enabled rtc-early-clock.service` prints `enabled`, and after a

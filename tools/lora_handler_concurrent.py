@@ -1078,26 +1078,22 @@ class LoRaHandler:
     def _start_remote_debug(self, value: str, code: str = '18 98') -> None:
         """Start, extend or end a remote debug session (docs/REMOTE_DEBUG_SESSION.md).
 
-        On a thread: bringing cellular and Tailscale up takes up to ~3 min, and
-        decode() runs in the serial listener. The session's status uplink goes
-        through this handler's transmit(), which waits for the lock.
+        Queued for remote-debug.service (remote-debug.path starts it at once)
+        rather than run here: this daemon runs with NoNewPrivileges, so doas and
+        sudo fail in it, and the session has to stop ticktalk, re-arm the Witty Pi
+        and power off or reboot. The service sends the status uplinks through this
+        daemon's socket.
         """
-        def run():
+        try:
             try:
-                try:
-                    from tools import remote_debug
-                except ImportError:
-                    import remote_debug
-                minutes = remote_debug.minutes_from_code(value)
-                if minutes:
-                    remote_debug.start(minutes, source='lora', handler=self,
-                                       connection=remote_debug.CODE_CONNECTION.get(code, 'cellular'))
-                else:
-                    remote_debug.stop(handler=self, reason='LoRa command')
-            except Exception as e:
-                print(f"⚠️ Remote debug command failed: {e}")
-        print(f'🛠️ Remote debug command, value {value!r}')
-        threading.Thread(target=run, name='remote-debug', daemon=True).start()
+                from tools import remote_debug
+            except ImportError:
+                import remote_debug
+            minutes = remote_debug.minutes_from_code(value)
+            remote_debug.request(minutes, 'lora', connection=remote_debug.CODE_CONNECTION.get(code, 'cellular'))
+            print(f'🛠️ Remote debug command, value {value!r}: queued for remote-debug.service')
+        except Exception as e:
+            print(f"⚠️ Remote debug command failed: {e}")
 
     def _send_debug_reply(self, hex_payload: str) -> None:
         """Transmit a debug-status reply (runs on its own thread; see decode())."""

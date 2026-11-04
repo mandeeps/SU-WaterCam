@@ -56,15 +56,18 @@ node:  1. clear the Witty Pi shutdown alarm       (the Pi stays on past its wind
        2. stop ticktalk.service                   (no capture load, no call_shutdown)
        3. nmcli connection up Quectel             (pi may do this: polkit rule)
        4. wait for Tailscale: BackendState Running and Self.Online (up to 120 s)
-       5. LoRa status uplink {"ak":<seq>,"dbg":1,"rd":<min left>,"tn":<tailscale 0/1>,"cl":<cellular 0/1>}
+       5. LoRa status uplink {"ak":<seq>,"dbg":1,"rd":<min left>,"tn":<tailscale 0/1>,"cl":<cellular 0/1>,
+          "wf":<wifi 0/1>,"tt":<ticktalk stopped 0/1>,"wa":<shutdown alarm cleared 0/1>}
 admin: tailscale ssh pi@ufo-01-01-NNN...
 end:   dashboard "End remote debug" (18 98 00), or on the node:
          ~/SU-WaterCam/venv/bin/python ~/SU-WaterCam/tools/remote_debug.py stop
        or the time runs out (checked every 30 s by remote-debug.timer)
 node:  1. cellular down, if it is managed on demand (Quectel autoconnect off)
-       2. re-arm the Witty Pi from the installed schedule.wpi (runScript.sh)
+       2. re-arm the Witty Pi from the installed schedule.wpi (runScript.sh);
+          not in emergency mode, which keeps the shutdown alarm cleared
        3. start ticktalk.service: a normal cycle, then its usual shutdown
-          (not if ticktalk.service is disabled, as on a bench unit: it stays up)
+          (not if ticktalk.service is disabled, as on a bench unit: it stays up;
+          in emergency mode a "power off" end starts ticktalk instead)
        4. LoRa status uplink with rd 0
 ```
 
@@ -91,8 +94,11 @@ boots caused by power returning, not switch presses.
 - **`tools/remote_debug.py`**: `start --minutes N`, `stop [--shutdown]`,
   `status`, `tick`. State in `data/remote_debug.json`: end time, what started
   it, and whether cellular was already up. Written atomically.
-- **`lora_daemon`**: on `18 98 NN`, runs `remote_debug.start()` or `stop()` on
-  a thread, so the serial listener isn't blocked while Tailscale connects.
+- **`lora_daemon`**: on `18 98/99/9A NN`, writes the request file and returns.
+  It runs with `NoNewPrivileges`, so the session itself (which runs doas to stop
+  ticktalk, re-arm the Witty Pi and power off or reboot) can't run there.
+  **`remote-debug.path`** starts `remote-debug.service` as soon as the file is
+  written; the service sends the status uplinks through the daemon's socket.
 - **IP downlink**: the command (acked with `POST /ip/ack`) writes a request file that the timer picks up, since
   ticktalk can't stop itself and keep running the session.
 - **`remote-debug.timer`** runs `remote_debug.py tick` every 30 s as `pi`. It
@@ -126,8 +132,8 @@ boots caused by power returning, not switch presses.
 
 ```bash
 cd ~/SU-WaterCam
-sudo cp config/remote-debug.service config/remote-debug.timer /etc/systemd/system/
+sudo cp config/remote-debug.service config/remote-debug.timer config/remote-debug.path /etc/systemd/system/
 sudo cp config/doas.conf /etc/doas.conf
-sudo systemctl daemon-reload && sudo systemctl enable --now remote-debug.timer
+sudo systemctl daemon-reload && sudo systemctl enable --now remote-debug.timer remote-debug.path
 sudo systemctl restart lora_daemon
 ```

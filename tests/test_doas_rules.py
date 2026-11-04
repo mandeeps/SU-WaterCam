@@ -6,7 +6,7 @@ any time or option). The shutdown callers all use `shutdown -h now`.
 import os
 import re
 
-ROOT = os.path.join(os.path.dirname(__file__), "..")
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 
 
 def _rules():
@@ -23,15 +23,17 @@ def test_passwordless_rules_name_their_arguments():
         assert " args " in f" {rule} " or cmd in exempt, rule
 
 
-def test_shutdown_is_only_halt_now():
+def test_shutdown_is_only_halt_or_reboot_now():
     shutdown = [r for r in _rules() if "/usr/sbin/shutdown" in r]
-    assert shutdown == ["permit nopass :pi as root cmd /usr/sbin/shutdown args -h now"]
+    assert shutdown == ["permit nopass :pi as root cmd /usr/sbin/shutdown args -h now",
+                        "permit nopass :pi as root cmd /usr/sbin/shutdown args -r now"]
 
 
 def test_every_shutdown_caller_matches_the_rule():
     pattern = re.compile(r"doas[^\n]*?/usr/sbin/shutdown([^\n]*)")
     for dirpath, _, files in os.walk(ROOT):
-        if any(part in dirpath for part in (".git", "venv", "node_modules", "tests", "docs")):
+        rel = os.path.relpath(dirpath, ROOT).split(os.sep)
+        if any(part in rel for part in (".git", "venv", ".venv", "node_modules", "tests", "docs")):
             continue
         for name in files:
             if not name.endswith(".py"):
@@ -39,4 +41,4 @@ def test_every_shutdown_caller_matches_the_rule():
             with open(os.path.join(dirpath, name), errors="replace") as f:
                 for m in pattern.finditer(f.read()):
                     tail = m.group(1)
-                    assert '"-h", "now"' in tail or "-h now" in tail, (name, m.group(0))
+                    assert any(a in tail for a in ('"-h", "now"', "-h now", '"-r", "now"', "-r now")), (name, m.group(0))
