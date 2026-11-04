@@ -78,8 +78,8 @@ def test_removed_keys_are_refused():
 
 
 def test_known_mismatches_are_listed():
-    # Decided in review, key by key; until then the template keeps its values
-    assert ("emergency_frequency", 10, 5) in cs.template_mismatches()
+    # Decided in review, key by key: emergency_frequency now follows the code (10)
+    assert [k for k, _, _ in cs.template_mismatches()] == ["ip_upload.server_url"]
 
 
 def test_lora_thresholds_section_defaults():
