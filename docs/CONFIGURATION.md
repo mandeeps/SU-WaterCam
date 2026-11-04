@@ -28,7 +28,7 @@ Defaults are the code's (`tools/lora_runtime_integration.py` `_DEFAULT_PARAMS`, 
 | `bitmap_method2_enabled` | true | — | bitmap_fit, ticktalk_main | local | guide 1.5, BITMAP_DECODING_SPEC |
 | `stage_threshold` | 50; 0–65535 cm | 50 | ticktalk_main (reported only; the server applies its own) | remote `11 91` | guide 1.5 |
 | `monitoring_frequency` | 60; 1–10080 min | 60 | ticktalk_main; written by schedule_control | remote, via `15 95` | guide 1.5 |
-| `emergency_frequency` | 10; 1–240 min | **5** | ticktalk_main, emergency_sleep, photo_interval_watcher, max_awake | remote `13 93` | guide 1.5, REMOTE_START_AND_EMERGENCY |
+| `emergency_frequency` | 10; 1–240 min | 10 | ticktalk_main, emergency_sleep, photo_interval_watcher, max_awake | remote `13 93` | guide 1.5, REMOTE_START_AND_EMERGENCY |
 | `photo_interval` | 60; 30–1440 s | 60 | ticktalk_main, photo_interval_watcher | local | guide 1.5 |
 | `neighborhood_emergency_frequency` | 30; 1–1440 min | 30 | ticktalk_main | remote `14 94` | guide 1.5 |
 | `emergency_mode` | false | false | ticktalk_main, emergency_sleep, max_awake, bitmap_policy, lora handler | remote `21 91` on, `99 99` off | REMOTE_START_AND_EMERGENCY, IP_TRANSMISSION |
@@ -181,7 +181,7 @@ These are listed so a reader of `/run` and `/tmp` knows what they are:
 
 ## To review later
 
-1. **Template vs code defaults:** `emergency_frequency` is 5 in the template and 10 in the code, and the template lacks `emergency_sleep`, `bitmap_*`, `storage_*`, `gps_*`, `wifi_when_lora_healthy` and `lora_min_margin_db`.
+1. **Template vs code defaults:** `emergency_frequency` is 10 in both. The template lacks `emergency_sleep`, `bitmap_*`, `storage_*`, `gps_*`, `wifi_when_lora_healthy` and `lora_min_margin_db`.
 2. **`lora_config.json` duplicates:** resolved. The file is no longer written, and its copies are ignored (`lora_queue` section above).
 3. **No effect:** resolved. `max_retransmissions`, `backup_enabled` and `compression_level` have been removed (`set_parameter` now refuses them; an existing unit's file may still hold them, harmlessly).
 4. **The `wittypi_*` keys:** only a last resort, used when emergency mode ends with no `schedule.wpi` and no fallback schedule. The repo's daylight preset is always a fallback, so in practice they are never used. `ticktalk_main.get_wittypi_schedule_config` is not called from the graph. They can go when ticktalk_main is next rebuilt.

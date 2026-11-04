@@ -77,7 +77,7 @@ SETTINGS: List[Setting] = [
       range=(1, 10080), integer=True, in_defaults=True, remote="15 95", readers=("ticktalk_main", "schedule_control"), in_template=True),
     S("emergency_frequency", DEFAULT_EMERGENCY_FREQUENCY, "Minutes between captures in emergency mode and keep-awake holds",
       range=(MIN_EMERGENCY_FREQUENCY, MAX_EMERGENCY_FREQUENCY), integer=True, in_defaults=True, remote="13 93",
-      readers=("ticktalk_main", "emergency_sleep", "photo_interval_watcher", "max_awake"), template=5, in_template=True),
+      readers=("ticktalk_main", "emergency_sleep", "photo_interval_watcher", "max_awake"), in_template=True),
     S("photo_interval", 60, "Seconds between captures within a wake",
       range=(30, 1440), integer=True, in_defaults=True, readers=("ticktalk_main", "photo_interval_watcher"), in_template=True),
     S("neighborhood_emergency_frequency", 30, "Reporting frequency once a neighbouring unit signals emergency (minutes)",
