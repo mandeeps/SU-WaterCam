@@ -43,6 +43,50 @@ is on WiFi.
 Values above `18` are capped at 4 h. On the node, the LoRa decoder sees it as
 channel `18`, command `98`, value `NN`, read as hex.
 
+## Session actions
+
+While a session is up, the admin can ask the node to do one thing and get a short
+answer over LoRa. Step 1 has one action, the status check; collect logs, test
+capture and restart service will use the same dispatch (`ACTIONS` in
+`tools/remote_debug.py`).
+
+**Command:** `1A 9A II AA` in a command frame (`[seq] 1A 9A II AA`, e.g. `00 1A 9A 0C 01`
+by hand), the same over LoRa and IP. `II` is the action id (1-255, `00` is rejected), `AA`
+the action: `01` status check. The API picks ids that aren't reused within 10 minutes.
+
+**Where it runs:** `lora_daemon` (NoNewPrivileges) and the IP downlink only spool it as a
+file in `data/remote_debug_actions/` (`remote_debug.request_action`); `remote-debug.path`
+starts `remote-debug.service` at once, and `tick` runs it with the privileges the
+actions need. With no session running the action is refused, with a result.
+
+**IP poll:** ticktalk, which normally polls the IP command queue, is stopped during a
+session, so every `tick` (30 s) polls it once the session has Tailscale up, applies each
+frame like ticktalk does (`handle_downlink_reply`: each frame once, then `/ip/ack`) and runs
+any spooled action. The poll applies every queued command, not only actions (parameters,
+schedule, emergency, remote session codes), because ticktalk is stopped. A schedule change
+or emergency off re-arms the Witty Pi, so the poll clears the shutdown alarm again. Over IP the ack is the only report; the result goes over LoRa.
+
+**De-dup:** a frame that came over both transports is applied once (`data/applied_commands.json`).
+The action id is also remembered for 10 minutes in `remote_debug.json` (`"actions"`), so
+the same id in two different frames runs once. It is forgotten when the session ends.
+
+**Result** (LoRa uplink, compact JSON, trimmed from the end to the payload limit like the
+status uplink; it is not sent if `ai`, `ac` and `ok` (24 B) don't fit):
+
+| Field | Meaning |
+|---|---|
+| `ai` | the action id |
+| `ac` | the action code |
+| `ok` | 1 done, 0 not done |
+| `er` | only with `ok` 0: 1 no session, 2 unknown action, 3 failed |
+| `sv` | status check: service bitmask, 1 ticktalk, 2 lora_daemon, 4 segformer_daemon, 8 remote-debug (its timer) |
+| `vr` | status check: software version, `2026.10.7`, `+N` commits past the tag, `!` if modified |
+| `ca` | status check: minutes since the newest capture in `images/` |
+| `tn`, `wf`, `cl` | status check: Tailscale, WiFi, cellular up (0/1) |
+
+Example, 78 B: `{"ai":255,"ac":1,"ok":1,"sv":14,"vr":"2026.10.7","ca":37,"tn":1,"wf":1,"cl":0}`
+(53 B at SF9 keeps `ai` to `vr`). No SIM data. The action id is `ai`, not `ak`, which the API reads as a command ack.
+
 ## Sequence
 
 ```
@@ -102,6 +146,8 @@ boots caused by power returning, not switch presses.
   written; the service sends the status uplinks through the daemon's socket.
 - **IP downlink**: the command (acked with `POST /ip/ack`) writes a request file that the timer picks up, since
   ticktalk can't stop itself and keep running the session.
+- **Actions:** `remote_debug.request_action`, `handle_action`, `run_spooled_actions`,
+  `poll_ip_commands` (see Session actions above).
 - **`remote-debug.timer`** runs `remote_debug.py tick` every 30 s as `pi`. It
   applies a pending request and ends an expired session. It doesn't depend on
   `lora_daemon`, which a node without an mDot doesn't run.
@@ -135,6 +181,7 @@ boots caused by power returning, not switch presses.
 cd ~/SU-WaterCam
 sudo cp config/remote-debug.service config/remote-debug.timer config/remote-debug.path /etc/systemd/system/
 sudo cp config/doas.conf /etc/doas.conf
+mkdir -p data/remote_debug_actions   # optional: the node creates it on the first action
 sudo systemctl daemon-reload && sudo systemctl enable --now remote-debug.timer remote-debug.path
 sudo systemctl restart lora_daemon
 ```

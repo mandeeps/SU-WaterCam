@@ -7,6 +7,8 @@ Description=Start a requested WaterCam remote debug session at once (docs/REMOTE
 # retrigger the service in a loop until the start finished.
 [Path]
 PathChanged=/home/pi/SU-WaterCam/data/remote_debug_request.json
+# session actions (command 1A 9A) are spooled as files in this directory
+PathChanged=/home/pi/SU-WaterCam/data/remote_debug_actions
 Unit=remote-debug.service
 
 [Install]

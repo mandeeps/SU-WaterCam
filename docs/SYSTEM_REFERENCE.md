@@ -29,6 +29,7 @@ deduplicated, and acked as `ak: 0`.
 | `16 96` | 1 | audio recording | 0 or 1 |
 | `17 97` | 1 | IP upload in each of the next NN wakes | 0 cancels |
 | `18 98` / `18 99` / `18 9A` | 1 | remote debug session, NN x 10 min (cellular / WiFi only / WiFi else cellular) | 0 ends |
+| `1A 9A` | 2 | session action: id u8 (1-255), action u8 (1 = status check); only runs inside a remote debug session ([REMOTE_DEBUG_SESSION.md](REMOTE_DEBUG_SESSION.md#session-actions)) | id 0 is rejected |
 | `21 91` | 1 | emergency mode on for HH hours | 0 = `emergency_max_hours`; capped at 168 |
 | `50 01` | 0 | status request: the ack is the node's status reply | |
 | `19 99` | 0 | take a live GPS fix at the next wake (`tools/gps_window.py`) | |

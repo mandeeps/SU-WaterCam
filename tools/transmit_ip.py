@@ -817,6 +817,7 @@ DOWNLINK_CODE_LENGTHS: Dict[str, int] = {
     "18 98": 1,    # remote debug session: NN x 10 min, 0 = end (docs/REMOTE_DEBUG_SESSION.md)
     "18 99": 1,    # the same session over WiFi only, never cellular
     "18 9A": 1,    # the same session over WiFi if a known network answers, else cellular
+    "1A 9A": 2,    # session action: id u8 (1-255), action u8 (1 status check); remote debug sessions only
     "21 91": 1,    # emergency on for HH hours (00 = emergency_max_hours)
     "50 01": 0,    # status request: the ack is the node's status reply
     "19 99": 0,    # take a live GPS fix at the next wake (tools/gps_window.py)
@@ -1079,6 +1080,20 @@ def apply_downlink_command(
             remote_debug.request(minutes, "ip", connection=connection)
             logger.info("Queued: remote session (%s) %s", connection, f"{minutes} min" if minutes else "end")
             applied.append(f"remote_debug={minutes}" + ("" if connection == "cellular" else f":{connection}"))
+
+        elif code == "1A 9A":  # session action: spooled for remote-debug.service, which answers over LoRa
+            try:
+                from tools import remote_debug
+            except ImportError:
+                import remote_debug
+            action_id, action = payload_bytes[0], payload_bytes[1]
+            if action_id == 0:
+                logger.warning("Session action with id 0 ignored")
+                skipped.append(code)
+            else:
+                remote_debug.request_action(action_id, action, "frame")
+                logger.info("Queued: session action %d (action %d)", action_id, action)
+                applied.append(f"session_action={action_id}:{action}")
 
         elif code == "21 91":  # emergency mode on for HH hours
             hours = payload_bytes[0]

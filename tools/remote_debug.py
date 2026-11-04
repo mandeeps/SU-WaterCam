@@ -12,6 +12,11 @@ steps: docs/REMOTE_DEBUG_SESSION.md.
     remote_debug.py status
     remote_debug.py tick                   remote-debug.timer, every 30 s
 
+Session actions (docs/REMOTE_DEBUG_SESSION.md): the `1A 9A` command carries an
+action id and an action code. lora_daemon and the IP downlink only spool it
+(`request_action`); tick runs it, polls the IP command queue while the session is
+up (ticktalk, which normally polls, is stopped), and answers over LoRa.
+
 Starting: clear the Witty Pi shutdown alarm, stop ticktalk.service, bring the
 modem's connection up and wait for Tailscale. Stopping: take cellular down again
 if it is managed on demand, re-arm the Witty Pi from the installed schedule.wpi,
@@ -50,6 +55,13 @@ WIFI_TAILSCALE_WAIT_S = 45
 RETRY_S = 300             # an unreachable session tries again this often
 REBOOT_AFTER = 3          # failed retries before one reboot
 SYSTEMCTL = "/usr/bin/systemctl"
+
+# --- session actions ------------------------------------------------------------------------
+ACTION_STATUS = 1                 # status check; 2 collect logs, 3 test capture, 4 restart service to come
+ACTION_DEDUP_S = 600              # an action id seen in this window runs once, whichever transport it came by
+ACTION_BATCH = 8                  # spooled actions handled per tick
+ER_NO_SESSION, ER_UNKNOWN, ER_FAILED = 1, 2, 3
+SERVICE_BITS = (("ticktalk", 1), ("lora_daemon", 2), ("segformer_daemon", 4), ("remote-debug", 8))
 
 
 def log(msg):
@@ -537,9 +549,11 @@ def tick():
         return
     if not state or not state.get("active"):
         _keep_bench_wifi_on()
+        run_spooled_actions()                 # refused: no session
         return
     if time.time() >= state.get("until", 0):
         stop(reason="time is up")
+        run_spooled_actions()
         return
     if state.get("boot_id") != _boot_id():
         # rebooted mid-session: the boot re-armed the Witty Pi and started ticktalk
@@ -554,6 +568,175 @@ def tick():
         state = _retry()
         if state and state.get("tailscale"):
             send_status(state)                # an uplink only when it got through
+    else:
+        poll_ip_commands()                    # ticktalk, which normally polls, is stopped
+    run_spooled_actions()
+
+
+# --- session actions ------------------------------------------------------------------------
+
+def _actions_dir():
+    return os.path.join(DATA_DIR, "remote_debug_actions")
+
+
+def request_action(action_id, action, source):
+    """Spool one action for the service (remote-debug.path starts it at once, or the
+    timer within 30 s). For callers that can't run it: lora_daemon has NoNewPrivileges,
+    and ticktalk is stopped during a session. One file per request, so writers never clash."""
+    d = _actions_dir()
+    os.makedirs(d, exist_ok=True)
+    # written as a dot-prefixed temp file, then renamed: the path unit never starts the
+    # service on a half-written request, and the reader ignores temp files
+    name = f"{time.time_ns()}_{int(action_id)}.json"
+    _write_json(os.path.join(d, "." + name + ".tmp"),
+                {"id": int(action_id), "action": int(action), "source": source, "at": time.time()})
+    os.replace(os.path.join(d, "." + name + ".tmp"), os.path.join(d, name))
+
+
+def _service_mask():
+    mask = 0
+    for name, bit in SERVICE_BITS:
+        unit = "remote-debug.timer" if name == "remote-debug" else f"{name}.service"
+        if _run([SYSTEMCTL, "is-active", unit], timeout=15)[0] == 0:
+            mask |= bit
+    return mask
+
+
+def _version_tag():
+    """Release tag as "2026.10.7", with "+N" commits past it and "!" if dirty; or the commit."""
+    try:
+        from tools import node_version
+        v = node_version.software_version()
+    except Exception:
+        return None
+    if not v:
+        return None
+    if not v.get("release"):
+        return v.get("commit")
+    y, m, p = v["release"]
+    return f"{y}.{m}.{p}" + (f"+{v['ahead']}" if v.get("ahead") else "") + ("!" if v.get("dirty") else "")
+
+
+def _last_capture_age_min():
+    """Minutes since the newest capture in images/ was written, or None."""
+    try:
+        from tools.data_retention import IMAGES_DIR
+        newest = max(e.stat().st_mtime for e in os.scandir(IMAGES_DIR))
+    except (OSError, ValueError, ImportError):
+        return None
+    return max(0, int((time.time() - newest) // 60))
+
+
+def _action_status(state):
+    """Status check: (ok, extra fields in priority order). No SIM data."""
+    fields = [("sv", _service_mask()), ("vr", _version_tag()), ("ca", _last_capture_age_min()),
+              ("tn", int(bool(state.get("tailscale")))), ("wf", int(bool(state.get("wifi")))),
+              ("cl", int(bool(state.get("cellular"))))]
+    return 1, [(k, v) for k, v in fields if v is not None]
+
+
+ACTIONS = {ACTION_STATUS: _action_status}      # code -> fn(state) -> (ok, extra fields)
+
+
+def send_result(action_id, action, ok, extra=(), error=None, handler=None):
+    """LoRa uplink {"ai":<id>,"ac":<action>,"ok":0/1,["er":n,]...extra}; best effort.
+
+    Trimmed like send_status: extra fields drop from the end until it fits the
+    mDot's payload limit. The first three ({"ai":255,"ac":1,"ok":1} is 24 B) must fit,
+    otherwise nothing is sent."""
+    fields = [("ai", int(action_id)), ("ac", int(action)), ("ok", int(bool(ok)))]
+    if error:
+        fields.append(("er", int(error)))
+    fields += list(extra)
+    try:
+        if handler is None:
+            from tools.lora_handler_concurrent import get_lora_handler
+            handler = get_lora_handler()
+        if handler is None:
+            log("no LoRa handler: action result not sent")
+            return False
+        from tools.lora_debug_integration import encode_for_limit
+        limit = _size_limit(handler)
+        payload, dropped = encode_for_limit(fields, limit)
+        if {"ai", "ac", "ok"} & set(dropped):
+            log(f"payload limit {limit} B is too small for an action result: not sent")
+            return False
+        sent = bool(handler.transmit(payload.hex()))
+        log(f"action result {'sent' if sent else 'failed'}: {payload.decode()}")
+        return sent
+    except Exception as e:
+        log(f"action result failed: {e}")
+        return False
+
+
+def handle_action(action_id, action, source="lora", handler=None):
+    """Run one action and send its result. Returns the result dict, or None for a
+    duplicate (the same id inside ACTION_DEDUP_S, from either transport)."""
+    with _Lock():
+        state = load_state()
+        if not state or not state.get("active"):
+            state = None
+        else:
+            now = time.time()
+            seen = {k: t for k, t in (state.get("actions") or {}).items() if now - t < ACTION_DEDUP_S}
+            if str(action_id) in seen:
+                log(f"action {action_id} ({source}): already handled")
+                return None
+            seen[str(action_id)] = now
+            state["actions"] = seen
+            _write_json(STATE_FILE, state)
+    result = {"ai": action_id, "ac": action}
+    if state is None:
+        log(f"action {action_id} ({source}): no session, refused")
+        result.update(ok=0, er=ER_NO_SESSION, extra=[])
+    elif action not in ACTIONS:
+        log(f"action {action_id} ({source}): unknown action {action}")
+        result.update(ok=0, er=ER_UNKNOWN, extra=[])
+    else:
+        try:
+            ok, extra = ACTIONS[action](state)
+            result.update(ok=ok, er=None, extra=extra)
+        except Exception as e:
+            log(f"action {action_id} ({source}): failed: {e}")
+            result.update(ok=0, er=ER_FAILED, extra=[])
+    send_result(action_id, action, result["ok"], result["extra"], result["er"], handler)
+    return result
+
+
+def run_spooled_actions(handler=None):
+    """Handle the spooled actions, oldest first; returns how many were taken."""
+    d = _actions_dir()
+    try:
+        names = sorted(n for n in os.listdir(d) if n.endswith(".json") and not n.startswith("."))[:ACTION_BATCH]
+    except OSError:
+        return 0
+    for name in names:
+        path = os.path.join(d, name)
+        req = _read_json(path)
+        _remove(path)
+        try:
+            aid, act = int(req["id"]), int(req["action"])
+        except (TypeError, KeyError, ValueError):
+            log(f"{name}: malformed action request dropped")
+            continue
+        handle_action(aid, act, req.get("source", "?"), handler)
+    return len(names)
+
+
+def poll_ip_commands():
+    """Apply what the IP command queue offers, as ticktalk does when it runs (it is
+    stopped in a session). Each frame is applied once (tools/command_log.py, so one that
+    came over LoRa isn't run again) and acked. Every queued command is applied here, not
+    only actions, since ticktalk is stopped. Never raises."""
+    try:
+        from tools import transmit_ip
+        r = transmit_ip.handle_downlink_reply(transmit_ip.poll_downlink(), label="Session IP poll")
+        # a new schedule (15 95) or emergency off (99 99) re-arms the Witty Pi, which sets the
+        # shutdown alarm again: clear it, or the node powers off at the end of its ON slot
+        if any(a.startswith(("schedule=", "emergency_mode=False")) for a in r.get("applied_params", [])):
+            suspend_shutdown_alarm()
+    except Exception as e:
+        log(f"IP command poll failed: {e}")
 
 
 def main(argv=None):
