@@ -32,8 +32,8 @@ Now the node only logs the mDot's `EMERGENCY: PA_6 pin state: N` line. A bare
 
 The mDot drops downlinks while the Pi is off, so the API delivers `21 91 HH` the
 way it delivers a remote debug request: send it; if the node doesn't answer within
-60 s, send `!` and resend the command every 20 s for up to 5 minutes, until the
-node's status uplink acks it (`ak` equal to the frame's seq; `em: 1` shows it took
+60 s, send `!`, wait 75 s for the Pi to boot, then resend the command every 35 s
+until 4 minutes after the `!`, until the node's status uplink acks it (`ak` equal to the frame's seq; `em: 1` shows it took
 effect). Over IP the command is offered in every reply until `POST /ip/ack`. A woken Pi runs `lora_daemon` before ticktalk,
 so the command arrives before the normal cycle ends.
 

@@ -51,7 +51,8 @@ API:   send 18 98 NN (Class C, delivered at once)
          node awake? -> lora_daemon starts the session -> status uplink within ~2 min
          no status after 60 s and "wake" ticked:
            send "!"         mDot pulses the Witty Pi switch: Pi boots (~60 s)
-           resend 18 98 NN every 20 s for 5 min, until a status uplink says rd > 0
+           after 75 s, resend 18 98 NN every 35 s until 4 min after the "!",
+           until a status uplink says rd > 0
 node:  1. clear the Witty Pi shutdown alarm       (the Pi stays on past its window)
        2. stop ticktalk.service                   (no capture load, no call_shutdown)
        3. nmcli connection up Quectel             (pi may do this: polkit rule)
