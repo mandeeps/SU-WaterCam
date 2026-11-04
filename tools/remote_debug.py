@@ -278,6 +278,19 @@ def suspend_shutdown_alarm(attempts=3):
     return False
 
 
+def keep_alarm_cleared(state):
+    """Clear the Witty Pi shutdown alarm again if something set it during the session
+    (a schedule or emergency-off command re-arms it, over LoRa or IP). Reads the alarm
+    (no I2C write when it is still clear); only for a session that cleared it at start."""
+    if not state.get("alarm_cleared"):
+        return
+    rc, alarm = _wittypi("get_shutdown_time")
+    if rc == 0 and alarm.endswith(ALARM_CLEARED):
+        return
+    log(f"Witty Pi shutdown alarm was set again ({alarm!r}): clearing it")
+    suspend_shutdown_alarm()
+
+
 def rearm_schedule():
     """Re-arm the Witty Pi from the installed schedule.wpi (runScript.sh). Never writes it."""
     try:
@@ -564,6 +577,7 @@ def tick():
                 _establish(state)
         send_status(state)
         return
+    keep_alarm_cleared(state)
     if not state.get("tailscale"):
         state = _retry()
         if state and state.get("tailscale"):

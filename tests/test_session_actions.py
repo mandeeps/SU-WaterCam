@@ -226,3 +226,43 @@ def test_session_poll_clears_the_shutdown_alarm_after_a_schedule(node, monkeypat
     monkeypatch.setattr(transmit_ip, "handle_downlink_reply", lambda *a, **k: {"applied_params": ["area=5"]})
     rd.poll_ip_commands()
     cleared.assert_called_once()
+
+
+@pytest.fixture
+def wittypi(node, monkeypatch):
+    calls = []
+    alarm = {"v": "00 00:00:00"}
+
+    def fake(func, timeout=20):
+        calls.append(func)
+        if func == "clear_shutdown_time":
+            alarm["v"] = "00 00:00:00"
+            return 0, ""
+        return 0, alarm["v"]
+    monkeypatch.setattr(rd, "_wittypi", fake)
+    monkeypatch.setattr(rd, "poll_ip_commands", lambda: None)
+    monkeypatch.setattr(rd.time, "sleep", lambda s: None)
+    return calls, alarm
+
+
+def test_tick_leaves_a_clear_alarm_alone_without_writing(wittypi):
+    calls, _ = wittypi
+    session(alarm_cleared=True)
+    rd.tick()
+    assert calls == ["get_shutdown_time"]
+
+
+def test_tick_clears_an_alarm_that_was_set_again(wittypi):
+    calls, alarm = wittypi
+    session(alarm_cleared=True)
+    alarm["v"] = "05 21:30:00"
+    rd.tick()
+    assert "clear_shutdown_time" in calls and alarm["v"] == "00 00:00:00"
+
+
+def test_tick_ignores_the_alarm_when_the_session_never_cleared_it(wittypi):
+    calls, alarm = wittypi
+    session(alarm_cleared=False)
+    alarm["v"] = "05 21:30:00"
+    rd.tick()
+    assert calls == []
