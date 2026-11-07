@@ -76,11 +76,12 @@ def build_rotation_matrix(heading_deg: float,
         0.0,        # Up
     ])
 
-    # Step 3: roll about boresight
-    if abs(roll_deg) > 1e-6:
-        cos_r = np.cos(r)
-        sin_r = np.sin(r)
-        right = cos_r * right + sin_r * np.cross(forward, right)
+    # Step 3: roll about boresight. Always applied: skipping it near zero made the
+    # rotation flat in roll there, so a solver starting at roll 0 never moved it
+    # (its finite-difference step is far below any such threshold).
+    cos_r = np.cos(r)
+    sin_r = np.sin(r)
+    right = cos_r * right + sin_r * np.cross(forward, right)
 
     # Step 4: camera down (Y) = Z × X
     down = np.cross(forward, right)
