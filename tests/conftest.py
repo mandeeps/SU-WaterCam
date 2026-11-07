@@ -246,6 +246,13 @@ def _ip_fallback_state(monkeypatch, tmp_path):
 
 
 @pytest.fixture(autouse=True)
+def _nir_filter_state(monkeypatch, tmp_path):
+    """Keep tools/nir_filter_check.py's last lit verdict in the test's own directory."""
+    from tools import nir_filter_check
+    monkeypatch.setattr(nir_filter_check, "LAST_LIT_PATH", str(tmp_path / "nir_filter_last.json"))
+
+
+@pytest.fixture(autouse=True)
 def _command_log_state(monkeypatch, tmp_path):
     """Keep tools/command_log.py's applied-command and pending-ack files in the test's own directory."""
     from tools import command_log

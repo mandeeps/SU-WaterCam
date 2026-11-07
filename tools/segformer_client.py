@@ -5,19 +5,24 @@ each @SQify function in its own process with only that function's body:
 module-level helpers in ticktalk_main.py are not defined there. segformer()
 imports this inside its body, like the other SQs import their tools.
 """
+from typing import Optional
 
 
 def segformer_via_daemon(tiff_path: str, output_path: str,
                          socket_path: str = "/run/segformer/segformer.sock",
-                         rgb_only: bool = False) -> bool:
+                         rgb_only: bool = False, info: Optional[dict] = None) -> bool:
     """Send an inference request to the persistent SegFormer daemon.
 
     Returns True on success. The daemon keeps the ONNX model resident in
     memory, cutting the per-cycle cold-start cost of ~10–20 s.
 
-    rgb_only: the TIFF's thermal band is a placeholder (the Lepton gave no
-    frame). The daemon then runs only a model that reads the RGB bands alone and
-    answers with an error otherwise.
+    rgb_only: the TIFF's thermal or NIR band holds no data (the Lepton gave no
+    frame, or the IR-cut filter did not move). The daemon then runs only a model
+    that reads the RGB bands alone (its RGB fallback, if the loaded model reads
+    more) and answers with an error otherwise.
+
+    info: filled with the daemon's reply on success, which names the model when
+    the RGB fallback made the mask ({"model": "rgb_fallback", "model_sha256"}).
     """
     import json
     import os as _os
@@ -48,6 +53,8 @@ def segformer_via_daemon(tiff_path: str, output_path: str,
 
         resp = json.loads(data.strip())
         if resp.get("status") == "ok":
+            if info is not None:
+                info.update(resp)
             print(f"\n SegFormer daemon: {resp.get('inference_ms', '?')} ms\n")
             return True
         print(f"⚠️ SegFormer daemon error: {resp.get('message')}")
