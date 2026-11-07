@@ -142,10 +142,21 @@ def _record_result(got_fix: bool, path: Optional[str] = None) -> None:
         pass
 
 
-def reasons(now: Optional[float] = None, requested: bool = False, pose_wake: bool = False) -> List[str]:
-    """Why a fix is due now (empty: not due). Pure apart from reading the cache and the last try."""
+def reasons(now: Optional[float] = None, requested: bool = False, pose_wake: bool = False,
+            scheduled: bool = True) -> List[str]:
+    """Why a fix is due now (empty: not due). Pure apart from reading the cache and the last try.
+
+    scheduled=False leaves out the daily fix (an emergency wake that will sleep
+    after its capture): only a knock, a removal or the server's request count.
+    """
     now = time.time() if now is None else now
     out = []
+    if not scheduled:
+        if pose_wake:
+            out.append("knocked or removed")
+        if requested:
+            out.append("requested by the server")
+        return out
     due_s = max(0.0, _interval_h() - ATTEMPT_SLACK_H) * 3600
     intervals = BACKOFF_INTERVALS if failed_tries() >= BACKOFF_AFTER else 1
     wait_s = max(0.0, _interval_h() * intervals - ATTEMPT_SLACK_H) * 3600
@@ -298,8 +309,18 @@ def start_if_due(background: bool = True) -> Optional[List[str]]:
         pose_wake = pose_monitor.take_gps_wake()
     except Exception:
         pose_wake = False
-    why = reasons(requested=_take_request(), pose_wake=pose_wake)
+    # An emergency wake that will sleep after its capture leaves the daily fix to
+    # the next normal wake: the window would hold the Pi up for minutes past the
+    # capture (call_shutdown waits for it). A knock or the server's request still runs
+    try:
+        from tools import emergency_sleep
+        sleeping = emergency_sleep.expected()
+    except Exception:
+        sleeping = False
+    why = reasons(requested=_take_request(), pose_wake=pose_wake, scheduled=not sleeping)
     if not why:
+        if sleeping and reasons():
+            print("🛰️ Daily GPS fix due, but this emergency wake sleeps after its capture: next normal wake")
         return None
     now = time.time()
     try:

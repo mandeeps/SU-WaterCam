@@ -176,3 +176,20 @@ def test_emergency_ended_by_command_continues(emergency_shutdown):
     result, calls = emergency_shutdown({"action": "continue", "why": "emergency mode was turned off"})
     assert result == "continue"
     calls.assert_not_called()
+
+
+@pytest.mark.parametrize("p, hold, expected", [
+    ({"emergency_mode": True, "emergency_sleep": True, "emergency_frequency": 10}, False, True),
+    ({"emergency_mode": False, "emergency_sleep": True, "emergency_frequency": 10}, False, False),
+    ({"emergency_mode": True, "emergency_sleep": False, "emergency_frequency": 10}, False, False),
+    ({"emergency_mode": True, "emergency_sleep": True, "emergency_frequency": 2}, False, False),
+    ({"emergency_mode": True, "emergency_sleep": True, "emergency_frequency": 10}, True, False),
+])
+def test_expected_matches_the_sleep_decision(p, hold, expected):
+    assert es.expected(get_param=lambda k, d=None: p.get(k, d), remote_active=lambda: hold) is expected
+
+
+def test_expected_is_false_when_the_settings_cannot_be_read():
+    def broken(k, d=None):
+        raise OSError("no config")
+    assert es.expected(get_param=broken, remote_active=lambda: False) is False

@@ -66,6 +66,29 @@ def plan(now: float, boot: Optional[float], interval_min: Any, enabled: bool = T
     return wake, f"next capture at {time.strftime('%H:%M:%S', time.localtime(wake))}"
 
 
+def expected(get_param: Optional[Callable[[str, Any], Any]] = None,
+             remote_active: Optional[Callable[[], bool]] = None) -> bool:
+    """Whether this wake is in emergency mode and set to sleep after its capture.
+
+    The same settings check as prepare(), without the downlink check or arming:
+    used early in a wake (tools/gps_window.py) to leave the daily GPS fix to a
+    normal wake rather than hold the Pi up past its capture.
+    """
+    try:
+        if get_param is None:
+            from tools.lora_runtime_integration import get_parameter as get_param
+        if not get_param('emergency_mode', False):
+            return False
+        if remote_active is None:
+            from tools.last_downlink_check import _remote_session_active as remote_active
+        now = time.time()
+        wake, _ = plan(now, now, get_param('emergency_frequency', 10),
+                       enabled=bool(get_param('emergency_sleep', True)), hold=remote_active())
+    except Exception:   # noqa: BLE001 - unsure: behave as before
+        return False
+    return wake is not None
+
+
 def _armed_startup(now: float) -> Optional[float]:
     """The startup alarm as the Witty Pi holds it."""
     from tools import ensure_next_wake as enw
