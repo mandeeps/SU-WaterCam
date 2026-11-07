@@ -19,6 +19,16 @@ range. With 0 it keeps trying on the sub-band set here.
     python3 tools/mdot_subband.py --sub-band 2  # a site whose gateway uses another
     python3 tools/mdot_subband.py --from-mask   # take it from the joined network's channel mask
     python3 tools/mdot_subband.py --rejoin      # then join once to prove it
+    python3 tools/mdot_subband.py --fixed-dr 1  # also turn ADR off and send at DR1 (SF9)
+    python3 tools/mdot_subband.py --adr         # also turn ADR back on
+
+A fixed data rate is for a site at the edge of coverage. There the network's ADR
+can raise the data rate past what the link carries: 006's frames arrived at SF9
+with an SNR of -10 to -12 dB (SF9 decodes to about -12.5), and ADR still moved it
+to SF8 (about -10 dB) on 2026-10-25, so more frames were lost. With ADR off the
+mDot keeps the data rate set here. The US915 125 kHz data rates are DR0 (SF10,
+11-byte payloads) to DR3 (SF7); a lower one reaches further but carries less, and
+the node splits its packets to fit (tools/lora_handler_concurrent.py).
 
 It stops lora_daemon (which owns the port) and starts it again. Settings are
 saved with AT&W, which saves every current setting, so the data-rate and ADR
@@ -107,14 +117,33 @@ class MDot:
         return False
 
 
-def changes_needed(fsb: str, join_retries: str, want: int) -> list:
-    """The AT commands that set sub-band `want` and no sub-band search; [] if both are right."""
+def changes_needed(fsb: str, join_retries: str, want: int, adr: str = None, tx_dr: str = None,
+                   fixed_dr: int = None, adr_on: bool = False) -> list:
+    """The AT commands that set sub-band `want` and no sub-band search; [] if both are right.
+
+    With fixed_dr also ADR off and that data rate; with adr_on, ADR on. `adr` and
+    `tx_dr` are the AT+ADR? and AT+TXDR? answers ('1, 64, 32', 'DR1 - SF9BW125').
+    """
     cmds = []
     if fsb != str(want):
         cmds.append(f'AT+FSB={want}')
     if join_retries != '0':
         cmds.append('AT+JR=0')
+    adr_enabled = (adr or '').split(',')[0].strip()
+    if fixed_dr is not None:
+        if adr_enabled != '0':
+            cmds.append('AT+ADR=0')
+        if data_rate(tx_dr) != fixed_dr:
+            cmds.append(f'AT+TXDR={fixed_dr}')
+    elif adr_on and adr_enabled != '1':
+        cmds.append('AT+ADR=1')
     return cmds
+
+
+def data_rate(answer: str):
+    """'DR1 - SF9BW125' -> 1, or None."""
+    m = re.match(r'DR(\d+)', (answer or '').strip())
+    return int(m.group(1)) if m else None
 
 
 def value(answer: str) -> str:
@@ -139,7 +168,8 @@ def run(a) -> int:
     jr = value(m.at('AT+JR?'))
     print(f"mDot {value(m.at('AT+DI?'))}: sub-band {fsb or '?'}, joined {joined or '?'}, channel mask {chm or '?'}, "
           f"sub-band search (join retries) {jr or '?'}")
-    print(f"  data rate {value(m.at('AT+TXDR?'))}, ADR {value(m.at('AT+ADR?'))}")
+    tx_dr, adr = value(m.at('AT+TXDR?')), value(m.at('AT+ADR?'))
+    print(f"  data rate {tx_dr or '?'}, ADR {adr or '?'}")
 
     want = a.sub_band
     if a.from_mask:
@@ -148,9 +178,11 @@ def run(a) -> int:
             print('--from-mask: the mDot must be joined and its mask enable exactly one sub-band')
             return 1
         print(f"  the network's channel mask is sub-band {want}")
-    cmds = changes_needed(fsb, jr, want)
+    dr_args = dict(fixed_dr=a.fixed_dr, adr_on=a.adr)
+    cmds = changes_needed(fsb, jr, want, adr, tx_dr, **dr_args)
     if a.check:
-        print('OK' if not cmds else f'sub-band {fsb} (wanted {want}), join retries {jr} (wanted 0)')
+        print('OK' if not cmds else f'sub-band {fsb} (wanted {want}), join retries {jr} (wanted 0); '
+                                    f"would send {', '.join(cmds)}")
         return 0 if not cmds else 2
 
     if not cmds:
@@ -160,8 +192,10 @@ def run(a) -> int:
             print(f"Could not set and save {', '.join(cmds)}")
             return 1
         now_fsb, now_jr = value(m.at('AT+FSB?')), value(m.at('AT+JR?'))
-        print(f'Sub-band {fsb} -> {now_fsb}, join retries {jr} -> {now_jr}, saved')
-        if changes_needed(now_fsb, now_jr, want):
+        now_dr, now_adr = value(m.at('AT+TXDR?')), value(m.at('AT+ADR?'))
+        print(f'Sub-band {fsb} -> {now_fsb}, join retries {jr} -> {now_jr}, '
+              f'data rate {tx_dr} -> {now_dr}, ADR {adr} -> {now_adr}, saved')
+        if changes_needed(now_fsb, now_jr, want, now_adr, now_dr, **dr_args):
             return 1
 
     if a.rejoin:
@@ -183,6 +217,10 @@ def main() -> int:
                          "and an uplink: until then the mask follows the mDot's own setting)")
     ap.add_argument('--check', action='store_true', help='report only; exit 2 if it differs')
     ap.add_argument('--rejoin', action='store_true', help='join once afterwards (spends a DevNonce)')
+    dr = ap.add_mutually_exclusive_group()
+    dr.add_argument('--fixed-dr', type=int, choices=range(0, 4),
+                    help='turn ADR off and send at this data rate (US915 DR0-DR3, SF10-SF7)')
+    dr.add_argument('--adr', action='store_true', help='turn ADR (back) on')
     ap.add_argument('--port', default=DEFAULT_PORT)
     a = ap.parse_args()
     if serial is None:

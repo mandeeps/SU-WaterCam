@@ -1,5 +1,5 @@
 """tools/mdot_subband.py: the sub-band in an AT+CHM? answer, and what to change."""
-from tools.mdot_subband import GATEWAY_SUB_BAND, changes_needed, sub_band_from_mask
+from tools.mdot_subband import GATEWAY_SUB_BAND, changes_needed, data_rate, sub_band_from_mask
 
 
 def test_our_gateway_mask_is_sub_band_1():
@@ -32,3 +32,26 @@ def test_sub_band_search_is_turned_off():
 
 def test_unreadable_values_are_set():
     assert changes_needed("", "", 1) == ["AT+FSB=1", "AT+JR=0"]
+
+
+def test_adr_and_data_rate_left_alone_by_default():
+    assert changes_needed("1", "0", 1, "1, 64, 32", "DR2 - SF8BW125") == []
+
+
+def test_fixed_data_rate_turns_adr_off():
+    # 006 at its site, 2026-10-25: ADR moved it from DR1 to DR2 at -11 dB SNR
+    assert changes_needed("1", "0", 1, "1, 64, 32", "DR2 - SF8BW125", fixed_dr=1) == ["AT+ADR=0", "AT+TXDR=1"]
+    assert changes_needed("1", "0", 1, "0, 64, 32", "DR2 - SF8BW125", fixed_dr=1) == ["AT+TXDR=1"]
+    assert changes_needed("1", "0", 1, "0, 64, 32", "DR1 - SF9BW125", fixed_dr=1) == []
+    assert changes_needed("3", "2", 1, "", "", fixed_dr=0) == ["AT+FSB=1", "AT+JR=0", "AT+ADR=0", "AT+TXDR=0"]
+
+
+def test_adr_back_on():
+    assert changes_needed("1", "0", 1, "0, 64, 32", "DR1 - SF9BW125", adr_on=True) == ["AT+ADR=1"]
+    assert changes_needed("1", "0", 1, "1, 64, 32", "DR1 - SF9BW125", adr_on=True) == []
+
+
+def test_data_rate_answer():
+    assert data_rate("DR1 - SF9BW125") == 1
+    assert data_rate("DR0 - SF10BW125") == 0
+    assert data_rate("") is None and data_rate(None) is None
