@@ -345,3 +345,38 @@ def test_the_window_result_is_recorded(cache, monkeypatch, tmp_path):
     with patch("tools.pose_monitor.take_gps_wake", return_value=False):
         assert gps_window.start_if_due(background=False) == ["no fix yet"]
     assert gps_window.failed_tries() == 1
+
+
+def _start(monkeypatch, tmp_path, sleeping, knocked=False, requested=False):
+    """start_if_due() on a wake that does or doesn't emergency-sleep; returns (reasons, windows run)."""
+    monkeypatch.setattr(gps_window, "BOOT_MARK", str(tmp_path / "mark"))
+    monkeypatch.setattr(gps_window, "REQUEST_FILE", str(tmp_path / "req.json"))
+    ran = []
+    monkeypatch.setattr(gps_window, "run_window", lambda why, **kw: ran.append(why) or True)
+    if requested:
+        gps_window.request()
+    with patch("tools.emergency_sleep.expected", return_value=sleeping), \
+            patch("tools.pose_monitor.take_gps_wake", return_value=knocked):
+        return gps_window.start_if_due(background=False), ran
+
+
+def test_an_emergency_sleep_wake_leaves_the_daily_fix_for_later(monkeypatch, tmp_path, cache):
+    why, ran = _start(monkeypatch, tmp_path, sleeping=True)
+    assert why is None and ran == []
+    assert gps_window.last_attempt() is None          # still due at the next normal wake
+    assert gps_window.reasons() == ["no fix yet"]
+
+
+def test_a_normal_wake_still_takes_the_daily_fix(monkeypatch, tmp_path, cache):
+    why, ran = _start(monkeypatch, tmp_path, sleeping=False)
+    assert why == ["no fix yet"] and len(ran) == 1
+
+
+def test_a_knock_on_an_emergency_sleep_wake_still_gets_a_fix(monkeypatch, tmp_path, cache):
+    why, ran = _start(monkeypatch, tmp_path, sleeping=True, knocked=True)
+    assert why == ["knocked or removed"] and len(ran) == 1
+
+
+def test_a_server_request_on_an_emergency_sleep_wake_still_gets_a_fix(monkeypatch, tmp_path, cache):
+    why, ran = _start(monkeypatch, tmp_path, sleeping=True, requested=True)
+    assert why == ["requested by the server"] and len(ran) == 1
