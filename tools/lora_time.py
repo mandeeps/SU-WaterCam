@@ -7,7 +7,7 @@ resolution) or GPS time, and after an IP upload from the server's reply
 window. The mDot can ask the network server instead: AT+GPSTIME sends an empty
 uplink carrying a DeviceTimeReq and the server answers in a receive window
 (measured on 005, 2026-11-10: 1.2 s round trip, the answers within about 15 ms
-of each other and 0.2-0.3 s behind true time). The answer is a LoRaWAN downlink,
+of each other and about 0.2 s ahead of true time). The answer is a LoRaWAN downlink,
 authenticated by the device's session keys, and needs no data plan.
 
 lora_time_sync in runtime_config.json says when to use it:

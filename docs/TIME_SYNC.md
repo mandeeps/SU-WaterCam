@@ -41,12 +41,20 @@ The mDot's `AT+GPSTIME` sends an empty uplink carrying a LoRaWAN DeviceTimeReq.
 The network server (our ChirpStack answers it) replies with a MAC-only
 DeviceTimeAns in the first receive window, and the mDot prints the time in
 milliseconds since the GPS epoch (Unix time = ms / 1000 + 315964800 - 18 leap
-seconds). Measured on 005 (2026-11-10):
+seconds). Measured on 005 (2026-11-10, two sessions of three asks, against
+an NTP-synchronised workstation):
 
-- 1.20 s from the command to the answer, every time;
-- three answers within about 15 ms of each other;
-- 0.2-0.3 s behind true time (an NTP-synchronised workstation). LoRaWAN times
-  the answer to the end of the uplink, about a second before it arrives.
+- answers 1.20 s after the command, five times out of six, within about 20 ms
+  of each other and about 0.2 s **ahead** of true time;
+- one answer took 2.5 s and was 0.8 s ahead;
+- so the printed time is the time at the answer (it can't be the uplink's
+  time, which would make it about a second behind), and the 0.2 s is most
+  likely the network server answering with its receive time, after the
+  gateway's backhaul delay, rather than with the uplink's end. Either way,
+  ChirpStack's clock is right to a few tenths of a second.
+
+The API server runs NTP (systemd-timesyncd, offset under 1 ms when checked);
+ChirpStack runs on a different server, so its clock was only checked this way.
 
 The answer is authenticated by the device's LoRaWAN session keys and uses no
 data plan. Each ask costs one uplink and one downlink, so a unit asks at most
