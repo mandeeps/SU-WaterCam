@@ -320,8 +320,9 @@ def read_config() -> Dict[str, Any]:
 def clock_offset_s() -> Optional[float]:
     """Server time minus this clock, from the server's Date header (seconds), or None.
 
-    The Witty Pi software turns NTP off, so a node's clock is corrected from the
-    server's replies instead (tools/transmit_ip.correct_clock); compare with it."""
+    Units don't run NTP: the Witty Pi software keeps the clock, setting the
+    system time from its real-time clock at every boot (and syncing with network
+    time when it is online). So compare with the server instead of asking NTP."""
     try:
         from email.utils import parsedate_to_datetime
 
@@ -500,8 +501,9 @@ def step_start(ctx: Context) -> StepResult:
             out["setup_connection"] = None
     out["clock_offset_s"] = offset
     if offset is not None and abs(offset) > 120:
-        return StepResult("warn", f"The unit's clock is {abs(offset):.0f} s off. It corrects itself from the "
-                                  "server at its next upload; captures until then may carry the wrong time.", out)
+        return StepResult("warn", f"The unit's clock is {abs(offset):.0f} s off the server's. It comes from "
+                                  "the Witty Pi's real-time clock at every boot, so resync that before leaving "
+                                  "(Witty Pi software: synchronize with network time).", out)
     return StepResult("pass", "The unit stays awake until setup is finished.", out)
 
 
