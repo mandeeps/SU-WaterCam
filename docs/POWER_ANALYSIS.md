@@ -117,9 +117,27 @@ lower at the same current (4.83 V at 0.55-1.05 A, against 4.87-4.89 V at
 
 The reboot rules the mDot out: it drew only its idle current then. The flag
 comes in the Pi's own boot peak (8-11 s in, as the WiFi firmware, the GPU
-driver and the first services start), so the drop is in the supply path into P2:
-the pack, the Y-cable and the solder joints. Open: what fed 005 on 2026-11-05,
-and a meter on P2 during a boot, against the Witty Pi's Vout.
+driver and the first services start), so the drop was in the supply path into
+P2. The pack and the Y-cable were the same as on 2026-11-05; the only change was
+the cable's USB-C plug, cut off and soldered to P2 instead.
+
+**Load test afterwards (2026-11-10 17:11-17:17, all four cores for 5 min,
+samples every 2 s):** no under-voltage at any point, nor on the boot just
+before it (17:10, 0x0).
+
+| Phase | Witty Pi Vout mean / min | Iout mean / max | P2 (meter) | CPU temp max |
+|---|---|---|---|---|
+| Idle | 4.91 / 4.89 V | 0.39 / 0.47 A | 4.94 V | 42 °C |
+| All 4 cores | 4.85 / 4.78 V | 1.20 / 1.44 A | 4.94-4.95 V | 79 °C |
+
+P2 doesn't move under load, so the pack, Y-cable and joints now lose next to
+nothing; the 0.03-0.10 V between P2 and Vout is the Witty Pi's own switch and
+current sense (about 0.09 Ω), which the USB-C input path has as well. Most
+likely a joint was marginal on the first two boots and settled when it was
+disturbed (an accidental short while probing reset the unit at 17:10). Solder
+joints on P2 should be checked under load, with P2 measured against Vout, before
+a unit is deployed. A bare Pi under full load reaches 79 °C, just under the
+80 °C throttling point.
 
 **The USB meters can't settle it:** their "under about 0.05 W" is less than the
 radio alone (11 mA at 5 V is 55 mW), which fits their dead zone at low
