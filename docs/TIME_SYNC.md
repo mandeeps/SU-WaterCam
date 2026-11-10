@@ -91,8 +91,12 @@ retried after 6 h instead of a day; one on a weak link isn't.
 - **WiFi down,** or up with no internet: no network time (each request times
   out). LoRa time, the server's time over cellular or GPS takes over.
 - **API server down:** network time from public https servers; no server time
-  after uploads (they queue). LoRa time doesn't depend on it, unless ChirpStack
-  is down too.
+  after uploads (they queue). LoRa time doesn't depend on it: ChirpStack runs
+  on a different server.
+- **Both servers unreachable** (they share a network, so an outage there takes
+  out both): no LoRa time (the link checks fail too) and no server time. Units
+  with internet still get network time from public https servers; the others
+  rely on the daily GPS fix.
 - **Everything down:** the RTC drifts (about 0.5 s a day) and is an hour off
   after a daylight-saving change. Captures are flagged `clock_unverified`
   (uplink `01 0D`) until a source confirms the clock.
