@@ -47,14 +47,16 @@ an NTP-synchronised workstation):
 - answers 1.20 s after the command, five times out of six, within about 20 ms
   of each other and about 0.2 s **ahead** of true time;
 - one answer took 2.5 s and was 0.8 s ahead;
-- so the printed time is the time at the answer (it can't be the uplink's
-  time, which would make it about a second behind), and the 0.2 s is most
-  likely the network server answering with its receive time, after the
-  gateway's backhaul delay, rather than with the uplink's end. Either way,
-  ChirpStack's clock is right to a few tenths of a second.
+- what that says about ChirpStack's clock depends on libmdot, which is only a
+  binary: if `getGPSTime()` returns the current time (the answer moved on by
+  the time since it arrived), ChirpStack's clock is right to about 0.2 s
+  (likely its receive time after the gateway's backhaul, not the uplink's
+  end); if it returns the uplink's time unchanged, ChirpStack's clock is about
+  1.2 s fast. A unit's GPS fixes in the time sync log would tell the two apart
+  over time, and show if ChirpStack's clock drifted.
 
 The API server runs NTP (systemd-timesyncd, offset under 1 ms when checked);
-ChirpStack runs on a different server, so its clock was only checked this way.
+ChirpStack runs on a different server, whose clock was only checked this way.
 
 The answer is authenticated by the device's LoRaWAN session keys and uses no
 data plan. Each ask costs one uplink and one downlink, so a unit asks at most
