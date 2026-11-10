@@ -45,7 +45,9 @@ def test_tables_are_unchanged():
     assert list(M._DEFAULT_PARAMS) == list(DEFAULTS_BEFORE)   # the order a new file is written in
     assert M._PARAM_RANGES == RANGES_BEFORE
     assert M._INT_PARAMS == INTS_BEFORE
-    assert M._SETTABLE_PARAMS == frozenset(DEFAULTS_BEFORE) | frozenset(RANGES_BEFORE) | {'emergency_since', 'schedule'}
+    # lora_time_sync: settable on purpose (tools/lora_time.py, a mode, no range)
+    assert M._SETTABLE_PARAMS == (frozenset(DEFAULTS_BEFORE) | frozenset(RANGES_BEFORE)
+                                  | {'emergency_since', 'schedule', 'lora_time_sync'})
 
 
 def test_template_file_is_generated_from_the_schema():

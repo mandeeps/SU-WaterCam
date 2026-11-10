@@ -253,23 +253,41 @@ def _wait_for_fix(timeout_s: float) -> Optional[dict]:
 
 
 def _set_clock_from(packet) -> None:
-    """Set the clock from the fix if nothing set it this boot (no network time)."""
-    if os.path.exists(TIME_SOURCE):
-        return
+    """Set the clock from the fix if nothing set it this boot (no network time).
+
+    Either way the fix's offset goes into the time sync log, next to LoRa time's
+    (tools/lora_time.py), to compare the two on the same unit (docs/TIME_SYNC.md)."""
     try:
         from datetime import datetime
         t = getattr(packet, "time", None)
         ts = datetime.fromisoformat(str(t).replace("Z", "+00:00")).timestamp() if t else None
     except (ValueError, TypeError):
         ts = None
-    if not ts or abs(ts - time.time()) < 2:
+    if not ts:
         return
+    offset = ts - time.time()
     try:
-        r = subprocess.run(["doas", SET_CLOCK, str(int(ts))], capture_output=True, text=True, timeout=15)
+        with open(TIME_SOURCE) as f:
+            source = f.read().strip()
+    except OSError:
+        source = ""
+    event = {"t": int(time.time()), "source": "gps", "ok": True, "offset_s": round(offset, 3),
+             "clock_from": source or "rtc", "applied": False}
+    try:
+        if source or abs(offset) < 2:
+            return
+        r = subprocess.run(["doas", SET_CLOCK, str(int(ts)), "gps"], capture_output=True, text=True, timeout=15)
         if r.returncode == 0:
-            print(f"🕒 Clock set from GPS ({int(ts - time.time()):+d} s)")
+            event["applied"] = True
+            print(f"🕒 Clock set from GPS ({int(offset):+d} s)")
     except (OSError, subprocess.SubprocessError) as e:
         print(f"⚠️ clock not set from GPS: {e}")
+    finally:
+        try:
+            from tools.lora_time import log_event
+            log_event(event)
+        except Exception:  # noqa: BLE001 - the log never stops the window
+            pass
 
 
 def run_window(why: List[str], timeout_s: Optional[float] = None) -> bool:

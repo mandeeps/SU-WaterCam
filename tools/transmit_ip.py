@@ -1320,13 +1320,22 @@ def correct_clock(uplink_result: Dict[str, Any]) -> Optional[float]:
     SET_CLOCK helper and its doas rule. Returns the offset applied, or None.
 
     Runs at most once per boot, and not at all when the clock was already set
-    from the network or GPS this boot (TIME_SOURCE). The Date header comes with
+    from the network, LoRa or GPS this boot (TIME_SOURCE), or LoRa time
+    confirmed it (tools/lora_time.py). The Date header comes with
     the upload's own reply, so the check sends nothing extra either way.
     """
     from email.utils import parsedate_to_datetime
     date = (uplink_result or {}).get("server_date")
     if not date or not os.path.exists(SET_CLOCK) or os.path.exists(TIME_SOURCE):
         return None
+    # LoRa time (tools/lora_time.py, 1 s or better) set or confirmed the clock this
+    # boot: the reply's Date header (1 s resolution, plus the upload's delay) can't improve it
+    try:
+        from tools import lora_time
+        if lora_time.synced_this_boot():
+            return None
+    except Exception:  # noqa: BLE001
+        pass
     boot = _boot_id()
     try:
         with open(CLOCK_CHECKED) as f:

@@ -414,6 +414,21 @@ def encode_sensor_chunks(data: Dict[str, Any], limit: int) -> list:
     return chunks
 
 
+#: GPS time began 1980-01-06; it has no leap seconds, so it runs ahead of UTC by
+#: the leap seconds since then (18 since 2017; none announced since)
+GPS_EPOCH_UNIX = 315964800
+GPS_UTC_LEAP_S = 18
+
+
+def gps_ms_to_unix(ms: str) -> Optional[float]:
+    """Unix time from the mDot's AT+GPSTIME answer (milliseconds since the GPS
+    epoch), or None for anything that isn't a plausible one."""
+    if not ms or not str(ms).isdigit():
+        return None
+    unix = int(ms) / 1000 + GPS_EPOCH_UNIX - GPS_UTC_LEAP_S
+    return unix if 1767225600 <= unix < 4102444800 else None      # 2026 to 2100
+
+
 class LoRaHandler:
     def __init__(self, port='/dev/ttyAMA5', config_file=LEGACY_CONFIG_FILE):
         self.port = port
@@ -613,6 +628,32 @@ class LoRaHandler:
                 result.update(ok=int(m.group(2)) > 0, margin_db=int(m.group(1)), gateways=int(m.group(2)))
             else:
                 result["error"] = text.strip().splitlines()[-1] if text.strip() else "no answer"
+        except Exception as e:
+            result["error"] = str(e)
+        return result
+
+    def network_time(self, timeout_s: float = 20.0) -> Dict[str, Any]:
+        """Ask the network server for the time (AT+GPSTIME, a DeviceTimeReq).
+
+        The mDot sends its own empty uplink carrying the request and prints the
+        answer (milliseconds since the GPS epoch) once the DeviceTimeAns arrives
+        in a receive window, about 1.2 s later; the MAC-only downlink it also
+        prints ("PACKET:PORT=0,SIZE=0") is set aside by _read_line(). Returns
+        {"ok", "unix", "answered_at", "rtt_s", "error"}; never raises. "unix" is
+        the network's time at "answered_at" (this host's clock when the answer
+        came), so a caller can tell how far its own clock is off.
+        """
+        result = {"ok": False, "unix": None, "answered_at": None, "rtt_s": None, "error": None}
+        try:
+            t0 = time.time()
+            lines = self._at_query(b'AT+GPSTIME\r\n', timeout_s, lambda l: 'OK' in l or 'ERROR' in l)
+            t1 = time.time()
+            unix = gps_ms_to_unix(next((l for l in lines if l.isdigit()), ""))
+            if unix is not None and any('OK' in l for l in lines):
+                result.update(ok=True, unix=unix, answered_at=t1, rtt_s=round(t1 - t0, 3))
+            else:
+                text = '\n'.join(lines).strip()
+                result["error"] = text.splitlines()[-1] if text else "no answer"
         except Exception as e:
             result["error"] = str(e)
         return result
@@ -2295,6 +2336,12 @@ class LoRaHandlerClient:
             return dict(self._call("link_check", self._LONG_TIMEOUT_S))
         except Exception as e:
             return {"ok": False, "margin_db": None, "gateways": 0, "error": f"LoRa daemon: {e}"}
+
+    def network_time(self) -> Dict[str, Any]:
+        try:
+            return dict(self._call("network_time", self._LONG_TIMEOUT_S))
+        except Exception as e:
+            return {"ok": False, "unix": None, "answered_at": None, "rtt_s": None, "error": f"LoRa daemon: {e}"}
 
     def queue_transmit(self, data: Dict[str, Any]) -> bool:
         try:
