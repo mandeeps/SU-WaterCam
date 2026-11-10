@@ -320,9 +320,11 @@ def read_config() -> Dict[str, Any]:
 def clock_offset_s() -> Optional[float]:
     """Server time minus this clock, from the server's Date header (seconds), or None.
 
-    Units don't run NTP: the Witty Pi software keeps the clock, setting the
-    system time from its real-time clock at every boot (and syncing with network
-    time when it is online). So compare with the server instead of asking NTP."""
+    Units don't run NTP. At boot the Witty Pi daemon sets the system time from
+    its real-time clock, then SU-WaterCam's config/wittypi/syncTime.sh (run from
+    beforeScript.sh) applies network time, or GPS time, and writes it back to
+    the RTC; after an IP uplink transmit_ip.correct_clock fixes a clock that is
+    still off. So compare with the server instead of asking NTP."""
     try:
         from email.utils import parsedate_to_datetime
 
@@ -501,9 +503,19 @@ def step_start(ctx: Context) -> StepResult:
             out["setup_connection"] = None
     out["clock_offset_s"] = offset
     if offset is not None and abs(offset) > 120:
-        return StepResult("warn", f"The unit's clock is {abs(offset):.0f} s off the server's. It comes from "
-                                  "the Witty Pi's real-time clock at every boot, so resync that before leaving "
-                                  "(Witty Pi software: synchronize with network time).", out)
+        ui.say(f"  The clock is {abs(offset):.0f} s off. The unit sets it from network time at boot when it is")
+        ui.say("  online, so it probably had no internet then.")
+        sync = os.path.join(WITTYPI_DIR, "syncTime.sh")
+        if os.path.exists(sync) and ui.yes_no("  Set it from network time now (and the Witty Pi's clock)?", default=True):
+            ctx.change("set the clock and the Witty Pi's RTC from network time (syncTime.sh)",
+                       ["sudo", "bash", sync], timeout=120)
+            if not ctx.dry_run:
+                offset = clock_offset_s()
+                out["clock_offset_s"] = offset
+        if offset is not None and abs(offset) > 120:
+            return StepResult("warn", f"The unit's clock is still {abs(offset):.0f} s off the server's: captures "
+                                      "would carry the wrong time. It is fixed at the next boot with internet, or "
+                                      "after the first IP upload.", out)
     return StepResult("pass", "The unit stays awake until setup is finished.", out)
 
 

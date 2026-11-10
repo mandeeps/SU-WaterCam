@@ -347,9 +347,21 @@ def test_check_capture_names_what_went_wrong(tmp_path, kw, problem):
 
 # ── the background Wi-Fi test ───────────────────────────────────────────────
 
-def test_a_clock_far_off_the_servers_is_a_warning(env, monkeypatch):
-    monkeypatch.setattr(fs, "clock_offset_s", lambda: 600.0)
-    ctx, _ = ctx_for(["y"], FakeRunner(NODE))
+def test_a_clock_far_off_is_set_from_network_time(env, monkeypatch):
+    wittypi = env / "wittypi"
+    wittypi.mkdir()
+    (wittypi / "syncTime.sh").write_text("#!/bin/bash\n")
+    monkeypatch.setattr(fs, "WITTYPI_DIR", str(wittypi))
+    offsets = iter([600.0, 0.4])
+    monkeypatch.setattr(fs, "clock_offset_s", lambda: next(offsets))
+    runner = FakeRunner(NODE)
+    ctx, _ = ctx_for(["y", "y"], runner)            # hotspot: yes; set the clock: yes
+    r = fs.step_start(ctx)
+    assert r.status == "pass" and r.values["clock_offset_s"] == 0.4
+    assert runner.ran(f"sudo bash {wittypi}/syncTime.sh")
+
+    monkeypatch.setattr(fs, "clock_offset_s", lambda: 600.0)    # still off: a warning
+    ctx, _ = ctx_for(["y", "n"], FakeRunner(NODE))
     r = fs.step_start(ctx)
     assert r.status == "warn" and "600 s off" in r.message
 
