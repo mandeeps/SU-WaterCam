@@ -263,6 +263,68 @@ it is calibrated at a clean spot near the site (step 3), before mounting.
 The steps follow the bench-tested manual procedure used for 006 (2026-10-21/22);
 until the wizard exists, that procedure is the field checklist.
 
+### 8.1 Until the wizard exists: the command-line script
+
+`tools/field_setup.py` runs the field procedure on the node as plain numbered
+prompts, over SSH (the installer's phone hotspot, which their laptop also
+joins) or the serial console. It is the step before the wizard: its steps are
+functions in `tools/field_setup_steps.py` that take a UI object and return a
+result (pass, warn, fail or skip, a plain-language message, recorded values),
+so the wizard's pages can call the same functions with a web UI in place of
+the terminal one.
+
+The steps are ordered by what the installer is doing with the unit, so
+everything that needs the box in hand comes before it is fixed in place:
+
+| Phase | # | Step | Wizard step |
+|---|---|---|---|
+| A. Before mounting | 0 | Start: hold the unit awake (`hold_awake`, `ticktalk` stopped and disabled), record the setup network | 0 |
+| | 1 | Check the node (`initial_health_check.py`, throttle flags) | 1 |
+| | 2 | New site or new angle: back up, then clear GPS home, flood baseline, orientation reference | 2 |
+| | 3 | Power wiggle test: 60 s watching the Witty Pi output, throttle flags and restarts | 5 (moved before mounting: tugging and tilting needs the box in hand) |
+| | 4 | Magnetometer, at a clean spot, then a log check | 3 |
+| | 5 | Signal at the chosen spot: LoRa health, site Wi-Fi seen | 6 (a first look, so a unit isn't mounted out of range) |
+| B. Mounting | 6 | Mount and record (height, heading, pole, magnetic sources, RTK camera position); pose reference reset | 4 |
+| C. Final position | 7 | Connectivity: LoRa sub-band rejoin and 3 health checks, site Wi-Fi, cellular | 6 |
+| | 8 | Power at the mount; then the case may be sealed | 5 |
+| | 9 | Mount heading from the RTK bearing (skipped without RTK: pose provisional) | 8 |
+| | 10 | Reference photo (below) | 9-10 |
+| | 11 | First capture with the shutdown intercepted (`tools/held_capture.sh`), then the flood baseline | 11 |
+| | 12 | Finish: schedule from the dashboard, hold off, `ticktalk` on, recovery boot, setup network's autoconnect off, final check, logs | 12 |
+
+Rules it keeps:
+
+- **Resumable.** `~/field_setup/<date-time>/session.json` holds each step's
+  result, the recorded values and every change with its previous value. Run it
+  again to continue; a dropped connection or Ctrl-C loses nothing. RTK positions
+  and site notes stay in that folder, on the node.
+- **Nothing half-done.** Quitting before the end says the unit is still held
+  awake and offers to put it back on its schedule. `max-awake` stays the
+  backstop.
+- **`--dry-run`** runs every check and changes nothing; it says what it would
+  change. `--step NAME` runs one step. `--answers FILE` scripts the prompts for
+  rehearsals.
+- **The site Wi-Fi is tested from a background job** (`systemd-run`), because
+  switching to it drops the installer's own connection: it leaves the setup
+  network, tries the site's and the server, and always reconnects to the setup
+  network, usually within 2 minutes (systemd stops the job only after 10). The
+  result is shown when the installer's
+  session comes back. With no separate setup network (already on the site's),
+  it is checked in place.
+- **Plain ASCII** output, readable on a serial console.
+
+The reference photo (step 10) is a full raw frame from the unit's camera,
+`rpicam-still --nopreview --width 2592 --height 1944`, the capture workflow's
+size, which the camera calibration is for. The dashboard draws water maps on it
+through that calibration (WaterCam-Team/API#264). The script checks the size,
+brightness and focus (variance of the Laplacian), then sends the photo and
+`config/camera_calibration.json` to the server with the unit's own IP token
+(`POST /ip/devices/{id}/reference-photo`, `PUT /ip/devices/{id}/calibration`,
+WaterCam-Team/API#265), which accepts them only with that unit's token. The
+token only goes to an https or tailnet server (`transmit_ip.trusted_server`).
+Against a server without those endpoints it keeps the photo and says how to
+upload it by hand.
+
 ## 9. Implementation order
 
 1. Maintenance mode with a local trigger, the hotspot, and the time and
@@ -271,8 +333,8 @@ until the wizard exists, that procedure is the field checklist.
    dashboard control (WaterCam-Team/API#109). Works within today's wake latency.
 3. Maintenance wake and downlink replay in the mDot firmware
    (WaterCam-Team/mDot-AT-firmware#3).
-4. Wizard pages, starting with the checks the manual field procedure already
-   runs by hand (node, power and connectivity: steps 1, 5 and 6) and the
+4. Wizard pages, calling the steps of `tools/field_setup.py` (8.1), starting
+   with the checks the manual field procedure already runs by hand (node, power and connectivity: steps 1, 5 and 6) and the
    magnetometer (step 3), then the live view (step 7) and the IMU on the pole
    (step 8), then markers and pose (steps 9-10), first capture and save (steps
    11-12). (#119)
