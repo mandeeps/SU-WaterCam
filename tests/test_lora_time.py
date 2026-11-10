@@ -26,6 +26,7 @@ def lt(tmp_path, monkeypatch):
     monkeypatch.setattr(lora_time, "STATE_PATH", str(tmp_path / "lora_time.json"))
     monkeypatch.setattr(lora_time, "_boot_id", lambda: "boot-1")
     monkeypatch.setattr(lora_time, "_mark_verified", lambda: None)
+    monkeypatch.setattr(lora_time, "BIAS_DEFAULT_S", 0.0)   # the bias has its own tests
     lora_time.tmp = tmp_path
     return lora_time
 
@@ -282,3 +283,26 @@ def test_a_gone_gateway_costs_no_asks(lt):
     for t in range(5):
         lt.sync(h, run=Run(), now=lambda: 1_000_000 + t * 3600, assess=gone)
     assert h.asked == 0 and not lt.synced_this_boot()             # server and GPS time still run
+
+
+def test_the_bias_is_subtracted_before_deciding_and_setting(lt, monkeypatch):
+    (lt.tmp / "runtime_config.json").write_text(json.dumps({"lora_time_bias_s": 0.21}))
+    # LoRa time 1.1 s ahead of the clock is 0.89 s after the bias: within the tolerance
+    e = lt.sync(Handler(offset=1.1), run=Run(), now=lambda: 1794287896.0, assess=HEALTHY)
+    assert e["verified"] and not e["applied"] and e["offset_s"] == pytest.approx(0.89) and e["bias_s"] == 0.21
+    os.unlink(lt.DONE_PATH)
+    run = Run()
+    e = lt.sync(Handler(offset=5.21), run=run, now=lambda: 1794287896.0, assess=HEALTHY)
+    assert e["applied"] and run.calls[0][2] == str(1794287896 + 5)   # 5.21 - 0.21
+
+
+def test_the_bias_setting_falls_back_to_the_default(lt, monkeypatch):
+    monkeypatch.setattr(lt, "BIAS_DEFAULT_S", 0.21)
+    assert lt.bias_s() == 0.21                                         # no setting
+    for bad in (5.0, -3, "x", None):
+        (lt.tmp / "runtime_config.json").write_text(json.dumps({"lora_time_bias_s": bad}))
+        assert lt.bias_s() == 0.21
+    (lt.tmp / "runtime_config.json").write_text(json.dumps({"lora_time_bias_s": 0}))
+    assert lt.bias_s() == 0.0                                          # a gateway with GPS timestamps
+    (lt.tmp / "runtime_config.json").write_text(json.dumps({"lora_time_bias_s": -0.05}))
+    assert lt.bias_s() == -0.05

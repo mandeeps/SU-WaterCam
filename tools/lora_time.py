@@ -82,6 +82,25 @@ def _boot_id() -> str:
         return ""
 
 
+#: LoRa time's measured bias (lora_time_bias_s): subtracted from every answer
+BIAS_DEFAULT_S = 0.21
+BIAS_LIMIT_S = 2.0
+
+
+def bias_s() -> float:
+    """How far LoRa time runs ahead of true time (runtime_config lora_time_bias_s).
+
+    Measured on 005 against NTP (2026-11-10): +0.214 s, 9 ms standard deviation,
+    most likely ChirpStack answering with its time after its 200 ms deduplication
+    delay. It changes if that delay does or a gateway sends GPS timestamps, so it
+    is a setting; out of range or unreadable means the default."""
+    try:
+        value = float((config_io.read_json(CONFIG) or {}).get("lora_time_bias_s", BIAS_DEFAULT_S))
+    except Exception:  # noqa: BLE001
+        return BIAS_DEFAULT_S
+    return value if abs(value) <= BIAS_LIMIT_S else BIAS_DEFAULT_S
+
+
 def mode() -> str:
     try:
         value = str((config_io.read_json(CONFIG) or {}).get("lora_time_sync") or "healthy").strip().lower()
@@ -143,7 +162,8 @@ def sync(handler, now: Callable[[], float] = time.time, run: Callable = subproce
     """One attempt: decide, ask the network, set the clock if it is off. Never raises.
 
     Returns the logged event: {"source": "lora", "mode", "link", "asked", "ok",
-    "offset_s" (network minus this clock), "rtt_s", "applied", "verified", "reason"}.
+    "offset_s" (network minus this clock, after
+    bias_s is subtracted), "bias_s", "rtt_s", "applied", "verified", "reason"}.
     """
     m = mode()
     event: Dict[str, Any] = {"t": int(now()), "source": "lora", "mode": m, "asked": False, "ok": False,
@@ -183,8 +203,10 @@ def sync(handler, now: Callable[[], float] = time.time, run: Callable = subproce
     else:
         event["error"] = answer.get("error")
         return done(f"no network time: {answer.get('error') or 'no answer'}")
-    offset = answer["unix"] - answer["answered_at"]
-    event.update(ok=True, offset_s=round(offset, 3), rtt_s=answer.get("rtt_s"))
+    bias = bias_s()
+    unix = answer["unix"] - bias                   # the network time, corrected for its bias
+    offset = unix - answer["answered_at"]
+    event.update(ok=True, offset_s=round(offset, 3), bias_s=bias, rtt_s=answer.get("rtt_s"))
     if not healthy and m == "measure":
         return done(f"measured on a weak link, not applied ({offset:+.2f} s)")
     if abs(offset) <= LORA_TOLERANCE_S:
@@ -195,7 +217,7 @@ def sync(handler, now: Callable[[], float] = time.time, run: Callable = subproce
     if abs(offset) > MAX_STEP_S and not os.path.exists(RTC_UNTRUSTED) and clock >= CLOCK_FLOOR:
         return done(f"LoRa time is {abs(offset) / 3600:.1f} h off the clock: more than a day, not applied "
                     "(the RTC looks valid)")
-    why = _apply(answer["unix"] + (clock - answer["answered_at"]), run)
+    why = _apply(unix + (clock - answer["answered_at"]), run)
     if why:
         event["error"] = why
         return done(f"clock {offset:+.1f} s off LoRa time, not corrected: {why}")

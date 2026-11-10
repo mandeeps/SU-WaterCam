@@ -7,7 +7,7 @@ do better:
 | When | Source | Resolution | Code |
 |---|---|---|---|
 | Every boot, first | The Witty Pi RTC, copied into the system clock by the Witty Pi daemon (or the other way round if the RTC's time is bad) | 1 s, drifts (005: 2 s in 4 days) | `~/wittypi/daemon.sh` (stock), `tools/rtc_early_clock.py` |
-| Once a day, soon after boot | **LoRa network time** (DeviceTimeReq) when the LoRa link is healthy | about 0.3 s | `tools/lora_time.py`, from `lora_daemon` |
+| Once a day, soon after boot | **LoRa network time** (DeviceTimeReq) when the LoRa link is healthy | about 10 ms after its bias (0.21 s) | `tools/lora_time.py`, from `lora_daemon` |
 | Every boot, +30 s, unless LoRa or GPS time set the clock | **Network time**: the API server's `Date` header (tailnet or https), or public https servers' when it is down; when there's no internet, **GPS time** if the modem already has power | about 0.5 s / better than 0.1 s | `config/wittypi/syncTime.sh`, `network_time.py` |
 | After an IP upload, once per boot | The **server's** `Date` header in the reply, when nothing above set the time this boot | 1 s | `tools/transmit_ip.py` `correct_clock` |
 | The daily GPS window | **GPS time** from the fix, when nothing above set the time this boot | better than 0.1 s | `tools/gps_window.py` |
@@ -67,6 +67,12 @@ time since the uplink added on), and that ChirpStack's clock is right to about
 10 ms. The other reading, an uncorrected uplink time and a ChirpStack clock
 1.3 s fast, would have to match the default delay by chance. Checking
 `deduplication_delay` in ChirpStack's configuration would settle it.
+
+`lora_time` subtracts the bias from every answer: **`lora_time_bias_s`** in
+`runtime_config.json`, default 0.21 s, settable from -2 to 2 s. Set it again if
+ChirpStack's deduplication delay changes, or to about 0 if a unit's gateway
+sends GPS timestamps; the GPS fixes in the time sync log show what is left. With
+the bias taken out, LoRa time is good to about 10 ms on 005.
 
 The API server runs NTP (systemd-timesyncd, offset under 1 ms when checked);
 ChirpStack runs on a different server, whose clock was only checked this way (above).
@@ -139,7 +145,7 @@ the GPS fix's `offset_s` is LoRa time's error.
 
 ## Evaluation: LoRa or GPS time on weak links
 
-On a healthy link LoRa time is the better choice: about 0.3 s, a second of
+On a healthy link LoRa time is the better choice: about 10 ms after its bias, a second of
 radio, no modem. On a weak link the question is open: an ask can go unanswered
 (the uplink not heard, or the answer lost), and every retry is another uplink at
 a slow data rate; the GPS window instead powers the modem (USB on, 0.6-0.9 W)

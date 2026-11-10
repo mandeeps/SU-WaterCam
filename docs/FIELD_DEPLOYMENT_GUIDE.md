@@ -352,7 +352,7 @@ How the unit keeps time (NTP is off; `timedatectl` reports "not synchronized", w
 1. **At boot,** the Witty Pi daemon copies its RTC into the system clock, or
    the other way round if the RTC's time looks bad.
 2. **Soon after the LoRa join,** `lora_daemon` sets the clock from LoRa network
-   time (about 0.3 s) when the LoRa link is healthy, at most once a day.
+   time (about 10 ms) when the LoRa link is healthy, at most once a day.
 3. **About 30 s after boot,** `beforeScript.sh` runs `syncTime.sh`. Unless LoRa
    time already set the clock, it takes network time (`network_time.py`) from
    the API server's reply, or, if the API server is down, from public https

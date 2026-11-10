@@ -36,7 +36,7 @@ fi
 # wait long enough so the whole system gets stable before processing
 sleep ${SYNC_WAIT_S:-30}
 
-# LoRa time (lora_daemon, about 0.3 s) usually comes first and is finer than
+# LoRa time (lora_daemon, about 10 ms after its bias) usually comes first and is finer than
 # network time; GPS time is finer still. Don't overwrite either.
 prior=$(cat $TIME_SOURCE 2>/dev/null)
 if [[ "$prior" == "lora" || "$prior" == "gps" ]]; then

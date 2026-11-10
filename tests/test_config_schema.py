@@ -43,11 +43,12 @@ INTS_BEFORE = frozenset({
 def test_tables_are_unchanged():
     assert M._DEFAULT_PARAMS == DEFAULTS_BEFORE
     assert list(M._DEFAULT_PARAMS) == list(DEFAULTS_BEFORE)   # the order a new file is written in
-    assert M._PARAM_RANGES == RANGES_BEFORE
+    # lora_time_bias_s: LoRa time's measured bias (tools/lora_time.py), ranged on purpose
+    assert M._PARAM_RANGES == {**RANGES_BEFORE, 'lora_time_bias_s': (-2.0, 2.0)}
     assert M._INT_PARAMS == INTS_BEFORE
     # lora_time_sync: settable on purpose (tools/lora_time.py, a mode, no range)
     assert M._SETTABLE_PARAMS == (frozenset(DEFAULTS_BEFORE) | frozenset(RANGES_BEFORE)
-                                  | {'emergency_since', 'schedule', 'lora_time_sync'})
+                                  | {'emergency_since', 'schedule', 'lora_time_sync', 'lora_time_bias_s'})
 
 
 def test_template_file_is_generated_from_the_schema():

@@ -131,6 +131,9 @@ SETTINGS: List[Setting] = [
     S("lora_time_sync", "healthy", "Clock from LoRa network time (tools/lora_time.py): healthy (on a healthy "
       "link, ahead of IP time), measure (also ask on a weak link, only log it), always, off",
       settable=True, readers=("lora_time",)),
+    S("lora_time_bias_s", 0.21, "How far LoRa network time runs ahead of true time, in s; lora_time subtracts it "
+      "(005, 2026-11-10: +0.214 s, likely ChirpStack's 200 ms deduplication delay; docs/TIME_SYNC.md)",
+      range=(-2.0, 2.0), readers=("lora_time",)),
     S("hold_awake", False, "Keep the unit up for bench work (max_awake); replaces /etc/watercam/hold-awake, still honoured for now",
       in_defaults=True, readers=("max_awake",)),
     S("wifi_when_lora_healthy", False, "Join WiFi even when LoRa is healthy", settable=False, readers=("wifi_policy",)),
