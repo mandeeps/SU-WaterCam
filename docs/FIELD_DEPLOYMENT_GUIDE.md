@@ -894,6 +894,19 @@ sudo cp config/journald-volatile.conf /etc/systemd/journald.conf.d/
 sudo systemctl restart systemd-journald
 ```
 
+To look into past wakes on the unit itself, keep the journal on the card
+instead, for 30 days or more, with `config/journald-persistent.conf`. It costs
+about 100-150 MB of card writes a day on an hourly schedule. Install it as
+`zz-watercam-journal.conf` so it overrides the default and any older drop-ins.
+It sets `SystemMaxFiles=1000`, because journald's default of 100 files holds
+only about 3 days on a node.
+
+```bash
+sudo cp config/journald-persistent.conf /etc/systemd/journald.conf.d/zz-watercam-journal.conf
+sudo rm -f /etc/systemd/journald.conf.d/journald-volatile.conf
+sudo systemctl restart systemd-journald
+```
+
 The LoRa handler's `DEBUG:` lines (every AT command, payload hex) and the
 per-poll GPS lines are off by default. Turn them on for a test or problem unit
 with the runtime parameter `debug_mode: true` in `runtime_config.json` (the
