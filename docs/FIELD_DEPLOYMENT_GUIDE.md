@@ -351,25 +351,30 @@ How the unit keeps time (NTP is off; `timedatectl` reports "not synchronized", w
 
 1. **At boot,** the Witty Pi daemon copies its RTC into the system clock, or
    the other way round if the RTC's time looks bad.
-2. **About 30 s later,** `beforeScript.sh` runs `syncTime.sh`. It reads the
-   `Date:` header of an HTTP request to `http://google.com`, accurate to about
-   1 s, and writes it to the system clock and the RTC. That needs internet at
-   boot: WiFi, or cellular if the modem autoconnects. A unit whose modem is kept
-   off until needed has no internet at boot without WiFi.
-3. **Without internet,** `syncTime.sh` takes the time from GPS instead (gpsd,
-   through `gps_time.py`), waiting up to 90 s for a fix. The GPS is the
-   modem's, and works with its data connection down. With neither, the clock
-   and RTC are left alone.
-4. **The RTC holds local time.** After a daylight-saving change, the first boot
-   runs an hour off until step 2 or 3 corrects it. A unit with neither internet
-   nor a GPS fix isn't corrected for the change or for drift, so check its
-   clock at each visit.
+2. **Soon after the LoRa join,** `lora_daemon` sets the clock from LoRa network
+   time (about 0.3 s) when the LoRa link is healthy, at most once a day.
+3. **About 30 s after boot,** `beforeScript.sh` runs `syncTime.sh`. Unless LoRa
+   time already set the clock, it takes network time (`network_time.py`) from
+   the API server's reply, or, if the API server is down, from public https
+   servers. It never uses plain http, which a captive portal can answer, and
+   refuses an answer more than a day off a clock that looks valid. That needs
+   internet at boot: WiFi, or cellular if the modem autoconnects. A unit whose
+   modem is kept off until needed has no internet at boot without WiFi.
+4. **Without internet,** `syncTime.sh` takes the time from GPS instead (gpsd,
+   through `gps_time.py`) if the modem has power, waiting up to 90 s for a fix.
+   The GPS is the modem's, and works with its data connection down. Later in
+   the wake, the server's reply to an upload or the daily GPS fix can still set
+   it. `docs/TIME_SYNC.md` has the whole order.
+5. **The RTC holds local time.** After a daylight-saving change, the first boot
+   runs an hour off until one of these corrects it. A unit with none of them
+   isn't corrected for the change or for drift, so check its clock at each
+   visit.
 
 Install this repo's time sync into the Witty Pi folder (the stock `syncTime.sh`
-has no GPS fallback):
+has no GPS fallback and takes any plain-http answer):
 
 ```bash
-cp /home/pi/SU-WaterCam/config/wittypi/syncTime.sh /home/pi/SU-WaterCam/config/wittypi/gps_time.py /home/pi/wittypi/
+cp /home/pi/SU-WaterCam/config/wittypi/syncTime.sh /home/pi/SU-WaterCam/config/wittypi/network_time.py /home/pi/SU-WaterCam/config/wittypi/gps_time.py /home/pi/wittypi/
 ```
 
 ### 1.5 Configure `runtime_config.json`
@@ -831,7 +836,7 @@ microphone are always on or off together. The four `uhubctl` lines from
 ```bash
 sudo apt install uhubctl
 sudo cp config/usb-power-off.service config/quectel-gnss.service /etc/systemd/system/
-sudo cp config/wittypi/syncTime.sh /home/pi/wittypi/
+sudo cp config/wittypi/syncTime.sh config/wittypi/network_time.py /home/pi/wittypi/
 # Units set up before 2026-10-22: the old timer turned USB on 8 s after every boot
 sudo systemctl disable --now usb-power-on.timer 2>/dev/null; sudo rm -f /etc/systemd/system/usb-power-on.{timer,service}
 sudo systemctl daemon-reload

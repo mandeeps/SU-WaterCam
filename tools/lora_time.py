@@ -22,8 +22,8 @@ lora_time_sync in runtime_config.json says when to use it:
   off      never ask.
 
 Rules, the same as for the server's time (transmit_ip.correct_clock):
-- at most once a day (INTERVAL_S; once per boot at most), and not after GPS
-  time, which is more exact;
+- at most once a day (INTERVAL_S; once per boot at most; RETRY_S after an
+  unanswered ask on a healthy link), and not after GPS time, which is more exact;
 - an offset of LORA_TOLERANCE_S or less is left alone (the clock helper takes
   whole seconds), but counts as verified;
 - a step of more than MAX_STEP_S (a day) only when the RTC is known to be bad
@@ -61,6 +61,11 @@ DONE_PATH = "/tmp/watercam-lora-time"
 #: days), so a unit waking every hour asks at most once every INTERVAL_S
 STATE_PATH = os.path.join(REPO, "data", "lora_time.json")
 INTERVAL_S = 24 * 3600
+#: After an ask on a healthy link went unanswered (one lost uplink or downlink),
+#: ask again sooner. Not after one on a weak link (measure, always): that would
+#: be an extra ask every few hours where answers are rare. A gone gateway fails
+#: the link check first, so it costs no asks either way.
+RETRY_S = 6 * 3600
 CLOCK_FLOOR = 1767225600                 # 2026-01-01, as watercam-set-clock
 LORA_TOLERANCE_S = 1.0
 MAX_STEP_S = 24 * 3600
@@ -171,9 +176,11 @@ def sync(handler, now: Callable[[], float] = time.time, run: Callable = subproce
         return done(f"weak link ({link.get('reason') or 'not healthy'}): left to IP, GPS and the RTC")
 
     event["asked"] = True
-    _write_state({"last_asked": event["t"]})
+    _write_state({"last_asked": event["t"], "answered": False, "healthy": healthy})
     answer = handler.network_time()
-    if not answer.get("ok"):
+    if answer.get("ok"):
+        _write_state({"answered": True})
+    else:
         event["error"] = answer.get("error")
         return done(f"no network time: {answer.get('error') or 'no answer'}")
     offset = answer["unix"] - answer["answered_at"]
@@ -218,11 +225,14 @@ def _write_state(update: Dict[str, Any]) -> None:
 
 
 def due(now: Optional[float] = None) -> bool:
-    """True when it last asked INTERVAL_S or longer ago (or never, or 'in the
-    future': the clock was wrong then or is now)."""
+    """True when it last asked INTERVAL_S or longer ago (RETRY_S after an
+    unanswered ask on a healthy link), or never, or 'in the future' (the clock
+    was wrong then or is now)."""
     now = time.time() if now is None else now
-    last = _read_state().get("last_asked")
-    return not isinstance(last, (int, float)) or not 0 <= now - last < INTERVAL_S
+    state = _read_state()
+    last = state.get("last_asked")
+    wait = RETRY_S if state.get("answered") is False and state.get("healthy") else INTERVAL_S
+    return not isinstance(last, (int, float)) or not 0 <= now - last < wait
 
 
 def _mark_verified() -> None:

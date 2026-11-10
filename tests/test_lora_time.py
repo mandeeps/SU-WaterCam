@@ -257,3 +257,28 @@ def test_the_helper_takes_only_known_sources():
     assert 'source=${2:-server}' in text and '^(server|lora|gps)$' in text
     r = subprocess.run(["bash", path, "1794287896", "'; rm -rf /'"], capture_output=True, text=True)
     assert r.returncode == 2 and "source must be" in r.stderr
+
+
+def test_an_unanswered_ask_on_a_healthy_link_retries_sooner(lt):
+    lt.sync(Handler(ok=False), run=Run(), now=lambda: 1_000_000, assess=HEALTHY)
+    assert not lt.due(now=1_000_000 + 3600)
+    assert lt.due(now=1_000_000 + lt.RETRY_S)                      # not a whole day
+    lt.sync(Handler(ok=True), run=Run(), now=lambda: 1_100_000, assess=HEALTHY)
+    assert not lt.due(now=1_100_000 + lt.RETRY_S)                  # answered: a day again
+
+
+def test_an_unanswered_ask_on_a_weak_link_waits_a_day(lt):
+    set_mode(lt, "measure")
+    lt.sync(Handler(ok=False), run=Run(), now=lambda: 1_000_000, assess=WEAK)
+    assert not lt.due(now=1_000_000 + lt.RETRY_S)
+    assert lt.due(now=1_000_000 + lt.INTERVAL_S)
+
+
+def test_a_gone_gateway_costs_no_asks(lt):
+    # The mDot still says joined, but the link check fails: not healthy, so no ask
+    gone = lambda: {"healthy": False, "joined": True, "margin_db": None, "gateways": 0,  # noqa: E731
+                    "reason": "link check failed: no gateway answered"}
+    h = Handler()
+    for t in range(5):
+        lt.sync(h, run=Run(), now=lambda: 1_000_000 + t * 3600, assess=gone)
+    assert h.asked == 0 and not lt.synced_this_boot()             # server and GPS time still run

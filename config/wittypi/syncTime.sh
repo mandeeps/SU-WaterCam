@@ -19,18 +19,45 @@ if [ -z "$my_dir" ] ; then
 fi
 . $my_dir/utilities.sh
 
-# wait long enough so the whole system gets stable before processing
-sleep 30
+# (overridable only for tests/test_network_time.py)
+TIME_SOURCE=${WATERCAM_TIME_SOURCE:-/run/watercam-time-source}
+RTC_UNTRUSTED=${WATERCAM_RTC_UNTRUSTED:-/run/watercam-rtc-untrusted}
+NET_ERR=${WATERCAM_NET_ERR:-/tmp/watercam-network-time.err}
 
-# 1. network time (HTTP Date header, about 1 s)
-net_ts=$(get_network_timestamp)
-if [[ "$net_ts" != "-1" ]]; then
-  log '  Applying network time to system...'
-  sudo date -u -s @$net_ts >/dev/null
-  system_to_rtc
-  echo network > /run/watercam-time-source   # tools/transmit_ip.py correct_clock skips then
+# The Witty Pi daemon found the RTC's time bad: it has already copied the
+# (possibly days-old) system time into the RTC, so a large correction must be
+# allowed, here and by LoRa time and the server's (tools/lora_time.py,
+# tools/transmit_ip.py). Marked before the wait so they see it too.
+rtc_verdict=$(tail -c 8192 $my_dir/wittyPi.log 2>/dev/null | grep -aoE 'RTC has bad time|RTC has good time' | tail -1)
+if [[ "$rtc_verdict" == "RTC has bad time" && ! -e $RTC_UNTRUSTED ]]; then
+  echo "Witty Pi: RTC has bad time" > $RTC_UNTRUSTED
+fi
+
+# wait long enough so the whole system gets stable before processing
+sleep ${SYNC_WAIT_S:-30}
+
+# LoRa time (lora_daemon, about 0.3 s) usually comes first and is finer than
+# network time; GPS time is finer still. Don't overwrite either.
+prior=$(cat $TIME_SOURCE 2>/dev/null)
+if [[ "$prior" == "lora" || "$prior" == "gps" ]]; then
+  log "  Clock already set from $prior time this boot: network time not needed."
   exit 0
 fi
+
+# 1. network time: our API server (tailnet or https), else public https servers
+#    with the certificate checked; never plain http, which a captive portal or
+#    access point can answer. Timed out, and checked like the other sources
+#    (network_time.py).
+net=$(python3 $my_dir/network_time.py 2>$NET_ERR)
+if [[ -n "$net" ]]; then
+  read -r net_ts net_from <<< "$net"
+  log "  Applying network time ($net_from) to system..."
+  sudo date -u -s @$net_ts >/dev/null
+  system_to_rtc
+  echo network > $TIME_SOURCE   # tools/transmit_ip.py correct_clock and the GPS window skip then
+  exit 0
+fi
+log "  No network time: $(head -c 200 $NET_ERR 2>/dev/null)"
 
 # 2. GPS time, from gpsd, only if the modem already has power: USB is off unless
 #    something needs it (tools/usb_power.py), and the RTC keeps time well enough.
@@ -46,7 +73,7 @@ if [[ -n "$gps_time" && -n "$gps_ts" && "$gps_ts" -gt 1767225600 ]]; then   # af
   log "  Applying GPS time ($gps_time) to system..."
   sudo date -u -s @$gps_ts >/dev/null
   system_to_rtc
-  echo gps > /run/watercam-time-source
+  echo gps > $TIME_SOURCE
   exit 0
 fi
 
