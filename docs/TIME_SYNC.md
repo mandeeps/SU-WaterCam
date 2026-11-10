@@ -41,22 +41,35 @@ The mDot's `AT+GPSTIME` sends an empty uplink carrying a LoRaWAN DeviceTimeReq.
 The network server (our ChirpStack answers it) replies with a MAC-only
 DeviceTimeAns in the first receive window, and the mDot prints the time in
 milliseconds since the GPS epoch (Unix time = ms / 1000 + 315964800 - 18 leap
-seconds). Measured on 005 (2026-11-10, two sessions of three asks, against
-an NTP-synchronised workstation):
+seconds).
 
-- answers 1.20 s after the command, five times out of six, within about 20 ms
-  of each other and about 0.2 s **ahead** of true time;
-- one answer took 2.5 s and was 0.8 s ahead;
-- what that says about ChirpStack's clock depends on libmdot, which is only a
-  binary: if `getGPSTime()` returns the current time (the answer moved on by
-  the time since it arrived), ChirpStack's clock is right to about 0.2 s
-  (likely its receive time after the gateway's backhaul, not the uplink's
-  end); if it returns the uplink's time unchanged, ChirpStack's clock is about
-  1.2 s fast. A unit's GPS fixes in the time sync log would tell the two apart
-  over time, and show if ChirpStack's clock drifted.
+**Measured on 005 against NTP (2026-11-10 17:43 EST).** Ten asks, each between
+two NTP offset measurements on the unit (pool.ntp.org, the best of four by
+delay, 16-130 ms), so the unit's own clock error cancels out. Data rate DR0
+(SF10), RX1 delay 1 s:
+
+| | Result |
+|---|---|
+| Answered | 9 of 10 (one "Server time not received") |
+| Command to answer | 1.102-1.103 s |
+| LoRa time minus true time, at the answer | **+0.214 s** mean, 0.009 s standard deviation (+0.200 to +0.226) |
+
+Earlier the same day (two sessions of three, against the workstation's clock
+over ssh) gave +0.20 to +0.22 s on five asks and +0.82 s on one that took 2.5 s.
+
+So LoRa time is a steady 0.21 s ahead: a fixed bias, not noise. The likely
+cause is the network server rather than its clock. ChirpStack holds each uplink
+for its deduplication delay (200 ms by default) to collect it from every
+gateway, and, when the gateway gives no GPS timestamp, answers DeviceTimeReq
+with its own time after that. Add the backhaul and it comes to about 0.21 s.
+That also means libmdot's `getGPSTime()` returns the time at the answer (the
+time since the uplink added on), and that ChirpStack's clock is right to about
+10 ms. The other reading, an uncorrected uplink time and a ChirpStack clock
+1.3 s fast, would have to match the default delay by chance. Checking
+`deduplication_delay` in ChirpStack's configuration would settle it.
 
 The API server runs NTP (systemd-timesyncd, offset under 1 ms when checked);
-ChirpStack runs on a different server, whose clock was only checked this way.
+ChirpStack runs on a different server, whose clock was only checked this way (above).
 
 The answer is authenticated by the device's LoRaWAN session keys and uses no
 data plan. Each ask costs one uplink and one downlink, so a unit asks at most
