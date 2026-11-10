@@ -1187,6 +1187,64 @@ baseline + `area_threshold`, and flood growing (07 27) when it rose by
 `area_threshold` or more since the previous capture. After moving or re-aiming
 the camera, run `--reset` and set the baseline again.
 
+### 2.4.2 Take and upload the reference photo
+
+The dashboard draws each water map on a reference photo from the unit's own
+camera (the device panel's "Water Projection on Reference Photo"), and the
+Georeference page reads its pixels. Take it once the camera is in its final
+position, and again after re-aiming it.
+
+The water maps are not plain photos: before segmenting, the capture workflow
+undistorts the frame with `config/camera_calibration.json`
+(`tools/coreg_multiple.py`), so a map is a grid over the undistorted frame. The
+reference photo is a raw frame, and the dashboard maps each of its pixels
+through the same calibration to the water map. That only works for a full
+frame from this camera, so take it exactly as below.
+
+1. On the unit, keep it up and free the camera:
+
+   ```bash
+   cd ~/SU-WaterCam
+   venv/bin/python -c "from tools.lora_runtime_integration import set_parameter; set_parameter('hold_awake', True)"
+   sudo systemctl stop ticktalk.service
+   ```
+
+2. Take a full-resolution frame, the size the capture workflow uses:
+
+   ```bash
+   rpicam-still --nopreview --width 2592 --height 1944 -o ~/reference.jpg
+   ```
+
+   Keep the 4:3 shape. A smaller 4:3 size also works (the dashboard scales the
+   calibration), but a 16:9 size is a cropped view: the dashboard then
+   stretches the water map over it, and the water toward the edges is drawn
+   off by a few percent. `rpicam-still` applies no lens correction, which is
+   what the dashboard expects.
+
+3. Copy it to your computer (`scp <hostname>:reference.jpg .` over Tailscale)
+   and look at it: the view the camera will monitor, in focus.
+
+4. Release the unit. `ticktalk` then runs a normal cycle and powers off:
+
+   ```bash
+   venv/bin/python -c "from tools.lora_runtime_integration import set_parameter; set_parameter('hold_awake', False)"
+   sudo systemctl start ticktalk.service
+   ```
+
+5. On the dashboard, **Management**: select the unit and upload the photo
+   under *Reference photo*. Uploading clears any saved projection points. Don't
+   click new ones: the 4-point projection is only for a photo taken from
+   somewhere other than the unit's camera.
+
+6. If the unit has no camera calibration on the server yet, on the
+   **Georeference** page select the unit, paste the contents of
+   `config/camera_calibration.json` (`K`, `D`, `img_size`) into *Camera
+   calibration*, and save.
+
+Check the device panel: the note under the photo should say the water is
+"drawn through the unit's lens calibration". If it says the overlay is
+stretched, the calibration is missing or the photo's shape doesn't match it.
+
 ### 2.5 Final weatherproofing
 
 Confirm all cable entries are sealed, connections to the solar panel are secure, and the case is fully closed before leaving the site.
@@ -1197,5 +1255,7 @@ Confirm all cable entries are sealed, connections to the solar panel are secure,
 
 - **Dashboard**: check for regular incoming readings at the expected
   `monitoring_frequency` cadence.
+- **Reference photo** (2.4.2): uploaded, and the device panel's water
+  projection says it is drawn through the unit's lens calibration.
 - **Remote access**: `ssh <hostname>` over Tailscale (only works while the Pi is powered on per its WittyPi schedule
 - **Remote Start**: if the system is in range of a LoRa gateway and connected to it you can send a remote start signal from the Chirpstack server or through the dashboard (the dashboard is still under development so it might have issues)
