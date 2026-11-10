@@ -108,8 +108,9 @@ def read_json(path):
     return data
 
 
-def write_json(path, data, mode=0o600):
-    """Atomically replace path with data, keeping the previous good file as <path>.bak."""
+def write_json(path, data, mode=0o600, indent=2):
+    """Atomically replace path with data, keeping the previous good file as <path>.bak.
+    indent=None writes compact JSON (one line), for a long log."""
     dirpath = os.path.dirname(os.path.abspath(path))
     tmp = f"{path}.tmp.{os.getpid()}"
     st = None
@@ -121,7 +122,7 @@ def write_json(path, data, mode=0o600):
     fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, mode)
     try:
         with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, indent=indent, separators=None if indent else (',', ':'))
             f.flush()
             os.fsync(f.fileno())
         if st is not None and os.geteuid() == 0 and (st.st_uid, st.st_gid) != (0, 0):

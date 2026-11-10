@@ -326,6 +326,11 @@ class IPTransmitter:
         result = self._post_with_retry(url, payload)
         if acks and result.get("success"):
             _clear_pending_acks(a["id"] for a in acks)
+        try:    # how this wake's IP uploads went, beside its LoRa check (tools/lora_health.py)
+            from tools import lora_health
+            lora_health.note_ip(bool(result.get("success")))
+        except Exception:
+            pass
         return result
 
     def post_acks(self, acks: List[Dict[str, Any]]) -> bool:

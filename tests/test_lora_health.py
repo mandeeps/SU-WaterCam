@@ -120,3 +120,60 @@ def test_cellular_session_leaves_wifi_policy_alone(tmp_path, monkeypatch):
     assert wp._session_active() is False
     state.write_text(json.dumps({"active": True, "mode": "auto"}))
     assert wp._session_active() is True
+
+
+# ── the check history: 30 days, the verdict and this boot's IP uploads ────────
+
+def _hist():
+    import json
+    with open(lh.HISTORY_PATH) as f:
+        return json.load(f)
+
+
+def test_history_records_the_verdict_and_reason():
+    lh.assess(handler())
+    lh.assess(handler(checks=({"ok": True, "margin_db": 2, "gateways": 1},)), force=True)
+    healthy, weak = _hist()
+    assert healthy["healthy"] is True and "14 dB margin" in healthy["reason"] and healthy["boot"] == "boot-1"
+    assert weak["healthy"] is False and "weak link" in weak["reason"] and weak["ok"] is False
+
+
+def test_history_keeps_30_days_and_at_most_the_cap(monkeypatch):
+    import json
+    now = 2_000_000_000
+    old = [{"t": now - lh.HISTORY_MAX_AGE_S - 60, "ok": False}]
+    recent = [{"t": now - 3600 * i, "ok": True} for i in range(50, 0, -1)]
+    with open(lh.HISTORY_PATH, "w") as f:
+        json.dump(old + recent, f)
+    monkeypatch.setattr(lh.time, "time", lambda: now)
+    lh.assess(handler(), force=True)
+    hist = _hist()
+    assert len(hist) == 51 and all(now - h["t"] <= lh.HISTORY_MAX_AGE_S for h in hist)   # 21 more than before
+    monkeypatch.setattr(lh, "HISTORY_MAX", 10)
+    lh.assess(handler(), force=True)
+    assert len(_hist()) == 10 and _hist()[-1]["t"] == now
+
+
+def test_history_is_written_compact():
+    lh.assess(handler())
+    with open(lh.HISTORY_PATH) as f:
+        text = f.read()
+    assert "\n" not in text.strip() and "\": " not in text
+
+
+def test_note_ip_counts_on_this_boots_entry(monkeypatch):
+    lh.note_ip(True)                                  # no history yet: nothing to note on
+    lh.assess(handler())
+    lh.note_ip(True)
+    lh.note_ip(False)
+    lh.note_ip(True)
+    assert _hist()[-1]["ip_sent"] == 2 and _hist()[-1]["ip_failed"] == 1
+    monkeypatch.setattr(lh, "_boot_id", lambda: "boot-2")
+    lh.note_ip(True)                                  # a later boot with no link check
+    assert _hist()[-1]["ip_sent"] == 2
+
+
+def test_a_healthy_wake_without_ip_counts_shows_the_skip():
+    lh.assess(handler())
+    last = _hist()[-1]
+    assert last["healthy"] and "ip_sent" not in last and "ip_failed" not in last
