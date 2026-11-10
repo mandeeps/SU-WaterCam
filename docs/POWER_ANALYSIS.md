@@ -123,7 +123,7 @@ the cable's USB-C plug, cut off and soldered to P2 instead.
 
 **Load test afterwards (2026-11-10 17:11-17:17, all four cores for 5 min,
 samples every 2 s):** no under-voltage at any point, nor on the boot just
-before it (17:10, 0x0).
+before it (17:10, 0x0) or on two reboots after it (17:20 and 17:21, 0x0).
 
 | Phase | Witty Pi Vout mean / min | Iout mean / max | P2 (meter) | CPU temp max |
 |---|---|---|---|---|
