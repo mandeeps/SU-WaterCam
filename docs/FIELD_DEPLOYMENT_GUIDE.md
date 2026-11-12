@@ -143,6 +143,12 @@ tailscale up --ssh
 
 This will allow logging into the system using SSH now and when the unit is in the field connected via cellular modem.
 
+Log in interactively as above (it prints a URL to open). If you use an auth key
+instead, never put it on the command line, where it stays in `~/.bash_history` on
+the SD card: write it to a file, pass `--auth-key=file:/path/to/key`, then delete
+the file. Use a one-off, pre-tagged key (`tag:watercam`) that expires soon, so a
+copy that survives somewhere can't add another machine to the tailnet.
+
 Check that tailnet names resolve through resolved. `tailscale0` should list
 `100.100.100.100`, and the server should answer by name (prints `200`):
 
@@ -753,7 +759,10 @@ sudo systemctl enable --now wittypi-next-wake.service
 `systemd-analyze security lora_daemon` should read about 2.5 OK and `ticktalk` about 7.1 MEDIUM
 (it runs doas, so it can't drop privileges). `ticktalk.service`,
 `lora_daemon.service` and `segformer_daemon.service` set
-`Environment=PYTHONUNBUFFERED=1`, so each `print()` reaches the journal when it
+`Environment=PYTHONUNBUFFERED=1` (and `ticktalk.service` also
+`TT_PICKLE_POLICY=enforce`: its runtime refuses network messages holding types
+outside `ticktalkpython/SafeUnpickle.py`'s allowlist, logged as `dropped a … network
+message: blocked …`), so each `print()` reaches the journal when it
 happens (with buffered stdout, journal timestamps bunch together: two captures
 60 s apart are logged within the same second). On a unit installed before that,
 copy the three files again as above and run `sudo systemctl daemon-reload`;
@@ -1148,7 +1157,16 @@ for the site:
       bench. A routine IP upload switches it to `ip`; set it back in the device
       panel's Transport section.
 - [ ] `systemctl show ticktalk.service -p Environment` includes
-      `PYTHONUNBUFFERED=1` (the unit file from this release, 1.9).
+      `PYTHONUNBUFFERED=1` and `TT_PICKLE_POLICY=enforce` (the unit file from this
+      release, 1.9), and `journalctl -u ticktalk -b | grep "network message"` prints
+      nothing after a bench capture.
+- [ ] **WiFi:** `nmcli -t -f NAME,TYPE con show | grep wireless` lists only the
+      site's network. Delete bench, home and guest profiles (`sudo nmcli con delete
+      NAME`): the unit joins any network with a saved name, and anyone can set up a
+      look-alike of an open or shared-password network ([NODE_SECURITY.md](NODE_SECURITY.md)).
+- [ ] **No auth key in the shell history:** `grep -c tskey ~/.bash_history` prints
+      `0` (if not, revoke that key in the Tailscale admin console and edit the
+      line out).
 - [ ] **Tailscale:** the unit appears in the admin console with the
       `tag:watercam` tag and no personal owner (the ACL itself is kept by the
       tailnet admin, outside this repository).

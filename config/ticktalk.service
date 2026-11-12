@@ -16,6 +16,12 @@ WorkingDirectory=/home/pi/SU-WaterCam
 # (two captures 60 s apart logged within the same second). The graph's
 # worker processes inherit the setting.
 Environment=PYTHONUNBUFFERED=1
+# The runtime's UDP listener (127.0.0.1:8080/8081) refuses any pickled message
+# holding something outside the allowlist (ticktalkpython/SafeUnpickle.py, #204)
+# instead of logging it and loading it anyway (the "warn" default). A refusal
+# is logged as "blocked <module>.<name>": if a capture stalls after an update,
+# look for that in the journal and add the type to SafeUnpickle.ALLOWED.
+Environment=TT_PICKLE_POLICY=enforce
 # Don't start the cameras, modem and inference until the WittyPi daemon has
 # armed the next wake: a brownout before that leaves no startup alarm, and the
 # unit never wakes again on its own. The wait gives up after 120 s and always
