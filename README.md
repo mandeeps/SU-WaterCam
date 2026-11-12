@@ -219,7 +219,7 @@ Outdated (Bullseye specific): If there are issues with taking high-resolution im
 
 Can also add nohdmi to the vc4-kms-v3d line to disable HDMI ports and save ~30mA
 
-Keep the systemd journal in RAM to spare the microSD card: install `config/journald-volatile.conf` as described at the top of that file. Logs then last until the next shutdown or power cut.
+Keep the systemd journal in RAM to spare the microSD card: install `config/journald-volatile.conf` as described at the top of that file. Logs then last until the next shutdown or power cut. To keep 30 days or more on the card instead, install `config/journald-persistent.conf` (see the top of that file).
 
 ### Power Management
 
