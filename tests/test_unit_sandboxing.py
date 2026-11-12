@@ -7,7 +7,7 @@ CONFIG = os.path.join(os.path.dirname(__file__), "..", "config")
 # Services whose code calls doas (shutdown, systemctl, uhubctl, set-clock)
 RUNS_DOAS = {"ticktalk.service", "max-awake.service", "remote-debug.service"}
 # Bench and development only: not installed on deployed units
-BENCH_ONLY = {"filebrowser.service", "button.service"}
+BENCH_ONLY = {"button.service"}
 
 
 def _units():

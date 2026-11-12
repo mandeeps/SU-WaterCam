@@ -7,8 +7,19 @@ unit: everything it holds can be revoked without touching the others.
 ## What a node exposes
 
 - **Over the network:** nothing but `tailscaled`. OpenSSH and filebrowser aren't
-  running; remote access is Tailscale SSH, governed by the tailnet ACL. Multicast
-  name responders are off (`config/systemd-resolved/90-watercam.conf`).
+  installed; remote access is Tailscale SSH, governed by the tailnet ACL. Multicast
+  name responders are off (`config/systemd-resolved/90-watercam.conf`). An input
+  firewall (`config/nftables/watercam-host.nft`, loaded by
+  `watercam-firewall.service` before the network comes up) drops everything that
+  arrives on WiFi, Ethernet or cellular except Tailscale's WireGuard (UDP 41641),
+  replies to the node's own connections, DHCP and the ICMP IPv6 needs. A service
+  that later listens on every interface by mistake is still only reachable over
+  the tailnet.
+- **Commands and the API key only over the tailnet:** the node sends its API token,
+  and takes commands and the clock, only from a server that Tailscale reports as a
+  running peer, or over verified HTTPS (`tools/transmit_ip.py`, `trusted_server`).
+  A hostile WiFi network can't pose as the API server by answering DNS with a
+  tailnet address.
 - **Physically:** the SD card (unencrypted: the Pi has no secure boot or TPM, and
   the unit must boot unattended, so disk encryption would need its key on the same
   card) and the serial console (`console=serial0`), kept on purpose for field

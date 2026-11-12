@@ -91,6 +91,9 @@ connection transfers data over the cellular interface.
 sudo systemctl disable --now filebrowser.service
 ```
 
+The unit file has since been removed from `config/`; copy files with `rsync` over
+Tailscale SSH instead (README).
+
 ---
 
 ### 5. Route metric misconfiguration
