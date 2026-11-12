@@ -622,19 +622,38 @@ sudo apt install mosh
 
 Use an appropriate client for your own device.
 
-### Filebrowser remote file access
+### Copying files off a node
 
-Helpful when using a system interactively for data collection: https://github.com/filebrowser/Filebrowser
+On a fixed node, use `scp` or `rsync` over Tailscale SSH: deployed nodes run no web
+or file service, and their firewall drops anything that doesn't arrive over
+Tailscale ([docs/NODE_SECURITY.md](docs/NODE_SECURITY.md)).
+
+```
+rsync -av pi@ufo-01-01-NNN.taild7822.ts.net:SU-WaterCam/images/20260419-010500 .
+```
+
+### Filebrowser remote file access (handheld units only)
+
+Helpful on a handheld unit used interactively for data collection:
+https://github.com/filebrowser/Filebrowser. Never install it on a deployed fixed
+node: it serves the photos over HTTP.
 
 Install, then run:
 
 ```
-filebrowser config init 
+filebrowser config init
 filebrowser users add USER PASSWORD
 filebrowser config set --address 0.0.0.0
 ```
 
-Then you can create a SystemD service like the example in the config directory. Move it to /etc/systemd/system, run `sudo systemctl daemon-reload` and `sudo systemctl enable --now filebrowser` to run.
+Use a strong password, not the default `admin` login. Then you can create a SystemD
+service like the example in the config directory (`config/filebrowser.service`).
+Move it to /etc/systemd/system, run `sudo systemctl daemon-reload` and
+`sudo systemctl enable --now filebrowser` to run. On a unit with the input firewall
+(`watercam-firewall.service`) it is reachable over Tailscale only; to reach it from
+the local network too, open its port (default 8080):
+`sudo nft insert rule inet watercam_host input tcp dport 8080 accept` (until the
+next reboot).
 
 ### Remote Video Streaming
 
@@ -642,7 +661,8 @@ with libcamera-apps-lite installed run:
 
 `libcamera-vid -t 0 --inline --listen -o tcp://0.0.0.0:8888`
 
-On your machine connected to the Pi (over Tailscale or directly) use VLC to stream the video using 'open network stream' and enter tcp/h264://PI_ADDRESS_OR_HOSTNAME:8888 with the appropriate IP address and port number. 
+On your machine connected to the Pi over Tailscale (the node's firewall drops
+connections from the local network) use VLC to stream the video using 'open network stream' and enter tcp/h264://PI_ADDRESS_OR_HOSTNAME:8888 with the appropriate IP address and port number. 
 
 ### Pytorch
 

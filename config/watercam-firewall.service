@@ -1,0 +1,18 @@
+[Unit]
+Description=WaterCam input firewall: nothing reaches the node except over Tailscale (docs/NODE_SECURITY.md)
+# Loaded before any network comes up, like Debian's nftables.service, so there is
+# no window with WiFi up and no filter
+DefaultDependencies=no
+Wants=network-pre.target
+Before=network-pre.target shutdown.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/sbin/nft -f /etc/nftables.d/watercam-host.nft
+ExecReload=/usr/sbin/nft -f /etc/nftables.d/watercam-host.nft
+ExecStop=-/usr/sbin/nft delete table inet watercam_host
+
+[Install]
+WantedBy=sysinit.target

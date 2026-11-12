@@ -331,8 +331,8 @@ set them with `cd ~/wittypi && sudo ./wittyPi.sh` if different.
 moving forward across boots without the RTC) and `zramswap`. Mask the file
 indexer like the other timers in 1.3.2: `sudo systemctl mask locate.timer`.
 
-**Firewall:** no host firewall beyond Tailscale's own rules and the cellular
-filter in 1.5.1, so no `ufw` and no stock `nftables.service`.
+**Firewall:** the node's input firewall and the cellular filter, both in 1.5.1,
+next to Tailscale's own rules. No `ufw` and no stock `nftables.service`.
 
 **Tailscale:** the tailnet ACL lives in the Tailscale admin console, not on the
 node and not in this public repository (it names who can reach the units). It
@@ -501,6 +501,23 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now watercam-cellular-filter.service   # starts whenever wwan0 exists
 sudo nft list table netdev watercam_cellular                     # shows the two drop rules
 ```
+
+Drop everything that reaches the node from WiFi, Ethernet or cellular except
+Tailscale ([NODE_SECURITY.md](NODE_SECURITY.md)). Remote access is Tailscale SSH,
+so the node needs nothing else inbound; a bench tool started with `--bind 0.0.0.0`
+stays unreachable from the local network. Install it from a Tailscale SSH session:
+it never blocks `tailscale0`.
+
+```bash
+sudo install -D -m 644 config/nftables/watercam-host.nft /etc/nftables.d/watercam-host.nft
+sudo install -m 644 config/watercam-firewall.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now watercam-firewall.service   # loads before the network at every boot
+sudo nft list chain inet watercam_host input            # policy drop, Tailscale accepted
+```
+
+To reach a bench tool from the LAN for one session, open its port; the rule is gone
+at the next reboot: `sudo nft insert rule inet watercam_host input tcp dport 8080 accept`.
 
 Don't enable the stock `nftables.service`: its `/etc/nftables.conf` starts with
 `flush ruleset`, which would also remove Tailscale's own firewall rules.
@@ -970,8 +987,9 @@ card can't stop the unit. The photos aren't uploaded, so this is the only copy.
   on every unit that should accept remote-access requests (`sudo systemctl enable
   --now remote-debug.timer remote-debug.path`); the startup health check (1.10)
   warns when either isn't enabled.
-- **filebrowser:** off on deployed units (`sudo systemctl disable --now
-  filebrowser`), it costs cellular data ([1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
+- **filebrowser:** handheld units only, never on deployed fixed nodes (`sudo
+  systemctl disable --now filebrowser` if an old install has it): it serves the
+  photos over HTTP and costs cellular data ([1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
 - **Legacy, never install:** `watercam.service` (replaced by ticktalk; the unit file is gone from `config/`),
   `gps.service` (replaced by `quectel-gnss.service`), `button.service`,
   `temperature.service` (removed from `config/`); `config/dhcpcd.conf` (NetworkManager is used) and
@@ -1134,6 +1152,9 @@ for the site:
 - [ ] **Tailscale:** the unit appears in the admin console with the
       `tag:watercam` tag and no personal owner (the ACL itself is kept by the
       tailnet admin, outside this repository).
+- [ ] **Firewall:** `systemctl is-enabled watercam-firewall.service` says
+      `enabled`, and `sudo nft list chain inet watercam_host input` shows
+      `policy drop` (1.5.1).
 - [ ] **Last:** clear the mount position learned during the bench tests,
       `venv/bin/python tools/gps_home.py --reset`, then shut down without
       another test cycle (1.7.1).
