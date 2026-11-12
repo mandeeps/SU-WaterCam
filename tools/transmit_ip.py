@@ -139,16 +139,68 @@ def _load_ip_config(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
 _TAILNET_NETS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
 
 
+_STATUS_MAX_AGE_S = 10.0
+_status_cache: Tuple[float, Optional[Dict[str, Any]]] = (float("-inf"), None)
+
+
+def _tailscale_status(max_age_s: float = _STATUS_MAX_AGE_S) -> Optional[Dict[str, Any]]:
+    """``tailscale status --json`` (local only: sends nothing), or None if it can't be read.
+
+    Cached for ``max_age_s``: the trust check runs on every request."""
+    global _status_cache
+    now = time.monotonic()
+    if now - _status_cache[0] < max_age_s:
+        return _status_cache[1]
+    try:
+        r = subprocess.run(["tailscale", "status", "--json"],
+                           capture_output=True, text=True, timeout=10)
+        status = json.loads(r.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        status = None
+    if not isinstance(status, dict):
+        status = None
+    _status_cache = (now, status)
+    return status
+
+
+def _tailnet_peer_addrs(host: str) -> set:
+    """The tailnet addresses that may stand for `host`: none unless Tailscale is running.
+
+    A name only gets the addresses of the peer with that name; a literal address
+    gets every current peer's. Where the traffic goes is only protected by WireGuard
+    when Tailscale is up and the address is a peer's: a DNS answer in 100.64.0.0/10
+    alone could come from a hostile network, and with Tailscale down the packets
+    would leave over that network in the clear."""
+    status = _tailscale_status()
+    if not status or status.get("BackendState") != "Running":
+        return set()
+    try:
+        ipaddress.ip_address(host)
+        literal = True
+    except ValueError:
+        literal = False
+    addrs = set()
+    for peer in (status.get("Peer") or {}).values():
+        if literal or (peer.get("DNSName") or "").rstrip(".").lower() == host:
+            addrs.update(peer.get("TailscaleIPs") or [])
+    return addrs
+
+
 def _resolves_into_tailnet(host: str) -> bool:
-    """True when every address `host` resolves to is a tailnet address (100.64.0.0/10)."""
+    """True when Tailscale is running and every address `host` resolves to is the
+    tailnet address of the peer named `host` (a literal address: of a current peer)."""
+    peer_addrs = _tailnet_peer_addrs(host)
+    if not peer_addrs:
+        return False
     try:
         infos = socket.getaddrinfo(host, None)
     except OSError:
         return False
     addrs = {i[4][0].split("%")[0] for i in infos}
     try:
-        return bool(addrs) and all(any(ipaddress.ip_address(a) in net for net in _TAILNET_NETS)
-                                   for a in addrs)
+        return bool(addrs) and all(
+            any(ipaddress.ip_address(a) in net for net in _TAILNET_NETS) and a in peer_addrs
+            for a in addrs)
     except ValueError:
         return False
 
@@ -170,7 +222,11 @@ def trusted_server(url: str) -> bool:
         ip = ipaddress.ip_address(host)
     except ValueError:
         return False
-    return ip.is_loopback or any(ip in net for net in _TAILNET_NETS)
+    if ip.is_loopback:
+        return True
+    # A tailnet address is only reached over WireGuard while Tailscale is up and it
+    # is a peer's; otherwise it is routed out over whatever network the node is on
+    return any(ip in net for net in _TAILNET_NETS) and _resolves_into_tailnet(host)
 
 
 class IPTransmitter:
@@ -1278,13 +1334,8 @@ def tailscale_online(host: str) -> Optional[bool]:
     Reads ``tailscale status --json``, which sends nothing over the network.
     None if the status can't be read or ``host`` isn't a peer.
     """
-    try:
-        r = subprocess.run(["tailscale", "status", "--json"],
-                           capture_output=True, text=True, timeout=10)
-        status = json.loads(r.stdout)
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return None
-    if not isinstance(status, dict):
+    status = _tailscale_status(max_age_s=0)     # polled while waiting: always fresh
+    if status is None:
         return None
     for peer in (status.get("Peer") or {}).values():
         if (peer.get("DNSName") or "").rstrip(".").lower() == host:
