@@ -26,3 +26,9 @@ def test_doas_services_keep_new_privileges():
     for name, text in _units():
         if name in RUNS_DOAS:
             assert "NoNewPrivileges=yes" not in text, name
+
+
+def test_ticktalk_refuses_unlisted_pickles():
+    """The runtime's UDP listener runs SafeUnpickle in enforce mode, not warn (#204)."""
+    with open(os.path.join(CONFIG, "ticktalk.service")) as f:
+        assert "\nEnvironment=TT_PICKLE_POLICY=enforce\n" in f.read()

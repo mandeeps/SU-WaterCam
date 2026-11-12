@@ -43,6 +43,16 @@ stays enabled. It is a root login for anyone holding the unit, so:
 Prefer WiFi logins that are unique to the unit or a guest network, so a lost unit
 never means changing a password other devices use.
 
+Keep only the site's network on a deployed unit. The unit joins any network that
+uses a saved name, and anyone can set up a look-alike of an open network (no
+password, or registered by MAC address) or of a guest network whose password is
+widely known. Joining one gives an attacker no way in, since the node accepts
+nothing but Tailscale and trusts the API server only as a Tailscale peer, but
+fewer saved networks means fewer chances to be lured onto one.
+
+Never type a Tailscale auth key on the command line: `~/.bash_history` keeps it on
+the SD card (FIELD_DEPLOYMENT_GUIDE.md, 1.3).
+
 ## When a unit is lost, stolen or tampered with
 
 Do these the same day, in this order:

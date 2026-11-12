@@ -23,6 +23,7 @@ import io
 import logging
 import os
 import pickle
+import pickletools
 
 logger = logging.getLogger("TTPython.SafeUnpickle")
 
@@ -89,8 +90,37 @@ class RestrictedUnpickler(pickle.Unpickler):
         return obj
 
 
+_MEMO_OPS = {"PUT", "BINPUT", "LONG_BINPUT", "GET", "BINGET", "LONG_BINGET"}
+
+
+def check_lengths(data: bytes) -> None:
+    """Refuse a stream whose opcodes claim more bytes than it holds.
+
+    The C unpickler buffers a FRAME, and allocates a BYTES8/BYTEARRAY8/
+    BINUNICODE8 argument, at its claimed size before finding the stream too
+    short: one damaged or crafted datagram claiming gigabytes gets the runtime
+    killed for memory (overcommit lets the allocation through). pickletools
+    reads each argument from the bytes actually there, so it raises instead,
+    without allocating; it doesn't check a FRAME's size, so that is done here.
+    Likewise a PUT/GET to a huge memo index makes the C unpickler grow its memo
+    table to that index (2**31 entries is 16 GB): a real stream can't use an
+    index beyond its own length, one opcode per memo entry at least."""
+    try:
+        for op, arg, pos in pickletools.genops(data):
+            if op.name == "FRAME" and arg > len(data) - pos:
+                raise ValueError(f"frame of {arg} bytes at {pos}, but only "
+                                 f"{len(data) - pos} remain")
+            if op.name in _MEMO_OPS and int(arg) > len(data):
+                raise ValueError(f"memo index {arg} at {pos} in a {len(data)} byte stream")
+    except ValueError as e:
+        raise pickle.UnpicklingError(f"malformed stream: {e}") from None
+
+
 def loads(data):
     mode = policy()
     if mode == "off":
         return pickle.loads(data)
-    return RestrictedUnpickler(io.BytesIO(bytes(data)), mode).load()
+    data = bytes(data)
+    if mode == "enforce":
+        check_lengths(data)
+    return RestrictedUnpickler(io.BytesIO(data), mode).load()
