@@ -102,6 +102,8 @@ def test_uplink_fields(repo, tmp_path_factory, monkeypatch):
 def test_uplink_fields_without_git_or_daemon(monkeypatch, tmp_path):
     monkeypatch.setattr(nv, "REPO", str(tmp_path / "missing"))
     monkeypatch.setattr(nv, "MODEL_INFO_PATH", str(tmp_path / "none.json"))
+    # Not the real /tmp cache: on a node it holds this boot's version and model
+    monkeypatch.setattr(nv, "CACHE_PATH", str(tmp_path / "no-cache.json"))
     assert nv.uplink_fields() == {}
 
 

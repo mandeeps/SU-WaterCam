@@ -104,13 +104,15 @@ def _coerce_float(value: Any, default: float) -> float:
         return default
 
 
-def _load_ip_config(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
+def _load_ip_config(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Load and return the ip_upload section from runtime_config.json.
 
     Returns an empty dict (all defaults) if the file is missing or contains
     invalid JSON — runtime_config.json is gitignored and may not exist in fresh
     dev or CI environments.
     """
+    # Looked up here, not bound as the default, so tests can point it elsewhere
+    config_path = config_path or _DEFAULT_CONFIG_PATH
     try:
         with open(config_path) as f:
             cfg = json.load(f)
@@ -229,6 +231,28 @@ def trusted_server(url: str) -> bool:
     return any(ip in net for net in _TAILNET_NETS) and _resolves_into_tailnet(host)
 
 
+def why_untrusted(url: str) -> str:
+    """Why trusted_server(url) is False, for the log: the fix differs (a wrong
+    server_url, Tailscale down, or a server that isn't on the tailnet)."""
+    from urllib.parse import urlparse
+    host = (urlparse(url or "").hostname or "").lower()
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if not (host.endswith(".ts.net") or
+            (literal is not None and any(literal in net for net in _TAILNET_NETS))):
+        return "plain http to an address outside the tailnet"
+    status = _tailscale_status()
+    if status is None:
+        return "Tailscale's status can't be read"
+    if status.get("BackendState") != "Running":
+        return f"Tailscale isn't running ({status.get('BackendState') or 'unknown'})"
+    if not _tailnet_peer_addrs(host):
+        return f"{host} isn't a current Tailscale peer"
+    return f"{host} doesn't resolve to its Tailscale peer's address"
+
+
 class IPTransmitter:
     """Handles uplink posting and downlink polling over HTTP.
 
@@ -259,23 +283,23 @@ class IPTransmitter:
         return trusted_server(self.server_url)
 
     def _auth_headers(self) -> Dict[str, str]:
-        """The API key header, only for a server it may go to: https, or a tailnet
-        address (a *.ts.net name must resolve into 100.64.0.0/10). Checked per
-        request, as the name only resolves once the link is up. Otherwise the key
-        stays home and the server will refuse the request."""
+        """The API key header, only for a server it may go to: https, or a server
+        Tailscale reports as a running peer (trusted_server). Checked per request, as
+        Tailscale may only come up after the link does. Otherwise the key stays home
+        and the server will refuse the request."""
         if not self.api_key:
             return {}
         if trusted_server(self.server_url):
             return {"Authorization": f"Bearer {self.api_key}"}
         if not self._key_refused_logged:
-            logger.warning("Not sending the API key to %s: not https and not a tailnet address",
-                           self.server_url)
+            logger.warning("Not sending the API key to %s: %s",
+                           self.server_url, why_untrusted(self.server_url))
             self._key_refused_logged = True
         return {}
 
     def __init__(
         self,
-        config_path: str = _DEFAULT_CONFIG_PATH,
+        config_path: Optional[str] = None,
         override_url: Optional[str] = None,
         override_device_id: Optional[str] = None,
         queue_dir: Optional[str] = None,
@@ -288,9 +312,9 @@ class IPTransmitter:
         self.configured: bool = bool(override_url or cfg.get("server_url"))
         self.server_url: str = (override_url or cfg.get("server_url", "http://localhost:8000")).rstrip("/")
         if self.configured and not trusted_server(self.server_url):
-            logger.warning("server_url %s is neither https nor (yet) a tailnet address: uploads go "
-                           "without the API key, and commands and the server's time are ignored (#203)",
-                           self.server_url)
+            logger.warning("server_url %s isn't trusted (yet): %s. Uploads go without the API "
+                           "key, and commands and the server's time are ignored (#203)",
+                           self.server_url, why_untrusted(self.server_url))
         self.api_key: str = cfg.get("api_key", "")
         self.device_id: str = override_device_id or cfg.get("device_id", "watercam-001")
         self.timeout_s: int = max(1, _coerce_int(cfg.get("timeout_s"), 15))
@@ -713,11 +737,11 @@ class IPTransmitter:
             # read the reading (with its position) and, by answering 2xx, make the
             # node drop it from its queue. Keep it queued until the server is trusted.
             if not self._untrusted_logged:
-                logger.warning("Not uploading to %s: not https and not a tailnet address; "
-                               "readings stay queued", self.server_url)
+                logger.warning("Not uploading to %s: %s; readings stay queued",
+                               self.server_url, why_untrusted(self.server_url))
                 self._untrusted_logged = True
             return {"success": False, "status_code": None, "response": None, "untrusted": True,
-                    "error": "untrusted server (not https, not a tailnet address)", "attempts": 0}
+                    "error": f"untrusted server ({why_untrusted(self.server_url)})", "attempts": 0}
 
         for attempt in range(1, self.retry_attempts + 1):
             try:
@@ -814,7 +838,7 @@ class IPTransmitter:
 def send_uplink(
     channels: List[Dict[str, str]],
     device_ts: Optional[int] = None,
-    config_path: str = _DEFAULT_CONFIG_PATH,
+    config_path: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Module-level wrapper: create a transmitter, send one uplink, then close."""
     tx = IPTransmitter(config_path=config_path)
@@ -824,7 +848,7 @@ def send_uplink(
         tx.close()
 
 
-def poll_downlink(config_path: str = _DEFAULT_CONFIG_PATH) -> Dict[str, Any]:
+def poll_downlink(config_path: Optional[str] = None) -> Dict[str, Any]:
     """Module-level wrapper: create a transmitter, poll for the pending commands, then close."""
     tx = IPTransmitter(config_path=config_path)
     try:
@@ -838,7 +862,7 @@ def _is_api_reply(body: Any, device_id: str) -> bool:
     return isinstance(body, dict) and body.get("device_id") == device_id and "decoded" in body
 
 
-def post_acks(acks: List[Dict[str, Any]], config_path: str = _DEFAULT_CONFIG_PATH) -> bool:
+def post_acks(acks: List[Dict[str, Any]], config_path: Optional[str] = None) -> bool:
     """Module-level wrapper for IPTransmitter.post_acks."""
     tx = IPTransmitter(config_path=config_path)
     try:

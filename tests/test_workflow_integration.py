@@ -542,11 +542,12 @@ class TestCoregSegmentation:
             mock_popen.return_value = mock_proc
 
             # The segformer function from ticktalk_main uses @SQify, so call the
-            # daemon helper directly to test the fallback path.
-            import importlib.util, json as _json, socket as _socket
-            socket_path = "/run/segformer/segformer.sock"
-            # Socket doesn't exist in CI — daemon path returns False immediately.
-            assert not os.path.exists(socket_path)
+            # daemon helper directly to test the fallback path. A socket path that
+            # doesn't exist, not the real one: on a node the daemon is running.
+            from tools.segformer_client import segformer_via_daemon
+            socket_path = os.path.join(tmp_image_dir, "no-daemon", "segformer.sock")
+            assert segformer_via_daemon(tiff_path, output_path, socket_path=socket_path) is False
+            assert not os.path.exists(output_path)
 
 
 # ═════════════════════════════════════════════════════════════════════════
