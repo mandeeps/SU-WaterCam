@@ -974,9 +974,9 @@ card can't stop the unit. The photos aren't uploaded, so this is the only copy.
   on every unit that should accept remote-access requests (`sudo systemctl enable
   --now remote-debug.timer remote-debug.path`); the startup health check (1.10)
   warns when either isn't enabled.
-- **filebrowser:** never on deployed units. Its unit file is gone from `config/`;
-  remove an old install with `sudo systemctl disable --now filebrowser` (it served
-  the photos over HTTP and cost cellular data, [1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
+- **filebrowser:** handheld units only, never on deployed fixed nodes (`sudo
+  systemctl disable --now filebrowser` if an old install has it): it serves the
+  photos over HTTP and costs cellular data ([1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
 - **Legacy, never install:** `watercam.service` (replaced by ticktalk; the unit file is gone from `config/`),
   `gps.service` (replaced by `quectel-gnss.service`), `button.service`,
   `temperature.service` (removed from `config/`); `config/dhcpcd.conf` (NetworkManager is used) and

@@ -6,8 +6,8 @@ unit: everything it holds can be revoked without touching the others.
 
 ## What a node exposes
 
-- **Over the network:** nothing but `tailscaled`. OpenSSH and filebrowser aren't
-  installed; remote access is Tailscale SSH, governed by the tailnet ACL. Multicast
+- **Over the network:** nothing but `tailscaled`. OpenSSH isn't installed, and
+  filebrowser runs on handheld units only, never on fixed nodes; remote access is Tailscale SSH, governed by the tailnet ACL. Multicast
   name responders are off (`config/systemd-resolved/90-watercam.conf`). An input
   firewall (`config/nftables/watercam-host.nft`, loaded by
   `watercam-firewall.service` before the network comes up) drops everything that

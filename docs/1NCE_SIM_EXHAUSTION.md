@@ -91,8 +91,8 @@ connection transfers data over the cellular interface.
 sudo systemctl disable --now filebrowser.service
 ```
 
-The unit file has since been removed from `config/`; copy files with `rsync` over
-Tailscale SSH instead (README).
+`config/filebrowser.service` is for handheld units only; on a fixed node, copy files
+with `rsync` over Tailscale SSH instead (README).
 
 ---
 

@@ -624,13 +624,36 @@ Use an appropriate client for your own device.
 
 ### Copying files off a node
 
-Use `scp` or `rsync` over Tailscale SSH rather than a file server on the node: the
-node runs no web or file service, and its firewall drops anything that doesn't
-arrive over Tailscale ([docs/NODE_SECURITY.md](docs/NODE_SECURITY.md)).
+On a fixed node, use `scp` or `rsync` over Tailscale SSH: deployed nodes run no web
+or file service, and their firewall drops anything that doesn't arrive over
+Tailscale ([docs/NODE_SECURITY.md](docs/NODE_SECURITY.md)).
 
 ```
 rsync -av pi@ufo-01-01-NNN.taild7822.ts.net:SU-WaterCam/images/20260419-010500 .
 ```
+
+### Filebrowser remote file access (handheld units only)
+
+Helpful on a handheld unit used interactively for data collection:
+https://github.com/filebrowser/Filebrowser. Never install it on a deployed fixed
+node: it serves the photos over HTTP.
+
+Install, then run:
+
+```
+filebrowser config init
+filebrowser users add USER PASSWORD
+filebrowser config set --address 0.0.0.0
+```
+
+Use a strong password, not the default `admin` login. Then you can create a SystemD
+service like the example in the config directory (`config/filebrowser.service`).
+Move it to /etc/systemd/system, run `sudo systemctl daemon-reload` and
+`sudo systemctl enable --now filebrowser` to run. On a unit with the input firewall
+(`watercam-firewall.service`) it is reachable over Tailscale only; to reach it from
+the local network too, open its port (default 8080):
+`sudo nft insert rule inet watercam_host input tcp dport 8080 accept` (until the
+next reboot).
 
 ### Remote Video Streaming
 
