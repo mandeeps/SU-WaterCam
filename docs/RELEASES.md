@@ -46,6 +46,8 @@ in the periodic full send. LoRa status replies (`dbg`) carry `"v"` after `"em"`.
 
 1. CI is green on the commit to release.
 2. **Bench checks:**
+   - the hardware tests on 005 (`venv/bin/python -m pytest --hardware -rs tests/hardware`,
+     [BENCH_HARDWARE_TESTS.md](BENCH_HARDWARE_TESTS.md));
    - a wake test on 005, with shutdown intercepted (`~/test_wake.sh`);
    - for changes to waking, power, transport or the capture pipeline, a run of real
      scheduled wakes on 006 over WiFi and cellular, as on 2026-10-11.

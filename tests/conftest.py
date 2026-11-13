@@ -24,12 +24,39 @@ for _p in [str(_REPO_ROOT), str(_REPO_ROOT / "tools")]:
         sys.path.insert(0, _p)
 
 
+# ── Hardware tests (tests/hardware) ───────────────────────────────────────
+# `pytest --hardware tests/hardware` on a bench unit tests the real devices: the
+# stubs below and _no_real_node are then left out, and only tests/hardware runs.
+# Read from argv because the stubs must go in before options are parsed.
+HARDWARE_RUN = "--hardware" in sys.argv
+_HARDWARE_DIR = str(_REPO_ROOT / "tests" / "hardware")
+
+
+def pytest_addoption(parser):
+    parser.addoption("--hardware", action="store_true", default=False,
+                     help="run tests/hardware against this bench unit's real devices "
+                          "(docs/BENCH_HARDWARE_TESTS.md); nothing else runs")
+
+
+def pytest_collection_modifyitems(config, items):
+    in_hw = [i for i in items if str(i.path).startswith(_HARDWARE_DIR)]
+    if config.getoption("--hardware"):
+        config.hook.pytest_deselected(items=[i for i in items if i not in in_hw])
+        items[:] = in_hw
+        return
+    skip = pytest.mark.skip(reason="bench-unit hardware test: run with --hardware on a bench unit")
+    for item in in_hw:
+        item.add_marker(skip)
+
+
 # ── Hardware module stubs ─────────────────────────────────────────────────
 # Installed here (module level, not in a fixture) so they are in place
-# before any test file triggers a project import.
+# before any test file triggers a project import. Not for a hardware run.
 
 def _stub(name, attrs=None):
     """Register an empty module stub in sys.modules if not already present."""
+    if HARDWARE_RUN:              # the real driver, on a bench unit
+        return sys.modules.get(name)
     if name not in sys.modules:
         m = types.ModuleType(name)
         if attrs:
@@ -69,10 +96,11 @@ _stub("gpsd")
 _stub("libxmp")
 _stub("libxmp.consts")
 # Add attributes so `from libxmp import XMPFiles, XMPMeta, consts` succeeds
-sys.modules["libxmp.consts"].XMP_NS_DC = "http://purl.org/dc/elements/1.1/"
-sys.modules["libxmp"].XMPFiles = MagicMock
-sys.modules["libxmp"].XMPMeta = MagicMock
-sys.modules["libxmp"].consts = sys.modules["libxmp.consts"]
+if not HARDWARE_RUN:
+    sys.modules["libxmp.consts"].XMP_NS_DC = "http://purl.org/dc/elements/1.1/"
+    sys.modules["libxmp"].XMPFiles = MagicMock
+    sys.modules["libxmp"].XMPMeta = MagicMock
+    sys.modules["libxmp"].consts = sys.modules["libxmp.consts"]
 
 # Preload so patch("tools.compress_segmented.compress_image") resolves at import
 import tools.compress_segmented  # noqa: F401
@@ -94,6 +122,9 @@ def _mock_serial_port(monkeypatch, tmp_path):
     that lora_handler_concurrent actually holds (its .serial attribute), NOT
     sys.modules['serial'] which may be the wrong object after test_device_scenarios runs.
     """
+    if HARDWARE_RUN:              # the real devices, on a bench unit
+        yield None
+        return
     import os as _os
     import sys as _sys
 
@@ -152,8 +183,12 @@ _NODE_PATHS = {
 
 @pytest.fixture(autouse=True)
 def _no_real_node(monkeypatch, tmp_path):
-    """Every test sees a machine without a node's hardware, state or server."""
+    """Every test sees a machine without a node's hardware, state or server
+    (except a --hardware run, whose point is the real devices)."""
     import importlib
+    if HARDWARE_RUN:
+        yield
+        return
     missing = tmp_path / "no-node"            # this test's own; only data/ exists
     (missing / "data").mkdir(parents=True)
     for name, attrs in _NODE_PATHS.items():
