@@ -193,3 +193,28 @@ def test_rtc_early_clock_marks_an_untrusted_rtc(tmp_path, monkeypatch):
     monkeypatch.setattr(rec, "rtc_timestamp", lambda: None)
     rec.main([])
     assert "RTC unreadable" in (tmp_path / "rtc-untrusted").read_text()
+
+
+@pytest.mark.parametrize("url,status,why", [
+    ("http://192.168.1.20:8000", None, "outside the tailnet"),
+    ("http://server.example.ts.net:8000", "unreadable", "can't be read"),
+    ("http://server.example.ts.net:8000", "stopped", "isn't running (Stopped)"),
+    ("http://other.example.ts.net:8000", "running", "isn't a current Tailscale peer"),
+    ("http://server.example.ts.net:8000", "running", "doesn't resolve to its Tailscale peer"),
+])
+def test_why_untrusted_names_the_actual_reason(url, status, why):
+    st = {"unreadable": None,
+          "stopped": {"BackendState": "Stopped", "Peer": {}},
+          "running": {"BackendState": "Running", "Peer": {"k": {
+              "DNSName": "server.example.ts.net.", "TailscaleIPs": ["100.101.102.103"]}}}}.get(status)
+    with patch.object(tip, "_tailscale_status", return_value=st), _resolve("100.90.9.9"):
+        assert not tip.trusted_server(url)
+        assert why in tip.why_untrusted(url)
+
+
+def test_the_key_refusal_says_why(caplog):
+    tx = _keyed("http://server.example.ts.net:8000")
+    with _resolve("100.101.102.103"), _status(running=False):
+        assert tx._auth_headers() == {}
+    assert "Tailscale isn't running" in caplog.text
+    assert "not a tailnet address" not in caplog.text

@@ -129,6 +129,49 @@ def _mock_serial_port(monkeypatch, tmp_path):
     yield mock_ser
 
 
+# Paths through which code reaches a node's real hardware, state or server. On a
+# workstation or CI runner none of them exist, and the tests rely on that: run on a
+# node, call_shutdown's emergency path armed and cleared the real Witty Pi alarms
+# (005, 2026-11-12), and a last downlink check would poll the production API with
+# the node's own token; state files (the GPS window's) were read and written in the
+# real checkout. Each is pointed into the test's own tmp_path: the Witty Pi
+# directory and the config don't exist there, so a test sees a workstation wherever
+# it runs, and state files land in a fresh data/ per test, so no test sees another's.
+# A test that sets its own path still overrides it.
+_NODE_PATHS = {
+    "witty_pi_4": {"WITTYPI_DIRECTORY": "wittypi", "SCHEDULE_FILE_PATH": "wittypi/schedule.wpi"},
+    "recovery_boot": {"WITTYPI_DIR": "wittypi"},
+    "remote_debug": {"WITTYPI_DIR": "wittypi"},
+    "wait_for_wittypi_schedule": {"WITTYPI_LOG": "wittypi/wittyPi.log"},
+    "transmit_ip": {"_DEFAULT_CONFIG_PATH": "runtime_config.json"},
+    "node_version": {"CACHE_PATH": "watercam-version.json", "MODEL_INFO_PATH": "segformer/model.json"},
+    "gps_window": {"BOOT_MARK": "watercam-gps-window", "REQUEST_FILE": "data/gps_request.json",
+                   "ATTEMPT_FILE": "data/gps_window_attempt.json"},
+}
+
+
+@pytest.fixture(autouse=True)
+def _no_real_node(monkeypatch, tmp_path):
+    """Every test sees a machine without a node's hardware, state or server."""
+    import importlib
+    missing = tmp_path / "no-node"            # this test's own; only data/ exists
+    (missing / "data").mkdir(parents=True)
+    for name, attrs in _NODE_PATHS.items():
+        mods = []
+        try:
+            mods.append(importlib.import_module("tools." + name))
+        except Exception:      # noqa: BLE001 -- a module that can't import here can't touch the node
+            pass
+        bare = sys.modules.get(name)          # also imported without the tools. prefix
+        if bare is not None and all(bare is not m for m in mods):
+            mods.append(bare)
+        for mod in mods:
+            for attr, rel in attrs.items():
+                if hasattr(mod, attr):
+                    monkeypatch.setattr(mod, attr, str(missing / rel))
+    yield
+
+
 @pytest.fixture
 def data():
     """Minimal AHT20-style sensor dict used by test_aht20_data_flow.py."""
