@@ -1179,6 +1179,21 @@ for the site:
 
 ## Phase 2: Field Installation
 
+**The easy way:** at the site, connect to the unit over your phone's hotspot
+(saved on the unit before the trip, so the unit and your laptop both join it)
+and run
+
+```bash
+cd ~/SU-WaterCam && venv/bin/python tools/field_setup.py
+```
+
+It walks you through this phase one numbered step at a time, in the order you
+handle the unit (before mounting, mounting, at the final position), checks each
+step and says what to do if one fails. Progress is saved: run it again to carry
+on. `--dry-run` first, at the bench, shows what it would do without changing
+anything. The sections below are the same procedure by hand
+(docs/SETUP_MODE_DESIGN.md 8.1).
+
 ### 2.1 Site selection
 
 - Camera has a clear, unobstructed view of the area to monitor.
