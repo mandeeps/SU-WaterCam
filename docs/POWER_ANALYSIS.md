@@ -18,7 +18,7 @@ what still needs measuring.
 | Raspberry Pi 4B | Stock clocks (1800 MHz) and no `initial_turbo` since `config/config.txt` dropped both; older units may still run `arm_freq=2000` (see [Peaks](#peaks-matter-more-than-averages)) |
 | Witty Pi 4 | Power switching, RTC and schedule; always powered |
 | Dorhea IR-Cut camera, FLIR Lepton 3.5 | Optical/NIR and thermal capture |
-| MultiTech mDot | LoRaWAN, Class C (listens continuously), powered from the Witty Pi's always-on 3.3 V rail |
+| MultiTech mDot | LoRaWAN, Class C (listens continuously). Powered from the Witty Pi's always-on 3.3 V rail (P4, about 3.0 V), except on 005, which since 2026-11-10 feeds it from the battery's 5 V at the Witty Pi's P2 (see [The 5 V feed](#the-mdots-5-v-feed)) |
 | Quectel EC25 | LTE modem, on IP-transport units only (006 has one) |
 | AHT20, BNO055/BNO085 | Negligible draw |
 | Voltaic V75, new design (aluminium case) | All units since October 2026 (006 changed from a V50 on 2026-10-17). 72 Wh (20,100 mAh). Two USB-A Always On outputs, 2 A each (3 A combined). Own draw about 7 mA (26 mW). Solar input 5–6 V, at most 2 A, maximum power point 5.2 V, on the 3.5 × 1.1 mm jack or the side USB-C port. Stops charging below 0 °C and above 45 °C; cuts its output below −15 °C and above 60 °C ([Voltaic](https://voltaicsystems.com/v75)) |
@@ -73,9 +73,71 @@ manual doesn't say), so the current is drawn at 5 V:
 - 15–25 mA is 75–125 mW, **1.8–3.0 Wh/day**;
 - at the datasheet's 43 mA it would be 5.2 Wh/day.
 
-pcb-designs' planned direct 5 V feed (`Schematic_Remaining_Work.md` #20) goes
-into the mDot's own linear regulator, which costs the same. A switching
-regulator to about 3.6 V would save about a quarter of it.
+The direct 5 V feed (pcb-designs `Schematic_Remaining_Work.md` #20, wired on
+005 since 2026-11-10) goes into the mDot's own linear regulator. If the Witty
+Pi's 3.3 V is linear too, that costs the same; if it is a switching regulator,
+the 5 V feed costs up to about 1.5 times as much ([The 5 V feed](#the-mdots-5-v-feed)).
+A switching regulator to about 3.6 V would save about a quarter of it.
+
+#### The mDot's 5 V feed
+
+The Witty Pi's P4 3.3 V rail measures about 3.0 V (meter, 2026-11-05), and the
+mDot sagged below 2.8 V at its boot. That trips libmdot's low-voltage guard,
+which then skips mounting the mDot's file system (lost settings and reset
+loops; mDot-AT-firmware `docs/RESET_LOOP_ANALYSIS.md`). The mDot's pin 1 takes
+3.3-5 V ±5%, so it now takes the battery's 5 V instead.
+
+**Wiring on 005 (2026-11-10):** the V50's Y-cable goes to the Witty Pi's P2
+5 V and GND, and the mDot's 5 V input to the same P2 5 V. That is upstream of
+the Witty Pi's switch, so the mDot stays powered (and joined) while the Pi is
+off, as it did on P4. The pack's no-load output must stay at or under 5.25 V.
+
+**Energy:** at 15-25 mA the mDot takes 75-125 mW at 5 V, 1.8-3.0 Wh/day.
+- If the Witty Pi's 3.3 V rail is linear off its 5 V input (the assumption
+  above), the old feed drew the same current at 5 V: **no change**.
+- If it is a switching regulator (about 90 % efficient), the old feed took
+  about 3.0 V × I / 0.9 from the battery: the 5 V feed costs **about 0.6-1.0
+  Wh/day more** at 15-25 mA (1.3 Wh/day at the 32 mA idle figure of the
+  mDot's spec).
+
+Either way it is small next to the resets it fixes. Measuring the mDot's current
+in series with its 5 V input, with the Pi off, would settle both this and the
+estimate above.
+
+**Boot under-voltage on 005 after the rewiring.** Both boots on the new wiring
+flagged Pi under-voltage (0x50005 at 7 s, 0x50000 afterwards); none of the five
+boots before (2026-11-05, 0x0) did. The Witty Pi's output read about 50 mV
+lower at the same current (4.83 V at 0.55-1.05 A, against 4.87-4.89 V at
+0.5-1.0 A on 2026-11-05).
+
+| Boot | mDot | Under-voltage |
+|---|---|---|
+| 2026-11-10 16:53 | plugged into P2 while the Pi was booting | 11.0-12.8 s (1.8 s) |
+| 2026-11-10 17:00, a reboot | powered all along, joined, idle (no rejoin in `lora_daemon`'s log) | 8.5-12.5 s (4.0 s) |
+
+The reboot rules the mDot out: it drew only its idle current then. The flag
+comes in the Pi's own boot peak (8-11 s in, as the WiFi firmware, the GPU
+driver and the first services start), so the drop was in the supply path into
+P2. The pack and the Y-cable were the same as on 2026-11-05; the only change was
+the cable's USB-C plug, cut off and soldered to P2 instead.
+
+**Load test afterwards (2026-11-10 17:11-17:17, all four cores for 5 min,
+samples every 2 s):** no under-voltage at any point, nor on the boot just
+before it (17:10, 0x0) or on two reboots after it (17:20 and 17:21, 0x0).
+
+| Phase | Witty Pi Vout mean / min | Iout mean / max | P2 (meter) | CPU temp max |
+|---|---|---|---|---|
+| Idle | 4.91 / 4.89 V | 0.39 / 0.47 A | 4.94 V | 42 °C |
+| All 4 cores | 4.85 / 4.78 V | 1.20 / 1.44 A | 4.94-4.95 V | 79 °C |
+
+P2 doesn't move under load, so the pack, Y-cable and joints now lose next to
+nothing; the 0.03-0.10 V between P2 and Vout is the Witty Pi's own switch and
+current sense (about 0.09 Ω), which the USB-C input path has as well. Most
+likely a joint was marginal on the first two boots and settled when it was
+disturbed (an accidental short while probing reset the unit at 17:10). Solder
+joints on P2 should be checked under load, with P2 measured against Vout, before
+a unit is deployed. A bare Pi under full load reaches 79 °C, just under the
+80 °C throttling point.
 
 **The USB meters can't settle it:** their "under about 0.05 W" is less than the
 radio alone (11 mA at 5 V is 55 mW), which fits their dead zone at low
