@@ -6,7 +6,7 @@ import os
 CONFIG = os.path.join(os.path.dirname(__file__), "..", "config")
 # Services whose code calls doas (shutdown, systemctl, uhubctl, set-clock)
 RUNS_DOAS = {"ticktalk.service", "max-awake.service", "remote-debug.service"}
-# Bench and development only: not installed on deployed units
+# Bench, development and handheld units only: not installed on deployed fixed nodes
 BENCH_ONLY = {"filebrowser.service", "button.service"}
 
 
@@ -26,3 +26,9 @@ def test_doas_services_keep_new_privileges():
     for name, text in _units():
         if name in RUNS_DOAS:
             assert "NoNewPrivileges=yes" not in text, name
+
+
+def test_ticktalk_refuses_unlisted_pickles():
+    """The runtime's UDP listener runs SafeUnpickle in enforce mode, not warn (#204)."""
+    with open(os.path.join(CONFIG, "ticktalk.service")) as f:
+        assert "\nEnvironment=TT_PICKLE_POLICY=enforce\n" in f.read()

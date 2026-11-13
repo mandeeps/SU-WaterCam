@@ -143,6 +143,12 @@ tailscale up --ssh
 
 This will allow logging into the system using SSH now and when the unit is in the field connected via cellular modem.
 
+Log in interactively as above (it prints a URL to open). If you use an auth key
+instead, never put it on the command line, where it stays in `~/.bash_history` on
+the SD card: write it to a file, pass `--auth-key=file:/path/to/key`, then delete
+the file. Use a one-off, pre-tagged key (`tag:watercam`) that expires soon, so a
+copy that survives somewhere can't add another machine to the tailnet.
+
 Check that tailnet names resolve through resolved. `tailscale0` should list
 `100.100.100.100`, and the server should answer by name (prints `200`):
 
@@ -331,8 +337,8 @@ set them with `cd ~/wittypi && sudo ./wittyPi.sh` if different.
 moving forward across boots without the RTC) and `zramswap`. Mask the file
 indexer like the other timers in 1.3.2: `sudo systemctl mask locate.timer`.
 
-**Firewall:** no host firewall beyond Tailscale's own rules and the cellular
-filter in 1.5.1, so no `ufw` and no stock `nftables.service`.
+**Firewall:** the node's input firewall and the cellular filter, both in 1.5.1,
+next to Tailscale's own rules. No `ufw` and no stock `nftables.service`.
 
 **Tailscale:** the tailnet ACL lives in the Tailscale admin console, not on the
 node and not in this public repository (it names who can reach the units). It
@@ -506,6 +512,23 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now watercam-cellular-filter.service   # starts whenever wwan0 exists
 sudo nft list table netdev watercam_cellular                     # shows the two drop rules
 ```
+
+Drop everything that reaches the node from WiFi, Ethernet or cellular except
+Tailscale ([NODE_SECURITY.md](NODE_SECURITY.md)). Remote access is Tailscale SSH,
+so the node needs nothing else inbound; a bench tool started with `--bind 0.0.0.0`
+stays unreachable from the local network. Install it from a Tailscale SSH session:
+it never blocks `tailscale0`.
+
+```bash
+sudo install -D -m 644 config/nftables/watercam-host.nft /etc/nftables.d/watercam-host.nft
+sudo install -m 644 config/watercam-firewall.service /etc/systemd/system/
+sudo systemctl daemon-reload
+sudo systemctl enable --now watercam-firewall.service   # loads before the network at every boot
+sudo nft list chain inet watercam_host input            # policy drop, Tailscale accepted
+```
+
+To reach a bench tool from the LAN for one session, open its port; the rule is gone
+at the next reboot: `sudo nft insert rule inet watercam_host input tcp dport 8080 accept`.
 
 Don't enable the stock `nftables.service`: its `/etc/nftables.conf` starts with
 `flush ruleset`, which would also remove Tailscale's own firewall rules.
@@ -741,7 +764,10 @@ sudo systemctl enable --now wittypi-next-wake.service
 `systemd-analyze security lora_daemon` should read about 2.5 OK and `ticktalk` about 7.1 MEDIUM
 (it runs doas, so it can't drop privileges). `ticktalk.service`,
 `lora_daemon.service` and `segformer_daemon.service` set
-`Environment=PYTHONUNBUFFERED=1`, so each `print()` reaches the journal when it
+`Environment=PYTHONUNBUFFERED=1` (and `ticktalk.service` also
+`TT_PICKLE_POLICY=enforce`: its runtime refuses network messages holding types
+outside `ticktalkpython/SafeUnpickle.py`'s allowlist, logged as `dropped a … network
+message: blocked …`), so each `print()` reaches the journal when it
 happens (with buffered stdout, journal timestamps bunch together: two captures
 60 s apart are logged within the same second). On a unit installed before that,
 copy the three files again as above and run `sudo systemctl daemon-reload`;
@@ -899,6 +925,19 @@ sudo cp config/journald-volatile.conf /etc/systemd/journald.conf.d/
 sudo systemctl restart systemd-journald
 ```
 
+To look into past wakes on the unit itself, keep the journal on the card
+instead, for 30 days or more, with `config/journald-persistent.conf`. It costs
+about 100-150 MB of card writes a day on an hourly schedule. Install it as
+`zz-watercam-journal.conf` so it overrides the default and any older drop-ins.
+It sets `SystemMaxFiles=1000`, because journald's default of 100 files holds
+only about 3 days on a node.
+
+```bash
+sudo cp config/journald-persistent.conf /etc/systemd/journald.conf.d/zz-watercam-journal.conf
+sudo rm -f /etc/systemd/journald.conf.d/journald-volatile.conf
+sudo systemctl restart systemd-journald
+```
+
 The LoRa handler's `DEBUG:` lines (every AT command, payload hex) and the
 per-poll GPS lines are off by default. Turn them on for a test or problem unit
 with the runtime parameter `debug_mode: true` in `runtime_config.json` (the
@@ -962,8 +1001,9 @@ card can't stop the unit. The photos aren't uploaded, so this is the only copy.
   on every unit that should accept remote-access requests (`sudo systemctl enable
   --now remote-debug.timer remote-debug.path`); the startup health check (1.10)
   warns when either isn't enabled.
-- **filebrowser:** off on deployed units (`sudo systemctl disable --now
-  filebrowser`), it costs cellular data ([1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
+- **filebrowser:** handheld units only, never on deployed fixed nodes (`sudo
+  systemctl disable --now filebrowser` if an old install has it): it serves the
+  photos over HTTP and costs cellular data ([1NCE_SIM_EXHAUSTION.md](1NCE_SIM_EXHAUSTION.md)).
 - **Legacy, never install:** `watercam.service` (replaced by ticktalk; the unit file is gone from `config/`),
   `gps.service` (replaced by `quectel-gnss.service`), `button.service`,
   `temperature.service` (removed from `config/`); `config/dhcpcd.conf` (NetworkManager is used) and
@@ -1122,10 +1162,22 @@ for the site:
       bench. A routine IP upload switches it to `ip`; set it back in the device
       panel's Transport section.
 - [ ] `systemctl show ticktalk.service -p Environment` includes
-      `PYTHONUNBUFFERED=1` (the unit file from this release, 1.9).
+      `PYTHONUNBUFFERED=1` and `TT_PICKLE_POLICY=enforce` (the unit file from this
+      release, 1.9), and `journalctl -u ticktalk -b | grep "network message"` prints
+      nothing after a bench capture.
+- [ ] **WiFi:** `nmcli -t -f NAME,TYPE con show | grep wireless` lists only the
+      site's network. Delete bench, home and guest profiles (`sudo nmcli con delete
+      NAME`): the unit joins any network with a saved name, and anyone can set up a
+      look-alike of an open or shared-password network ([NODE_SECURITY.md](NODE_SECURITY.md)).
+- [ ] **No auth key in the shell history:** `grep -c tskey ~/.bash_history` prints
+      `0` (if not, revoke that key in the Tailscale admin console and edit the
+      line out).
 - [ ] **Tailscale:** the unit appears in the admin console with the
       `tag:watercam` tag and no personal owner (the ACL itself is kept by the
       tailnet admin, outside this repository).
+- [ ] **Firewall:** `systemctl is-enabled watercam-firewall.service` says
+      `enabled`, and `sudo nft list chain inet watercam_host input` shows
+      `policy drop` (1.5.1).
 - [ ] **Last:** clear the mount position learned during the bench tests,
       `venv/bin/python tools/gps_home.py --reset`, then shut down without
       another test cycle (1.7.1).
@@ -1192,6 +1244,64 @@ baseline + `area_threshold`, and flood growing (07 27) when it rose by
 `area_threshold` or more since the previous capture. After moving or re-aiming
 the camera, run `--reset` and set the baseline again.
 
+### 2.4.2 Take and upload the reference photo
+
+The dashboard draws each water map on a reference photo from the unit's own
+camera (the device panel's "Water Projection on Reference Photo"), and the
+Georeference page reads its pixels. Take it once the camera is in its final
+position, and again after re-aiming it.
+
+The water maps are not plain photos: before segmenting, the capture workflow
+undistorts the frame with `config/camera_calibration.json`
+(`tools/coreg_multiple.py`), so a map is a grid over the undistorted frame. The
+reference photo is a raw frame, and the dashboard maps each of its pixels
+through the same calibration to the water map. That only works for a full
+frame from this camera, so take it exactly as below.
+
+1. On the unit, keep it up and free the camera:
+
+   ```bash
+   cd ~/SU-WaterCam
+   venv/bin/python -c "from tools.lora_runtime_integration import set_parameter; set_parameter('hold_awake', True)"
+   sudo systemctl stop ticktalk.service
+   ```
+
+2. Take a full-resolution frame, the size the capture workflow uses:
+
+   ```bash
+   rpicam-still --nopreview --width 2592 --height 1944 -o ~/reference.jpg
+   ```
+
+   Keep the 4:3 shape. A smaller 4:3 size also works (the dashboard scales the
+   calibration), but a 16:9 size is a cropped view: the dashboard then
+   stretches the water map over it, and the water toward the edges is drawn
+   off by a few percent. `rpicam-still` applies no lens correction, which is
+   what the dashboard expects.
+
+3. Copy it to your computer (`scp <hostname>:reference.jpg .` over Tailscale)
+   and look at it: the view the camera will monitor, in focus.
+
+4. Release the unit. `ticktalk` then runs a normal cycle and powers off:
+
+   ```bash
+   venv/bin/python -c "from tools.lora_runtime_integration import set_parameter; set_parameter('hold_awake', False)"
+   sudo systemctl start ticktalk.service
+   ```
+
+5. On the dashboard, **Management**: select the unit and upload the photo
+   under *Reference photo*. Uploading clears any saved projection points. Don't
+   click new ones: the 4-point projection is only for a photo taken from
+   somewhere other than the unit's camera.
+
+6. If the unit has no camera calibration on the server yet, on the
+   **Georeference** page select the unit, paste the contents of
+   `config/camera_calibration.json` (`K`, `D`, `img_size`) into *Camera
+   calibration*, and save.
+
+Check the device panel: the note under the photo should say the water is
+"drawn through the unit's lens calibration". If it says the overlay is
+stretched, the calibration is missing or the photo's shape doesn't match it.
+
 ### 2.5 Final weatherproofing
 
 Confirm all cable entries are sealed, connections to the solar panel are secure, and the case is fully closed before leaving the site.
@@ -1202,5 +1312,7 @@ Confirm all cable entries are sealed, connections to the solar panel are secure,
 
 - **Dashboard**: check for regular incoming readings at the expected
   `monitoring_frequency` cadence.
+- **Reference photo** (2.4.2): uploaded, and the device panel's water
+  projection says it is drawn through the unit's lens calibration.
 - **Remote access**: `ssh <hostname>` over Tailscale (only works while the Pi is powered on per its WittyPi schedule
 - **Remote Start**: if the system is in range of a LoRa gateway and connected to it you can send a remote start signal from the Chirpstack server or through the dashboard (the dashboard is still under development so it might have issues)

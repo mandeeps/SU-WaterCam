@@ -32,9 +32,17 @@ def _resolve(*addrs):
                         return_value=[(socket.AF_INET, 0, 0, "", (a, 0)) for a in addrs])
 
 
+def _status(running=True, peers=(("server.example.ts.net.", ["100.101.102.103"]),)):
+    """A `tailscale status --json` with the given peers (DNSName, TailscaleIPs)."""
+    return patch.object(tip, "_tailscale_status", return_value={
+        "BackendState": "Running" if running else "Stopped",
+        "Peer": {f"k{i}": {"DNSName": n, "TailscaleIPs": ips} for i, (n, ips) in enumerate(peers)},
+    })
+
+
 def test_a_ts_net_name_must_resolve_into_the_tailnet():
     url = "http://server.example.ts.net:8000"
-    with _resolve("100.101.102.103"):
+    with _status(), _resolve("100.101.102.103"):
         assert tip.trusted_server(url)
     with _resolve("100.101.102.103", "192.0.2.7"):
         assert not tip.trusted_server(url)
@@ -46,6 +54,70 @@ def test_a_ts_net_name_must_resolve_into_the_tailnet():
         assert tip.trusted_server("https://x.ts.net")       # https verifies the certificate itself
 
 
+def test_a_tailnet_dns_answer_is_not_enough_when_tailscale_is_down():
+    # A hostile WiFi network's DNS can answer with a 100.x address: with Tailscale
+    # down the request would leave over that network, key and all
+    url = "http://server.example.ts.net:8000"
+    with _resolve("100.101.102.103"):
+        with _status(running=False):
+            assert not tip.trusted_server(url)
+        with patch.object(tip, "_tailscale_status", return_value=None):     # unreadable
+            assert not tip.trusted_server(url)
+        with _status(peers=()):                                             # not a peer
+            assert not tip.trusted_server(url)
+
+
+def test_the_address_must_be_the_named_peers():
+    url = "http://server.example.ts.net:8000"
+    other = (("server.example.ts.net.", ["100.101.102.103"]), ("laptop.example.ts.net.", ["100.90.1.2"]))
+    with _status(peers=other):
+        with _resolve("100.90.1.2"):           # another peer's address
+            assert not tip.trusted_server(url)
+        with _resolve("100.101.102.103"):
+            assert tip.trusted_server(url)
+        with _resolve("100.64.9.9"):           # in the range, but nobody's
+            assert not tip.trusted_server(url)
+
+
+def test_a_literal_tailnet_address_must_be_a_running_peers():
+    with _status(peers=(("server.example.ts.net.", ["100.101.102.103", "fd7a:115c:a1e0::1"]),)):
+        with _resolve("100.101.102.103"):
+            assert tip.trusted_server("http://100.101.102.103:8000")
+        with _resolve("fd7a:115c:a1e0::1"):
+            assert tip.trusted_server("http://[fd7a:115c:a1e0::1]:8000")
+        with _resolve("100.64.9.9"):
+            assert not tip.trusted_server("http://100.64.9.9:8000")
+    with _status(running=False), _resolve("100.101.102.103"):
+        assert not tip.trusted_server("http://100.101.102.103:8000")
+    with patch.object(tip, "_tailscale_status", return_value=None), _resolve("100.101.102.103"):
+        assert tip.trusted_server("http://127.0.0.1:8000")   # loopback needs no tailnet
+
+
+def test_the_api_key_stays_home_when_tailscale_is_down():
+    tx = _keyed("http://server.example.ts.net:8000")
+    with _resolve("100.101.102.103"), _status(running=False):
+        assert "Authorization" not in tx._auth_headers()
+    with _resolve("100.101.102.103"), _status():
+        assert tx._auth_headers() == {"Authorization": "Bearer secret"}
+
+
+def test_tailscale_status_is_cached_but_online_check_is_fresh(monkeypatch):
+    calls = []
+
+    class R:
+        stdout = '{"BackendState": "Running", "Self": {"Online": true}, "Peer": {}}'
+
+    def run(*a, **k):
+        calls.append(1)
+        return R()
+    monkeypatch.setattr(tip, "_status_cache", (float("-inf"), None))
+    monkeypatch.setattr(tip.subprocess, "run", run)
+    tip._tailscale_status(); tip._tailscale_status()
+    assert len(calls) == 1
+    tip.tailscale_online("server.example.ts.net")
+    assert len(calls) == 2
+
+
 def _keyed(url):
     tx = _tx(url)
     tx.api_key, tx._key_refused_logged = "secret", False
@@ -53,7 +125,7 @@ def _keyed(url):
 
 
 def test_api_key_goes_only_to_a_trusted_server():
-    with _resolve("100.101.102.103"):
+    with _resolve("100.101.102.103"), _status(peers=(("a.ts.net.", ["100.101.102.103"]),)):
         assert _keyed("http://a.ts.net:8000")._auth_headers() == {"Authorization": "Bearer secret"}
     with _resolve("203.0.113.9"):
         assert _keyed("http://a.ts.net:8000")._auth_headers() == {}

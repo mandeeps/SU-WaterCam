@@ -1,0 +1,57 @@
+#!/usr/sbin/nft -f
+# Input firewall for a node: nothing reaches it except over Tailscale.
+#
+# Applies to every interface but tailscale0: WiFi, Ethernet and cellular (wwan0)
+# alike. Remote access is Tailscale SSH, so the node needs no other inbound
+# traffic than Tailscale's own (UDP 41641), replies to connections it opened,
+# and what DHCP and IPv6 need to keep an address. Anything a service might
+# later listen on (a bench tool started with --bind 0.0.0.0, a file browser)
+# stays unreachable from the local network until a rule here allows it.
+#
+# Its own table, so it never touches Tailscale's rules (ip/ip6 filter, managed by
+# tailscaled through iptables-nft) or the cellular filter (netdev
+# watercam_cellular). A packet must be accepted by every input chain, so this
+# table only ever narrows what Tailscale's rules let in.
+#
+# Loaded by watercam-firewall.service from /etc/nftables.d/watercam-host.nft
+# (docs/FIELD_DEPLOYMENT_GUIDE.md, 1.5.1). Don't use the stock nftables.service:
+# its /etc/nftables.conf starts with "flush ruleset", which removes Tailscale's
+# rules too.
+#
+# Open a port for a bench session (gone at the next reboot or reload):
+#   sudo nft insert rule inet watercam_host input tcp dport 8000 accept
+
+# Create-then-delete makes reloading the file idempotent
+table inet watercam_host
+delete table inet watercam_host
+
+table inet watercam_host {
+    chain input {
+        type filter hook input priority filter; policy drop;
+
+        iif "lo" accept
+        # Tailscale's own rules decide what the tailnet may reach (the ACL)
+        iifname "tailscale0" accept
+        ct state established,related accept
+        ct state invalid drop
+
+        # WireGuard from Tailscale peers making a direct connection
+        udp dport 41641 accept
+
+        # DHCP replies: offers can be broadcast, which conntrack doesn't match
+        udp sport 67 udp dport 68 accept
+        ip6 saddr fe80::/10 udp sport 547 udp dport 546 accept
+
+        # IPv6 needs these to keep an address and a working path
+        icmpv6 type { nd-neighbor-solicit, nd-neighbor-advert, nd-router-advert } ip6 hoplimit 255 accept
+        icmpv6 type mld-listener-query ip6 saddr fe80::/10 accept
+        icmpv6 type { destination-unreachable, packet-too-big, time-exceeded, parameter-problem } accept
+
+        # Ping, rate-limited
+        icmp type echo-request limit rate 5/second accept
+        icmpv6 type echo-request limit rate 5/second accept
+
+        # Count what the policy drops: sudo nft list chain inet watercam_host input
+        counter comment "dropped"
+    }
+}

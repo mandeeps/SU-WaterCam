@@ -697,13 +697,23 @@ class TTNetworkManager():
             # something created in a custom namespace within an SQ? User could
             # fix be doing serialization/deserialization themselves in their
             # function.
-            payload = SafeUnpickle.loads(payload)    # not pickle.loads (#204)
+            # A message SafeUnpickle refuses (or that isn't a pickle at all) is
+            # dropped, not raised: raised, it would end this loop and the runtime
+            # with it, so one stray datagram could stop the captures (#204)
+            try:
+                payload = SafeUnpickle.loads(payload)    # not pickle.loads (#204)
+            except Exception as e:      # malformed pickles raise many kinds
+                self.logger.error("dropped a %d byte network message: %s",
+                                  len(message.payload), e)
+                return
             self.logger.debug("handle %d byte network message %s",
                               len(message.payload), payload)
 
-        assert isinstance(payload, list) or isinstance(
-            payload, Message
-        ), 'Incoming payloads over the network should be Messages (list or singular)'
+        if not (isinstance(payload, Message) or
+                (isinstance(payload, list) and all(isinstance(m, Message) for m in payload))):
+            self.logger.error("dropped a network message that isn't a Message: %s",
+                              type(payload).__name__)
+            return
         if isinstance(payload, list):
             for ipc_msg in payload:
                 self.handle_IPC_message_from_network(ipc_msg)

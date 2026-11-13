@@ -19,7 +19,12 @@ CACHE_TTL_S, an unhealthy one from a link check for UNHEALTHY_TTL_S (each check
 is an uplink, and a long emergency wake asks every capture), both only for this
 boot; "not joined" or "daemon not running" is checked again at once, and so is a
 healthy result after a send failed (invalidate()). The check history is in
-data/lora_health.json.
+data/lora_health.json: one entry per link check, kept HISTORY_MAX_AGE_S (30 days)
+and at most HISTORY_MAX entries, so a past wake can be looked into on the node.
+Each entry has the check (ok, margin_db, gateways), the verdict (healthy,
+reason) and, once this boot sends over IP, how its uploads went (ip_sent,
+ip_failed; note_ip(), called by tools/transmit_ip.py). A healthy entry with
+no IP counts is a wake that left IP out because LoRa worked.
 """
 import json
 import os
@@ -35,6 +40,8 @@ REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HISTORY_PATH = os.path.join(REPO, "data", "lora_health.json")
 CACHE_PATH = "/tmp/watercam-lora-health.json"
 LINK_HISTORY = 3
+HISTORY_MAX_AGE_S = 30 * 24 * 3600
+HISTORY_MAX = 3000      # ~3 weeks of 10-minute emergency wakes; ~200 KB
 MAX_FAILURES_IN_HISTORY = 1
 DEFAULT_MIN_MARGIN_DB = 5
 ATTEMPTS = 2
@@ -62,9 +69,34 @@ def _read(path: str) -> Any:
 def _write(path: str, data: Any) -> None:
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        config_io.write_json(path, data, mode=0o644)    # atomic and fsynced
+        # atomic and fsynced; the long history compact (~70 bytes an entry)
+        config_io.write_json(path, data, mode=0o644, indent=None if path == HISTORY_PATH else 2)
     except (OSError, TypeError, ValueError) as e:
         print(f"⚠️ LoRa health: couldn't save {path}: {e}")
+
+
+def _trim(hist: list, now: float) -> list:
+    """hist without entries older than HISTORY_MAX_AGE_S, and at most HISTORY_MAX."""
+    keep = [h for h in hist if isinstance(h, dict)
+            and now - float(h.get("t") or 0) <= HISTORY_MAX_AGE_S]
+    return keep[-HISTORY_MAX:]
+
+
+def note_ip(sent: bool) -> None:
+    """Count an IP upload, sent or failed, on this boot's latest history entry.
+    Never raises."""
+    try:
+        hist = _read(HISTORY_PATH)
+        if not isinstance(hist, list) or not hist or not isinstance(hist[-1], dict):
+            return
+        last = hist[-1]
+        if last.get("boot") != _boot_id()[:8]:
+            return      # no link check this boot (not joined, daemon down)
+        key = "ip_sent" if sent else "ip_failed"
+        last[key] = int(last.get(key) or 0) + 1
+        _write(HISTORY_PATH, hist)
+    except Exception as e:
+        print(f"⚠️ LoRa health: couldn't note the IP upload: {e}")
 
 
 def _min_margin() -> float:
@@ -130,10 +162,10 @@ def assess(handler=None, force: bool = False) -> Dict[str, Any]:
             ok_now = bool(lc.get("ok")) and (lc.get("margin_db") or 0) >= _min_margin()
             hist = _read(HISTORY_PATH)
             hist = hist if isinstance(hist, list) else []
-            hist.append({"t": int(time.time()), "ok": ok_now, "margin_db": lc.get("margin_db"),
-                         "gateways": lc.get("gateways") or 0})
-            hist = hist[-20:]
-            _write(HISTORY_PATH, hist)
+            entry = {"t": int(time.time()), "boot": _boot_id()[:8], "ok": ok_now,
+                     "margin_db": lc.get("margin_db"), "gateways": lc.get("gateways") or 0}
+            hist.append(entry)
+            hist = _trim(hist, time.time())
             recent_failures = sum(1 for h in hist[-LINK_HISTORY:] if not h.get("ok"))
             if not lc.get("ok"):
                 result["reason"] = f"link check failed: {lc.get('error') or 'no gateway answered'}"
@@ -144,6 +176,8 @@ def assess(handler=None, force: bool = False) -> Dict[str, Any]:
             else:
                 result["healthy"] = True
                 result["reason"] = f"{lc.get('margin_db')} dB margin, {lc.get('gateways')} gateway(s)"
+            entry.update(healthy=result["healthy"], reason=result["reason"])
+            _write(HISTORY_PATH, hist)
     except Exception as e:
         result["reason"] = f"check failed: {e}"
     print(f"📡 LoRa {'healthy' if result['healthy'] else 'NOT healthy'}: {result['reason']}")

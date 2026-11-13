@@ -7,6 +7,9 @@
 # 127.0.0.1 (reach it with `ssh -L 8080:127.0.0.1:8080`), never on every
 # interface: the stream is unauthenticated. --bind ADDRESS overrides that
 # (--bind 0.0.0.0 for a bench on a trusted network); --port changes the port.
+# The node's firewall (config/nftables/watercam-host.nft) still drops LAN
+# connections: open the port for the session with
+#   sudo nft insert rule inet watercam_host input tcp dport 8080 accept
 
 import argparse
 import io

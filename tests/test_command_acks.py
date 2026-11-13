@@ -247,7 +247,15 @@ class TestHandleDownlinkReply:
 
 # ── IPTransmitter: post_acks, send_uplink, poll_downlink ─────────────────────
 
-TRUSTED = "http://100.101.102.103:8000"   # a tailnet address: trusted without DNS
+TRUSTED = "http://100.101.102.103:8000"   # a tailnet address: trusted while it is a running peer's
+
+
+@pytest.fixture(autouse=True)
+def _tailscale_running_with_the_server():
+    with patch.object(tip, "_tailscale_status", return_value={
+            "BackendState": "Running",
+            "Peer": {"srv": {"DNSName": "srv.example.ts.net.", "TailscaleIPs": ["100.101.102.103"]}}}):
+        yield
 
 
 def _tx(url=TRUSTED):
