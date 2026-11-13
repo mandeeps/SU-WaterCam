@@ -33,6 +33,7 @@ Client -> server (newline-terminated JSON):
     {"action": "transmit", "params": {"content": ..., "max_retries": 2}}
     {"action": "get_queue_depth", "params": {}}
     {"action": "get_size_limit", "params": {}}
+    {"action": "network_time", "params": {}}
 
 Server -> client (newline-terminated JSON):
     {"status": "ok", "result": ...}
@@ -138,6 +139,10 @@ def _do_get_queue_depth(handler, params):
     return handler.get_queue_depth()
 
 
+def _do_network_time(handler, params):
+    return handler.network_time()
+
+
 def _do_get_size_limit(handler, params):
     return handler.get_size_limit()
 
@@ -149,6 +154,7 @@ def _do_size_limit_now(handler, params):
 ACTIONS = {
     "is_joined": _do_is_joined,
     "link_check": _do_link_check,
+    "network_time": _do_network_time,
     "queue_transmit": _do_queue_transmit,
     "queue_binary_transmit": _do_queue_binary_transmit,
     "process_transmit_queue": _do_process_transmit_queue,
@@ -319,6 +325,19 @@ def start_mdot_keepalive(handler, interval_s: float = MDOT_KEEPALIVE_S) -> threa
     return stop
 
 
+def start_lora_time_sync(handler) -> None:
+    """Set the clock from LoRa network time once per boot, in the background
+    (tools/lora_time.py decides whether the link is good enough)."""
+    def run():
+        try:
+            from tools import lora_time
+            result = lora_time.sync_when_joined(handler)
+            log.info("LoRa time: %s", result.get("reason"))
+        except Exception:
+            log.exception("LoRa time sync failed")
+    threading.Thread(target=run, daemon=True, name="lora-time").start()
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -380,6 +399,7 @@ def main():
     manager.register_update_callback("emergency_mode", _on_emergency_mode_changed)
 
     start_mdot_keepalive(handler)
+    start_lora_time_sync(handler)
     serve(handler, args.socket)
 
 
