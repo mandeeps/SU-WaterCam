@@ -34,6 +34,8 @@ except ImportError:
 
 _sensor = None
 last_val = 0xFFFF
+_started_at = None           # time.monotonic() when this process set the sensor up (fusion restarts)
+_mag_offsets_loaded = False  # saved magnetometer offsets were written to the chip
 
 
 def _apply_calibration(sensor) -> bool:
@@ -84,6 +86,8 @@ def _apply_calibration(sensor) -> bool:
         if "mag" in have:
             sensor.offsets_magnetometer  = mag
             sensor.radius_magnetometer   = mag_r
+            global _mag_offsets_loaded
+            _mag_offsets_loaded = True
         if "gyro" in have:
             sensor.offsets_gyroscope     = gyro
 
@@ -113,6 +117,8 @@ def _get_sensor():
             return None
         i2c = board.I2C()
         _sensor = adafruit_bno055.BNO055_I2C(i2c)
+        global _started_at
+        _started_at = time.monotonic()
         calibration_loaded = _apply_calibration(_sensor)
         # Warm-up: allow fusion to initialize. If saved offsets were loaded,
         # also wait for calibration_status to reconfirm mag >= 2 (the
@@ -286,7 +292,12 @@ def get_pose():
         calib = tuple(sensor.calibration_status)  # (sys, gyro, accel, mag), 0-3
     except Exception:
         calib = None
-    return {"quaternion": q, "gravity": g, "euler": sensor.euler, "calibration_status": calib}
+    # how long the fusion has run, and whether saved mag offsets were loaded: together they
+    # say whether the heading can be trusted while the status register still reads 0
+    # (tools/pose_monitor.py)
+    age = None if _started_at is None else time.monotonic() - _started_at
+    return {"quaternion": q, "gravity": g, "euler": sensor.euler, "calibration_status": calib,
+            "fusion_age_s": age, "mag_offsets_loaded": _mag_offsets_loaded}
 
 
 def main():
