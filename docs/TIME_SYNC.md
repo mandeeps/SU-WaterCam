@@ -16,8 +16,11 @@ LoRa time usually answers before `syncTime.sh`'s 30 s wait is over, and
 `syncTime.sh` then leaves it. When it answers later, it corrects network time
 only by more than 1 s.
 
-Network time never comes from plain http outside the tailnet: a captive portal
-or an access point's own clock could answer that, and as "network time" the
+Network time never comes from plain http outside the tailnet, and over the
+tailnet only while Tailscale is running and the server is one of its peers (the
+rule `transmit_ip` uses for the server's time; before Tailscale is up, the public
+https servers answer): a captive portal or an access point's own clock could
+answer otherwise, and as "network time" the
 answer would keep the other sources out for the boot and go into the RTC. Each
 request times out after 8 s and the whole lookup after 30 s, so WiFi without
 internet no longer holds the boot sync for minutes (it runs in the foreground

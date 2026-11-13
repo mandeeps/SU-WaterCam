@@ -74,14 +74,54 @@ def test_an_untrusted_api_url_is_skipped(tmp_path):
     assert all(u.startswith("https://") for u in nt.PUBLIC)
 
 
+def _status(running=True, peers=(("api.example.ts.net.", ["100.101.102.103"]),)):
+    return json.dumps({"BackendState": "Running" if running else "Stopped",
+                       "Peer": {str(i): {"DNSName": n, "TailscaleIPs": ips} for i, (n, ips) in enumerate(peers)}})
+
+
+def _tailscale(monkeypatch, out):
+    calls = []
+
+    def run(cmd, **kw):
+        calls.append(cmd)
+        if isinstance(out, Exception):
+            raise out
+        return subprocess.CompletedProcess(cmd, 0, out, "")
+    monkeypatch.setattr(nt.subprocess, "run", run)
+    return calls
+
+
+def _resolve(monkeypatch, addrs):
+    def getaddrinfo(host, port):          # a literal address resolves to itself
+        try:
+            found = [str(nt.ipaddress.ip_address(host))]
+        except ValueError:
+            found = addrs
+        return [(0, 0, 0, "", (a, 0)) for a in found]
+    monkeypatch.setattr(nt.socket, "getaddrinfo", getaddrinfo)
+
+
 def test_trusted_matches_the_uploads_rule(monkeypatch):
+    _tailscale(monkeypatch, _status())
+    _resolve(monkeypatch, ["100.101.102.103"])
     assert nt.trusted("https://api.example.org")
-    assert nt.trusted("http://100.101.102.103:8000")
+    assert nt.trusted("http://100.101.102.103:8000")          # a current peer
+    assert nt.trusted("http://api.example.ts.net:8000")       # resolves to that peer
+    assert not nt.trusted("http://100.64.0.9:8000")           # tailnet range, but no peer's
+    assert not nt.trusted("http://other.example.ts.net:8000")  # no peer of that name
     assert not nt.trusted("http://192.168.1.5:8000")
     assert not nt.trusted("http://google.com")
-    monkeypatch.setattr(nt, "_in_tailnet", lambda host: host == "good.example.ts.net")
-    assert nt.trusted("http://good.example.ts.net:8000")
-    assert not nt.trusted("http://bad.example.ts.net:8000")
+    _resolve(monkeypatch, ["100.101.102.103", "203.0.113.5"])
+    assert not nt.trusted("http://api.example.ts.net:8000")   # partly outside the tailnet
+
+
+@pytest.mark.parametrize("out", [_status(running=False), "not json", OSError("no tailscale")])
+def test_http_is_untrusted_without_a_running_tailscale(monkeypatch, out):
+    _tailscale(monkeypatch, out)
+    _resolve(monkeypatch, ["100.101.102.103"])
+    assert not nt.trusted("http://100.101.102.103:8000")
+    assert not nt.trusted("http://api.example.ts.net:8000")
+    assert nt.trusted("https://api.example.org")
 
 
 @pytest.mark.parametrize("offset, untrusted, clock, ok", [

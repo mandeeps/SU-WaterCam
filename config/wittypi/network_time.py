@@ -11,8 +11,9 @@ that is up but has no internet made each curl wait for the TCP timeout (about
 2 min), with the next wake still unarmed when the RTC was bad (beforeScript.sh).
 
 Now, in order, the first that answers:
-1. our API server (ip_upload.server_url): only over https or the tailnet
-   (an http *.ts.net name must resolve into the tailnet, as transmit_ip.trusted_server);
+1. our API server (ip_upload.server_url): only over https or the tailnet (plain
+   http only while Tailscale is running and the server is one of its peers, as
+   transmit_ip.trusted_server; Tailscale not up yet means the public servers);
 2. public https servers, certificate checked, for when the API server is down.
    A portal or access point can't answer for them.
 Plain http outside the tailnet is never used. Each request has REQUEST_TIMEOUT_S,
@@ -34,6 +35,7 @@ import os
 import signal
 import socket
 import ssl
+import subprocess
 import sys
 import time
 import urllib.error
@@ -62,25 +64,62 @@ def server_url(config_path):
     return url.rstrip("/") if isinstance(url, str) else ""
 
 
+def _tailnet_peer_addrs(host):
+    """The tailnet addresses that may stand for `host`, from `tailscale status`
+    (local only): none unless Tailscale is running. A name gets only the peer of
+    that name's addresses, a literal address every current peer's."""
+    try:
+        r = subprocess.run(["tailscale", "status", "--json"], capture_output=True, text=True, timeout=10)
+        status = json.loads(r.stdout)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return set()
+    if not isinstance(status, dict) or status.get("BackendState") != "Running":
+        return set()
+    try:
+        ipaddress.ip_address(host)
+        literal = True
+    except ValueError:
+        literal = False
+    addrs = set()
+    for peer in (status.get("Peer") or {}).values():
+        if literal or (peer.get("DNSName") or "").rstrip(".").lower() == host:
+            addrs.update(peer.get("TailscaleIPs") or [])
+    return addrs
+
+
 def _in_tailnet(host):
+    """Tailscale is running and every address `host` resolves to is a tailnet
+    address of the peer named `host` (a literal address: of a current peer)."""
+    peers = _tailnet_peer_addrs(host)
+    if not peers:
+        return False
     try:
         addrs = {i[4][0].split("%")[0] for i in socket.getaddrinfo(host, None)}
-        return bool(addrs) and all(any(ipaddress.ip_address(a) in n for n in TAILNET) for a in addrs)
+        return bool(addrs) and all(
+            any(ipaddress.ip_address(a) in n for n in TAILNET) and a in peers for a in addrs)
     except (OSError, ValueError):
         return False
 
 
 def trusted(url):
-    """https (the certificate is checked), or http that stays inside the tailnet."""
+    """https (the certificate is checked), or http that stays inside the tailnet:
+    the rule of tools/transmit_ip.trusted_server. A tailnet address or a DNS answer
+    in 100.64.0.0/10 proves nothing by itself; with Tailscale down, or to an
+    address that is no peer's, the request would leave over the local network in
+    the clear."""
     p = urlparse(url or "")
     if p.scheme == "https":
         return True
     if p.scheme != "http" or not p.hostname:
         return False
+    host = p.hostname.lower()
+    if host.endswith(".ts.net"):
+        return _in_tailnet(host)
     try:
-        return any(ipaddress.ip_address(p.hostname) in n for n in TAILNET)
+        ip = ipaddress.ip_address(host)
     except ValueError:
-        return p.hostname.lower().endswith(".ts.net") and _in_tailnet(p.hostname)
+        return False
+    return any(ip in n for n in TAILNET) and _in_tailnet(host)
 
 
 def fetch_date(url, opener=urllib.request.urlopen, now=time.time):
