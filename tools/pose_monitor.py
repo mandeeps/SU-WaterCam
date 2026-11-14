@@ -3,8 +3,22 @@
 
 Every capture compares the IMU's orientation with a reference saved once the unit
 is mounted: the tilt between the gravity vectors (accelerometer, steady even near
-90 deg pitch) and, when the magnetometer is fully calibrated at both readings,
-the rotation between the quaternions. Levels (`pose_level`, sent as 01 0E with
+90 deg pitch) and, when the heading can be trusted at both readings, the rotation
+between the quaternions.
+
+The heading is trusted when the chip says the magnetometer is fully calibrated, or
+when saved magnetometer offsets were loaded and the fusion has run for
+HEADING_SETTLE_S. After a power-up the BNO055 reports the magnetometer as 0 until it
+has been moved about, which a fixed camera never is, although the loaded offsets
+are right: on 006 (2026-10-24 .. 11-12) the status read 0 on 426 of 430 captures,
+yet every wake's second capture, a minute in, read the same heading (sd 1.3 deg),
+while the first, a few seconds after start-up, was often ~130 deg off. A
+reference adopted without a trusted heading takes one from the first capture
+that has it.
+
+Readings whose gravity isn't about 9.81 m/s^2 or whose quaternion isn't a unit
+quaternion are dropped (garbled I2C reads: 006 logged a gravity axis of -319 and
+323, which read as a 150 deg tilt). Levels (`pose_level`, sent as 01 0E with
 the tilt as 01 0F):
 
     0    ok
@@ -52,6 +66,8 @@ REFERENCE_CAPTURES, REFERENCE_STABLE_DEG = 3, 0.5
 GPS_WAKES_AFTER_REMOVED = 3
 SAMPLES, SAMPLE_GAP_S = 5, 0.2
 MAG_FULL = 3
+HEADING_SETTLE_S = 60.0      # fusion running this long with mag offsets loaded: heading usable
+GRAVITY_TOL = 0.8            # m/s^2 either side of 9.81; outside it the reading is garbled
 
 OK, GEOREF, KNOCKED, REMOVED, NO_REFERENCE = 0, 1, 2, 3, 255
 
@@ -95,26 +111,44 @@ def _mean_gravity(samples: List[Dict]) -> List[float]:
     return [sum(s["gravity"][i] for s in samples) / len(samples) for i in range(3)]
 
 
-def _mag_full(pose: Dict) -> bool:
+def _heading_ok(pose: Dict) -> bool:
+    """Can this reading's heading be compared? (see the module docstring)"""
     c = pose.get("calibration_status")
-    return bool(c) and len(c) == 4 and c[3] >= MAG_FULL
+    if c and len(c) == 4 and c[3] is not None and c[3] >= MAG_FULL:
+        return True
+    age = pose.get("fusion_age_s")
+    return bool(pose.get("mag_offsets_loaded")) and age is not None and age >= HEADING_SETTLE_S
+
+
+def _valid(pose: Dict) -> bool:
+    """False for a garbled reading (gravity far from 9.81 m/s^2, quaternion not unit length)."""
+    try:
+        g = math.sqrt(sum(v * v for v in pose["gravity"]))
+        qn = math.sqrt(sum(v * v for v in pose["quaternion"]))
+    except (KeyError, TypeError):
+        return False
+    return abs(g - 9.81) <= GRAVITY_TOL and abs(qn - 1.0) <= 0.1
 
 
 def assess(samples: List[Dict], state: Dict, gps_moved: bool = False) -> Dict:
     """Update `state` for one capture's samples and return the result (pure, testable)."""
     if not samples:
         return {"level": state.get("level", NO_REFERENCE), "tilt": None, "rotation": None, "note": "no IMU"}
+    samples = [s for s in samples if _valid(s)]
+    if not samples:
+        return {"level": state.get("level", NO_REFERENCE), "tilt": None, "rotation": None,
+                "note": "IMU readings garbled"}
     g = _mean_gravity(samples)
     q = samples[len(samples) // 2]["quaternion"]
     # the largest difference between any two samples of this capture
     spread = max((tilt_deg(a["gravity"], b["gravity"]) for i, a in enumerate(samples)
                   for b in samples[i + 1:]), default=0.0)
-    mag = all(_mag_full(s) for s in samples)
+    mag = all(_heading_ok(s) for s in samples)
     ref = state.get("reference")
 
     if not ref:
         cands = state.setdefault("candidates", [])
-        cands.append({"gravity": g, "quaternion": list(q), "mag_full": mag})
+        cands.append({"gravity": g, "quaternion": list(q), "heading_ok": mag})
         cands[:] = cands[-REFERENCE_CAPTURES:]
         if spread < HANDLING_SPREAD_DEG and len(cands) == REFERENCE_CAPTURES and \
                 max(tilt_deg(cands[0]["gravity"], c["gravity"]) for c in cands) < REFERENCE_STABLE_DEG:
@@ -126,7 +160,12 @@ def assess(samples: List[Dict], state: Dict, gps_moved: bool = False) -> Dict:
         return {"level": NO_REFERENCE, "tilt": None, "rotation": None, "note": "no reference yet"}
 
     tilt = tilt_deg(ref["gravity"], g)
-    rotation = rotation_deg(ref["quaternion"], q) if (mag and ref.get("mag_full")) else None
+    # states saved before 2026-11 call it mag_full
+    ref_heading = ref.get("heading_ok", ref.get("mag_full", False))
+    if mag and not ref_heading and state.get("level", OK) < KNOCKED:
+        ref.update(quaternion=list(q), heading_ok=True, heading_set_at=time.time())
+        ref_heading = True
+    rotation = rotation_deg(ref["quaternion"], q) if (mag and ref_heading) else None
     level = state.get("level", OK)
     if level == NO_REFERENCE:
         level = OK

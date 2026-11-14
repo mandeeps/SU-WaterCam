@@ -119,6 +119,69 @@ def test_heading_only_counts_with_full_magnetometer():
     assert r["level"] == pm.OK and r["rotation"] is None
 
 
+def _settled(tilt_deg, q, age=90.0, mag=0):
+    """Readings with saved mag offsets loaded, `age` s after the fusion started."""
+    return [dict(s, fusion_age_s=age, mag_offsets_loaded=True) for s in _samples(tilt_deg, mag=mag, q=q)]
+
+
+def _yaw(deg):
+    return (math.cos(math.radians(deg / 2)), 0.0, 0.0, math.sin(math.radians(deg / 2)))
+
+
+def test_heading_counts_once_the_fusion_has_settled_with_offsets_loaded():
+    # 006: the status register says mag 0 all deployment, but a minute in the heading is right
+    state = {}
+    for _ in range(3):
+        pm.assess(_settled(0, _yaw(0)), state)
+    assert state["reference"]["heading_ok"]
+    for _ in range(3):
+        r = pm.assess(_settled(0, _yaw(5)), state)
+    assert r["level"] == pm.GEOREF and r["rotation"] == pytest.approx(5, abs=0.01)
+
+
+def test_start_up_headings_are_not_compared():
+    # a few seconds after start-up the heading can be ~130 deg off: it must not read as a knock
+    state = {}
+    for _ in range(3):
+        pm.assess(_settled(0, _yaw(0)), state)
+    for _ in range(4):
+        r = pm.assess(_settled(0, _yaw(130), age=5.0), state)
+    assert r["level"] == pm.OK and r["rotation"] is None
+    no_offsets = [dict(s, mag_offsets_loaded=False) for s in _settled(0, _yaw(130))]
+    for _ in range(4):
+        r = pm.assess(no_offsets, state)
+    assert r["level"] == pm.OK and r["rotation"] is None
+
+
+def test_a_reference_without_heading_takes_the_first_trusted_one():
+    state = {}
+    for _ in range(3):
+        pm.assess(_settled(0, _yaw(0), age=5.0), state)        # adopted a few seconds after start-up
+    assert not state["reference"]["heading_ok"]
+    r = pm.assess(_settled(0, _yaw(40)), state)               # first settled reading: becomes the heading
+    assert r["rotation"] == pytest.approx(0, abs=0.01) and state["reference"]["heading_ok"]
+    for _ in range(2):
+        r = pm.assess(_settled(0, _yaw(40 + 30)), state)
+    assert r["level"] == pm.KNOCKED
+
+
+def test_an_old_state_with_mag_full_false_takes_a_heading():
+    state = {"level": pm.OK, "reference": {"gravity": G0, "quaternion": [1.0, 0, 0, 0], "mag_full": False}}
+    pm.assess(_settled(0, _yaw(90)), state)
+    assert state["reference"]["heading_ok"] and state["reference"]["quaternion"] == list(_yaw(90))
+
+
+def test_garbled_readings_are_dropped():
+    state = _with_reference()
+    garbled = _samples(0)
+    garbled[2] = dict(garbled[2], gravity=[1.76, -4.28, -319.04])     # 006, 2026-11-01
+    r = pm.assess(garbled, state)
+    assert r["level"] == pm.OK and r["tilt"] == pytest.approx(0, abs=0.01)
+    all_bad = [dict(s, gravity=[1.75, 323.19, 8.53]) for s in _samples(0)]
+    r = pm.assess(all_bad, state)
+    assert r["level"] == pm.OK and r["note"] == "IMU readings garbled"
+
+
 def test_check_reads_once_per_capture_and_reset(tmp_path):
     path = str(tmp_path / "pose.json")
     for i in range(3):
