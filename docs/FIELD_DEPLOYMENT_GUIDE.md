@@ -863,6 +863,10 @@ microphone are always on or off together. The four `uhubctl` lines from
 sudo apt install uhubctl
 sudo cp config/usb-power-off.service config/quectel-gnss.service /etc/systemd/system/
 sudo cp config/wittypi/syncTime.sh config/wittypi/network_time.py /home/pi/wittypi/
+# The Witty Pi daemon sets the clock from the RTC again at boot, after rtc-early-clock
+# has; the second set only steps it back and makes journald start a new file. Skip it
+# when the two already agree (tools/wittypi_patch.py; --check, --revert):
+tools/wittypi_patch.py --apply
 # Units set up before 2026-10-22: the old timer turned USB on 8 s after every boot
 sudo systemctl disable --now usb-power-on.timer 2>/dev/null; sudo rm -f /etc/systemd/system/usb-power-on.{timer,service}
 sudo systemctl daemon-reload
