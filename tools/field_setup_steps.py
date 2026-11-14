@@ -23,6 +23,7 @@ import json
 import math
 import os
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -1153,7 +1154,11 @@ def step_finish(ctx: Context) -> StepResult:
     checks = {}
     for unit in ("ticktalk", "wittypi-next-wake", "max-awake.timer", "remote-debug.timer"):
         checks[unit] = (ctx.run(["systemctl", "is-enabled", unit], timeout=10).stdout or "").strip() or "missing"
-    alarms = ctx.run(["bash", "-c", "cd ~/wittypi && . ./utilities.sh >/dev/null 2>&1 && "
+    # utilities.sh calls i2cget from /usr/sbin, which isn't on pi's PATH: without it
+    # every read fails (the Witty Pi log fills with "I2C read ... failed") and the
+    # alarms print as garbage (tools/remote_debug.py and witty_pi_4.py do the same)
+    alarms = ctx.run(["bash", "-c", 'PATH="$PATH:/usr/sbin:/sbin"; '
+                                    f"cd {shlex.quote(WITTYPI_DIR)} && . ./utilities.sh >/dev/null 2>&1 && "
                                     "echo startup $(get_startup_time) && echo shutdown $(get_shutdown_time)"],
                      timeout=30, cwd=os.path.expanduser("~"))
     held = read_config().get("hold_awake") is True or os.path.exists(HOLD_FLAG)
