@@ -25,8 +25,10 @@ are not compared one by one. Instead:
 - rotation: the angle of the rotation between the two quaternions, heading
   included. Heading comes from the magnetometer, which is meaningless until the
   BNO055 is calibrated (nodes without bno055_calibration.json read heading 0), so
-  rotation only counts when the magnetometer was calibrated (status 2 or 3) at
-  both readings.
+  rotation only counts when the heading can be trusted at both readings: the
+  magnetometer reports calibrated (status 2 or 3), or saved magnetometer offsets
+  were loaded and the fusion has run HEADING_SETTLE_S (heading_settled; after a
+  power-up the chip reports 0 on a fixed mount although the offsets are right).
 
 The reference lives in the cache's metadata under "orientation". A cache without
 one adopts the current pose: after a fresh solve, after a re-seed (which writes a
@@ -88,6 +90,18 @@ def _vector(v: Any, n: int) -> Optional[List[float]]:
     return [float(x) for x in v]
 
 
+#: Fusion running this long with saved mag offsets loaded: the heading can be trusted
+#: although the status register still reads 0 (006, 2026-10-24..11-12: a minute in, the
+#: heading held within 1.3 deg; a few seconds in it was often ~130 deg off).
+HEADING_SETTLE_S = 60.0
+
+
+def heading_settled(reading: Dict[str, Any]) -> bool:
+    """Saved magnetometer offsets were loaded and the fusion has run HEADING_SETTLE_S."""
+    age = reading.get("fusion_age_s")
+    return bool(reading.get("mag_offsets_loaded")) and isinstance(age, (int, float)) and age >= HEADING_SETTLE_S
+
+
 def pose_from_reading(reading: Any) -> Optional[Dict[str, Any]]:
     """The parts of a bno055_imu.get_pose() reading kept as a reference, or None."""
     if not isinstance(reading, dict):
@@ -98,7 +112,7 @@ def pose_from_reading(reading: Any) -> Optional[Dict[str, Any]]:
         return None
     calib = reading.get("calibration_status")
     mag_ok = (isinstance(calib, (list, tuple)) and len(calib) == 4
-              and isinstance(calib[3], int) and calib[3] >= MAG_CALIBRATED)
+              and isinstance(calib[3], int) and calib[3] >= MAG_CALIBRATED) or heading_settled(reading)
     euler = _vector(reading.get("euler"), 3)
     return {"quaternion": q, "gravity": g, "euler_deg": euler, "mag_calibrated": mag_ok}
 
