@@ -5,8 +5,8 @@ import struct
 import serial
 
 # Data Format
-# Channel 00 Type 01 Time stamp UNIX
-# Channel 01 Type 04 emergency status 0/1 where 0 is monitoring & 1 is emergency
+# Category 00 Type 01 Time stamp UNIX
+# Category 01 Type 04 emergency status 0/1 where 0 is monitoring & 1 is emergency
 # 01 05 health 0/1 where 0 is normal operation
 # 01 06 coordinate move threshold 0/1 where 0 is insignificant movement
 # 02 01 battery percent

@@ -6,8 +6,8 @@ This document specifies how to **decode** flood detection bitmaps produced by SU
 
 ## 1. Where the bitmap appears
 
-- **Over LoRa (TLV payload)**: The bitmap is sent as a **blob** with channel `0x08` and type `0x18`.
-- **Blob layout**: `[Channel: 1 byte][Type: 1 byte][Length: 2 bytes, big-endian][Data: Length bytes]`
+- **Over LoRa (TLV payload)**: The bitmap is sent as a **blob** with category `0x08` and type `0x18`.
+- **Blob layout**: `[Category: 1 byte][Type: 1 byte][Length: 2 bytes, big-endian][Data: Length bytes]`
 - **Data** (the bytes after the 2-byte length) are the **compressed bitmap** described below. The TLV layer does not change the format of `Data`; it only adds the 4-byte prefix.
 
 So after you strip the TLV prefix (or read the blob payload), you have the **compressed bitmap** byte string. Decoding that is described in §2 and §3.
@@ -121,7 +121,7 @@ of the same size has about twice the pixels.
 ## 4. End-to-end decoding steps
 
 1. **Get the blob payload**  
-   From your LoRa/API payload, locate the blob with channel `0x08` and type `0x18`. The blob **value** is the compressed bitmap (no TLV prefix in this value).
+   From your LoRa/API payload, locate the blob with category `0x08` and type `0x18`. The blob **value** is the compressed bitmap (no TLV prefix in this value).
 
 2. **Parse header**  
    - `method = data[0]`  
@@ -147,11 +147,11 @@ of the same size has about twice the pixels.
 
 ## 5. Constraints and notes
 
-- **Size**: Compressed bitmap (header + payload) is usually ≤ 228 bytes when sent with a TT token, or ≤ 242 bytes otherwise. TLV adds 4 bytes (channel + type + length).
+- **Size**: Compressed bitmap (header + payload) is usually ≤ 228 bytes when sent with a TT token, or ≤ 242 bytes otherwise. TLV adds 4 bytes (category + type + length).
 - **Dimensions**: they come from the encoder and are stored in the 5-byte header.
   - LoRa, methods 0/1: long side at most 160 (the size search starts at 32).
   - LoRa with `bitmap_method2_enabled` (the default): long side at most 640, methods 0, 1 or 2, whichever is smallest.
-  - IP uplink (`/ip/uplink`, channel `08 18`): the mask at full resolution (e.g. 1296x972), methods 0/1 only, at most `FULL_RES_MAX_BYTES` (32000 B, so the hex fits one InfluxDB string field); a larger one is replaced by the LoRa-sized bitmap.
+  - IP uplink (`/ip/uplink`, field code `08 18`): the mask at full resolution (e.g. 1296x972), methods 0/1 only, at most `FULL_RES_MAX_BYTES` (32000 B, so the hex fits one InfluxDB string field); a larger one is replaced by the LoRa-sized bitmap.
 
 ### Method 2 and `bitmap_method2_enabled`
 

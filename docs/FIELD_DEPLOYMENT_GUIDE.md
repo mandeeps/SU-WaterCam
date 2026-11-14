@@ -446,7 +446,7 @@ Also confirm before deploying:
   `python -m tools.registration_orientation --reset` from `~/SU-WaterCam`. A cache with no
   recorded pose (new, re-seeded, or from before this check) takes the next reading as its
   reference, so install and seed with the unit in its final position.
-  The status also goes to the server as `registration_status` (channel `01 08`, LoRa and IP)
+  The status also goes to the server as `registration_status` (field code `01 08`, LoRa and IP)
   whenever it changes, and the dashboard shows **Check alignment** on the unit's card while it
   is `shifted`.
 - **Pose reference for georeferencing:** separately, `tools/pose_monitor.py` watches for the unit

@@ -102,7 +102,7 @@ The shipped `battery_manager` does not immediately declare unavailable when ADS1
 1. **ADS1115 D+** (preferred) — direct voltage reading, no drift, no state file
 2. **INA260 coulomb counting** — accurate fallback; accumulated mAh persisted to `battery_state.json`
 3. **WittyPi output voltage** — coarse estimate from the 5V rail sag; no extra hardware required
-4. **Unavailable** — `battery_pct = None`, `battery_source = "unavailable"`; channel `02 01` omitted from packets so the receiver treats battery state as unknown
+4. **Unavailable** — `battery_pct = None`, `battery_source = "unavailable"`; field code `02 01` omitted from packets so the receiver treats battery state as unknown
 
 WittyPi VIN (`get_input_voltage`) is **not** used for SOC — it reads a regulated 5V rail — and not for supply checks either: it reads 0.4-0.5 V low on several boards, so it is only logged, and the health check judges the Witty Pi's output voltage instead.
 
@@ -165,7 +165,7 @@ Priority fallback chain:
   1. ADS1115 D+ (preferred — no drift, no state file)
   2. INA260 coulomb counting (fallback — accurate, drifts; state in battery_state.json)
   3. WittyPi output voltage (rough estimate — no extra hardware)
-  4. Unavailable — battery_pct=None, battery channel omitted from packets
+  4. Unavailable — battery_pct=None, battery field omitted from packets
 
 _read_ads1115_dplus() → float | None
     Read AIN0 from ADS1115 at ±2.048V gain.
@@ -234,7 +234,7 @@ _save_state(state) → None
 1. `battery_pct` in packets reflects D+ derived cell SOC when ADS1115 is present
 2. Falls back to INA260 coulomb counting when ADS1115 absent
 3. Falls back to WittyPi output voltage when both ADS1115 and INA260 absent
-4. When all paths unavailable, battery channel omitted from packet (not silently wrong)
+4. When all paths unavailable, battery field omitted from packet (not silently wrong)
 5. `battery_source` field always present in status dict
 6. No LiPo formula applied to regulated WittyPi VIN voltage anywhere in codebase
 7. LoRa and IP paths both use `battery_manager.get_battery_status()`

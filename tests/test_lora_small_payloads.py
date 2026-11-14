@@ -145,13 +145,13 @@ def _codec_decode(pkt):
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
 def test_codec_decodes_every_sensor_channel():
-    """The ChirpStack codec stops at the first channel it doesn't know and drops
-    the rest of the packet, so a channel added on the node without a codec case
+    """The ChirpStack codec stops at the first field code it doesn't know and drops
+    the rest of the packet, so a field code added on the node without a codec case
     silently loses everything after it (09 69 did, until 2026-10-15)."""
     from tools.lora_handler_concurrent import _encode_compressed_packet
     pkt = _encode_compressed_packet(dict(FULL_SENSOR_DATA))
     out = _codec_decode(pkt)
-    # The last fields of the packet decode only if every channel before them did
+    # The last fields of the packet decode only if every field before them did
     assert out["camera_water_pct"] == 70
     assert out["sf_dropped"] == 3
     assert out["clock_unverified"] == 1
@@ -166,7 +166,7 @@ def test_codec_decodes_every_sensor_channel():
     assert out["temperature_celsius"] == 22.2
     # The Witty Pi temperature and output voltage aren't sent over LoRa
     assert "wittypi_temperature" not in out and "wittypi_internal_voltage" not in out
-    assert len(pkt) == 97   # 104 with the float32 and Witty Pi channels (before 01 11, 07 47 and 01 10)
+    assert len(pkt) == 97   # 104 with the float32 and Witty Pi fields (before 01 11, 07 47 and 01 10)
 
 
 def test_compact_fields_layout_and_limits():

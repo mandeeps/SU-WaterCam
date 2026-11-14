@@ -41,7 +41,7 @@ is on WiFi.
 | `00` | End the session and restore normal operation |
 
 Values above `18` are capped at 4 h. On the node, the LoRa decoder sees it as
-channel `18`, command `98`, value `NN`, read as hex.
+category `18`, command `98`, value `NN`, read as hex.
 
 ## Session actions
 

@@ -6,8 +6,8 @@ import struct
 import serial
 
 # Transmission Data Format
-# Channel 00 Type 01 Time stamp UNIX
-# Channel 01 Type 04 emergency status 0/1 where 0 is monitoring & 1 is emergency
+# Category 00 Type 01 Time stamp UNIX
+# Category 01 Type 04 emergency status 0/1 where 0 is monitoring & 1 is emergency
 # 01 05 health 0/1 where 0 is normal operation
 # 01 06 coordinate move threshold 0/1 where 0 is insignificant movement
 # 02 01 battery percent
@@ -25,7 +25,7 @@ import serial
 # 09 59 neighborhood emergency status freq
 
 # Reception Data Format
-# Channel 10 Type 90 Area Threshold (at) - 10% increments
+# Category 10 Type 90 Area Threshold (at) - 10% increments
 # 11 91 Stage Threshold (st) - continuous cm value 
 # 12 92 Monitoring Frequency (mf) - how long to stay awake for - minute value
 # Emergency status: !, hex 21 - system enters emergency mode and stops scheduled shutdowns

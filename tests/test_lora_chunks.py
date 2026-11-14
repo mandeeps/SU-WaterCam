@@ -52,7 +52,7 @@ def test_bad_float_fields_are_skipped():
 
 
 def _tlv_fields(chunk):
-    """The (channel, type) pairs of a chunk; sizes are fixed except the ones skipped here."""
+    """The (category, type) pairs of a chunk; sizes are fixed except the ones skipped here."""
     sizes = {(0, 1): 4, (1, 4): 1, (1, 5): 1, (1, 6): 1, (2, 1): 1, (3, 2): 6, (4, 1): 12, (5, 2): 2,
              (6, 1): 1, (7, 0x17): 1, (7, 0x27): 1, (7, 0x37): 1, (9, 0x19): 1, (9, 0x29): 2,
              (9, 0x39): 2, (9, 0x49): 2, (9, 0x59): 2, (9, 0x69): 1, (1, 7): 1, (1, 8): 1,

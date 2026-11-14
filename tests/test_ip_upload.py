@@ -60,7 +60,7 @@ def _make_transmitter() -> IPTransmitter:
 
 
 # ---------------------------------------------------------------------------
-# Channel encoding helpers (mirrors what the main application will produce)
+# Field entry encoding helpers (mirrors what the main application will produce)
 # ---------------------------------------------------------------------------
 
 def encode_device_ts(ts: int) -> dict:
@@ -152,7 +152,7 @@ class TestIPUplink(unittest.TestCase):
         print(f"  decoded: {json.dumps(decoded, indent=4)}")
 
     def test_02_full_sensor_uplink(self):
-        """Uplink with all standard sensor channels."""
+        """Uplink with all standard sensor fields."""
         ts = int(time.time())
         # Syracuse University coordinates (test fixture)
         channels = [
@@ -190,7 +190,7 @@ class TestIPUplink(unittest.TestCase):
         print(f"  flood_detect: {decoded.get('camera_flood_detect')}")
 
     def test_04_uplink_with_bitmap(self):
-        """Uplink with a small synthetic flood bitmap (variable-length channel)."""
+        """Uplink with a small synthetic flood bitmap (variable-length field)."""
         ts = int(time.time())
         # 8x8 bitmap, alternating bytes as a synthetic flood mask
         bitmap = bytes([0xFF, 0x00] * 4)
@@ -223,7 +223,7 @@ class TestIPUplink(unittest.TestCase):
         self.assertIn("2023", resp_ts, "Server should reflect the device timestamp year")
 
     def test_06_uplink_empty_channels_rejected(self):
-        """Empty channels list should fail locally before hitting the server."""
+        """Empty `channels` list should fail locally before hitting the server."""
         result = self.tx.send_uplink([])
         self.assertFalse(result["success"])
         self.assertIsNotNone(result["error"])

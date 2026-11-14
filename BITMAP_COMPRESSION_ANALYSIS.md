@@ -97,9 +97,9 @@ def compress_image(input_path, max_bytes=228, min_size=32, output_path=None, sav
 
 The bitmap is transmitted using the **TLV (Type-Length-Value) format**:
 
-- **Channel**: `0x08`
+- **Category**: `0x08`
 - **Type**: `0x18` (flood bitmap compressed binary)
-- **Format**: `[Channel:1B][Type:1B][Length:2B][Data:Length]`
+- **Format**: `[Category:1B][Type:1B][Length:2B][Data:Length]`
 
 ### Transmission Code Path
 
@@ -112,7 +112,7 @@ The bitmap is transmitted using the **TLV (Type-Length-Value) format**:
    ```
    
    The `add_blob()` function creates:
-   - Channel byte: `0x08`
+   - Category byte: `0x08`
    - Type byte: `0x18`
    - Length: 2 bytes (big-endian uint16)
    - Data: The compressed bitmap bytes
@@ -310,7 +310,7 @@ To test decompression, you can:
 ## Summary
 
 - **Compression**: Binary thresholding → resize → bitpack/RLE → Brotli compression
-- **Transmission**: Channel 0x08, Type 0x18, TLV format with length prefix
+- **Transmission**: category 0x08, type 0x18, TLV format with length prefix
 - **Decoding**: Parse header → Brotli decompress → reconstruct binary image → display
 - **Key Library**: Brotli decompressor (JavaScript implementation needed for dashboard)
 

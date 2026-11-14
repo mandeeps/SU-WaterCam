@@ -1,7 +1,7 @@
 #!/home/pi/SU-WaterCam/venv/bin/python
 """IP uplink/downlink transport for SU-WaterCam.
 
-Sends sensor channel data to the WaterCam FastAPI server over HTTP (WiFi or
+Sends sensor field data to the WaterCam FastAPI server over HTTP (WiFi or
 cellular) and polls for queued downlink commands.  Designed to run outside of
 TickTalkPython so the logic can be tested standalone before integration.
 
@@ -22,9 +22,9 @@ Configuration
 All settings live in runtime_config.json under the "ip_upload" key.  See the
 project docs/IP_TRANSMISSION.md for a full field reference.
 
-Channel format
---------------
-Each element of `channels` must match the ChannelItem schema the server expects:
+Field format
+------------
+Each field entry in `channels` must match the ChannelItem schema the server expects:
     {"code": "02 01", "payload_hex": "00000064"}
 
 Codes used by this device (from API CHANNEL_REGISTRY):
@@ -82,7 +82,7 @@ CELLULAR_DRAIN_MAX_ENTRIES = 5
 CELLULAR_DRAIN_MAX_BYTES = 200_000
 # A .tmp file left by a write that never finished, older than this, is removed
 ORPHAN_TMP_AGE_S = 300
-# The channel code of the flood bitmap: only the newest one stays queued
+# The field code of the flood bitmap: only the newest one stays queued
 BITMAP_CODE = "08 18"
 # A 4xx other than these says the entry itself is wrong; these say try again later
 _RETRY_STATUSES = (401, 403, 429)
@@ -351,12 +351,12 @@ class IPTransmitter:
         want_command: bool = False,
         ip_fallback: bool = False,
     ) -> Dict[str, Any]:
-        """POST sensor channel data to /ip/uplink.
+        """POST sensor field data to /ip/uplink.
 
         Parameters
         ----------
         channels:
-            List of channel dicts, each with "code" and "payload_hex".
+            List of field entries, each with "code" and "payload_hex".
             Example:
                 [
                     {"code": "02 01", "payload_hex": "00000064"},
@@ -581,7 +581,7 @@ class IPTransmitter:
         return sorted(f for f in names if f.endswith(".json"))
 
     def _drop_older_bitmaps(self, device_ts: int) -> int:
-        """Remove the bitmap channel from queued readings taken at or before
+        """Remove the bitmap field from queued readings taken at or before
         `device_ts`: a newer one is queued, and an older scene would only be
         sent over cellular to show the dashboard something out of date (as the
         LoRa queue does, tools/lora_store_forward.py). Returns how many lost it."""
@@ -609,7 +609,7 @@ class IPTransmitter:
         Writes an atomic, fsynced JSON file to ``self._queue_dir``.  If the queue
         is already at ``max_queue_depth``, the oldest entry is dropped to make
         room.  Only the newest bitmap stays queued: queuing one removes the
-        bitmap channel from older entries.  Returns True on success, False on
+        bitmap field from older entries.  Returns True on success, False on
         I/O error.
         """
         try:

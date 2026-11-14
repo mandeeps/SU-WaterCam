@@ -34,7 +34,7 @@ worth. The kernel doesn't count what the network adds, so the figure reads a
 little low against the carrier's bill; the server measures the gap.
 
 Reporting. daily_report_kib() gives the total in KiB for the uplink
-(cellular_kib_total, channel 01 11, LoRa and IP) on the first wake of each day,
+(cellular_kib_total, field code 01 11, LoRa and IP) on the first wake of each day,
 and None on the others. Every uplink of that one wake carries it. It never
 causes a connection: it rides uplinks that are going out anyway, mostly LoRa. A
 unit that has never had a modem interface reports nothing.

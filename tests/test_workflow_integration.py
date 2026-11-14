@@ -338,7 +338,7 @@ class TestIPUplink:
         tx.close()
 
     def test_channel_code_format(self):
-        """All channel codes used by ip_uplink_transmit must be two-byte space-separated hex."""
+        """All field codes used by ip_uplink_transmit must be two-byte space-separated hex."""
         import re
         codes = [
             "00 01", "02 01", "04 01", "05 01", "06 01",

@@ -160,7 +160,7 @@ def test_handler_code_15_is_the_schedule(handler):
 
 
 def test_debug_status_typed_as_text_in_chirpstack(handler):
-    """006 got "5001" as ASCII text (35 30 30 31) and read it as channel 35/30; no reply."""
+    """006 got "5001" as ASCII text (35 30 30 31) and read it as category 35/30; no reply."""
     handler.decode("303035303031")      # "005001" as text
     handler.reply.assert_called_once_with(ack=(0, 0))
 

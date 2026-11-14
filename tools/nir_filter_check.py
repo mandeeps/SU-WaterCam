@@ -22,7 +22,7 @@ The comparison runs on small copies of the two frames (JPEG draft decoding, abou
   (April-June 2026); its stuck filter gave 0.1-1.2, a few up to 10 when the light
   changed between the two frames.
 
-Sent to the server as nir_filter_status (channel 07 47, both transports):
+Sent to the server as nir_filter_status (field code 07 47, both transports):
 0 the filter moved, 1 it did not (the frames are the same though lit). No value
 when there is no verdict: no pair, a frame unreadable, or too dark.
 

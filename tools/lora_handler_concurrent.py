@@ -21,8 +21,8 @@ except ImportError:     # run from tools/ as a script
     from debug_log import debug
 
 # Transmission Data Format
-# Channel 00 Type 01 Time stamp UNIX
-# Channel 01 Type 04 emergency status 0/1 where 0 is monitoring & 1 is emergency
+# Category 00 Type 01 Time stamp UNIX
+# Category 01 Type 04 emergency status 0/1 where 0 is monitoring & 1 is emergency
 # 01 05 health 0/1 where 0 is normal operation
 # 01 06 coordinate move threshold 0/1 where 0 is insignificant movement
 # 02 01 battery percent
@@ -44,25 +44,25 @@ except ImportError:     # run from tools/ as a script
 # 0A 03 wittypi internal voltage (float, volts; no longer sent)
 
 # Reception Data Format
-# Format: [Channel][Command][Value]
-# Channel: Two digits (00-99) representing the data channel
+# Format: [Category][Command][Value]
+# Category: Two digits (00-99) representing the data category
 # Command: Two digits representing the command type
 # Value: Remaining digits representing the value to set
 # 
 # Examples:
-# 1090 -> Channel 10, Command 90, Value 0 (Area Threshold 0%)
-# 1010 -> Channel 10, Command 90, Value 10 (Area Threshold 100%)
-# 1191 -> Channel 11, Command 91, Value 1 (Stage Threshold 1 cm)
-# 1192 -> Channel 11, Command 91, Value 92 (Stage Threshold 92 cm)
-# 1292 -> Channel 12, Command 92, Value 2 (Monitoring Frequency 2 minutes)
-# 1393 -> Channel 13, Command 93, Value 3 (Emergency Frequency 3 minutes)
-# 2100 -> Channel 21, Command 00, Value 0 (Emergency status: system enters emergency mode)
+# 1090 -> Category 10, Command 90, Value 0 (Area Threshold 0%)
+# 1010 -> Category 10, Command 90, Value 10 (Area Threshold 100%)
+# 1191 -> Category 11, Command 91, Value 1 (Stage Threshold 1 cm)
+# 1192 -> Category 11, Command 91, Value 92 (Stage Threshold 92 cm)
+# 1292 -> Category 12, Command 92, Value 2 (Monitoring Frequency 2 minutes)
+# 1393 -> Category 13, Command 93, Value 3 (Emergency Frequency 3 minutes)
+# 2100 -> Category 21, Command 00, Value 0 (Emergency status: system enters emergency mode)
 # 9999 -> Emergency clear message (Deactivate emergency mode)
 
 
 
 
-# Compact packet: channel 0C type 01 and nine bytes, 11 in all, so it fits
+# Compact packet: category 0C type 01 and nine bytes, 11 in all, so it fits
 # US915 DR0 (SF10, 11-byte payloads). Sent instead of the full sensor packet
 # when the mDot's current limit is below CHUNK_MIN_LIMIT; otherwise the sensor
 # packet goes in chunks. Layout after 0C 01:
@@ -292,7 +292,7 @@ def _temperature_field(d):
 
 # (key, builder) in wire order. Optional fields are left out when None. A value that
 # can't be encoded drops its own field and nothing else. Decoders that predate a
-# channel stop at the first pair they don't know, so newer channels come last
+# field code stop at the first pair they don't know, so newer field codes come last
 # (01 07 and after), as the comments in the history of this list explain.
 _SENSOR_FIELDS = (
     ('timestamp', _u32_field(0x00, 0x01, 'timestamp')),
@@ -333,7 +333,7 @@ _SENSOR_FIELDS = (
     ('clock_unverified', lambda d: bytes([0x01, 0x0D, 1 if d['clock_unverified'] else 0])),
     # Water percentage of the capture's mask (tools/flood_baseline.py)
     ('camera_water_pct', lambda d: bytes([0x07, 0x37, max(0, min(100, _int_in(d['camera_water_pct'], -(1 << 31), 1 << 31)))])),
-    # Compact forms of the old float32 channels, 2 bytes a value instead of 4:
+    # Compact forms of the old float32 fields, 2 bytes a value instead of 4:
     # 03 02 orientation in 0.01 deg (u16 heading 0-360, i16 roll, i16 pitch),
     # 05 02 temperature as i16 0.01 C. The Witty Pi temperature, input and output
     # voltages aren't sent over LoRa (the server doesn't store them).
@@ -1289,7 +1289,7 @@ class LoRaHandler:
             # A command typed as text in ChirpStack's enqueue form ("5001" as ASCII)
             # arrives hex-encoded twice ("35303031"). No real command consists only
             # of ASCII hex-digit bytes (the codes are 10-21, 50, 99), so decode it once
-            # more instead of reading channel 35, command 30.
+            # more instead of reading category 35, command 30.
             payload = self._unwrap_text_hex(payload)
 
             # A bare 21 is the remote start byte '!', which the mDot handles itself
