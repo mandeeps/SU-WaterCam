@@ -1,7 +1,7 @@
 #!/bin/bash
 # One real ticktalk wake with the shutdown intercepted, then everything restored.
 #
-#   sudo tools/held_capture.sh [--ip] OUT_DIR
+#   sudo tools/held_capture.sh [--ip] [--keep-schedule] OUT_DIR
 #
 # The capture workflow ends a wake by powering the Pi off (call_shutdown runs
 # `doas /usr/sbin/shutdown -h now`). For a test wake at the bench or at
@@ -22,24 +22,37 @@
 # ip_upload.enabled on in the test's config. lora_daemon is started again
 # afterwards. The run counts as failed if no IP upload went through.
 #
+# The wake writes ~/wittypi/schedule.wpi and arms the Witty Pi's next start-up
+# (and shutdown) alarm, as a real wake does. On a bench unit that left a schedule
+# a later reboot would arm (005 then powered off hourly), so by default both are
+# put back as they were: schedule.wpi restored (or removed if there was none; the
+# wake's copy is kept as OUT_DIR/schedule.wpi.from-wake) and both alarms set back.
+# --keep-schedule leaves what the wake set: tools/field_setup.py uses it at
+# installation, where that schedule is the one the unit should keep.
+#
 # Run as root (systemd drop-ins); ticktalk itself still runs as its service user.
 set -u
 MODE=lora
+KEEP_SCHEDULE=0
 OUT=
+USAGE="usage: held_capture.sh [--ip] [--keep-schedule] OUT_DIR"
 for arg in "$@"; do
   case $arg in
     --ip) MODE=ip ;;
-    -*) echo "usage: held_capture.sh [--ip] OUT_DIR" >&2; exit 2 ;;
+    --keep-schedule) KEEP_SCHEDULE=1 ;;
+    -*) echo "$USAGE" >&2; exit 2 ;;
     *) OUT=$arg ;;
   esac
 done
-[ -n "$OUT" ] || { echo "usage: held_capture.sh [--ip] OUT_DIR" >&2; exit 2; }
+[ -n "$OUT" ] || { echo "$USAGE" >&2; exit 2; }
 REPO=${WATERCAM_REPO:-/home/pi/SU-WaterCam}
 CFG=$REPO/runtime_config.json
 # Overridable for the tests only
 TEST=${HELD_CAPTURE_RUN_DIR:-/run/ticktalk-test}
 DROPIN=${HELD_CAPTURE_DROPIN:-/etc/systemd/system/ticktalk.service.d/zz-no-shutdown-test.conf}
 LORA_HEALTH=${HELD_CAPTURE_LORA_HEALTH:-/tmp/watercam-lora-health.json}
+WITTYPI_DIR=${HELD_CAPTURE_WITTYPI_DIR:-/home/pi/wittypi}
+ALARMS_SAVED=0
 LORA_STOPPED=0
 # A wake ends by asking for the power-off (call_shutdown, after its captures:
 # about 2 min in the field, longer with a bench schedule); this is only the cap
@@ -48,11 +61,41 @@ MAX_S=${HELD_CAPTURE_MAX_S:-900}
 mkdir -p "$OUT"
 exec >>"$OUT/runner.log" 2>&1
 log() { echo "$(date +%T) $*"; }
+# One Witty Pi utilities.sh function; i2cget/i2cset live in /usr/sbin
+wp() { bash -c "PATH=\"\$PATH:/usr/sbin:/sbin\"; cd \"$WITTYPI_DIR\" && . ./utilities.sh >/dev/null 2>&1 && $1"; }
+ALARM_RE='^[0-9][0-9] [0-9][0-9]:[0-9][0-9]:[0-9][0-9]$'
+
+restore_schedule() {
+  local sched="$WITTYPI_DIR/schedule.wpi"
+  if [ -f "$OUT/schedule.wpi.before" ]; then
+    if ! cmp -s "$OUT/schedule.wpi.before" "$sched"; then
+      [ -f "$sched" ] && cp -p "$sched" "$OUT/schedule.wpi.from-wake"
+      cp -p "$OUT/schedule.wpi.before" "$sched"
+      log "schedule.wpi put back as it was"
+    fi
+  elif [ -f "$OUT/schedule.wpi.absent" ] && [ -f "$sched" ]; then
+    mv "$sched" "$OUT/schedule.wpi.from-wake"
+    log "schedule.wpi removed (there was none before; the wake's copy is in $OUT)"
+  fi
+  [ "$ALARMS_SAVED" = 1 ] || return 0
+  local kind v d h m sec
+  for kind in startup shutdown; do
+    v=$(cat "$OUT/alarm_$kind.before")
+    if [ "$v" = "00 00:00:00" ]; then
+      wp "clear_${kind}_time" >/dev/null 2>&1
+    else
+      read -r d h m sec <<<"${v//:/ }"
+      wp "set_${kind}_time $((10#$d)) $((10#$h)) $((10#$m)) $((10#$sec))" >/dev/null 2>&1
+    fi
+  done
+  log "Witty Pi alarms set back: startup $(wp get_startup_time 2>/dev/null), shutdown $(wp get_shutdown_time 2>/dev/null)"
+}
 STATUS=error
 REASON="did not finish"
 
 finish() {
   systemctl stop ticktalk 2>/dev/null
+  [ "$KEEP_SCHEDULE" = 1 ] || restore_schedule
   [ -f "$OUT/runtime_config.json.orig" ] && { cp "$OUT/runtime_config.json.orig" "$CFG"; chown pi:pi "$CFG"; }
   rm -f "$DROPIN"
   systemctl daemon-reload
@@ -77,6 +120,21 @@ fi
 cp "$CFG" "$OUT/runtime_config.json.orig"
 cp "$REPO/data/lora_last_sent.json" "$OUT/lora_last_sent.before" 2>/dev/null
 ls -d "$REPO"/images/2* 2>/dev/null | sort > "$OUT/images.before"
+if [ "$KEEP_SCHEDULE" = 0 ]; then
+  if [ -f "$WITTYPI_DIR/schedule.wpi" ]; then
+    cp -p "$WITTYPI_DIR/schedule.wpi" "$OUT/schedule.wpi.before"
+  else
+    touch "$OUT/schedule.wpi.absent"
+  fi
+  wp get_startup_time > "$OUT/alarm_startup.before" 2>/dev/null
+  wp get_shutdown_time > "$OUT/alarm_shutdown.before" 2>/dev/null
+  if grep -qE "$ALARM_RE" "$OUT/alarm_startup.before" && grep -qE "$ALARM_RE" "$OUT/alarm_shutdown.before"; then
+    ALARMS_SAVED=1
+    log "saved: schedule.wpi ($([ -f "$OUT/schedule.wpi.before" ] && echo present || echo none)), alarms startup $(cat "$OUT/alarm_startup.before"), shutdown $(cat "$OUT/alarm_shutdown.before")"
+  else
+    log "could not read the Witty Pi alarms; they won't be set back (schedule.wpi will be)"
+  fi
+fi
 
 # The test's settings, written in place (owner and mode kept); the original
 # comes back in finish()

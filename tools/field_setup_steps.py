@@ -1030,7 +1030,8 @@ def step_first_capture(ctx: Context) -> StepResult:
     unit = f"field-setup-capture-{time.strftime('%H%M%S')}"
     ctx.change(f"run one held capture cycle ({unit})",
                ["sudo", "systemd-run", f"--unit={unit}", "--collect",
-                "-p", f"Environment=WATERCAM_REPO={REPO}", os.path.join(TOOLS_DIR, "held_capture.sh"), out])
+                "-p", f"Environment=WATERCAM_REPO={REPO}", os.path.join(TOOLS_DIR, "held_capture.sh"),
+                "--keep-schedule", out])   # at installation the wake's schedule is the one to keep
     start = time.monotonic()
     shown = 0
     while time.monotonic() - start < 1000 and not os.path.exists(os.path.join(out, "result.json")):
