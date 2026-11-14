@@ -132,7 +132,11 @@ def _get_sensor():
         # calibration actually being fine (confirmed happening on UFO010).
         try:
             import time as _t
-            max_wait_s = 5.0 if calibration_loaded else 2.0
+            # 2 s, not 5: on a fixed mount the mag status rarely comes back at all after
+            # power-up (006: 0 on 426 of 430 captures, 2026-10-24..11-12) although the loaded
+            # offsets are right, so a longer wait only cost every wake 5 s. Whether the heading
+            # can be trusted is decided per reading (registration_orientation.heading_settled).
+            max_wait_s = 2.0
             deadline = _t.time() + max_wait_s
             fusion_ready = False
             mag_confirmed = not calibration_loaded
@@ -153,9 +157,9 @@ def _get_sensor():
             if not fusion_ready:
                 logger.warning("BNO055 warmup timed out — fusion not yet initialised")
             elif not mag_confirmed:
-                logger.warning(
-                    "BNO055 warmup timed out — magnetometer calibration status has not "
-                    "reconfirmed yet despite loaded offsets; heading may be briefly unreliable"
+                logger.info(
+                    "BNO055 warmup: magnetometer calibration status has not reconfirmed yet despite "
+                    "loaded offsets (normal on a fixed mount after power-up; the offsets apply)"
                 )
         except Exception:
             pass

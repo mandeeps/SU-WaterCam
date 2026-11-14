@@ -196,3 +196,12 @@ def test_status_is_encoded_after_pi_throttled():
 @pytest.mark.parametrize("capture_dir", [None, ""])
 def test_no_status_code_without_a_capture_directory(capture_dir):
     assert ro.status_code_for_capture(capture_dir) is None
+
+
+def test_heading_trusted_once_the_fusion_has_settled_with_offsets_loaded():
+    # The status register reads 0 after power-up on a fixed mount, though the offsets are right
+    base = {"quaternion": (1.0, 0.0, 0.0, 0.0), "gravity": (0.0, -G, 0.0), "calibration_status": (0, 3, 3, 0)}
+    assert ro.pose_from_reading(dict(base, mag_offsets_loaded=True, fusion_age_s=90.0))["mag_calibrated"]
+    assert not ro.pose_from_reading(dict(base, mag_offsets_loaded=True, fusion_age_s=5.0))["mag_calibrated"]
+    assert not ro.pose_from_reading(dict(base, mag_offsets_loaded=False, fusion_age_s=90.0))["mag_calibrated"]
+    assert not ro.pose_from_reading(base)["mag_calibrated"]

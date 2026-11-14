@@ -8,7 +8,7 @@ between the quaternions.
 
 The heading is trusted when the chip says the magnetometer is fully calibrated, or
 when saved magnetometer offsets were loaded and the fusion has run for
-HEADING_SETTLE_S. After a power-up the BNO055 reports the magnetometer as 0 until it
+HEADING_SETTLE_S (registration_orientation). After a power-up the BNO055 reports the magnetometer as 0 until it
 has been moved about, which a fixed camera never is, although the loaded offsets
 are right: on 006 (2026-10-24 .. 11-12) the status read 0 on 426 of 430 captures,
 yet every wake's second capture, a minute in, read the same heading (sd 1.3 deg),
@@ -52,7 +52,7 @@ if _REPO not in sys.path:
     sys.path.insert(0, _REPO)
 
 from tools import config_io                                      # noqa: E402
-from tools.registration_orientation import rotation_deg, tilt_deg  # noqa: E402
+from tools.registration_orientation import heading_settled, rotation_deg, tilt_deg  # noqa: E402
 
 STATE_FILE = os.path.join(_REPO, "data", "pose_state.json")
 
@@ -66,7 +66,6 @@ REFERENCE_CAPTURES, REFERENCE_STABLE_DEG = 3, 0.5
 GPS_WAKES_AFTER_REMOVED = 3
 SAMPLES, SAMPLE_GAP_S = 5, 0.2
 MAG_FULL = 3
-HEADING_SETTLE_S = 60.0      # fusion running this long with mag offsets loaded: heading usable
 GRAVITY_TOL = 0.8            # m/s^2 either side of 9.81; outside it the reading is garbled
 
 OK, GEOREF, KNOCKED, REMOVED, NO_REFERENCE = 0, 1, 2, 3, 255
@@ -116,8 +115,7 @@ def _heading_ok(pose: Dict) -> bool:
     c = pose.get("calibration_status")
     if c and len(c) == 4 and c[3] is not None and c[3] >= MAG_FULL:
         return True
-    age = pose.get("fusion_age_s")
-    return bool(pose.get("mag_offsets_loaded")) and age is not None and age >= HEADING_SETTLE_S
+    return heading_settled(pose)
 
 
 def _valid(pose: Dict) -> bool:

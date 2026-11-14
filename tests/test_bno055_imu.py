@@ -223,15 +223,16 @@ def test_get_sensor_warns_when_mag_never_reconfirms(tmp_path, monkeypatch, caplo
     monkeypatch.setattr(imu.time, "sleep", clock.sleep)
 
     # euler settles quickly (fusion is fine), but mag never reaches >= 2
-    # within the 5s warm-up window.
+    # within the 2 s warm-up window: an info line, and no longer than 2 s.
     sensor = _FakeFusionSensor(euler_settle_calls=0, mag_settle_calls=10_000, final_mag=0)
     _patch_hardware(monkeypatch, imu, sensor)
 
-    with caplog.at_level(logging.WARNING):
+    with caplog.at_level(logging.INFO):
         imu._get_sensor()
 
     assert any("magnetometer calibration status has not reconfirmed" in r.message
                for r in caplog.records)
+    assert clock.now <= 2.2   # was 5 s: on a fixed mount the status rarely comes back
 
 
 def test_get_sensor_no_calibration_file_uses_short_timeout_and_old_warning(tmp_path, monkeypatch, caplog):
