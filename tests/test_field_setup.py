@@ -443,3 +443,20 @@ def test_a_full_dry_run_rehearsal_changes_nothing(env, monkeypatch):
     assert set(statuses) == set(fs.STEP_IDS)
     assert "fail" not in statuses.values(), statuses
     assert session.values["site"]["mount_height_m"] == 2.5
+
+
+# ── the final check reads the Witty Pi alarms with i2cget on PATH ────────────
+
+def test_finish_reads_the_alarms_with_usr_sbin_on_path(env, monkeypatch):
+    # pi's PATH has no /usr/sbin, where i2cget lives: without it every alarm read
+    # failed and filled the Witty Pi log with "I2C read ... failed" (005, 2026-11)
+    wittypi = env / "wittypi"
+    wittypi.mkdir()
+    monkeypatch.setattr(fs, "WITTYPI_DIR", str(wittypi))
+    runner = FakeRunner(NODE + [("get_startup_time", "startup 14 08:00:00\nshutdown 00 00:00:00\n", 0)])
+    ctx, ui = ctx_for(["n"], runner)                # no schedule saved on the dashboard just now
+    fs.step_finish(ctx)
+    calls = runner.ran("get_startup_time")
+    assert len(calls) == 1
+    assert "/usr/sbin" in calls[0] and str(wittypi) in calls[0]
+    assert "~/wittypi" not in calls[0]
