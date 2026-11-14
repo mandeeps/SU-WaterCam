@@ -47,6 +47,11 @@ So the capture directory has to sit under the project tree. Production satisfies
 and the optical pair still succeeds, so the failure is easy to miss — you get a scene with no
 thermal band rather than an error.
 
+## The IR-cut filter
+
+How GPIO 21 drives the filter, why indoor bench tests can report a working
+filter as stuck, and its expected lifetime: [NIR_FILTER.md](NIR_FILTER.md).
+
 ## Driving the capture functions directly
 
 `take_two_photos` and `flir` are `@SQify`-decorated for the TickTalk runtime. The plain functions
