@@ -528,7 +528,7 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
         print("[lora_token_with_tracker] No bitmap data to transmit")
     elif send_bitmap:
         try:
-            # TLV-wrap as channel 0x08 type 0x18 so ChirpStack codec can decode it.
+            # TLV-wrap as category 0x08 type 0x18 so ChirpStack codec can decode it.
             # compressed_encoding({'flood_bitmap_compressed': bitmap}) produces:
             #   08 18 [len 2B BE] [bitmap bytes]
             # No capture time, to keep every byte for the bitmap: it goes out right
@@ -1835,7 +1835,7 @@ def log_sensor_tracking_stats(sensor_tracker):
 def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     """Send a subset of sensor readings and the flood bitmap to the FastAPI server over IP.
 
-    Encodes the following channels as channel-coded hex blocks and POSTs to
+    Encodes the following fields as field-coded hex blocks and POSTs to
     /ip/uplink: device_ts, battery_pct (from battery_manager; source varies by
     available hardware — ADS1115 D+, INA260, or WittyPi output), Pi throttled flags, GPS lat/lon, temperature,
     humidity, flood_detect (inferred from bitmap), flood_bitmap, and the five
@@ -1967,7 +1967,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         # ── Collect sensor data ────────────────────────────────────────────────
         # Sensor collection is done BEFORE the reachability check so that a
         # reading can be queued to disk when the server is temporarily down.
-        # IMU orientation is not transmitted (no 03 01 channel encoded below).
+        # IMU orientation is not transmitted (no 03 01 field code encoded below).
         data = {}
         # The capture time, same as the LoRa packet's: the server drops
         # whichever copy of a capture arrives second.
@@ -2043,9 +2043,9 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         data['neighborhood_emergency_frequency']  = get_parameter('neighborhood_emergency_frequency', 30)
         data['audio_recording_enabled']           = 1 if get_parameter('audio_recording_enabled', False) else 0
 
-        # ── Build channel list ─────────────────────────────────────────────────
-        # Every channel is built on its own: a value that can't be encoded (None,
-        # NaN, out of range) drops that channel and nothing else.
+        # ── Build field list ─────────────────────────────────────────────────
+        # Every field entry is built on its own: a value that can't be encoded (None,
+        # NaN, out of range) drops that entry and nothing else.
         channels = []
 
         def _add(code, build):

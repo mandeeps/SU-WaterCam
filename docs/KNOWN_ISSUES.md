@@ -63,7 +63,7 @@ A bare `except:` swallows `SystemExit` and `KeyboardInterrupt`. The handler then
 
 ### Received LoRa payload parsed without bounds checking
 **File:** `tools/lora_runtime_integration.py` (~line 350, `process_lora_command`)
-Channel, command, and value fields are extracted from the payload without range validation. A malformed packet can set out-of-range thresholds or frequencies.
+Category, command, and value fields are extracted from the payload without range validation. A malformed packet can set out-of-range thresholds or frequencies.
 **Fix:** Validate parsed integers against expected ranges before applying them.
 
 ### `pickle.load()` on graph file without source validation

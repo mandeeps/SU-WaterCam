@@ -62,7 +62,7 @@ DEFAULT_TILT_THRESHOLD_DEG = 5.0
 DEFAULT_ROTATION_THRESHOLD_DEG = 15.0
 #: calibration_status is (sys, gyro, accel, mag), each 0-3.
 MAG_CALIBRATED = 2
-#: Sent to the server as registration_status (channel 01 08, both transports);
+#: Sent to the server as registration_status (field code 01 08, both transports);
 #: the API's app/decoders.py REGISTRATION_STATUS must list the same codes.
 STATUS_CODES = {"ok": 0, "shifted": 1, "adopted": 2, "no_cache": 3, "no_imu": 4}
 

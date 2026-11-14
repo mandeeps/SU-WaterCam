@@ -256,7 +256,7 @@ def send_lora_alert() -> bool:
 
     Sends timestamp, emergency_status=1, and health_status=0.
     Failure details (failures list, readings) are NOT transmitted —
-    the LoRa encoder only encodes known channel fields, and failure details
+    the LoRa encoder only encodes known fields, and failure details
     would exceed the LoRa payload size limit.
     """
     try:

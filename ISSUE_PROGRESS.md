@@ -60,7 +60,7 @@ Documents work already in the codebase against each open GitHub issue.
 
 `tools/lora_handler_concurrent.py` (≈2100 lines):
 
-- Full TLV-based command parser (`_parse_tlv_commands`, `_apply_command_tlv`) covering all parameter channels (area threshold, stage threshold, monitoring/emergency frequency, debug mode, emergency mode activation/deactivation)
+- Full TLV-based command parser (`_parse_tlv_commands`, `_apply_command_tlv`) covering all parameter fields (area threshold, stage threshold, monitoring/emergency frequency, debug mode, emergency mode activation/deactivation)
 - Legacy hex command format also handled for backwards compatibility
 - Command timestamp logging for frequency-adjustment tracking
 
@@ -70,7 +70,7 @@ Test files:
 |------|---------|
 | `tests/test_command_parsing.py` | LoRa command parsing unit tests |
 | `tests/test_lora_command_integration.py` | End-to-end with simulated serial hardware |
-| `tests/test_new_format_commands.py` | TLV `[Channel][Command][Value]` format |
+| `tests/test_new_format_commands.py` | TLV `[Category][Command][Value]` format |
 | `tests/test_chirpstack_parameter_update.py` | Sending downlinks through ChirpStack API |
 | `tests/test_emergency_activation.py` | Emergency mode activate/deactivate commands |
 | `tests/test_emergency_mode*.py` | Emergency mode state machine |

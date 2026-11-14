@@ -6,33 +6,33 @@
  * _flush_mac_commands): sent when the mDot answers "Tx buffer filled by MAC Commands", it
  * carries only the mDot's MAC command answers, typically after a join at DR0.
  *
- * Channel 00 Type 01: Timestamp (UNIX)
- * Channel 01 Type 04: Emergency status (0/1)
- * Channel 01 Type 05: Health status (0/1) 
- * Channel 01 Type 06: Movement threshold (0/1)
- * Channel 01 Type 07: Pi throttled flags (u8: low nibble = now, high nibble = since boot; bit 0 = under-voltage)
- * Channel 01 Type 08: Registration orientation check (u8: 0 ok, 1 shifted, 2 adopted, 3 no_cache, 4 no_imu)
- * Channel 01 Type 09: Software release (u32: year-2000, month, patch, flags; tools/node_version.py)
- * Channel 01 Type 0B: Loaded segmentation model (u32: first 8 hex digits of its SHA-256)
- * Channel 02 Type 01: Battery percent
- * Channel 03 Type 01: Tilt/roll/yaw (3x float32; older nodes)
- * Channel 03 Type 02: Tilt/roll/yaw in 0.01 deg (u16 heading 0-360, i16 roll, i16 pitch)
- * Channel 04 Type 01: Lat/lon/z coordinates (3x float32)
- * Channel 05 Type 01: Temperature in Celsius (float32; older nodes)
- * Channel 05 Type 02: Temperature in 0.01 Celsius (i16)
- * Channel 06 Type 01: Relative humidity percent
- * Channel 07 Type 17: Camera flood detected (0/1)
- * Channel 07 Type 27: Camera flood growing (0/1)
- * Channel 08 Type 18: Flood bitmap compressed binary
- * Channel 09 Type 19: Status area threshold %
- * Channel 09 Type 29: Stage threshold (u16, cm)
- * Channel 09 Type 39: Monitoring frequency (minutes)
- * Channel 09 Type 49: Emergency frequency (minutes)
- * Channel 09 Type 59: Neighborhood emergency frequency (minutes)
- * Channel 0A Type 01: WittyPi temperature (float32, Celsius; older nodes, no longer sent)
- * Channel 0A Type 03: WittyPi internal voltage (float32, Volts; older nodes, no longer sent)
- * Channel 0B Type 01: Debug status message (JSON string; not a Witty Pi channel)
- * Channel 0C Type 01: Compact packet (11 bytes in all, for DR0): u32 capture time, u8 flags
+ * Category 00 Type 01: Timestamp (UNIX)
+ * Category 01 Type 04: Emergency status (0/1)
+ * Category 01 Type 05: Health status (0/1) 
+ * Category 01 Type 06: Movement threshold (0/1)
+ * Category 01 Type 07: Pi throttled flags (u8: low nibble = now, high nibble = since boot; bit 0 = under-voltage)
+ * Category 01 Type 08: Registration orientation check (u8: 0 ok, 1 shifted, 2 adopted, 3 no_cache, 4 no_imu)
+ * Category 01 Type 09: Software release (u32: year-2000, month, patch, flags; tools/node_version.py)
+ * Category 01 Type 0B: Loaded segmentation model (u32: first 8 hex digits of its SHA-256)
+ * Category 02 Type 01: Battery percent
+ * Category 03 Type 01: Tilt/roll/yaw (3x float32; older nodes)
+ * Category 03 Type 02: Tilt/roll/yaw in 0.01 deg (u16 heading 0-360, i16 roll, i16 pitch)
+ * Category 04 Type 01: Lat/lon/z coordinates (3x float32)
+ * Category 05 Type 01: Temperature in Celsius (float32; older nodes)
+ * Category 05 Type 02: Temperature in 0.01 Celsius (i16)
+ * Category 06 Type 01: Relative humidity percent
+ * Category 07 Type 17: Camera flood detected (0/1)
+ * Category 07 Type 27: Camera flood growing (0/1)
+ * Category 08 Type 18: Flood bitmap compressed binary
+ * Category 09 Type 19: Status area threshold %
+ * Category 09 Type 29: Stage threshold (u16, cm)
+ * Category 09 Type 39: Monitoring frequency (minutes)
+ * Category 09 Type 49: Emergency frequency (minutes)
+ * Category 09 Type 59: Neighborhood emergency frequency (minutes)
+ * Category 0A Type 01: WittyPi temperature (float32, Celsius; older nodes, no longer sent)
+ * Category 0A Type 03: WittyPi internal voltage (float32, Volts; older nodes, no longer sent)
+ * Category 0B Type 01: Debug status message (JSON string; not in the Witty Pi category)
+ * Category 0C Type 01: Compact packet (11 bytes in all, for DR0): u32 capture time, u8 flags
  *   (bit 0 emergency, 1 flood detected, 2 flood growing, 3 health fault, 4 moved, 5 under-voltage
  *   now, 6 since boot), u8 battery % (255 none), u8 Witty Pi voltage in 25 mV (255 none),
  *   i8 temperature C (-128 none), u8 humidity % (255 none). The full packet goes in chunks (each

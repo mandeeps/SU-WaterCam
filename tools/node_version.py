@@ -10,7 +10,7 @@ has local edits can't pass for the release:
     v2026.10.1-dirty              local edits (005's no-shutdown patch, say)
     abc12345                      no release tag reachable
 
-It is sent on these channels (LoRa sends all but the commit):
+It is sent under these field codes (LoRa sends all but the commit):
 
     01 09  software_version  u32 (year-2000)<<24 | month<<16 | patch<<8 | flags
     01 0A  software_commit   u32 first 8 hex digits of the commit
@@ -113,7 +113,7 @@ def _boot_id() -> Optional[str]:
 
 
 def encode_version_u32(version: Optional[Dict[str, Any]]) -> Optional[int]:
-    """Channel 01 09, or None if there is no version to send."""
+    """Field code 01 09, or None if there is no version to send."""
     if not version:
         return None
     flags = (FLAG_DIRTY if version.get("dirty") else 0) | \
@@ -128,7 +128,7 @@ def encode_version_u32(version: Optional[Dict[str, Any]]) -> Optional[int]:
 
 
 def hex8_u32(hex_digits: Optional[str]) -> Optional[int]:
-    """First 8 hex digits as a u32 (channels 01 0A and 01 0B), or None."""
+    """First 8 hex digits as a u32 (field codes 01 0A and 01 0B), or None."""
     if not hex_digits or len(hex_digits) < 8:
         return None
     try:

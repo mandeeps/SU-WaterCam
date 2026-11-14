@@ -28,7 +28,7 @@ model, so this is reported separately from the software version.
 
 ### On the wire
 
-| Channel | Field | Value (u32) | Sent over |
+| Field code | Field | Value (u32) | Sent over |
 |---|---|---|---|
 | `01 09` | `software_version` | `(year-2000)<<24 \| month<<16 \| patch<<8 \| flags` | LoRa, IP |
 | `01 0A` | `software_commit` | first 8 hex digits of the commit | IP |
@@ -62,8 +62,8 @@ in the periodic full send. LoRa status replies (`dbg`) carry `"v"` after `"em"`.
    (`grype sbom:inventory-<host>-<date>.cdx.json`), read anything critical or high that
    has a fix, and add the files to WaterCam-Team/documentation under `inventories/su-watercam-<tag>/` with a short README of the scan result. Not to the release: releases are immutable once published, so nothing can be attached afterwards. Not to this repo either: every node downloads its files on each update. The same command on a field unit
    answers "is this one affected?" when an advisory comes out.
-4. If the release adds an uplink channel, deploy the API (and paste the ChirpStack codec)
-   **before** any node runs it: the API rejects an IP uplink with a channel it doesn't
+4. If the release adds an uplink field code, deploy the API (and paste the ChirpStack codec)
+   **before** any node runs it: the API rejects an IP uplink with a field code it doesn't
    know.
 5. Tag **signed**, then publish, with notes covering the changes since the last release,
    the deploy order, the pickle's SHA-256 and where the inventories are. Releases are

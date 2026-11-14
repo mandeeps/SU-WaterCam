@@ -28,7 +28,7 @@ _REFRESH_S = 3600               # or when the cached fix is this old
 
 # What the last get_location_with_retry() returned: 'live', 'cached' or 'none',
 # the fix's age in seconds (0 when live) and its horizontal error in metres
-# when gpsd reports one. The IP uplink sends the age (channel 04 02).
+# when gpsd reports one. The IP uplink sends the age (field code 04 02).
 last_fix = {"source": "none", "age_s": None, "error_m": None}
 _cached_note_shown = False   # "using the last fix" printed once per process
 

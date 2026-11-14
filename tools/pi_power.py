@@ -32,7 +32,7 @@ UNDERVOLTAGE_OCCURRED = 1 << 16
 def get_throttled() -> Optional[int]:
     """Return the raw throttled register, or None when it cannot be read.
 
-    None (not 0) on failure, so callers omit the channel rather than
+    None (not 0) on failure, so callers omit the field rather than
     transmitting a false "all clear".
     """
     try:
