@@ -6,7 +6,7 @@ drop their oldest entry when full, and evict entries older than their age limit.
 That loses captures silently, so each drop is counted here and the running total
 goes out with the status reports:
 
-    IP uplink / LoRa packet  channel 01 0C  sf_dropped (u32)
+    IP uplink / LoRa packet  field code 01 0C  sf_dropped (u32)
     LoRa debug status reply  key "sd"
 
 The file is data/sf_dropped.json: {"lora": n, "ip": n, ...}. It lives in data/,

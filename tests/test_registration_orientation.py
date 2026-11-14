@@ -168,7 +168,7 @@ def test_cache_filename_matches_coreg():
     assert ro.CACHE_FILENAME == config.TRANSFORM_CACHE_FILENAME
 
 
-# --- sending the status: channel 01 08 ---------------------------------------
+# --- sending the status: field code 01 08 ---------------------------------------
 
 @pytest.mark.parametrize("status, code", [("ok", 0), ("shifted", 1), ("adopted", 2),
                                           ("no_cache", 3), ("no_imu", 4)])

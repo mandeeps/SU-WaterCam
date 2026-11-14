@@ -44,20 +44,20 @@ def mock_compressed_encoding(data):
     # Start with header (like the example packet)
     encoded = bytearray()
     
-    # Add timestamp (Channel 0x00, Type 0x01, 4 bytes)
+    # Add timestamp (Category 0x00, Type 0x01, 4 bytes)
     encoded.extend([0x00, 0x01])
     timestamp_bytes = struct.pack('>I', data.get('timestamp', 0))
     encoded.extend(timestamp_bytes)
     
-    # Add emergency status (Channel 0x01, Type 0x04, 3 bytes)
+    # Add emergency status (Category 0x01, Type 0x04, 3 bytes)
     encoded.extend([0x01, 0x04])
     encoded.append(data.get('emergency_status', 0))
     
-    # Add battery percent (Channel 0x02, Type 0x01, 3 bytes) - mock value
+    # Add battery percent (Category 0x02, Type 0x01, 3 bytes) - mock value
     encoded.extend([0x02, 0x01])
     encoded.append(85)  # Mock 85% battery
     
-    # Add IMU data (Channel 0x03, Type 0x01, 14 bytes - 3x float32)
+    # Add IMU data (Category 0x03, Type 0x01, 14 bytes - 3x float32)
     encoded.extend([0x03, 0x01])
     imu_values = [
         data.get('tilt', 0.0),
@@ -67,7 +67,7 @@ def mock_compressed_encoding(data):
     for value in imu_values:
         encoded.extend(struct.pack('>f', value))
     
-    # Add GPS data (Channel 0x04, Type 0x01, 14 bytes - 3x float32)
+    # Add GPS data (Category 0x04, Type 0x01, 14 bytes - 3x float32)
     encoded.extend([0x04, 0x01])
     gps_values = [
         data.get('latitude', 0.0),
@@ -77,37 +77,37 @@ def mock_compressed_encoding(data):
     for value in gps_values:
         encoded.extend(struct.pack('>f', value))
     
-    # Add temperature (Channel 0x05, Type 0x01, 4 bytes)
+    # Add temperature (Category 0x05, Type 0x01, 4 bytes)
     encoded.extend([0x05, 0x01])
     temp_bytes = struct.pack('>f', data.get('temperature', 0.0))
     encoded.extend(temp_bytes)
     
-    # Add humidity (Channel 0x06, Type 0x01, 4 bytes)
+    # Add humidity (Category 0x06, Type 0x01, 4 bytes)
     encoded.extend([0x06, 0x01])
     humidity_bytes = struct.pack('>f', data.get('humidity', 0.0))
     encoded.extend(humidity_bytes)
     
-    # Add area threshold (Channel 0x09, Type 0x29, 4 bytes)
+    # Add area threshold (Category 0x09, Type 0x29, 4 bytes)
     encoded.extend([0x09, 0x29])
     threshold_bytes = struct.pack('>f', data.get('status_area_threshold', 0.0))
     encoded.extend(threshold_bytes)
     
-    # Add stage threshold (Channel 0x09, Type 0x39, 4 bytes)
+    # Add stage threshold (Category 0x09, Type 0x39, 4 bytes)
     encoded.extend([0x09, 0x39])
     stage_bytes = struct.pack('>f', data.get('stage_threshold', 0.0))
     encoded.extend(stage_bytes)
     
-    # Add monitoring frequency (Channel 0x09, Type 0x49, 4 bytes)
+    # Add monitoring frequency (Category 0x09, Type 0x49, 4 bytes)
     encoded.extend([0x09, 0x49])
     freq_bytes = struct.pack('>f', data.get('monitoring_frequency', 0.0))
     encoded.extend(freq_bytes)
     
-    # Add emergency frequency (Channel 0x09, Type 0x59, 4 bytes)
+    # Add emergency frequency (Category 0x09, Type 0x59, 4 bytes)
     encoded.extend([0x09, 0x59])
     emergency_freq_bytes = struct.pack('>f', data.get('emergency_frequency', 0.0))
     encoded.extend(emergency_freq_bytes)
     
-    # Add WittyPi data (Channel 0x0A, Type 0x01-0x03, 12 bytes)
+    # Add WittyPi data (Category 0x0A, Type 0x01-0x03, 12 bytes)
     encoded.extend([0x0A, 0x01])
     wittypi_temp_bytes = struct.pack('>f', data.get('wittypi_temperature', 0.0))
     encoded.extend(wittypi_temp_bytes)

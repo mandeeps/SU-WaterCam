@@ -13,6 +13,14 @@ On deployments with WiFi or cellular access, the same data can be sent directly
 to the FastAPI server over HTTP.  Both transports produce identical readings in
 InfluxDB and the dashboard — the only difference is the delivery path.
 
+> **Terms.** A *field code* is the two-byte code in front of each value, a
+> *category* byte then a *type* byte (e.g. `02 01` battery %, `08 18` flood
+> bitmap). Older notes and the code call it a "channel" (from Cayenne LPP), and
+> the names `channels` and `CHANNEL_REGISTRY` keep that word because deployed
+> nodes and the API use them. It has nothing to do
+> with LoRaWAN radio channels (the frequencies in a sub-band), and neither has
+> the LoRaWAN FPort, which names the whole message.
+
 ```
 Sensors ──┬── LoRa (mDot → ChirpStack → POST /chirpstack/uplink)
            └── IP  (requests → POST /ip/uplink)
@@ -97,7 +105,7 @@ IPTransmitter(
 
 POST sensor readings to `/ip/uplink`.
 
-**`channels`** — list of channel dicts. Each channel encodes one sensor value:
+**`channels`** — list of field entries. Each entry encodes one sensor value:
 
 ```python
 channels = [
@@ -189,11 +197,11 @@ whether to attempt IP or fall back to LoRa.
 
 ---
 
-## Channel Encoding Reference
+## Field Code Encoding Reference
 
 The server's `CHANNEL_REGISTRY` maps 2-byte codes to sensor fields.  The
-`payload_hex` for each channel must be exactly the right length and use
-**big-endian byte order**. Any channel may carry `payload_b64` (base64 of the
+`payload_hex` for each field entry must be exactly the right length and use
+**big-endian byte order**. Any field entry may carry `payload_b64` (base64 of the
 same bytes) instead; the node sends the `08 18` bitmap that way, a third smaller
 than hex.
 
@@ -245,11 +253,11 @@ bitmap_bytes = b'\xff\x00\xff\x00'   # 8 pixels, alternating
 bitmap_bytes.hex()
 ```
 
-### LoRa sensor packet: compact channels
+### LoRa sensor packet: compact fields
 
 The LoRa sensor packet (`_encode_compressed_packet` in
-`tools/lora_handler_concurrent.py`) is a different encoding from the IP channels
-above: `[channel][type][value]` with values sized to fit (u8 flags, a u32
+`tools/lora_handler_concurrent.py`) is a different encoding from the IP field entries
+above: `[category][type][value]` with values sized to fit (u8 flags, a u32
 `00 01` capture time). Its orientation and temperature now go in 2-byte
 fixed-point form under new codes, and the Witty Pi temperature and output
 voltage are no longer sent over LoRa (the server never stored them; the IP
@@ -265,7 +273,7 @@ units on older software:
 
 The ChirpStack codec (`config/chirpstack_device_profile_codec.js`) gives both
 forms the same field names and units, so the server's mapping is unchanged. A
-reading that is missing or not a number is left out. The compact channels come
+reading that is missing or not a number is left out. The compact fields come
 last in the packet: a decoder that predates them stops there and loses only
 these fields. Update the codec and the API before the nodes. The full sensor
 packet in `tests/test_lora_small_payloads.py` (`FULL_SENSOR_DATA`) goes from
@@ -318,7 +326,7 @@ Receive sensor data from an IP device.
 ```
 
 - `device_ts` — optional; if omitted, server time is used.
-- `channels` — at least one required (or provide `payload_hex` for raw TTLoRa hex); a channel has `payload_hex` or `payload_b64`.
+- `channels` (field entries) — at least one required (or provide `payload_hex` for raw TTLoRa hex); a field entry has `payload_hex` or `payload_b64`.
 - Side effect: device `transport_type` is set to `"ip"` on first call.
 
 **Response (201):**
@@ -416,8 +424,8 @@ Two `@SQify` functions have been added to `ticktalk_main.py`:
 
 Collects a subset of sensor data (AHT20 temperature/humidity, GPS, WittyPi
 battery, flood bitmap, flood detect flag, and runtime threshold parameters),
-encodes it as channel-coded hex, and POSTs to `/ip/uplink`.  IMU orientation
-is intentionally omitted (no `03 01` channel).  Called from `ttmain` immediately
+encodes it as field-coded hex, and POSTs to `/ip/uplink`.  IMU orientation
+is intentionally omitted (no `03 01` field code).  Called from `ttmain` immediately
 after `lora_return`:
 
 ```python
@@ -459,7 +467,7 @@ commands here, after the capture rather than before it. Polling twice is safe:
 the server offers a command until it is acked, and the node applies a frame once.
 
 Queued readings keep only the newest bitmap: queuing one removes the `08 18`
-channel from older entries. An entry the server rejects as wrong (a 4xx other
+field code from older entries. An entry the server rejects as wrong (a 4xx other
 than 401, 403 and 429) or that can't be read is dropped rather than blocking the
 queue. Entries are written with an fsync (`config_io.write_json`).
 
@@ -469,7 +477,7 @@ reached over cellular doesn't lose its link until it is set up for this.
 
 **Capture ID.** The capture time, the moment `get_time` fired for that capture
 (`tools/capture_time.py`), identifies it on every transport: `device_ts` in the
-IP uplink, and channel `00 01` in the LoRa sensor packets. The LoRa bitmap
+IP uplink, and field code `00 01` in the LoRa sensor packets. The LoRa bitmap
 packet carries no ID, so that every byte goes to the bitmap. It is sent straight
 after the full sensor packet, and the API gives it that packet's capture time
 when the LoRaWAN frame counters are consecutive. Captures are at least 30 s
@@ -503,11 +511,11 @@ Tailscale ([CELLULAR_DATA.md](CELLULAR_DATA.md)).
 stop sending over IP while their LoRa is joined.
 
 **Sensor data collected:**
-- AHT20: `temperature_celsius` → channel `05 01`, `relative_humidity` → `06 01`
-- GPS: `gps_lat` / `gps_lon` → channel `04 01`
-- WittyPi: `battery_voltage` converted to % → channel `02 01`
-- Bitmap: contents → channel `08 18`; water % of the mask → `07 37`; flood detected / growing (when enabled) → `07 17` / `07 27`
-- Runtime params: area/stage thresholds, frequencies → channels `09 19`–`09 59`
+- AHT20: `temperature_celsius` → field code `05 01`, `relative_humidity` → `06 01`
+- GPS: `gps_lat` / `gps_lon` → field code `04 01`
+- WittyPi: `battery_voltage` converted to % → field code `02 01`
+- Bitmap: contents → field code `08 18`; water % of the mask → `07 37`; flood detected / growing (when enabled) → `07 17` / `07 27`
+- Runtime params: area/stage thresholds, frequencies → field codes `09 19`–`09 59`
 
 **Reachability check:** `is_reachable()` is called before encoding; if the
 server doesn't respond, the function returns `{"status": "unreachable"}` without
@@ -618,7 +626,7 @@ under unauthenticated requests on the dashboard (or `GET /ip/auth-status`).
 ## Known Gaps / Next Steps
 
 1. **Full image upload** — not applicable.  Raw camera files (JPG/PGM/CSV) are
-   never transmitted; the compressed flood bitmap via channel `08 18` is the
+   never transmitted; the compressed flood bitmap via field code `08 18` is the
    intended image payload.
 2. **Auth — done (API #28).** The server issues each device its own token and checks
    `Authorization: Bearer <token>` on uplinks and downlink polls. Install the token on

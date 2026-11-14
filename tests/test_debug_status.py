@@ -17,7 +17,7 @@ class TestGetLoraStatusSharesSingleton:
     and lora_runtime_integration bare (no "tools." prefix), which resolves to
     a second, independent copy of each module with its own singleton/lock —
     self-conflicting with the real one over the serial-port flock whenever a
-    debug-status request (LoRa channel 50/01) ran alongside the live
+    debug-status request (LoRa category 50/01) ran alongside the live
     ticktalk_main.py process. Confirmed on UFO010 in production: the debug
     handler's LoRaHandler() construction stole the flock, and every
     subsequent transmit cycle reported "LoRa serial port already owned by

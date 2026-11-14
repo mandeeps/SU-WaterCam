@@ -477,11 +477,11 @@ def transmit_debug_status_via_lora():
             print("❌ LoRa handler not available - cannot transmit")
             return False
         
-        # Format the debug data with proper LoRa channel/type headers
+        # Format the debug data with proper LoRa category/type headers
         debug_data = result['lora_formatted']
         debug_bytes = debug_data.encode('utf-8')
         
-        # Create the proper LoRa packet format: Channel 0B (11), Type 01, Length (2 bytes), Data
+        # Create the proper LoRa packet format: Category 0B (11), Type 01, Length (2 bytes), Data
         length = len(debug_bytes)
         lora_packet = bytes([0x0B, 0x01]) + length.to_bytes(2, 'big') + debug_bytes
         lora_hex = lora_packet.hex()

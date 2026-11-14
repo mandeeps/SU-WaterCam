@@ -1,4 +1,4 @@
-"""The node reports its software release and loaded model (channels 01 09-01 0B)."""
+"""The node reports its software release and loaded model (field codes 01 09-01 0B)."""
 import json
 import subprocess
 

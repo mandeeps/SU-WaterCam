@@ -24,12 +24,12 @@ Three measurement paths are supported, tried in priority order:
      moves with load and cabling, not with charge: a wall-powered unit read
      37-54 % within minutes under the old linear mapping. The voltage and
      current are still returned for diagnostics, but battery_pct is None, so
-     callers omit the battery channel. See docs/POWER_ANALYSIS.md for the
+     callers omit the battery field. See docs/POWER_ANALYSIS.md for the
      planned real signal (the V50's USB-C D+ pin read by the mDot's ADC).
 
   4. Unavailable
      No usable reading available. Returns battery_pct=None; callers omit the
-     battery channel from transmissions rather than sending a wrong value.
+     battery field from transmissions rather than sending a wrong value.
 
 Wiring — ADS1115 path:
   Voltaic V50 USB-C D+ ──► ADS1115 AIN0

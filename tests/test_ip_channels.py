@@ -1,4 +1,4 @@
-"""ip_uplink_transmit's channel list: 01 04 always, a bad field drops only itself,
+"""ip_uplink_transmit's field entry list: 01 04 always, a bad field drops only itself,
 the bitmap as base64."""
 import base64
 from contextlib import ExitStack

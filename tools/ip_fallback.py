@@ -50,7 +50,7 @@ DEFAULT_MIN_INTERVAL_HOURS = 6
 REPEAT_WINDOW_S = 15 * 60          # the API's wake + resend sequence takes about 6 min
 REQUEST_MAX_AGE_S = 7 * 86400
 MAX_WAKES = 255
-#: The bitmap packet's TLV header (channel 08, type 18), as hex
+#: The bitmap packet's TLV header (category 08, type 18), as hex
 BITMAP_PREFIX = "0818"
 
 

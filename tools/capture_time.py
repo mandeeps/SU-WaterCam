@@ -1,7 +1,7 @@
 """The capture time of one capture cycle: its ID on every transport.
 
 get_time writes the time it fired into the capture directory. The LoRa packet
-(channel 00 01), the IP uplink (device_ts) and both store-and-forward queues
+(field code 00 01), the IP uplink (device_ts) and both store-and-forward queues
 carry this same value, so the node and the server can tell that two payloads
 are the same capture whichever way they arrived. Captures are at least 30 s
 apart, so a unit never reuses one.
@@ -14,7 +14,7 @@ from typing import Optional
 
 FILENAME = "capture_time"
 #: Present in a capture directory when the capture was taken before the clock was
-#: known to be right. Sent as `clock_unverified` (channel 01 0D, 1 = unverified).
+#: known to be right. Sent as `clock_unverified` (field code 01 0D, 1 = unverified).
 UNVERIFIED_FILENAME = "clock_unverified"
 #: Written by syncTime.sh (network or GPS time) or watercam-set-clock (server time);
 #: /run is cleared at every boot.
