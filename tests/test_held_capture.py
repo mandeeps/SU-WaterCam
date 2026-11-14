@@ -26,6 +26,9 @@ case "$1" in
       cat "$STATE/lora_daemon" > "$STATE/wake_lora_daemon" 2>/dev/null
       mkdir -p "$WATERCAM_REPO/images/20261112-213015"
       printf '%s\n' "$WAKE_JOURNAL" > "$STATE/journal"
+      # A real wake writes its schedule and arms the next start-up, as on 005
+      echo "BEGIN 2026-11-13 08:00:00 (written by the wake)" > "$HELD_CAPTURE_WITTYPI_DIR/schedule.wpi"
+      echo "14 08:00:00" > "$HELD_CAPTURE_WITTYPI_DIR/.startup"
       PATH="$HELD_CAPTURE_RUN_DIR/bin:$PATH" doas /usr/sbin/shutdown -h now
     else
       echo active > "$STATE/$svc"
@@ -45,6 +48,15 @@ while [ $# -gt 0 ]; do
 done
 PATH="$path" "$@"
 """
+# The Witty Pi's utilities.sh: the alarms kept in files beside it
+UTILITIES = r"""
+get_startup_time() { cat ./.startup 2>/dev/null || echo "00 00:00:00"; }
+get_shutdown_time() { cat ./.shutdown 2>/dev/null || echo "00 00:00:00"; }
+set_startup_time() { printf '%02d %02d:%02d:%02d\n' "$1" "$2" "$3" "$4" > ./.startup; }
+set_shutdown_time() { printf '%02d %02d:%02d:%02d\n' "$1" "$2" "$3" "$4" > ./.shutdown; }
+clear_startup_time() { echo "00 00:00:00" > ./.startup; }
+clear_shutdown_time() { echo "00 00:00:00" > ./.shutdown; }
+"""
 JOURNALCTL = r"""#!/bin/bash
 case "$*" in *"-u ticktalk"*) cat "$STATE/journal" 2>/dev/null ;; esac
 exit 0
@@ -60,6 +72,9 @@ def held(tmp_path):
     (repo / "images").mkdir()
     state = tmp_path / "state"
     state.mkdir()
+    wittypi = tmp_path / "wittypi"
+    wittypi.mkdir()
+    (wittypi / "utilities.sh").write_text(UTILITIES)
     bin_ = tmp_path / "bin"
     bin_.mkdir()
     for name, text in (("systemctl", SYSTEMCTL), ("systemd-run", SYSTEMD_RUN), ("journalctl", JOURNALCTL)):
@@ -80,7 +95,7 @@ def held(tmp_path):
                "HELD_CAPTURE_RUN_DIR": str(tmp_path / "run"),
                "HELD_CAPTURE_DROPIN": str(tmp_path / "dropin" / "zz-test.conf"),
                "HELD_CAPTURE_LORA_HEALTH": str(tmp_path / "lora-health.json"),
-               "HELD_CAPTURE_SETTLE_S": "0"}
+               "HELD_CAPTURE_SETTLE_S": "0", "HELD_CAPTURE_WITTYPI_DIR": str(wittypi)}
         r = subprocess.run(["bash", str(SCRIPT), *args, str(out)], env=env, capture_output=True,
                            text=True, timeout=60)
 
@@ -95,6 +110,8 @@ def held(tmp_path):
                 "run_dir_left": (tmp_path / "run").exists(), "dropin_left": (tmp_path / "dropin" / "zz-test.conf").exists(),
                 "health_cache": tmp_path / "lora-health.json"}
     run.state = state
+    run.wittypi = wittypi
+    run.out = tmp_path / "out"
     return run
 
 
@@ -151,3 +168,45 @@ def test_bad_arguments_and_an_unwritable_config(held):
     r = held(config=None)          # "null": not a settings object
     assert r["result"]["status"] == "error" and "test settings" in r["result"]["reason"]
     assert "start --no-block ticktalk" not in r["calls"]
+
+
+# ── the Witty Pi schedule and alarms the wake set are put back ───────────────
+
+def _wp(held, name):
+    p = held.wittypi / name
+    return p.read_text().strip() if p.exists() else None
+
+
+def test_no_schedule_before_none_after_and_the_alarm_cleared(held):
+    r = held()
+    assert r["result"]["status"] == "done"
+    assert not (held.wittypi / "schedule.wpi").exists()            # there was none: removed
+    assert "written by the wake" in (held.out / "schedule.wpi.from-wake").read_text()
+    assert _wp(held, ".startup") == "00 00:00:00"                   # the wake's 14 08:00:00 cleared
+    assert "alarms set back: startup 00 00:00:00, shutdown 00 00:00:00" in r["log"]
+
+
+def test_an_existing_schedule_and_alarms_are_put_back(held):
+    (held.wittypi / "schedule.wpi").write_text("BEGIN the bench's own\n")
+    (held.wittypi / ".startup").write_text("09 07:05:00\n")
+    (held.wittypi / ".shutdown").write_text("09 07:15:30\n")
+    r = held()
+    assert (held.wittypi / "schedule.wpi").read_text() == "BEGIN the bench's own\n"
+    assert "written by the wake" in (held.out / "schedule.wpi.from-wake").read_text()
+    assert _wp(held, ".startup") == "09 07:05:00" and _wp(held, ".shutdown") == "09 07:15:30"
+
+
+def test_keep_schedule_leaves_what_the_wake_set(held):
+    r = held("--keep-schedule")
+    assert r["result"]["status"] == "done"
+    assert "written by the wake" in (held.wittypi / "schedule.wpi").read_text()
+    assert _wp(held, ".startup") == "14 08:00:00"
+    assert not (held.out / "schedule.wpi.from-wake").exists()
+
+
+def test_unreadable_alarms_are_left_alone_but_the_schedule_is_put_back(held):
+    (held.wittypi / "utilities.sh").write_text("get_startup_time() { echo garbage; }\n")
+    r = held()
+    assert "could not read the Witty Pi alarms" in r["log"]
+    assert not (held.wittypi / "schedule.wpi").exists()
+    assert "alarms set back" not in r["log"]
