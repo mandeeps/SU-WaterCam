@@ -1,8 +1,7 @@
 # IP Transmission — WaterCam over WiFi/Cellular
 
 **Status:** Complete — standalone client and TickTalkPython integration both implemented.  
-**Branch:** `CellTransmit`  
-**Last updated:** 2026-04-14
+**Written:** April 2026 on the `CellTransmit` branch, now in `main`; later sections and the `battery_pct` row updated through 2026-11-14.
 
 ---
 

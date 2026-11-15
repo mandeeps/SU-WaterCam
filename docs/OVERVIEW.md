@@ -150,8 +150,9 @@ recorded in this repository. Model training and export are in the
 ## 7. LoRa and IP sending
 
 Both paths carry the same readings and the same bitmap
-([IP_TRANSMISSION.md](IP_TRANSMISSION.md)). The message type travels in the
-LoRaWAN FPort; each value inside has a two-byte field code.
+([IP_TRANSMISSION.md](IP_TRANSMISSION.md)). Each value in a payload is tagged
+with a two-byte field code. (Moving the message type into the LoRaWAN FPort is
+a proposal, not implemented.)
 
 **LoRa** (`lora_token_with_tracker`, `tools/lora_handler_concurrent.py`,
 `tools/lora_send.py`): one sensor packet with the capture time and the fields
