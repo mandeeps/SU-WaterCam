@@ -209,7 +209,7 @@ than hex.
 |---|---|---|---|
 | `00 01` | `device_ts` | 8 | uint64 — UNIX seconds |
 | `01 04` | `emergency_status` | 4 | uint32 bool (0 or 1); in every upload |
-| `02 01` | `battery_pct` | 4 | uint32 (0–100) |
+| `02 01` | `battery_pct` | 4 | uint32 (0–100). **Sent only when the node has a real state-of-charge reading** (an ADS1115 on the pack's charge pin, or an INA260; `tools/battery_manager.py`); otherwise the field is left out. The Witty Pi's own reading is the regulated 5 V output and does not reflect charge, so it is not used for this field (`docs/BATTERY_ESTIMATION_PLAN.md`). No deployed unit has such a sensor yet, so in practice units don't send it. |
 | `03 01` | `imu_block` | 12 | 3× int32 accel (mg), or custom IMU packing |
 | `01 06` | `move_threshold` | 4 | uint32 bool: 1 while the unit is away from its mount position (`tools/gps_home.py`) |
 | `04 01` | `gps_block` | 8 | int32 lat\_microdeg, int32 lon\_microdeg |

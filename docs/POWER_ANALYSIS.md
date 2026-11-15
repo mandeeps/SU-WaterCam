@@ -84,7 +84,7 @@ A switching regulator to about 3.6 V would save about a quarter of it.
 The Witty Pi's P4 3.3 V rail measures about 3.0 V (meter, 2026-11-05), and the
 mDot sagged below 2.8 V at its boot. That trips libmdot's low-voltage guard,
 which then skips mounting the mDot's file system (lost settings and reset
-loops; mDot-AT-firmware `docs/RESET_LOOP_ANALYSIS.md`). The mDot's pin 1 takes
+loops; the mDot-AT-firmware repository's `README.md`, "User files and a low supply"; the repository is private, team access). The mDot's pin 1 takes
 3.3-5 V ±5%, so it now takes the battery's 5 V instead.
 
 **Wiring on 005 (2026-11-10):** the V50's Y-cable goes to the Witty Pi's P2
@@ -433,7 +433,7 @@ The packs put a scaled cell voltage on a pin of their top USB-C port
 The mDot can read it with no new chips:
 
 - **ADC pin:** `PB_0` is unconnected on the main-branch HAT and unused in
-  mDot-AT-firmware. In use: `PB_1` (Witty Pi switch, heartbeat, emergency out),
+  the mDot-AT-firmware repository (private, team access). In use: `PB_1` (Witty Pi switch, heartbeat, emergency out),
   `PA_5` (boot), `PC_1` (Pi state), `PA_6` (emergency in), `PC_4`/`PC_5` (ID).
   Spare ADC alternatives: `PA_1`, `PA_4`, `PA_0` (wake pin), `PA_7`.
 - **Always readable:** the mDot runs from the Witty Pi's always-on 3.3 V rail,

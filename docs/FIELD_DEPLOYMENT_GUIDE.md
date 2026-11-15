@@ -1,6 +1,6 @@
 # Field Deployment Guide: Configuring and Installing an Assembled WaterCam Unit
 
-**Audience:** Written assuming you have an assembled unit and flashed the SD card image (https://drive.google.com/file/d/1dCcisGiLYk8vYh0eK_8w945sLaqX_JKo/view?usp=sharing) but need to set up remote access, the WittyPi schdedule, and the auto-start functionality. 
+**Audience:** Written assuming you have an assembled unit and flashed the SD card image (published as release assets of the team's private `sd-images` repository, as described in `README.md`) but need to set up remote access, the WittyPi schdedule, and the auto-start functionality. 
 
 **Scope:** This guide starts where the hardware build guide (`README.md`) ends, it assumes you have a fully assembled unit (all components installed, case ready to be sealed).
 
@@ -295,8 +295,8 @@ sudo apt install i2c-tools gpsd opendoas nftables uhubctl tio
 (`i2c-tools` for the Witty Pi and the recovery/next-wake services, `gpsd` for
 GNSS, `opendoas` for the shutdown/USB/clock rules in 1.9, `nftables` for the
 cellular filter in 1.5.1, `uhubctl` for USB power in 1.9, `tio` for the mDot.)
-`lrzsz` isn't needed: `mDot-AT-firmware/tools/mdot_serial_flash.py` has its own
-YMODEM sender.
+`lrzsz` isn't needed: `tools/mdot_serial_flash.py` in the mDot-AT-firmware repository
+(private, team access) has its own YMODEM sender.
 
 **Cellular modem GNSS** (units with the Quectel EC25):
 
@@ -584,9 +584,9 @@ cellular unless you accept that. To undo it:
 
 This can be tricky. 
 
-If the mDot has already been flashed with our custom firmware (https://github.com/WaterCam-Team/mDot-AT-firmware) then you can proceed to connecting to a gateway after the mDot ID is registered with ChirpStack. If the firmware has not been flashed, follow the instructions in the firmware GitHub. If it has programming headers installed the easy way is to use the USB development board (https://multitech.com/product/multitech-mdot-micro-developer-kit-global/). If not, the same USB serial adapter used for the Raspberry Pi can be used to flash the firmware following the instructions in the repository.
+If the mDot has already been flashed with our custom firmware (the mDot-AT-firmware repository, https://github.com/WaterCam-Team/mDot-AT-firmware: private, team access) then you can proceed to connecting to a gateway after the mDot ID is registered with ChirpStack. If the firmware has not been flashed, follow the instructions in the firmware GitHub. If it has programming headers installed the easy way is to use the USB development board (https://multitech.com/product/multitech-mdot-micro-developer-kit-global/). If not, the same USB serial adapter used for the Raspberry Pi can be used to flash the firmware following the instructions in the repository.
 
-The mDot module's DevEUI must already be registered in ChirpStack before the unit can join the network. **This should be done ahead of time by the ChirpStack administrator**, confirm with them that this specific unit's DevEUI is registered and assigned to the correct application/device profile. The DevEUI is unique per mDot module (see `tools/AT_COMMANDS_REFERENCE.md` for querying the module over serial if you need to look it up).
+The mDot module's DevEUI must already be registered in ChirpStack before the unit can join the network. **This should be done ahead of time by the ChirpStack administrator**, confirm with them that this specific unit's DevEUI is registered and assigned to the correct application/device profile. The DevEUI is unique per mDot module (read it from the module over serial with `AT+DI?`, the query `tools/mdot_subband.py` uses, if you need to look it up).
 
 Once it's confirmed that the device is running our firmware and it is set up in ChirpStack, you can connect to the gateway following the instructions in https://docs.google.com/document/d/1Z83h89x7jlwzRIvbZtyiRxBoMupdoHzL/edit?usp=drive_link&ouid=115248649914453432688&rtpof=true&sd=true
 
@@ -612,8 +612,8 @@ It stops and restarts `lora_daemon` around it. A gateway on another sub-band:
 the mDot by itself if its firmware stops, or if the Pi is on but the LoRa daemon's
 keep-alive (`AT+ALIVE`, every 5 minutes) stops for an hour. Put the unit on
 release v2026.10.4 or later (1.3.1) **before** flashing it, or the silence
-restart never arms. Flash with `tools/mdot_serial_flash.py` from the firmware
-repository (its `docs/BUILD_AND_FLASH.md`): it reads the sub-band, Pi watchdog,
+restart never arms. Flash with `tools/mdot_serial_flash.py` from the
+mDot-AT-firmware repository (private, team access; its `docs/BUILD_AND_FLASH.md`): it reads the sub-band, Pi watchdog,
 silence limit and join nonce before the flash and puts back any the flash
 changed. After any flash, with `lora_daemon` stopped, check by hand:
 
