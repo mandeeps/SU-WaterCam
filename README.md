@@ -1,3 +1,5 @@
+**New to the node software?** Start with [docs/OVERVIEW.md](docs/OVERVIEW.md): what a unit does from wake to shutdown, with links to the detailed docs.
+
 Prerequisite Knowledge:
 Basic Linux, electronics, general computer troubleshooting
 
@@ -131,7 +133,7 @@ You can connect to the system using a serial cable. Once it's connected to a net
 
 Use Raspberry Pi Imager to install current stable 64-bit Raspberry Pi OS Lite (Trixie, Debian 13; the nodes no longer use Bookworm) to a microSD card with SSH enabled in the configuration options, along with the user account name and password, and configure a unique hostname for each system that makes sense (like the installation location)
 
-Trixie changed some modem behaviour (systemd 257, ModemManager 1.24); see [quectel-1nce-debugging.md](quectel-1nce-debugging.md#trixie-specific-issues).
+Trixie changed some modem behaviour (systemd 257, ModemManager 1.24); see [quectel-1nce-debugging.md](docs/quectel-1nce-debugging.md#trixie-specific-issues).
 
 https://www.raspberrypi.com/software/
 
@@ -228,6 +230,7 @@ Download: wget http://www.uugear.com/repo/WittyPi4/install.sh
 Install: sudo sh install.sh
 Shutdown the Pi, install the WittyPi onto the Pi using the extended headers
 Reboot, then run wittyPi.sh from the wittypi directory to configure the schedule.
+How the schedule and wake logic work, and how to diagnose a missed wake: [docs/WITTYPI_SCHEDULING.md](docs/WITTYPI_SCHEDULING.md). How the clock is set (the units run no NTP, by design): [docs/TIME_SYNC.md](docs/TIME_SYNC.md).
 
 Install doas with `sudo apt install doas -y`
 
@@ -747,7 +750,7 @@ https://www.pureengineering.com/projects/lepton
 Alternative implementation using more standard modern Linux subsystems: https://github.com/trackIT-Systems/wittypi4 - will investigate later
 Python interface to WittyPi4: https://github.com/Eagleshot/WittyPi4Python
 
-Note that the stock software disables network time sync software like Chrony, systemd-timesyncd, ntpd, etc.,
+Note that the stock software disables network time sync software like Chrony, systemd-timesyncd, ntpd, etc. The project uses no NTP by design: the clock is the Witty Pi RTC, set from network time, GPS or LoRa by our own scripts (see [docs/TIME_SYNC.md](docs/TIME_SYNC.md)).
 
 **Multitech mDot LoRa module**
 
