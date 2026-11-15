@@ -215,7 +215,8 @@ itself hangs. Details: FIELD_DEPLOYMENT_GUIDE 1.9.
 
 ## 9. The clock
 
-Units run no NTP, by design. The clock is the Witty Pi RTC, copied in at boot,
+Units run no NTP, by design: the Witty Pi documentation says NTP interferes with
+the Witty Pi's own timekeeping (its software turns NTP off itself). The clock is the Witty Pi RTC, copied in at boot,
 then corrected from LoRa network time (`tools/lora_time.py`), network time or
 GPS (`config/wittypi/syncTime.sh`), the server's `Date` header after an IP
 upload, or the daily GPS fix. A boot with no source marks its captures "clock
