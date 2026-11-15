@@ -1,9 +1,11 @@
 # LoRa Handler Multi-Process Conflict
 
+> **Update 2026-11-14:** the fix shipped. `lora_daemon.service` is part of the standard install (`docs/FIELD_DEPLOYMENT_GUIDE.md`, 1.9) and every LoRa send and receive in `ticktalk` goes through it. The status below is the 2026-07 record; where it says the daemon is not installed on any field device, that is no longer true.
+
 **Status:** Root cause confirmed (2026-07-22). Pragmatic mitigation shipped
 (retry-with-backoff). Proper architectural fix (single-owner daemon + IPC)
 implemented (2026-07-22) — see "Implemented fix" below. **Not yet installed
-on any field device**; requires deploying `config/lora_daemon.service` (see
+on any field device (as of July 2026)**; requires deploying `config/lora_daemon.service` (see
 that section for the manual install steps).
 
 **Severity:** Medium — reduces LoRa transmission reliability (a sensor-change

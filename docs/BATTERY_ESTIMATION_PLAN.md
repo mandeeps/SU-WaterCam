@@ -217,7 +217,7 @@ _save_state(state) → None
 - [x] Add `battery_state.json` to `.gitignore`
 - [x] Fix GPS key lookup in `initial_health_check.py` (`gps_lat`/`gps_lon`)
 - [ ] Deploy hardware and collect empirical D+ readings to tune `CELL_V_MIN`/`CELL_V_MAX`
-- [ ] Update `docs/KNOWN_ISSUES.md`
+- [ ] Update `docs/archive/KNOWN_ISSUES.md`
 
 ---
 

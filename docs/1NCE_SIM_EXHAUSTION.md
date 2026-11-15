@@ -2,7 +2,7 @@
 
 1NCE SIMs have a **500 MB lifetime data cap**. Once exhausted the modem shows good
 signal and correct APN but the network rejects PDP context attachment — see
-`quectel-1nce-debugging.md` for the modem-level symptoms.
+`quectel-1nce-debugging.md` (same folder) for the modem-level symptoms.
 
 This document covers why the 500 MB cap is being consumed faster than expected
 across multiple deployed units.

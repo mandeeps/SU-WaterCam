@@ -56,7 +56,7 @@ Defaults are the code's (`tools/lora_runtime_integration.py` `_DEFAULT_PARAMS`, 
 | `gps_move_alert_m` | 50 | — | gps_home | file | guide 1.7.1 |
 | `flood_baseline_water_pct` | (none); 0–100 | — | flood_baseline; written by `tools/flood_baseline.py` | local | guide 2.4.1 describes the procedure, not the key |
 | `schedule` | (object, set by `15 95`) | — | schedule_control | remote `15 95` | WITTYPI_SCHEDULING, IP_TRANSMISSION (the stored object isn't described) |
-| `wittypi_start_hour` / `_start_minute` / `_interval_minutes` / `_repetitions_per_day` | 8 / 0 / 30 / 8 | — | ticktalk_main, wittypi_control (rewrites schedule.wpi when emergency mode ends) | file | none. **Review:** older schedule path; check against `schedule` (15 95). |
+| `wittypi_start_hour` / `_start_minute` / `_interval_minutes` / `_repetitions_per_day` | 8 / 0 / 30 / 8 | — | `wittypi_control` (read only as the last resort when emergency mode ends: no `schedule.wpi` installed, and neither the deployment schedule, its backup nor the daylight preset can be installed, so it generates one from these four); `ticktalk_main.get_wittypi_schedule_config` also reads them, but the capture graph doesn't call it | file | none. **Legacy**, marked so in `tools/config_schema.py`: the normal wake schedule is the sun-following `schedule.wpi` (`docs/WITTYPI_SCHEDULING.md`) and the dashboard's `schedule` command (15 95), neither of which uses these keys. Not settable over LoRa. |
 | `iteration_count` | 0 | — | lora_runtime_integration, photo_interval_watcher | state | internal: wakes since boot, reset each boot |
 
 ### `ip_upload` section
@@ -148,7 +148,7 @@ New switches go in `runtime_config.json` or the systemd unit, not in `/etc`. The
 
 | Variable | Default | Read by | Described in |
 |---|---|---|---|
-| `WATERCAM_REPO` | the script's repo, else `/home/pi/SU-WaterCam` | about 25 tools, ticktalk_main | ISSUE_PLAN (design note only) |
+| `WATERCAM_REPO` | the script's repo, else `/home/pi/SU-WaterCam` | about 25 tools, ticktalk_main | archive/ISSUE_PLAN (design note only) |
 | `WATERCAM_CALIB_FILE` | `bno055_calibration.json` in the repo | bno055_imu | none |
 | `COREG_SINGLE_THREAD` | unset | coreg_multiple | CAPTURE_PIPELINE_NOTES |
 | `PYTHONUNBUFFERED=1` | set in the button, lora_daemon, segformer_daemon and ticktalk units | Python | — |
