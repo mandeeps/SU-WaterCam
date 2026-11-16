@@ -3,8 +3,8 @@
 Covers:
   1. _extract_txs_size_limit poisoning — small numeric LoRa downlinks must not
      corrupt current_size_limit (min raised from 1 to 11 bytes)
-  2. _query_txs_locked recovery — transmit() refreshes the limit when it is
-     below the floor rather than silently failing every attempt
+  2. transmit() asks the mDot for the room (AT+TXS) before each send, instead of
+     trusting a stored limit (only refreshed when it was below the floor)
   3. get_wittypi_status — removed @SQify so it returns a plain dict when called
      from within another SQ function
   4. generate_schedule validation — start_hour=0, start_minute=0 are valid
@@ -87,48 +87,77 @@ class TestExtractTxsSizeLimit:
 # 2. _query_txs_locked recovery inside transmit()
 # ---------------------------------------------------------------------------
 
-class TestQueryTxsLockedRecovery:
-    """transmit() must call _query_txs_locked when current_size_limit < 11,
-    allowing a single recovery before re-checking the payload size.
+class TestRoomAskedBeforeEachSend:
+    """transmit() asks the mDot for the room (AT+TXS) before every attempt, so a
+    stored limit that outlived a data-rate change (ADR, a rejoin at DR0, a fixed
+    DR1) or a poisoned one can't size the send (006, 2026-11-16).
     """
 
     @pytest.fixture
-    def poisoned_handler(self):
+    def handler(self):
         from tools.lora_handler_concurrent import LoRaHandler
         h = LoRaHandler.__new__(LoRaHandler)
-        h.current_size_limit = 2        # poisoned value
+        h.current_size_limit = 242      # stored, stale
         h.transmit_lock = __import__("threading").Lock()
         h._lock_fd = MagicMock()
-        mock_ser = MagicMock()
-        mock_ser.in_waiting = 0
-        mock_ser.read_until.return_value = b""
-        mock_ser.reset_input_buffer.return_value = None
-        mock_ser.write.return_value = None
-        h.ser = mock_ser
+        h.ser = MagicMock()
+        h._lockf_until = MagicMock(return_value=True)
+        h._attempt_transmission = MagicMock(return_value=(True, ""))
+        h._flush_mac_commands = MagicMock(return_value=True)
         return h
 
-    def test_recovery_called_when_limit_below_floor(self, poisoned_handler):
-        h = poisoned_handler
-        recovered = []
+    def _rooms(self, h, *rooms):
+        it = iter(rooms)
 
-        def fake_query():
-            h.current_size_limit = 242
-            recovered.append(True)
+        def query():
+            h.current_size_limit = next(it)
+        h._query_txs_locked = MagicMock(side_effect=query)
 
-        h._query_txs_locked = fake_query
-        h._attempt_transmission = MagicMock(return_value=(True, ""))
+    def _send(self, h, content):
+        import fcntl
+        with patch.object(fcntl, "lockf"):
+            return h.transmit(content, max_retries=0)
 
-        with h.transmit_lock:
-            import fcntl
-            with patch.object(fcntl, "lockf"):
-                # Re-implement just the recovery branch from transmit()
-                size_limit = h.current_size_limit
-                if size_limit < 11:
-                    h._query_txs_locked()
-                    size_limit = h.current_size_limit
+    def test_fits_the_room_asked_now(self, handler):
+        self._rooms(handler, 53)
+        assert self._send(handler, "00" * 40)
+        handler._attempt_transmission.assert_called_once_with("00" * 40, 53)
+        handler._flush_mac_commands.assert_not_called()
 
-        assert recovered, "_query_txs_locked was not called despite poisoned limit"
-        assert size_limit == 242
+    def test_too_big_for_the_data_rate_is_refused_without_a_send(self, handler):
+        self._rooms(handler, 53)                       # DR1, nothing pending
+        assert not self._send(handler, "00" * 185)
+        handler._attempt_transmission.assert_not_called()
+        handler._flush_mac_commands.assert_not_called()   # a probe can't help
+
+    def test_mac_answers_taking_the_room_are_flushed_first(self, handler):
+        self._rooms(handler, 8, 11)                    # DR0 with MAC answers pending
+        assert self._send(handler, b"0123456789a")
+        handler._flush_mac_commands.assert_called_once()
+        handler._attempt_transmission.assert_called_once_with(b"0123456789a", 11)
+
+    def test_poisoned_stored_limit_is_replaced(self, handler):
+        handler.current_size_limit = 2
+        self._rooms(handler, 242)
+        assert self._send(handler, "00" * 100)
+        handler._attempt_transmission.assert_called_once_with("00" * 100, 242)
+
+
+class TestStatusReplySizedNow:
+    def test_reply_built_for_the_room_asked_now(self):
+        from tools.lora_handler_concurrent import LoRaHandler
+        import tools.lora_debug_integration as dbg
+        h = LoRaHandler.__new__(LoRaHandler)
+        h.config = {}
+        h.current_size_limit = 242                     # stale
+        h.size_limit_now = MagicMock(return_value=53)
+        sent = []
+        h._send_debug_reply = sent.append
+        with patch.object(dbg, "handle_debug_status_request",
+                          return_value={"status": "success", "data": "7b7d"}) as build:
+            h._build_and_send_status(ack=(1, 0))
+        assert build.call_args.kwargs["size_limit"] == 53
+        assert sent == ["7b7d"]
 
 
 # ---------------------------------------------------------------------------
