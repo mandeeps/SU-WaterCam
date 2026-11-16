@@ -242,7 +242,12 @@ def take_gps_wake(path: Optional[str] = None) -> bool:
 
 
 def reset(path: Optional[str] = None) -> None:
-    """Forget the reference; the next stable captures become the new one."""
+    """Forget the reference; the next stable captures become the new one.
+
+    The unit's own reset (no path) also clears the camera's reference photo
+    (tools/camera_move.py): accepting the current orientation accepts the view too.
+    """
+    own = path is None
     path = path or STATE_FILE
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with config_io.locked(path):
@@ -250,6 +255,12 @@ def reset(path: Optional[str] = None) -> None:
         _save({"level": NO_REFERENCE, "reset_at": time.time(),
                "previous": {k: state.get(k) for k in ("level", "last")}}, path)
     _last.clear()
+    if own:
+        try:
+            from tools import camera_move
+            camera_move.reset()
+        except Exception as e:      # numpy/cv2 missing must not stop the IMU reset
+            print(f"⚠️ Camera reference not cleared: {e}")
 
 
 def fields(result: Dict) -> Dict:

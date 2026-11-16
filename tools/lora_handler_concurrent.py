@@ -36,6 +36,7 @@ except ImportError:     # run from tools/ as a script
 # 09 19 status area threshold %
 # 09 29 stage threshold, u16 cm
 # 01 0E pose level, 01 0F tilt from the reference (0.1 deg)
+# 01 12 camera rotation since the reference photo (u16 0.01 deg, u8 matches, u8 basis)
 # 09 39 monitoring freq
 # 09 79 wake schedule (7 bytes, as downlink 15 95)
 # 09 49 emergency freq
@@ -322,6 +323,12 @@ _SENSOR_FIELDS = (
     ('registration_status', _u8_field(0x01, 0x08, 'registration_status')),
     # IR-cut filter check (tools/nir_filter_check.py)
     ('nir_filter_status', _u8_field(0x07, 0x47, 'nir_filter_status')),
+    # Camera rotation since the reference photo (tools/camera_move.py): u16 0.01 deg,
+    # u8 matches, u8 basis; only from the capture that ran the day's check
+    ('camera_rotation_hundredths', lambda d: bytes([0x01, 0x12]) + struct.pack(
+        ">HBB", max(0, min(0xFFFF, _int_in(d['camera_rotation_hundredths'], 0, 1 << 32))),
+        max(0, min(0xFF, _int_in(d['camera_move_inliers'], 0, 1 << 32))),
+        _int_in(d['camera_move_basis'], 0, 3))),
     # Software release and loaded model (tools/node_version.py); the commit is IP only
     ('software_version', _u32_field(0x01, 0x09, 'software_version')),
     ('model_id', _u32_field(0x01, 0x0B, 'model_id')),
@@ -349,7 +356,7 @@ _CHUNK_PRIORITY = (
     'emergency_status', 'camera_flood_detected', 'camera_flood_growing', 'camera_water_pct',
     'battery_percent', 'health_status', 'movement_threshold', 'pose_level',
     'temperature_celsius', 'relative_humidity', 'pi_throttled', 'clock_unverified',
-    'lat_lon_z', 'tilt_roll_yaw', 'pose_tilt_tenths', 'registration_status', 'nir_filter_status', 'sf_dropped',
+    'lat_lon_z', 'tilt_roll_yaw', 'pose_tilt_tenths', 'registration_status', 'nir_filter_status', 'camera_rotation_hundredths', 'sf_dropped',
     'status_area_threshold', 'stage_threshold', 'monitoring_frequency', 'emergency_frequency',
     'neighborhood_emergency_frequency', 'audio_recording_enabled', 'schedule',
     'software_version', 'model_id', 'model_bands', 'cellular_kib_total',

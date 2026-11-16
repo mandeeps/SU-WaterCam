@@ -34,9 +34,10 @@ ANGLE_FIELDS = ("tilt_roll_yaw",)
 #: Identifiers packed into integers (tools/node_version.py): any change matters,
 #: and a relative threshold would miss v2026.10.0 -> v2026.10.1.
 EXACT_FIELDS = ("software_version", "software_commit", "model_id", "model_bands", "sf_dropped", "cellular_kib_total")
-#: Describes the capture, not a change: never tracked. The caller sends it when it is 1
-#: and leaves it out otherwise (decoders read a missing value as "not set").
-UNTRACKED_FIELDS = ("clock_unverified",)
+#: Describe the capture, not a change: never tracked. The caller sends clock_unverified
+#: when it is 1 and the camera check's fields when that capture ran it (tools/camera_move.py).
+UNTRACKED_FIELDS = ("clock_unverified", "camera_rotation_hundredths", "camera_move_inliers",
+                    "camera_move_basis")
 #: The unit's position, [lat, lon, alt]: sent when it moved POSITION_THRESHOLD_M,
 #: so GPS jitter doesn't put 12 bytes in every LoRa packet. A unit away from its
 #: mount sends it every time anyway (tools/gps_home.py).
