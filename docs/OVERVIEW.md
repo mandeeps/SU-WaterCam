@@ -146,6 +146,8 @@ move) is marked in `capture_status.json` (`tools/capture_status.py`,
   `tools/field_setup_steps.py` and the deployment guide's manual step both use
   2592×1944, and the camera calibration (`tools/calibrate_node.py`) is made at it
   too, and the setup step warns if the photo comes out at any other size. The
+  reference photo is a normal colour photo: the setup step sets the IR-cut filter
+  in (GPIO 21 low) for it, because a released pin leaves the filter out. The
   small `rpicam-still` scripts (`tools/fast_photo.sh`, `tools/take_two_photos.sh`)
   ask for 2592×1944 as well; a photo at another size would not match the
   calibration.

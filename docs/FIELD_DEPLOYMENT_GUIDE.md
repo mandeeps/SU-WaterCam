@@ -1286,10 +1286,15 @@ frame from this camera, so take it exactly as below.
    sudo systemctl stop ticktalk.service
    ```
 
-2. Take a full-resolution frame, the size the capture workflow uses:
+2. Take a full-resolution frame, the size the capture workflow uses, with the
+   IR-cut filter in (GPIO 21 low) so it is a normal colour photo. Left alone the
+   pin is pulled high and the filter is out, which tints the photo with
+   near-infrared. `tools/field_setup.py` does all of this for you.
 
    ```bash
+   pinctrl set 21 op dl && sleep 0.5
    rpicam-still --nopreview --width 2592 --height 1944 -o ~/reference.jpg
+   pinctrl set 21 ip
    ```
 
    Keep the 4:3 shape. A smaller 4:3 size also works (the dashboard scales the

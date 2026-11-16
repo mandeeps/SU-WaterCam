@@ -52,6 +52,9 @@ MIN_LORA_MARGIN_DB = 5.0
 #: The capture workflow's frame size (tools/take_photo.py); the camera
 #: calibration is for this size, so the reference photo is taken at it
 PHOTO_W, PHOTO_H = 2592, 1944
+#: The IR-cut filter's control pin (low: filter in) and its settle time, as in tt_take_photos.py
+NIR_FILTER_GPIO = 21
+NIR_FILTER_SETTLE_S = 0.5
 #: Variance of the Laplacian of the grey photo at a quarter size: under this the
 #: photo is probably out of focus or fogged. Measured on 006's reference photo:
 #: about 4000 sharp, 190 with a 4 px blur, 45 through a fogged window, 19 badly
@@ -921,8 +924,21 @@ def step_reference_photo(ctx: Context) -> StepResult:
     if (ctx.run(["systemctl", "is-active", "ticktalk"], timeout=10).stdout or "").strip() == "active":
         return StepResult("fail", "The capture service is running and using the camera; run step 0 again.", {})
     path = os.path.join(ctx.session.path, "reference.jpg")
-    r = ctx.run(["rpicam-still", "--nopreview", "--width", str(PHOTO_W), "--height", str(PHOTO_H), "-o", path],
-                timeout=60)
+    # A photo for people: a normal capture with the IR-cut filter IN (GPIO 21 low), like
+    # the NIR-OFF frame. Released, the pin is pulled high by the camera board and the
+    # filter is out, which would tint the photo with near-infrared (docs/NIR_FILTER.md).
+    filter_in = ctx.run(["pinctrl", "set", str(NIR_FILTER_GPIO), "op", "dl"], timeout=10).returncode == 0
+    if filter_in:
+        time.sleep(NIR_FILTER_SETTLE_S)
+    else:
+        ui.say(f"  Could not set GPIO {NIR_FILTER_GPIO} low: the IR-cut filter may be out and the photo tinted.")
+    try:
+        r = ctx.run(["rpicam-still", "--nopreview", "--width", str(PHOTO_W), "--height", str(PHOTO_H), "-o", path],
+                    timeout=60)
+    finally:
+        if filter_in:
+            # Back to the state every capture leaves (input, filter out).
+            ctx.run(["pinctrl", "set", str(NIR_FILTER_GPIO), "ip"], timeout=10)
     if r.returncode != 0 or not os.path.exists(path):
         return StepResult("fail", "The camera did not take the photo: " + ((r.stderr or "").strip()[-200:] or "no file"), {})
     vals: Dict[str, Any] = {"reference_photo": path}

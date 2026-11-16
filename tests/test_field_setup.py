@@ -242,6 +242,9 @@ def test_reference_photo_passes_and_flags_problems(env):
     assert r.status == "pass", r.message
     assert r.values["reference_photo_size"] == [2592, 1944]
     assert "--width 2592 --height 1944" in good.ran("rpicam-still")[0]
+    # the photo is taken with the IR-cut filter in, and the pin released afterwards
+    order = [c for c in good.calls if "pinctrl" in c or "rpicam-still" in c]
+    assert order == ["pinctrl set 21 op dl", order[1], "pinctrl set 21 ip"] and "rpicam-still" in order[1]
 
     small = FakeRunner([("rpicam-still", _camera((1640, 1232)), 0)] + NODE)
     ctx, _ = ctx_for([], small)
