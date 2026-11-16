@@ -9,6 +9,12 @@ Every figure below is marked **measured** or **estimate**. The estimates are
 there to size things roughly, not to be relied on; the last section lists
 what still needs measuring.
 
+> **Status 2026-11-15:** the measured figures are bench numbers (005's boot and
+> shutdown on 2026-10-22; the 2026-10-06 captures and load tests on 006, then on the
+> bench). Treat them as provisional until more accurate data exists. Since November
+> 2026 the mDot is fed from 5 V (hand-wired units: the Witty Pi's P2 5 V input, with no
+> diode), not from the Witty Pi's 3.3 V rail; the off-state measurements predate that.
+
 ---
 
 ## Hardware
@@ -242,7 +248,7 @@ interval is under 3 minutes (a boot costs more than it saves), during a remote
 access session, with `emergency_sleep` false in `runtime_config.json`, or if the
 alarm doesn't read back.
 
-- **Per capture cycle:** boot (25–35 mWh), one capture and its uploads with the
+- **Per capture cycle (005 bench numbers):** boot (25–35 mWh), one capture and its uploads with the
   Pi idling at about 2 W for 2–3 minutes (70–100 mWh), shutdown (10–15 mWh):
   about 100–150 mWh. *Estimate from the measured parts.*
 - **Per day at 10 minutes:** 144 cycles, about **15–22 Wh**, plus the off-state
@@ -436,16 +442,18 @@ The mDot can read it with no new chips:
   the mDot-AT-firmware repository (private, team access). In use: `PB_1` (Witty Pi switch, heartbeat, emergency out),
   `PA_5` (boot), `PC_1` (Pi state), `PA_6` (emergency in), `PC_4`/`PC_5` (ID).
   Spare ADC alternatives: `PA_1`, `PA_4`, `PA_0` (wake pin), `PA_7`.
-- **Always readable:** the mDot runs from the Witty Pi's always-on 3.3 V rail,
-  so it can read the pack while the Pi is off (a resting voltage, more accurate
+- **Always readable:** the mDot stays powered while the Pi is off (battery 5 V;
+  on hand-wired units through the Witty Pi's P2 5 V input), so it can read the pack while the Pi is off (a resting voltage, more accurate
   than one under load). Its ADC reference is about 3.0 V; check the SBU scale
   fits under it.
 - **Wiring:** a USB-C breakout in the pack's top port with **only the signal pin
   (SBU on the new design) and GND** connected, never VBUS or CC. Signal to
   `PB_0` through about 10 kΩ, with 100 nF from the pin to GND, and the pack's
   ground shared with the HAT.
-- **Blocker to test first:** anything plugged into the top port turns Always On
-  off on the A ports, and this wiring plugs into the top port. Check on the
+- **Blocker, still being investigated:** the charge signal is only on the PD
+  USB-C port, and anything plugged into that port turns Always On off on the A
+  ports. How to read it without losing Always On has to be worked out carefully
+  before any unit is wired this way. Check on the
   bench whether a breakout with only the signal pin and GND (no VBUS, no CC
   resistors) still trips it: watch whether the pack's output stays on through a
   long low-current idle. If it does trip, the reading needs another route, or
@@ -486,14 +494,16 @@ INA260.
 | Idle, uptime 120-240 s | 120 s | 104 mWh | 3.1 W |
 | Shutdown request to the sampler being killed | 8.8 s | 9.6 mWh | 3.9 W (6 W at the end) |
 
-So a boot to "ready" costs about 25-35 mWh and a shutdown about 10-15 mWh: about 40-50 mWh together, the same as about 50-60 s of idling at 3 W. Staying up between captures only pays for gaps shorter than about a minute; for anything longer (emergency mode's 10-min interval), shutting down and waking on the Witty Pi alarm saves most of the energy:
+So, on 005 on the bench, a boot to "ready" costs about 25-35 mWh and a shutdown about 10-15 mWh (provisional until more accurate data): about 40-50 mWh together, the same as about 50-60 s of idling at 3 W. Staying up between captures only pays for gaps shorter than about a minute; for anything longer (emergency mode's 10-min interval), shutting down and waking on the Witty Pi alarm saves most of the energy:
 
 | Emergency mode, 10-min interval | Per day |
 |---|---|
 | Pi kept on (about 3 W idle) | about 72 Wh |
 | Shut down between captures (boot + one capture + shutdown, about 0.09 Wh, ×144, plus under 0.05 W off) | about 13-14 Wh |
 
-The off draw (Witty Pi + mDot) was below what two cheap USB meters (different models and vendors) could read, on 006 and on 005 (2026-10-22): under their resolution, so at most a few tens of mW. The estimates use 0.05 W as an upper bound.
+The off draw (Witty Pi + mDot) was below what two cheap USB meters (different models and vendors) could read, on 006 and on 005 (2026-10-22): under their resolution, so at most a few tens of mW. The estimates use 0.05 W as an upper bound. Those readings were taken while the mDot ran from the Witty Pi's 3.3 V rail.
+
+**Where to measure now.** The mDot takes its 5 V from the Witty Pi's P2 input, so it sits downstream of the battery's USB-A output. A meter at the battery's USB-A output (on the Y-cable) sees the whole unit's off-state draw: Witty Pi standby plus the mDot. It doesn't see the V75's own draw (about 7 mA). To get the mDot alone, measure in series with its 5 V lead; the Witty Pi's share is the difference. The cheap USB meters can't resolve these currents, so use a multimeter or a shunt.
 
 ### Why 005 idles at 3 W, not 2 W (2026-10-22)
 
@@ -511,7 +521,7 @@ So the modem draws about 0.6-0.9 W while powered, even in low power, and the mic
 
 ## Still to measure
 
-1. **Off-state draw, above all the mDot's:** below what two USB meters could read (2026-10-22), though the radio alone should show. Measure the mDot's current in series with its VDD with a multimeter, Pi off; it moves daily use by up to 2 Wh ([The mDot's always-on draw](#the-mdots-always-on-draw)). The V75's own 7 mA is on top.
+1. **Off-state draw, above all the mDot's:** below what two USB meters could read (2026-10-22), though the radio alone should show. Measure the mDot's current in series with its 5 V lead with a multimeter, Pi off (see "Where to measure now"); it moves daily use by up to 2 Wh ([The mDot's always-on draw](#the-mdots-always-on-draw)). The V75's own 7 mA is on top.
 2. **Energy per wake, boot and shutdown included:** captures sampled at 5 Hz on 2026-10-06; boot and shutdown measured on 005 on 2026-10-22 (below). Still missing: the first ~14 s after power-on (bootloader and kernel, before any sampler can run), estimated.
 3. **WiFi's draw:** idle looked about 0.3–0.6 W lower with WiFi disconnected, in one session.
 4. **Solar charging through the V75's solar jack:** a load test while it charges from the real panel in sun.

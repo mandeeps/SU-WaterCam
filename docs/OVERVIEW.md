@@ -27,10 +27,11 @@ Two cameras in total: the visible camera (with the switchable IR filter) and the
 ### Battery wiring
 
 - **Witty Pi feed:** a Y-cable joins the battery's two USB-A ports (3 A combined) into the Witty Pi's input. It powers only the Witty Pi (and through it the Pi). Plugging a USB-A cable into the V75 engages its Always On mode; unplugging returns it to Auto Off.
-- **Modem:** runs from the Pi's USB, so it draws nothing while the Pi is off. A USB meter on the Witty Pi feed therefore sees the whole unit's off-state draw.
-- **mDot:** fed from the battery's 5 V into its pin 1, so it stays powered while the Pi is off. This is the standard for every unit (005 and 006 so far); the older wiring took the Witty Pi's always-on 3.3 V rail, which measures about 3.0 V, below the mDot's minimum (pcb-designs `Schematic_Remaining_Work.md` #20).
+- **Modem:** runs from the Pi's USB, so it draws nothing while the Pi is off.
+- **Measuring the off-state draw:** a meter at the battery's USB-A output sees the Witty Pi and the mDot together (not the V75's own ~7 mA); measure in series with the mDot's 5 V lead to separate it ([POWER_ANALYSIS.md](POWER_ANALYSIS.md)).
+- **mDot:** fed with 5 V into its pin 1, so it stays powered while the Pi is off. Hand-wired units take it from the Witty Pi's P2 5 V input, with no diode (the planned board adds a Schottky). This is the standard for every unit (005 and 006 so far); the older wiring took the Witty Pi's always-on 3.3 V rail, which measures about 3.0 V, below the mDot's minimum (pcb-designs `Schematic_Remaining_Work.md` #20).
 - **Solar:** into the V75's 3.5 × 1.1 mm barrel jack.
-- **USB-C ports:** empty when deployed, because the end (PD) port disables Always On. The side USB-C port is fine for charging on the bench. A USB-C port is planned to carry battery status later.
+- **USB-C ports:** empty when deployed, because the end (PD) port disables Always On. The side USB-C port is fine for charging on the bench. The battery's charge signal is exposed only on the PD port, so reading it without turning Always On off is still being investigated.
 - **006:** power reaches the Witty Pi through wires soldered to its P2 header ([WITTYPI_P2_POWER_HARNESS.md](WITTYPI_P2_POWER_HARNESS.md)).
 
 
