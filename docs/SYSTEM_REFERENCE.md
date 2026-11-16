@@ -1,5 +1,7 @@
 # System reference
 
+> **Scope:** this note covers the node's command frames, acknowledgements, the wake schedule and the pose data. For the whole node (hardware, services, capture, segmentation, sending, shutdown, updates) read [OVERVIEW.md](OVERVIEW.md) first.
+
 Settings (runtime parameters, config files, flag files, environment, service flags) are listed in [CONFIGURATION.md](CONFIGURATION.md).
 
 ## Command frames

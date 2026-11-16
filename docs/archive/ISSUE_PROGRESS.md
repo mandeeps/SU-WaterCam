@@ -1,3 +1,5 @@
+> Archived 2026-11-14: historical snapshot, not maintained. Current work is tracked in GitHub issues.
+
 # Open Issue Progress
 
 Documents work already in the codebase against each open GitHub issue.

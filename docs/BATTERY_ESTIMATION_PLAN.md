@@ -12,6 +12,11 @@
 > power from the USB-A ports (Always On), not through a USB-C cable. The current
 > plan reads the signal with the mDot's ADC: see `docs/POWER_ANALYSIS.md`,
 > "Battery state of charge".
+>
+> **Update 2026-11-15:** still being investigated. The signal is only on the PD
+> USB-C port, and plugging anything into that port turns Always On off, so how to
+> read it without that needs careful work first. `AT+CHGADC?` exists in mDot
+> firmware sw9.
 
 ---
 
@@ -217,7 +222,7 @@ _save_state(state) → None
 - [x] Add `battery_state.json` to `.gitignore`
 - [x] Fix GPS key lookup in `initial_health_check.py` (`gps_lat`/`gps_lon`)
 - [ ] Deploy hardware and collect empirical D+ readings to tune `CELL_V_MIN`/`CELL_V_MAX`
-- [ ] Update `docs/KNOWN_ISSUES.md`
+- [ ] Update `docs/archive/KNOWN_ISSUES.md`
 
 ---
 

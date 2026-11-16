@@ -1,8 +1,7 @@
 # IP Transmission — WaterCam over WiFi/Cellular
 
 **Status:** Complete — standalone client and TickTalkPython integration both implemented.  
-**Branch:** `CellTransmit`  
-**Last updated:** 2026-04-14
+**Written:** April 2026 on the `CellTransmit` branch, now in `main`; later sections and the `battery_pct` row updated through 2026-11-14.
 
 ---
 
@@ -76,7 +75,7 @@ Add or edit the `ip_upload` block:
 | `retry_attempts` | int | Max POST attempts before giving up (backoff between attempts). |
 | `retry_backoff_s` | float | Base sleep between retries. Before attempt N, waits `retry_backoff_s * 2^(N-1)` seconds (exponential backoff). |
 | `fallback_to_lora` | bool | Intent flag for the TickTalkPython integration layer: if IP fails, fall back to LoRa. Not enforced by `transmit_ip.py` itself. |
-| `only_if_lora_unavailable` | bool | Default `true`: skip the IP uplink while the mDot is joined (LoRa first). `false` sends over both. |
+| `only_if_lora_unavailable` | bool | Default `true`: skip the IP uplink only when a LoRa link check this boot found the link healthy (`tools/lora_health.py`, margin at least 5 dB); being joined isn't enough. A unit with a weak link therefore sends over IP every wake. `false` sends over both. |
 | `cellular_connection` | str | Default `"Quectel"`: the LTE modem's NetworkManager connection, brought up only when the server can't be reached over WiFi. Managed only if its autoconnect is off. `""` leaves the modem alone. See [Transport order](#transport-order-lora-wifi-cellular). |
 | `cellular_connect_timeout_s` | int | How long `nmcli` may take to bring the connection up (default 90; re-attaching took 3–51 s on 006). |
 | `wifi_grace_s` | int | Default 45. When the server isn't reachable but a saved WiFi network is in range (in NetworkManager's last scan) or WiFi is connected, wait up to this long for the server over WiFi before bringing up cellular. A weak signal can take a minute to authenticate at boot. Skipped when no saved network is in range, so a cellular-only unit loses no time. `0` disables it. |
@@ -209,7 +208,7 @@ than hex.
 |---|---|---|---|
 | `00 01` | `device_ts` | 8 | uint64 — UNIX seconds |
 | `01 04` | `emergency_status` | 4 | uint32 bool (0 or 1); in every upload |
-| `02 01` | `battery_pct` | 4 | uint32 (0–100) |
+| `02 01` | `battery_pct` | 4 | uint32 (0–100). **Sent only when the node has a real state-of-charge reading** (an ADS1115 on the pack's charge pin, or an INA260; `tools/battery_manager.py`); otherwise the field is left out. The Witty Pi's own reading is the regulated 5 V output and does not reflect charge, so it is not used for this field (`docs/BATTERY_ESTIMATION_PLAN.md`). No deployed unit has such a sensor yet, so in practice units don't send it. |
 | `03 01` | `imu_block` | 12 | 3× int32 accel (mg), or custom IMU packing |
 | `01 06` | `move_threshold` | 4 | uint32 bool: 1 while the unit is away from its mount position (`tools/gps_home.py`) |
 | `04 01` | `gps_block` | 8 | int32 lat\_microdeg, int32 lon\_microdeg |

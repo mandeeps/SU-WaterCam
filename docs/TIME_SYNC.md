@@ -1,7 +1,9 @@
 # Time on the units
 
 Units don't run NTP (`systemd-timesyncd` is disabled, chrony and ntp aren't
-installed). The clock comes from these sources, each later one only when it can
+installed). This is deliberate: the Witty Pi documentation says NTP interferes with
+the Witty Pi's own timekeeping, and the Witty Pi software turns NTP off itself
+(`timedatectl set-ntp 0` when it copies the RTC to the system clock). The clock comes from these sources, each later one only when it can
 do better:
 
 | When | Source | Resolution | Code |

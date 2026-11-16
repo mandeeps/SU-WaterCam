@@ -35,7 +35,7 @@ Constraints:
 | LoRa commands | `tools/lora_runtime_integration.py` | Parsed only while the Pi is awake |
 | Wake from sleep | mDot-AT-firmware `CmdClassCPacketProcessor` | The mDot is Class C on the Witty Pi's always-on rail. Only the exact one-byte `!` (0x21) wakes the Pi, by pulsing the Witty Pi switch; that packet is not passed on to the Pi |
 | Staying awake | `ticktalk_main.py` `call_shutdown()`, Witty Pi schedule | Two separate limits: `call_shutdown()` requests shutdown after `shutdown_iteration_limit` captures, and the Witty Pi schedule's ON window (10-15 min) ends the wake regardless. Emergency mode bypasses the first and clears the Witty Pi shutdown time (`tools/wittypi_control.py`); `tools/witty_pi_4.py` can clear a shutdown time but not set one |
-| Battery level | none | Units have no state-of-charge sensor. The Witty Pi's 5 V reading is regulated and says nothing about charge, so `battery_pct` is no longer reported (#122). A real reading is planned (`docs/POWER_ANALYSIS.md`, *Battery state of charge*) |
+| Battery level | none | Units have no state-of-charge sensor. The Witty Pi's 5 V reading is regulated and says nothing about charge, so it is not used for `battery_pct`, which the node now sends only when a real state-of-charge sensor is fitted (`tools/battery_manager.py`; none is, so it is left out, #122; see `docs/BATTERY_ESTIMATION_PLAN.md`). A real reading is planned (`docs/POWER_ANALYSIS.md`, *Battery state of charge*) |
 | Network control | NetworkManager via `nmcli` | User `pi` has NetworkManager network-control for all interfaces. This is intentional and this design does not narrow it |
 
 Two consequences shape the design:

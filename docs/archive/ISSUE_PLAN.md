@@ -1,3 +1,5 @@
+> Archived 2026-11-14: historical snapshot, not maintained. Current work is tracked in GitHub issues.
+
 # Issue Implementation Plan
 
 Detailed implementation plan for all open GitHub issues, organised by tier.

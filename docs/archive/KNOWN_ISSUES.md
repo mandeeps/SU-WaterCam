@@ -1,3 +1,5 @@
+> Archived 2026-11-14: historical snapshot, not maintained. Current work is tracked in GitHub issues.
+
 # Known Issues & Improvement Backlog
 
 Findings from a codebase audit conducted 2026-04-19. Issues are grouped by severity.

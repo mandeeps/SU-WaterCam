@@ -3,6 +3,12 @@
 Escapes the mDot auto-join loop and disables AUTO_OTA mode.
 Switches NJM from 2 (Auto OTA) to 1 (OTA) so the mDot waits for an
 explicit AT+JOIN rather than joining automatically on every boot.
+
+For the bench. Deployed units run AUTO_OTA (NJM 2) so the mDot rejoins on its own
+after one of its restarts while the Pi is off; a unit left on NJM 1 can't be
+remote-started until something sends AT+JOIN. Put it back before deploying:
+AT+NJM=2, AT&W. Stop lora_daemon first (it owns the port):
+    sudo systemctl stop lora_daemon; python3 tools/mdot_reset.py; ...
 """
 
 import argparse
@@ -107,6 +113,8 @@ def main():
         print("  AT+JOIN              - join manually (OTAA)")
         print("  AT+NJM=0             - switch to ABP/manual mode")
         print("  AT+NJM?              - verify join mode")
+        print("Before deploying: AT+NJM=2 then AT&W (deployed units must rejoin on their own),")
+        print("then start lora_daemon again.")
 
 
 if __name__ == '__main__':

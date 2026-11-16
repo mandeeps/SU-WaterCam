@@ -1,6 +1,6 @@
 # Field Deployment Guide: Configuring and Installing an Assembled WaterCam Unit
 
-**Audience:** Written assuming you have an assembled unit and flashed the SD card image (https://drive.google.com/file/d/1dCcisGiLYk8vYh0eK_8w945sLaqX_JKo/view?usp=sharing) but need to set up remote access, the WittyPi schdedule, and the auto-start functionality. 
+**Audience:** Written assuming you have an assembled unit and flashed the SD card image (published as release assets of the team's private `sd-images` repository, as described in `README.md`) but need to set up remote access, the WittyPi schdedule, and the auto-start functionality. 
 
 **Scope:** This guide starts where the hardware build guide (`README.md`) ends, it assumes you have a fully assembled unit (all components installed, case ready to be sealed).
 
@@ -295,8 +295,8 @@ sudo apt install i2c-tools gpsd opendoas nftables uhubctl tio
 (`i2c-tools` for the Witty Pi and the recovery/next-wake services, `gpsd` for
 GNSS, `opendoas` for the shutdown/USB/clock rules in 1.9, `nftables` for the
 cellular filter in 1.5.1, `uhubctl` for USB power in 1.9, `tio` for the mDot.)
-`lrzsz` isn't needed: `mDot-AT-firmware/tools/mdot_serial_flash.py` has its own
-YMODEM sender.
+`lrzsz` isn't needed: `tools/mdot_serial_flash.py` in the mDot-AT-firmware repository
+(private, team access) has its own YMODEM sender.
 
 **Cellular modem GNSS** (units with the Quectel EC25):
 
@@ -584,11 +584,11 @@ cellular unless you accept that. To undo it:
 
 This can be tricky. 
 
-If the mDot has already been flashed with our custom firmware (https://github.com/WaterCam-Team/mDot-AT-firmware) then you can proceed to connecting to a gateway after the mDot ID is registered with ChirpStack. If the firmware has not been flashed, follow the instructions in the firmware GitHub. If it has programming headers installed the easy way is to use the USB development board (https://multitech.com/product/multitech-mdot-micro-developer-kit-global/). If not, the same USB serial adapter used for the Raspberry Pi can be used to flash the firmware following the instructions in the repository.
+If the mDot has already been flashed with our custom firmware (the mDot-AT-firmware repository, https://github.com/WaterCam-Team/mDot-AT-firmware: private, team access) then you can proceed to connecting to a gateway after the mDot ID is registered with ChirpStack. If the firmware has not been flashed, follow the instructions in the firmware GitHub. If it has programming headers installed the easy way is to use the USB development board (https://multitech.com/product/multitech-mdot-micro-developer-kit-global/). If not, the same USB serial adapter used for the Raspberry Pi can be used to flash the firmware following the instructions in the repository.
 
-The mDot module's DevEUI must already be registered in ChirpStack before the unit can join the network. **This should be done ahead of time by the ChirpStack administrator**, confirm with them that this specific unit's DevEUI is registered and assigned to the correct application/device profile. The DevEUI is unique per mDot module (see `tools/AT_COMMANDS_REFERENCE.md` for querying the module over serial if you need to look it up).
+The mDot module's DevEUI must already be registered in ChirpStack before the unit can join the network. **This should be done ahead of time by the ChirpStack administrator**, confirm with them that this specific unit's DevEUI is registered and assigned to the correct application/device profile. The DevEUI is unique per mDot module (read it from the module over serial with `AT+DI?`, the query `tools/mdot_subband.py` uses, if you need to look it up).
 
-Once it's confirmed that the device is running our firmware and it is set up in ChirpStack, you can connect to the gateway following the instructions in https://docs.google.com/document/d/1Z83h89x7jlwzRIvbZtyiRxBoMupdoHzL/edit?usp=drive_link&ouid=115248649914453432688&rtpof=true&sd=true
+Once it's confirmed that the device is running our firmware and it is set up in ChirpStack, set the mDot's settings and join as described in the mDot-AT-firmware repository (private, team access), `docs/BUILD_AND_FLASH.md` sections 5 (the settings our units need: sub-band 1, no sub-band search, join mode AUTO_OTA, keys matching ChirpStack) and 5b (registering an mDot with ChirpStack, first join on OTA, then AUTO_OTA).
 
 **Set the gateway's sub-band before the first join.** A new mDot uses US915
 sub-band 0 (all 64 channels) and our gateway listens on sub-band 1, so only about
@@ -612,8 +612,8 @@ It stops and restarts `lora_daemon` around it. A gateway on another sub-band:
 the mDot by itself if its firmware stops, or if the Pi is on but the LoRa daemon's
 keep-alive (`AT+ALIVE`, every 5 minutes) stops for an hour. Put the unit on
 release v2026.10.4 or later (1.3.1) **before** flashing it, or the silence
-restart never arms. Flash with `tools/mdot_serial_flash.py` from the firmware
-repository (its `docs/BUILD_AND_FLASH.md`): it reads the sub-band, Pi watchdog,
+restart never arms. Flash with `tools/mdot_serial_flash.py` from the
+mDot-AT-firmware repository (private, team access; its `docs/BUILD_AND_FLASH.md`): it reads the sub-band, Pi watchdog,
 silence limit and join nonce before the flash and puts back any the flash
 changed. After any flash, with `lora_daemon` stopped, check by hand:
 
@@ -733,7 +733,7 @@ Clear any flood baseline from a previous site the same way
 
 ### 1.8 Confirm camera calibration exists
 
-Calibration for our set of hardware is done and the file should transfer from unit to unit as long as hardware does not change. I forgot to copy it to the SD card image, so download from (https://drive.google.com/file/d/1Lpb0LEcR_ePSkGa5xrXXbkxigSQw4oQi/view?usp=drive_link) and copy it to `config/camera_calibration.json` in the SU-WaterCam directory using scp or an SD card reader.
+A generic calibration for our camera ships in the repository as `config/camera_calibration.json` (2592×1944) and transfers from unit to unit while the hardware stays the same. A unit's own calibration is better for georeferencing: make it with `tools/calibrate_node.py` on the node.
 
 ```bash
 ls config/camera_calibration.json
@@ -789,8 +789,9 @@ WatchdogUSec -p WatchdogTimestamp` shows the setting and the last heartbeat; a
 restart shows as `Watchdog timeout` in `journalctl -u ticktalk`. Copy the unit
 again on units installed before it (as above).
 
-**Hard maximum awake time.** A wake is normally 10-15 minutes and `ticktalk`
-powers the Pi off at the end of it. `max-awake.timer` is the backstop for when
+**Hard maximum awake time.** A wake normally lasts 1–3 minutes (see `OVERVIEW.md`
+section 8) and `ticktalk` powers the Pi off at the end of it. The Witty Pi
+schedule's ON window (10–15 minutes) is only a maximum. `max-awake.timer` is the backstop for when
 that doesn't happen (a hung capture, a restart loop): every 5 minutes it checks
 the uptime and, past `max_awake_minutes` (`runtime_config.json`, default 60,
 `0` turns it off), runs the same `doas /usr/sbin/shutdown -h now` that
@@ -1285,10 +1286,15 @@ frame from this camera, so take it exactly as below.
    sudo systemctl stop ticktalk.service
    ```
 
-2. Take a full-resolution frame, the size the capture workflow uses:
+2. Take a full-resolution frame, the size the capture workflow uses, with the
+   IR-cut filter in (GPIO 21 low) so it is a normal colour photo. Left alone the
+   pin is pulled high and the filter is out, which tints the photo with
+   near-infrared. `tools/field_setup.py` does all of this for you.
 
    ```bash
+   pinctrl set 21 op dl && sleep 0.5
    rpicam-still --nopreview --width 2592 --height 1944 -o ~/reference.jpg
+   pinctrl set 21 ip
    ```
 
    Keep the 4:3 shape. A smaller 4:3 size also works (the dashboard scales the

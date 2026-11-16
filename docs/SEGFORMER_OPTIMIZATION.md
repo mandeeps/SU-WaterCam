@@ -4,11 +4,18 @@
 
 ### Inference Pipeline
 
-**As of 2026-09-26** `ticktalk_main.segformer()` sends the request to the resident daemon over
-`/run/segformer/segformer.sock` and only falls back to a subprocess if the socket is absent. Both
-paths are fed `color_preserved_5_band.tiff` and both write
-`color_preserved_5_band_segmentation.png`. Measured on node ufo-01-01-005: **2.2 s** via the
-daemon, **39.8 s** via the fallback.
+**Current:** `ticktalk_main.segformer()` sends the request to the resident ONNX daemon
+(`tools/segformer_daemon.py`, run by `segformer_daemon.service`) over
+`/run/segformer/segformer.sock`. It feeds the daemon `color_preserved_5_band.tiff` and the daemon
+writes `color_preserved_5_band_segmentation.png`. There is no subprocess fallback any more: if the
+daemon is down, the capture has no mask (`docs/CAPTURE_PIPELINE_NOTES.md`). Measured on node
+ufo-01-01-005 on 2026-09-26, when both paths still existed: **2.2 s** via the daemon, **39.8 s**
+via the subprocess.
+
+> **`segment_tiff_5band.py` is gone.** The sections below were written against that conda
+> script (`/home/pi/segformer_5band/segment_tiff_5band.py`, run in the `5band` conda env). It is
+> not in the `segformer_5band` repository or in this one, and the ONNX daemon replaced it. They
+> are kept as the record of why the daemon exists.
 
 The original design, which the strategies below were written against, invoked a fresh subprocess
 every wake cycle:
@@ -26,8 +33,9 @@ subprocess.Popen(
 Each call was synchronous (`.wait()`), so the entire WaterCam pipeline stalled for the duration of
 inference — which is what the daemon removed.
 
-The mask name is not a free choice: `segment_tiff_5band.py` takes no output argument and writes
-`<input stem>_segmentation.png`, so it follows from the TIFF name.
+The mask name is not a free choice: the old `segment_tiff_5band.py` took no output argument and
+wrote `<input stem>_segmentation.png`, so it followed from the TIFF name. The daemon path keeps
+that name because everything downstream reads it.
 
 ### Input Assembly
 
@@ -634,8 +642,10 @@ The daemon's output was verified against the subprocess ONNX path at source reso
 
 ## Notes on the Segformer Repo
 
-The inference script (`/home/pi/segformer_5band/segment_tiff_5band.py`) and
-model checkpoint are not version-controlled in this repository. Before
+*Historical.* The old inference script (`segment_tiff_5band.py`) is no longer used: the node
+runs `tools/segformer_daemon.py` on an ONNX export (`tools/export_segformer_onnx.py`). The
+checkpoint and model code live in the separate `segformer_5band` repository, not in this one.
+When this note was written none of it was version-controlled. Before
 beginning any optimization work:
 
 - Commit the inference script and model config to a branch (or submodule)
