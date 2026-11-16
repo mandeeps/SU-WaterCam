@@ -71,7 +71,7 @@ Described in IP_TRANSMISSION "Configuration", except where noted.
 | `retry_attempts` | 3 | |
 | `retry_backoff_s` | 2.0 | |
 | `fallback_to_lora` | true | IP_TRANSMISSION says it isn't enforced by `transmit_ip.py`, but `ticktalk_main` reads it. **Review** the wording. |
-| `only_if_lora_unavailable` | true | |
+| `only_if_lora_unavailable` | true | Skip IP only while a LoRa link check this boot shows a healthy link (`tools/lora_health.py`) |
 | `cellular_connection` | "Quectel" | |
 | `cellular_connect_timeout_s` | 90 | |
 | `wifi_grace_s` | 45 | |

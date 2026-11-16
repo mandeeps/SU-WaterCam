@@ -75,7 +75,7 @@ Add or edit the `ip_upload` block:
 | `retry_attempts` | int | Max POST attempts before giving up (backoff between attempts). |
 | `retry_backoff_s` | float | Base sleep between retries. Before attempt N, waits `retry_backoff_s * 2^(N-1)` seconds (exponential backoff). |
 | `fallback_to_lora` | bool | Intent flag for the TickTalkPython integration layer: if IP fails, fall back to LoRa. Not enforced by `transmit_ip.py` itself. |
-| `only_if_lora_unavailable` | bool | Default `true`: skip the IP uplink while the mDot is joined (LoRa first). `false` sends over both. |
+| `only_if_lora_unavailable` | bool | Default `true`: skip the IP uplink only when a LoRa link check this boot found the link healthy (`tools/lora_health.py`, margin at least 5 dB); being joined isn't enough. A unit with a weak link therefore sends over IP every wake. `false` sends over both. |
 | `cellular_connection` | str | Default `"Quectel"`: the LTE modem's NetworkManager connection, brought up only when the server can't be reached over WiFi. Managed only if its autoconnect is off. `""` leaves the modem alone. See [Transport order](#transport-order-lora-wifi-cellular). |
 | `cellular_connect_timeout_s` | int | How long `nmcli` may take to bring the connection up (default 90; re-attaching took 3–51 s on 006). |
 | `wifi_grace_s` | int | Default 45. When the server isn't reachable but a saved WiFi network is in range (in NetworkManager's last scan) or WiFi is connected, wait up to this long for the server over WiFi before bringing up cellular. A weak signal can take a minute to authenticate at boot. Skipped when no saved network is in range, so a cellular-only unit loses no time. `0` disables it. |

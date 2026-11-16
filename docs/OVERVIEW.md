@@ -243,8 +243,10 @@ go out later. At the lowest data rate no bitmap fits, so bitmaps wait in the que
 **How the transport is chosen.** The order is LoRa, then WiFi, then cellular.
 
 - IP is off unless `ip_upload.enabled` is true in `runtime_config.json`.
-- With `ip_upload.only_if_lora_unavailable` (default true), IP is skipped while
-  the mDot is joined.
+- With `ip_upload.only_if_lora_unavailable` (default true), IP is skipped only
+  when a LoRa link check this boot found the link healthy (`tools/lora_health.py`,
+  margin at least 5 dB); being joined isn't enough, so a unit with a weak link
+  sends over IP every wake.
 - When the server cannot be reached otherwise, the node brings up the cellular
   connection named in `ip_upload.cellular_connection`, and takes it down again
   after the upload and the command poll. It does not use cellular when WiFi is
