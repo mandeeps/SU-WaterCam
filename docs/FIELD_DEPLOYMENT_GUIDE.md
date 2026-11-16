@@ -789,8 +789,9 @@ WatchdogUSec -p WatchdogTimestamp` shows the setting and the last heartbeat; a
 restart shows as `Watchdog timeout` in `journalctl -u ticktalk`. Copy the unit
 again on units installed before it (as above).
 
-**Hard maximum awake time.** A wake is normally 10-15 minutes and `ticktalk`
-powers the Pi off at the end of it. `max-awake.timer` is the backstop for when
+**Hard maximum awake time.** A wake normally lasts 1–3 minutes (see `OVERVIEW.md`
+section 8) and `ticktalk` powers the Pi off at the end of it. The Witty Pi
+schedule's ON window (10–15 minutes) is only a maximum. `max-awake.timer` is the backstop for when
 that doesn't happen (a hung capture, a restart loop): every 5 minutes it checks
 the uptime and, past `max_awake_minutes` (`runtime_config.json`, default 60,
 `0` turns it off), runs the same `doas /usr/sbin/shutdown -h now` that

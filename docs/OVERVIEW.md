@@ -201,13 +201,21 @@ and dedup are in [SYSTEM_REFERENCE.md](SYSTEM_REFERENCE.md). Cellular data use:
 
 ## 8. Shutdown and the awake limit
 
+**How long a wake lasts.** 006, 25 Oct to 13 Nov 2026 (200 wakes, 2 passes; from its
+once-a-minute power log, so each figure can be up to a minute short): typically 1–2
+minutes from power-on to halt, 90% under about 3 minutes, the longest about 4–5
+minutes (GPS windows, commands). None ran into the Witty Pi's ON window. With the
+default 3 passes, expect about a minute more. The Witty Pi's ON window and
+`max_awake_minutes` are backstops, not the usual length.
+
 `call_shutdown` runs once per pass.
 
 1. It sends the systemd watchdog heartbeat and adds one to the pass count for
    this boot.
 2. Normal mode: when the count reaches `shutdown_iteration_limit` (default 3)
    and auto shutdown is on, it goes on. Otherwise the graph runs another pass,
-   60 s later.
+   60 s later. 006 runs 2 passes (`shutdown_iteration_limit` 2 in its
+   `runtime_config.json`).
 3. Before powering off, `tools/last_downlink_check.py` picks up any command sent
    during the wake. A command can say to stay up (emergency mode on, a remote
    session).
