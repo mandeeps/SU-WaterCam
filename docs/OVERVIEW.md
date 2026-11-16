@@ -213,8 +213,11 @@ The daemon also knows an RGB-only model (`--rgb-model`, default
    capture has no mask, and the reason is written to `capture_status.json`.
 
 Each uplink says which model made the mask (`model_id`, `model_bands`;
-[RELEASES.md](RELEASES.md#on-the-wire)). Which unit runs which model is not
-recorded in this repository. Model training and export are in the
+[RELEASES.md](RELEASES.md#on-the-wire)). The server keeps each unit's latest
+`model_id` (the first 8 hex digits of the model file's SHA-256) and `model_bands`
+(`GET /readings/last-seen`), and the dashboard marks a unit whose mask came from the
+3-band model, so which unit runs which model is read from there, not kept in a
+table here. Model training and export are in the
 `segformer_5band` repository; the speed measurements are in
 [SEGFORMER_OPTIMIZATION.md](SEGFORMER_OPTIMIZATION.md).
 
