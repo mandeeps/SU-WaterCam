@@ -160,6 +160,22 @@ def distort_normalized(x, y, D):
     return xd, yd
 
 
+def monotonic_radius(D, r_max: float = 10.0) -> float:
+    """
+    Largest undistorted normalized radius up to which the radial model is
+    monotonic, i.e. r_d = r * (1 + k1 r^2 + k2 r^4 + k3 r^6) still grows with r
+    (inf if it does up to r_max). Beyond it the polynomial turns back, so a
+    point far outside the field of view would project to a pixel inside the
+    frame; such points must be treated as unseen.
+    """
+    k1, k2, _p1, _p2, k3 = _dist_coeffs(D)
+    r = np.linspace(0.0, r_max, 20001)
+    r2 = r * r
+    slope = 1.0 + 3 * k1 * r2 + 5 * k2 * r2 * r2 + 7 * k3 * r2 * r2 * r2   # d r_d / d r
+    bad = np.flatnonzero(slope <= 0.0)
+    return float(r[bad[0]]) if bad.size else float("inf")
+
+
 def undistorted_camera_matrix(K: np.ndarray, D, image_w: int, image_h: int,
                               alpha: float = 1.0) -> np.ndarray:
     """
@@ -214,7 +230,9 @@ def pixel_ray(K: np.ndarray, u: float, v: float, D=None) -> np.ndarray:
 def project_to_pixels(points_cam: np.ndarray, K: np.ndarray, D=None):
     """
     Project camera-frame points (..., 3) to pixels (u, v), with distortion
-    when D is given. Points at or behind the camera give NaN.
+    when D is given. Points at or behind the camera give NaN, and so, with D,
+    do points beyond the lens model's monotonic radius (monotonic_radius):
+    there the polynomial folds back and would put them inside the frame.
     """
     K = np.asarray(K, dtype=np.float64)
     z = points_cam[..., 2]
@@ -222,6 +240,12 @@ def project_to_pixels(points_cam: np.ndarray, K: np.ndarray, D=None):
         x = np.where(z > 1e-9, points_cam[..., 0] / z, np.nan)
         y = np.where(z > 1e-9, points_cam[..., 1] / z, np.nan)
     if D is not None:
+        r_ok = monotonic_radius(D)
+        if np.isfinite(r_ok):
+            with np.errstate(invalid="ignore"):
+                far = (x * x + y * y) >= r_ok * r_ok
+            x = np.where(far, np.nan, x)
+            y = np.where(far, np.nan, y)
         x, y = distort_normalized(x, y, D)
     return K[0, 0] * x + K[0, 2], K[1, 1] * y + K[1, 2]
 
