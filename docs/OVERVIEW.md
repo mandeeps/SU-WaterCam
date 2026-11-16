@@ -14,13 +14,25 @@ itself down.
 |---|---|---|
 | Raspberry Pi 4B | runs everything below | |
 | Witty Pi 4 | RTC, wake schedule, cuts power to the Pi while it sleeps | `tools/witty_pi_4.py`, `tools/wittypi_control.py` |
-| Pi camera with a motorised IR-cut (NIR) filter | two frames per capture, filter in and out | `tt_take_photos.py`, [NIR_FILTER.md](NIR_FILTER.md) |
+| Camera with a motorised IR-cut (NIR) filter (a generic third-party CSI camera, not an official Raspberry Pi camera) | two frames per capture, filter in and out | `tt_take_photos.py`, [NIR_FILTER.md](NIR_FILTER.md) |
 | FLIR Lepton 3.5 thermal camera | thermal band | `tt_take_photos.flir`, `lepton/` |
-| BNO055 IMU (a BNO08x driver also exists), AHT20 temperature and humidity | pose, temperature, humidity | `tools/bno055_imu.py`, `tools/aht20_temperature.py` |
+| BNO055 IMU, AHT20 temperature and humidity (no unit uses a BNO085; it is being evaluated: same sensor, different firmware that reports some values more directly, and a driver exists) | pose, temperature, humidity | `tools/bno055_imu.py`, `tools/aht20_temperature.py` |
 | Quectel modem with GNSS | cellular uplink and GPS, normally powered off | `tools/usb_power.py`, `tools/get_gps.py`, `tools/gps_window.py` |
-| MultiTech mDot (LoRaWAN, firmware in the separate mDot-AT-firmware repository, private) | LoRa uplink, remote start, emergency command | `tools/lora_daemon.py` |
-| USB microphone (optional) | audio segments | `tools/audio_recorder.py` |
-| Voltaic battery pack with solar panel | power | [POWER_ANALYSIS.md](POWER_ANALYSIS.md) |
+| MultiTech mDot (LoRaWAN, firmware in the separate mDot-AT-firmware repository, private) | LoRa uplink, remote start, emergency command; stays powered while the Pi is off (see [Battery wiring](#battery-wiring)) | `tools/lora_daemon.py` |
+| USB microphone (not in the standard parts list; being evaluated for acoustic environmental monitoring) | audio segments | `tools/audio_recorder.py` |
+| Voltaic V75 battery pack with solar panel | power | [POWER_ANALYSIS.md](POWER_ANALYSIS.md), [Battery wiring](#battery-wiring) |
+
+Two cameras in total: the visible camera (with the switchable IR filter) and the Lepton.
+
+### Battery wiring
+
+- **Witty Pi feed:** a Y-cable joins the battery's two USB-A ports (3 A combined) into the Witty Pi's input. It powers only the Witty Pi (and through it the Pi). Plugging a USB-A cable into the V75 engages its Always On mode; unplugging returns it to Auto Off.
+- **Modem:** runs from the Pi's USB, so it draws nothing while the Pi is off. A USB meter on the Witty Pi feed therefore sees the whole unit's off-state draw.
+- **mDot:** fed from the battery's 5 V into its pin 1, so it stays powered while the Pi is off. This is the standard for every unit (005 and 006 so far); the older wiring took the Witty Pi's always-on 3.3 V rail, which measures about 3.0 V, below the mDot's minimum (pcb-designs `Schematic_Remaining_Work.md` #20).
+- **Solar:** into the V75's 3.5 × 1.1 mm barrel jack.
+- **USB-C ports:** empty when deployed, because the end (PD) port disables Always On. The side USB-C port is fine for charging on the bench. A USB-C port is planned to carry battery status later.
+- **006:** power reaches the Witty Pi through wires soldered to its P2 header ([WITTYPI_P2_POWER_HARNESS.md](WITTYPI_P2_POWER_HARNESS.md)).
+
 
 No deployed unit has a custom circuit board: every unit is hand-wired. The HAT
 in the `pcb-designs` repository is the planned board, not the one in the field.
