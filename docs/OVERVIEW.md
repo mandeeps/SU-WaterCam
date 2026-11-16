@@ -145,8 +145,10 @@ move) is marked in `capture_status.json` (`tools/capture_status.py`,
   filter. The setup photos are taken at the same size: the reference photo in
   `tools/field_setup_steps.py` and the deployment guide's manual step both use
   2592×1944, and the camera calibration (`tools/calibrate_node.py`) is made at it
-  too. A photo at another size (`rpicam-still` with no size, as in
-  `tools/fast_photo.sh`) would not match the calibration.
+  too, and the setup step warns if the photo comes out at any other size. The
+  small `rpicam-still` scripts (`tools/fast_photo.sh`, `tools/take_two_photos.sh`)
+  ask for 2592×1944 as well; a photo at another size would not match the
+  calibration.
 - **Working sizes.** Co-registration undistorts the visible frames with the
   unit's calibration and halves anything over 1000 px, so it works at 1296×972.
   `color_preserved_5_band.tiff` (red, green, blue, thermal, NIR) stays at
@@ -178,7 +180,16 @@ move) is marked in `capture_status.json` (`tools/capture_status.py`,
   `python -m tools.registration_orientation --reset`, or re-seed.
 - **NIR band.** `extract_nir_band` takes the red channel of the undistorted
   `NIR-ON` frame minus the red channel of the `NIR-OFF` frame (8-bit, negative
-  values clipped to 0) and resizes it to the working size.
+  values clipped to 0) and resizes it to the working size. Why the red channel:
+  with the filter out, near-infrared reaches the sensor and shows up in the red
+  channel (`tt_take_photos.py`: GPIO high "includes NIR in the red band"), so the
+  filter-out red minus the filter-in red leaves the near-infrared part. The code
+  doesn't use green or blue for this. Known weaknesses: the clip to 0 discards
+  pixels where the filter-in frame is brighter, and the two frames are separate
+  exposures (exposure and white balance are now locked between them). An
+  alternative, sending the filter-out red channel unchanged so the model forms a
+  signed difference itself, was written (SU-WaterCam #91) and reverted (#147)
+  until the next model checkpoint, because it changes what the model sees.
 
 ## 6. Which model runs
 
