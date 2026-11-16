@@ -134,6 +134,8 @@ FULL_SENSOR_DATA = {
     'status_area_threshold': 10, 'stage_threshold': 50, 'monitoring_frequency': 60,
     'emergency_frequency': 30, 'neighborhood_emergency_frequency': 30,
     'audio_recording_enabled': 1,
+    'pose_level': 1, 'pose_tilt_tenths': 18,
+    'camera_rotation_hundredths': 1234, 'camera_move_inliers': 255, 'camera_move_basis': 1,
 }
 
 
@@ -160,13 +162,15 @@ def test_codec_decodes_every_sensor_channel():
     assert out["camera_flood_detected"] == 1
     assert out["nir_filter_status"] == 1
     assert out["model_bands"] == 3
+    assert out["pose_level"] == 1 and out["pose_tilt_change_deg"] == 1.8
+    assert (out["camera_rotation_deg"], out["camera_move_inliers"], out["camera_move_basis"]) == (12.34, 255, 1)
     assert out["timestamp"] == 1792108958 and out["status_area_threshold"] == 10
     # Compact forms (03 02, 05 02): same field names and units as before
     assert out["tilt_roll_yaw"] == [0.0, 7.12, 85.06]
     assert out["temperature_celsius"] == 22.2
     # The Witty Pi temperature and output voltage aren't sent over LoRa
     assert "wittypi_temperature" not in out and "wittypi_internal_voltage" not in out
-    assert len(pkt) == 97   # 104 with the float32 and Witty Pi fields (before 01 11, 07 47 and 01 10)
+    assert len(pkt) == 110  # 97 before 01 0E / 01 0F (3 + 4 bytes) and 01 12 (6) were added here
 
 
 def test_compact_fields_layout_and_limits():

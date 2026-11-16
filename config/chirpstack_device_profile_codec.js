@@ -14,6 +14,10 @@
  * Category 01 Type 08: Registration orientation check (u8: 0 ok, 1 shifted, 2 adopted, 3 no_cache, 4 no_imu)
  * Category 01 Type 09: Software release (u32: year-2000, month, patch, flags; tools/node_version.py)
  * Category 01 Type 0B: Loaded segmentation model (u32: first 8 hex digits of its SHA-256)
+ * Category 01 Type 0E: Pose level (u8: 0 ok, 1 re-check georeferencing, 2 knocked, 3 removed, 255 no reference)
+ * Category 01 Type 0F: Tilt from the pose reference (u16, 0.1 deg)
+ * Category 01 Type 12: Camera rotation from the photos, once a day (u16 0.01 deg, u8 matches,
+ *   u8 basis: 0 reference photo, 1 running total, 2 new reference; tools/camera_move.py)
  * Category 02 Type 01: Battery percent
  * Category 03 Type 01: Tilt/roll/yaw (3x float32; older nodes)
  * Category 03 Type 02: Tilt/roll/yaw in 0.01 deg (u16 heading 0-360, i16 roll, i16 pitch)
@@ -103,6 +107,22 @@ function decodeUplink(input) {
       case '1-11':
         // Cellular KiB used since install (sent on the first wake of each day)
         result.cellular_kib_total = view.getUint32(offset, false);
+        offset += 4;
+        break;
+      case '1-e':
+        // Pose level from the IMU (tools/pose_monitor.py)
+        result.pose_level = view.getUint8(offset++);
+        break;
+      case '1-f':
+        // Tilt from the pose reference, 0.1 deg
+        result.pose_tilt_change_deg = view.getUint16(offset, false) / 10;
+        offset += 2;
+        break;
+      case '1-12':
+        // Camera rotation since the reference photo (tools/camera_move.py)
+        result.camera_rotation_deg = view.getUint16(offset, false) / 100;
+        result.camera_move_inliers = view.getUint8(offset + 2);
+        result.camera_move_basis = view.getUint8(offset + 3);
         offset += 4;
         break;
       case '1-c':
