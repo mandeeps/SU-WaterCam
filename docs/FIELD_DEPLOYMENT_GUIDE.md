@@ -588,7 +588,7 @@ If the mDot has already been flashed with our custom firmware (the mDot-AT-firmw
 
 The mDot module's DevEUI must already be registered in ChirpStack before the unit can join the network. **This should be done ahead of time by the ChirpStack administrator**, confirm with them that this specific unit's DevEUI is registered and assigned to the correct application/device profile. The DevEUI is unique per mDot module (read it from the module over serial with `AT+DI?`, the query `tools/mdot_subband.py` uses, if you need to look it up).
 
-Once it's confirmed that the device is running our firmware and it is set up in ChirpStack, you can connect to the gateway following the instructions in https://docs.google.com/document/d/1Z83h89x7jlwzRIvbZtyiRxBoMupdoHzL/edit?usp=drive_link&ouid=115248649914453432688&rtpof=true&sd=true
+Once it's confirmed that the device is running our firmware and it is set up in ChirpStack, set the mDot's settings and join as described in the mDot-AT-firmware repository (private, team access), `docs/BUILD_AND_FLASH.md` sections 5 (the settings our units need: sub-band 1, no sub-band search, join mode AUTO_OTA, keys matching ChirpStack) and 5b (registering an mDot with ChirpStack, first join on OTA, then AUTO_OTA).
 
 **Set the gateway's sub-band before the first join.** A new mDot uses US915
 sub-band 0 (all 64 channels) and our gateway listens on sub-band 1, so only about
