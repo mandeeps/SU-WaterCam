@@ -733,7 +733,7 @@ Clear any flood baseline from a previous site the same way
 
 ### 1.8 Confirm camera calibration exists
 
-Calibration for our set of hardware is done and the file should transfer from unit to unit as long as hardware does not change. I forgot to copy it to the SD card image, so download from (https://drive.google.com/file/d/1Lpb0LEcR_ePSkGa5xrXXbkxigSQw4oQi/view?usp=drive_link) and copy it to `config/camera_calibration.json` in the SU-WaterCam directory using scp or an SD card reader.
+A generic calibration for our camera ships in the repository as `config/camera_calibration.json` (2592×1944) and transfers from unit to unit while the hardware stays the same. A unit's own calibration is better for georeferencing: make it with `tools/calibrate_node.py` on the node.
 
 ```bash
 ls config/camera_calibration.json
