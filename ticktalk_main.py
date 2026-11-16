@@ -274,6 +274,14 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
     if nir_filter_status is not None:
         data['nir_filter_status'] = nir_filter_status
 
+    # Camera rotation since the reference photo, from the capture that ran the
+    # day's check only (tools/camera_move.py); field code 01 12.
+    try:
+        from tools.camera_move import fields_for_capture as camera_move_fields
+        data.update(camera_move_fields(dirname))
+    except Exception as e:
+        print(f"⚠️ Camera move fields unavailable: {e}")
+
     # Water % of this capture's mask, and the flood flags when detection is on
     # (tools/flood_baseline.py); absent when there is no mask.
     try:
@@ -370,6 +378,10 @@ def lora_token_with_tracker(bitmap, sensor_tracker, dirname):
                 # Describes the capture, not a change: sent whenever it is 1
                 sensors_to_transmit['clock_unverified'] = {
                     'current_value': data['clock_unverified'], 'reason': 'clock_unverified'}
+            # The day's camera check: present only on the capture that ran it, sent then
+            for k in ('camera_rotation_hundredths', 'camera_move_inliers', 'camera_move_basis'):
+                if data.get(k) is not None:
+                    sensors_to_transmit[k] = {'current_value': data[k], 'reason': 'camera_move_check'}
             print(f"📊 Sensor change check: {len(sensors_to_transmit)} sensors qualify for transmission")
         except Exception as e:
             print(f"⚠️ Failed to check sensor changes: {e}")
@@ -926,6 +938,16 @@ def coregistration(dirname, lepton_state, photo_state):
         print(describe(result))
     except Exception as e:
         print(f"⚠️ Registration orientation check failed: {e}")
+    # Has the camera turned since its reference photo? Once a day, from the photos
+    # (tools/camera_move.py); the IMU drifts, so it can't tell on its own.
+    try:
+        from tools import camera_move
+        move = camera_move.check(dirname)
+        if move is not None:
+            print(f"Camera rotation since the reference: {move['deg']:.2f}° "
+                  f"({camera_move._BASIS_NAME[move['basis']]}, {move['inliers']} matches, {move['seconds']} s)")
+    except Exception as e:
+        print(f"⚠️ Camera move check failed: {e}")
     return True
 
 @SQify
@@ -2015,6 +2037,11 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         data['registration_status'] = status_code_for_capture(dirname)
         from tools.nir_filter_check import status_code_for_capture as nir_filter_status_for
         data['nir_filter_status'] = nir_filter_status_for(dirname)
+        try:
+            from tools.camera_move import fields_for_capture as camera_move_fields
+            data.update(camera_move_fields(dirname))     # 01 12, the day's camera check only
+        except Exception as e:
+            print(f"⚠️ IP uplink: camera move fields unavailable: {e}")
         from tools.node_version import uplink_fields
         data.update(uplink_fields(dirname))
         from tools.cellular_usage import daily_report_kib
@@ -2102,6 +2129,13 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             _add("01 0E", lambda: {"payload_hex": struct.pack(">I", _u32(data['pose_level'])).hex()})
         if data.get('pose_tilt_tenths') is not None:
             _add("01 0F", lambda: {"payload_hex": struct.pack(">I", _u32(data['pose_tilt_tenths'])).hex()})
+        # 01 12 — camera rotation since the reference photo: u16 0.01 deg, u8 matches,
+        # u8 basis (tools/camera_move.py); only from the capture that ran the day's check
+        if data.get('camera_rotation_hundredths') is not None:
+            def _camera_move():
+                from tools.camera_move import payload as camera_move_payload
+                return {"payload_hex": camera_move_payload(data).hex()}
+            _add("01 12", _camera_move)
 
         # 04 01 — GPS block (lat int32 microdeg, lon int32 microdeg)
         lat = data.get('gps_lat')

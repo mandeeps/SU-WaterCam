@@ -37,7 +37,7 @@ jobs:
             dill multiprocess \
             astor astunparse \
             psutil py-gpsd2 \
-            opencv-python-headless SimpleITK pandas rasterio \
+            opencv-python-headless SimpleITK pandas rasterio scipy \
             onnx onnxruntime
 
       # Nodes run the committed output/ticktalk_main.pickle, not the source.

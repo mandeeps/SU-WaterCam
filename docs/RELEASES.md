@@ -37,6 +37,7 @@ model, so this is reported separately from the software version.
 | `01 0D` | `clock_unverified` | u8, 1 if the capture was taken before the clock was verified by network, GPS or server time (`tools/capture_time.py`). Sent only when 1; absent means not set (not tracked as a change) | LoRa, IP |
 | `01 10` | `model_bands` | u8, bands the model that made the capture's mask reads: 5 for the five-band model, 3 for an RGB one (006's model, or the RGB fallback when a capture lacks a band; `tools/node_version.py`) | LoRa, IP |
 | `01 11` | `cellular_kib_total` | KiB sent and received over cellular since install, counted on the node; on the first wake of each day only (`tools/cellular_usage.py`) | LoRa, IP |
+| `01 12` | `camera_rotation_hundredths` | 4 bytes: rotation since the reference photo in 0.01 deg (u16), matched points (u8, capped at 255), basis (u8: 0 reference photo, 1 running total of daily steps, 2 new reference adopted). Once a day, from the capture that ran the check (`tools/camera_move.py`); not tracked as a change | LoRa, IP |
 
 Flags: bit 0 dirty, bit 1 past the tag, bit 2 no release tag (the version bytes are
 then 0). Over LoRa the fields go at the end of the packet, only when they change and
