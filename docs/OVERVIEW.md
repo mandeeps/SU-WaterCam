@@ -190,8 +190,8 @@ move) is marked in `capture_status.json` (`tools/capture_status.py`,
   pixels where the filter-in frame is brighter, and the two frames are separate
   exposures (exposure and white balance are now locked between them). An
   alternative, sending the filter-out red channel unchanged so the model forms a
-  signed difference itself, was written (SU-WaterCam #91) and reverted (#147)
-  until the next model checkpoint, because it changes what the model sees.
+  signed difference itself, was written (SU-WaterCam #91), reverted (#147) and
+  waits in draft #148 for the next model checkpoint, because it changes what the model sees.
 
 ## 6. Which model runs
 
