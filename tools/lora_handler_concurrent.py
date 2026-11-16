@@ -75,6 +75,8 @@ except ImportError:     # run from tools/ as a script
 #   i8  temperature, whole degrees C (-128: none)
 #   u8  relative humidity percent  (255: none)
 COMPACT_PACKET_SIZE = 11
+# US915 uplink room at DR0, DR1, DR2 and DR3/DR4 with no MAC answers pending
+US915_FULL_ROOM = (11, 53, 125, 242)
 # Below this payload limit the compact packet is sent in place of the sensor packet;
 # from it up the sensor packet goes in chunks (encode_sensor_chunks)
 CHUNK_MIN_LIMIT = COMPACT_PACKET_SIZE + 1
@@ -894,6 +896,7 @@ class LoRaHandler:
         """
         deadline = time.monotonic() + deadline_s
         window = SENDB_WINDOW_HEX_S if isinstance(content, str) else SENDB_WINDOW_BYTES_S
+        payload_size = len(content) // 2 if isinstance(content, str) else len(content)
 
         def left() -> float:
             return deadline - time.monotonic()
@@ -923,15 +926,15 @@ class LoRaHandler:
                         debug(f"Starting transmission of {len(content)} bytes (attempt {attempt + 1})")
                         debug(f"Content to send: {content}")
 
-                        # Use the stored size limit (kept current by the listener loop).
-                        # Do NOT send AT+TXS here — it pollutes the RX buffer with "242\r\nOK\r\n"
-                        # that _attempt_transmission() would then misread as the SENDB response.
-                        size_limit = self.current_size_limit
-                        if size_limit < 11:
-                            print(f"WARNING: Stored size limit {size_limit}B is invalid; refreshing from mDot")
-                            self._query_txs_locked()
-                            size_limit = self.current_size_limit
-                        debug(f"Using stored size limit: {size_limit} bytes")
+                        # The room at the mDot's data rate now (AT+TXS). The stored limit
+                        # lags: ADR moves the rate, a rejoin starts at DR0 (11 B), a fixed
+                        # DR1 gives 53 B. _query_txs_locked() reads its own answer (input
+                        # drained first) and _attempt_transmission() drains again before
+                        # AT+SENDB, so the answer can't be taken for the send's.
+                        size_limit = self._room_for(payload_size, left, window)
+                        if size_limit is None:
+                            return False          # too big at this data rate: a retry won't help
+                        debug(f"Room in the next uplink: {size_limit} bytes")
 
                         if left() < window:
                             print(f"ERROR: Transmit deadline ({deadline_s:.0f} s) reached: giving up")
@@ -989,6 +992,28 @@ class LoRaHandler:
                 fcntl.lockf(self._lock_fd, fcntl.LOCK_UN)
         finally:
             self.transmit_lock.release()
+
+    def _room_for(self, payload_size: int, left, window: float) -> Optional[int]:
+        """The room in the next uplink (AT+TXS), or None when payload_size won't fit.
+
+        Under both locks (transmit()). When pending MAC answers take the room the
+        payload needs, one probe uplink carries them (as size_limit_now() does) and
+        the room is asked again, if the deadline leaves time for it.
+        """
+        self._query_txs_locked()
+        room = self.current_size_limit
+        # A room that is a data rate's full size isn't short of MAC answers: a
+        # probe would cost an uplink and change nothing
+        if payload_size > room and room not in US915_FULL_ROOM and left() >= MAC_FLUSH_WINDOW_S + window:
+            print(f"📏 {room} B free for {payload_size} B: flushing pending MAC commands")
+            self._flush_mac_commands()
+            self._query_txs_locked()
+            room = self.current_size_limit
+        if payload_size > room:
+            print(f"ERROR: {payload_size} B payload doesn't fit the {room} B the mDot has at its "
+                  f"current data rate; not sent")
+            return None
+        return room
 
     def _lockf_until(self, until_monotonic: float, poll_s: float = 0.1) -> bool:
         """Take the inter-process UART lock, waiting until until_monotonic at most."""
@@ -1116,13 +1141,22 @@ class LoRaHandler:
 
     def _reply_with_status(self, ack=None) -> None:
         """Send the node status JSON from a helper thread; ack = (seq, result) leads it."""
+        threading.Thread(target=self._build_and_send_status, args=(ack,),
+                         name='status-reply', daemon=True).start()
+
+    def _build_and_send_status(self, ack=None) -> None:
+        """Build the status reply for the room the mDot has now, then send it.
+
+        The room is asked (size_limit_now), not the stored limit: on 006
+        (2026-11-16) the stored 242 B outlived a data-rate change, and a reply
+        built for it either misses the gateway or is refused by the mDot.
+        """
         try:
             from tools.lora_debug_integration import handle_debug_status_request
-            reply = handle_debug_status_request(size_limit=self.current_size_limit,
+            reply = handle_debug_status_request(size_limit=self.size_limit_now(),
                                                 emergency_mode=self._emergency_mode(), ack=ack)
             if reply['status'] == 'success':
-                threading.Thread(target=self._send_debug_reply, args=(reply['data'],),
-                                 name='status-reply', daemon=True).start()
+                self._send_debug_reply(reply['data'])
         except Exception as e:
             print(f"⚠️ Status reply failed: {e}")
 

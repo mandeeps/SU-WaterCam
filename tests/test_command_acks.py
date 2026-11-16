@@ -467,6 +467,7 @@ class TestLoRaFrames:
         h.current_size_limit = 242
         sent = []
         with patch.object(LoRaHandler, "_send_debug_reply", lambda self, data: sent.append(data)), \
+                patch.object(LoRaHandler, "size_limit_now", lambda self: 242), \
                 patch.object(dbg, "collect_compact_status",
                              side_effect=lambda em=None, ack=None: [("ak", ack[0]), ("dbg", 1)]):
             h._reply_with_status(ack=(9, 0))
