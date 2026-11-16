@@ -135,6 +135,51 @@ A capture that lacks a band (no thermal frame, or the IR-cut filter did not
 move) is marked in `capture_status.json` (`tools/capture_status.py`,
 `tools/nir_filter_check.py`) and still goes through the steps where it can.
 
+### Capture details
+
+- **Frames and resolution.** `take_two_photos` shoots both visible frames with
+  Picamera2 at the OV5647's full 2592×1944. It first lets exposure and white
+  balance settle with the IR-cut filter in (GPIO 21 low), locks them, takes
+  `NIR-OFF.jpg`, then moves the filter out (GPIO 21 high, 0.5 s to settle) and
+  takes `NIR-ON.jpg` with the same settings, so the two frames differ only by the
+  filter. The setup photos are taken at the same size: the reference photo in
+  `tools/field_setup_steps.py` and the deployment guide's manual step both use
+  2592×1944, and the camera calibration (`tools/calibrate_node.py`) is made at it
+  too. A photo at another size (`rpicam-still` with no size, as in
+  `tools/fast_photo.sh`) would not match the calibration.
+- **Working sizes.** Co-registration undistorts the visible frames with the
+  unit's calibration and halves anything over 1000 px, so it works at 1296×972.
+  `color_preserved_5_band.tiff` (red, green, blue, thermal, NIR) stays at
+  1296×972 and is what the model reads; `final_5_band.tiff` is a 512×512 legacy
+  copy, not for models.
+- **Registration transform.** The thermal frame (moving) is registered to the
+  filter-in visible frame (fixed) with an affine transform, Mattes mutual
+  information and multi-resolution gradient descent (SimpleITK). One transform
+  serves every capture: it is cached next to the capture folders as
+  `images/registration_transform.json` plus `.tfm`, and reused while it is
+  compatible with the image sizes and transform type. A new solve happens only
+  when there is no usable cache or `--position-changed` is given. Because solves
+  of one scene spread over about 100 px, a new solve is cached only if it lies
+  within 25 px of the cached one (no metric threshold yet); otherwise the capture
+  uses the cached transform. To set the transform deliberately, run
+  `tools/seed_registration_cache.py` on a few scenes with good thermal contrast:
+  it solves each several times and caches the medoid. `--no-drift-check` accepts
+  a new solve after a camera is remounted on purpose. With no thermal frame, the
+  capture skips registration and the thermal band is zero.
+- **Orientation check.** `tools/registration_orientation.py` stores the IMU pose
+  the cached transform belongs to and compares each capture with it: tilt (angle
+  between gravity vectors, more than 5°) and rotation (quaternion angle, more than
+  15°, counted only when the magnetometer is calibrated). The result is
+  `registration_status` (field code `01 08`: 0 ok, 1 shifted, 2 adopted, 3 no
+  cache, 4 no IMU), and the dashboard shows "Check alignment" while it is 1. It
+  never re-solves: a turned node barely changes the transform (both cameras are
+  bolted together), and an automatic re-solve could swap a good transform for an
+  outlier. After checking the alignment by eye, clear the flag with
+  `python -m tools.registration_orientation --reset`, or re-seed.
+- **NIR band.** `extract_nir_band` takes the red channel of the undistorted
+  `NIR-ON` frame minus the red channel of the `NIR-OFF` frame (8-bit, negative
+  values clipped to 0) and resizes it to the working size.
+
 ## 6. Which model runs
 
 `segformer_daemon.service` loads one ONNX model at start. As shipped in
