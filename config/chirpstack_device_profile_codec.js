@@ -33,6 +33,9 @@
  * Category 09 Type 39: Monitoring frequency (minutes)
  * Category 09 Type 49: Emergency frequency (minutes)
  * Category 09 Type 59: Neighborhood emergency frequency (minutes)
+ * Category 09 Type 79: Wake schedule (7 bytes, as downlink 15 95): start HH MM, end HH MM,
+ *   u16 interval, u8 awake minutes; an hour byte F0/F1 is sunrise/sunset, its minute byte
+ *   then a signed offset. Output: wake_schedule, e.g. "sunrise+30-sunset-15/60/10"
  * Category 0A Type 01: WittyPi temperature (float32, Celsius; older nodes, no longer sent)
  * Category 0A Type 03: WittyPi internal voltage (float32, Volts; older nodes, no longer sent)
  * Category 0B Type 01: Debug status message (JSON string; not in the Witty Pi category)
@@ -59,7 +62,10 @@ function decodeUplink(input) {
 
   const result = {};
 
-  while (offset < view.byteLength) {
+  // A field cut short (a truncated or foreign packet) ends the decode with what came before
+  // it, instead of a RangeError that loses the whole packet
+  try {
+  while (offset + 2 <= view.byteLength) {
     const channel = view.getUint8(offset++);
     const type = view.getUint8(offset++);
     const key = `${channel.toString(16)}-${type.toString(16)}`;
@@ -206,6 +212,16 @@ function decodeUplink(input) {
         // USB microphone recording on (1) or off (0)
         result.audio_recording_enabled = view.getUint8(offset++);
         break;
+      case '9-79': {
+        const point = (hh, mm) => (hh === 0xF0 || hh === 0xF1)
+          ? (hh === 0xF0 ? 'sunrise' : 'sunset') + ((mm > 127 ? mm - 256 : mm) < 0 ? '' : '+') + (mm > 127 ? mm - 256 : mm)
+          : String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+        const b = [];
+        for (let i = 0; i < 7; i++) b.push(view.getUint8(offset + i));
+        result.wake_schedule = point(b[0], b[1]) + '-' + point(b[2], b[3]) + '/' + ((b[4] << 8) | b[5]) + '/' + b[6];
+        offset += 7;
+        break;
+      }
       case 'b-1': {
         // Debug status message (JSON string)
         const len = view.getUint16(offset, false);
@@ -273,6 +289,9 @@ function decodeUplink(input) {
         offset = view.byteLength; // Stop on unknown
         break;
     }
+  }
+  } catch (e) {
+    if (!(e instanceof RangeError)) throw e;
   }
 
   return { data: result };
