@@ -91,6 +91,13 @@ def test_dark_photo_is_skipped_and_does_not_use_a_try(env, scene):
     assert not os.path.exists(os.path.join(env["state"], "reference.npz"))
 
 
+def test_dark_photo_skips_the_feature_step(env, scene, monkeypatch):
+    d = _capture(env, "20261102-120000", _view(scene, brightness=0.15))
+    monkeypatch.setattr(cm, "features", lambda *a, **k: pytest.fail("features() ran on a dark photo"))
+    assert _check(env, d, NOON) is None
+    assert capture_status.read(d)["camera_move_mean"] < cm.LIT_MIN_MEAN
+
+
 def test_unmatched_photo_counts_tries(env, scene):
     _check(env, _capture(env, "20261102-120000", _view(scene)), NOON)
     rng = np.random.default_rng(1)

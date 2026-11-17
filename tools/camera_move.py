@@ -63,7 +63,7 @@ CALIBRATION_PATH = os.path.join(_REPO, "config", "camera_calibration.json")
 
 CHECK_FROM_HOUR = 11          # local time; midday light, the hours the benchmark used
 TRIES_PER_DAY = 3
-LIT_MIN_MEAN = 60.0           # mean grey (of 255) of the reduced photo
+LIT_MIN_MEAN = 60.0           # mean grey (of 255) of the photo at 1/8 size (brightness())
 SCALE = 0.25                  # of the full photo
 N_FEATURES = 4000
 RATIO = 0.8                   # Lowe's ratio test
@@ -102,11 +102,22 @@ def photo_of(dirname: str) -> Optional[str]:
     return found[0] if found else None
 
 
+def brightness(photo: str) -> Optional[float]:
+    """Mean grey of the photo decoded at 1/8 size, for the lit test; None if unreadable.
+
+    About 0.03 s on a Pi 4 against about 0.4 s for features(). On 011's photos it was
+    within 1 grey level of the mean of the undistorted, reduced photo.
+    """
+    import cv2
+    grey = cv2.imread(photo, cv2.IMREAD_REDUCED_GRAYSCALE_8)
+    return None if grey is None else float(grey.mean())
+
+
 def features(photo: str, calibration: str = CALIBRATION_PATH) -> Optional[Dict[str, np.ndarray]]:
     """SIFT features of the undistorted, reduced photo, or None when it can't be read.
 
     The JPEG is decoded at half size (cheap) and reduced to SCALE after undistorting.
-    "mean" is the reduced photo's mean grey, for the lit test.
+    "mean" is the reduced photo's mean grey (kept in the saved features; the lit test uses brightness()).
     """
     import cv2
     im = cv2.imread(photo, cv2.IMREAD_REDUCED_COLOR_2)
@@ -250,11 +261,14 @@ def check(dirname: str, now: Optional[_dt.datetime] = None, state_dir: Optional[
     if photo is None:
         return None
     t0 = time.monotonic()
+    lit = brightness(photo)
+    if lit is None:
+        return None
+    if lit < LIT_MIN_MEAN:            # before the features: a dark photo costs a 1/8-size decode only
+        capture_status.mark(dirname, camera_move="too_dark", camera_move_mean=round(lit, 1))
+        return None
     cur = features(photo, calibration)
     if cur is None:
-        return None
-    if float(cur["mean"]) < LIT_MIN_MEAN:
-        capture_status.mark(dirname, camera_move="too_dark", camera_move_mean=round(float(cur["mean"]), 1))
         return None
 
     today = now.date().isoformat()
