@@ -136,6 +136,7 @@ FULL_SENSOR_DATA = {
     'audio_recording_enabled': 1,
     'pose_level': 1, 'pose_tilt_tenths': 18,
     'camera_rotation_hundredths': 1234, 'camera_move_inliers': 255, 'camera_move_basis': 1,
+    'schedule': 'f01ef1f1003c0a',     # sunrise+30 to sunset-15, every 60 min, 10 min awake
 }
 
 
@@ -165,12 +166,26 @@ def test_codec_decodes_every_sensor_channel():
     assert out["pose_level"] == 1 and out["pose_tilt_change_deg"] == 1.8
     assert (out["camera_rotation_deg"], out["camera_move_inliers"], out["camera_move_basis"]) == (12.34, 255, 1)
     assert out["timestamp"] == 1792108958 and out["status_area_threshold"] == 10
+    assert out["wake_schedule"] == "sunrise+30-sunset-15/60/10"
     # Compact forms (03 02, 05 02): same field names and units as before
     assert out["tilt_roll_yaw"] == [0.0, 7.12, 85.06]
     assert out["temperature_celsius"] == 22.2
     # The Witty Pi temperature and output voltage aren't sent over LoRa
     assert "wittypi_temperature" not in out and "wittypi_internal_voltage" not in out
-    assert len(pkt) == 110  # 97 before 01 0E / 01 0F (3 + 4 bytes) and 01 12 (6) were added here
+    assert len(pkt) == 119  # 97, + 01 0E / 01 0F (3 + 4 bytes), 01 12 (6) and 09 79 (9)
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_codec_wake_schedule_clock_times():
+    assert _codec_decode(bytes.fromhex("097908001021003c0a"))["wake_schedule"] == "08:00-16:33/60/10"
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+def test_codec_keeps_what_came_before_a_cut_short_field():
+    # 005, 2026-11-13: a 1-byte 0a made the codec throw, losing the packet
+    assert _codec_decode(b"\x0a") == {}
+    assert _codec_decode(bytes.fromhex("0104010201")) == {"emergency_status": 1}   # 02 01 cut short
+    assert _codec_decode(bytes.fromhex("00016af7a073097908")) == {"timestamp": 1794613363}
 
 
 def test_compact_fields_layout_and_limits():
