@@ -630,6 +630,30 @@ class TestWaitTailnet:
         with patch("tools.transmit_ip.subprocess.run", side_effect=FileNotFoundError("tailscale")):
             assert transmit_ip.tailscale_online("server.example.ts.net") is None
 
+    def test_not_running_yet_is_false_not_none(self):
+        # Booted with no network: no peers until a link comes up (006, 2026-11-17)
+        for state in ("NoState", "Starting", "NeedsLogin"):
+            with patch("tools.transmit_ip.subprocess.run",
+                       return_value=_proc(out=json.dumps({"BackendState": state, "Self": {"Online": False}}))):
+                assert transmit_ip.tailscale_online("server.example.ts.net") is False
+        running = json.loads(self._status())
+        running["BackendState"] = "Running"
+        with patch("tools.transmit_ip.subprocess.run", return_value=_proc(out=json.dumps(running))):
+            assert transmit_ip.tailscale_online("server.example.ts.net") is True
+
+    def test_wait_tailnet_waits_out_nostate_after_cellular(self):
+        # Cellular just came up and Tailscale hasn't started: wait_tailnet waits for it
+        # instead of returning at once (the POST was then refused as untrusted)
+        nostate = json.dumps({"BackendState": "NoState", "Self": {"Online": False}})
+        running = json.dumps({"BackendState": "Running", "Self": {"Online": True},
+                              "Peer": {"k": {"DNSName": "server.example.ts.net.", "Online": True}}})
+        tx = IPTransmitter(override_url="http://server.example.ts.net:8000")
+        with patch("tools.transmit_ip.subprocess.run",
+                   side_effect=[_proc(out=nostate)] * 3 + [_proc(out=running)]) as run, \
+             patch("tools.transmit_ip.time.sleep"):
+            assert tx.wait_tailnet(30) is True
+        assert run.call_count == 4
+
     def test_wait_tailnet_waits_until_online(self):
         tx = IPTransmitter(override_url="http://server.example.ts.net:8000")
         with patch("tools.transmit_ip.tailscale_online", side_effect=[False, False, True]) as online, \

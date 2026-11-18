@@ -1356,11 +1356,17 @@ def tailscale_online(host: str) -> Optional[bool]:
     """Whether the local Tailscale daemon is online and sees ``host`` online.
 
     Reads ``tailscale status --json``, which sends nothing over the network.
-    None if the status can't be read or ``host`` isn't a peer.
+    False while the daemon isn't running yet (NoState, Starting, ...): it then
+    lists no peers, and a node that booted without a network stays that way
+    until a link comes up, so this must not read as "can't tell". None if the
+    status can't be read or ``host`` isn't a peer of a running daemon.
     """
     status = _tailscale_status(max_age_s=0)     # polled while waiting: always fresh
     if status is None:
         return None
+    state = status.get("BackendState")
+    if state is not None and state != "Running":
+        return False
     for peer in (status.get("Peer") or {}).values():
         if (peer.get("DNSName") or "").rstrip(".").lower() == host:
             return bool((status.get("Self") or {}).get("Online")) and bool(peer.get("Online"))
