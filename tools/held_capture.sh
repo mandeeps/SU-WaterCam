@@ -6,7 +6,11 @@
 # The capture workflow ends a wake by powering the Pi off (call_shutdown runs
 # `doas /usr/sbin/shutdown -h now`). For a test wake at the bench or at
 # installation (tools/field_setup.py, step "First capture"), a stand-in doas on
-# ticktalk's PATH logs the call and exits 0 instead, so the unit stays up. The
+# ticktalk's PATH logs the call and exits 0 instead, so the unit stays up. Only
+# power-off commands (shutdown, poweroff, reboot, halt) and the stand-in's own
+# probe are intercepted; every other doas call (uhubctl powering USB for the
+# cellular modem and GPS, for one) goes on to the real doas, so a held wake
+# exercises the same paths as a real one. The
 # drop-in, the stand-in and runtime_config.json are put back afterwards,
 # whatever happens (trap). Results in OUT_DIR: runner.log, wake.journal,
 # lora_daemon.journal, doas.log, captures.txt, lora_last_sent.before/.after,
@@ -52,6 +56,7 @@ TEST=${HELD_CAPTURE_RUN_DIR:-/run/ticktalk-test}
 DROPIN=${HELD_CAPTURE_DROPIN:-/etc/systemd/system/ticktalk.service.d/zz-no-shutdown-test.conf}
 LORA_HEALTH=${HELD_CAPTURE_LORA_HEALTH:-/tmp/watercam-lora-health.json}
 WITTYPI_DIR=${HELD_CAPTURE_WITTYPI_DIR:-/home/pi/wittypi}
+REAL_DOAS=${HELD_CAPTURE_REAL_DOAS:-/usr/bin/doas}
 ALARMS_SAVED=0
 LORA_STOPPED=0
 # A wake ends by asking for the power-off (call_shutdown, after its captures:
@@ -171,8 +176,14 @@ fi
 mkdir -p "$TEST/bin"
 cat > "$TEST/bin/doas" <<EOF
 #!/bin/sh
-echo "\$(date +%T) TEST-DOAS intercepted: \$*" >> "$TEST/doas.log"
-exit 0
+# Power-off commands and the probe stop here; everything else runs for real
+case "\$1" in
+  shutdown|*/shutdown|poweroff|*/poweroff|reboot|*/reboot|halt|*/halt|/bin/true)
+    echo "\$(date +%T) TEST-DOAS intercepted: \$*" >> "$TEST/doas.log"
+    exit 0 ;;
+esac
+echo "\$(date +%T) TEST-DOAS passed through: \$*" >> "$TEST/doas.log"
+exec "$REAL_DOAS" "\$@"
 EOF
 chmod 755 "$TEST/bin/doas"; chmod 777 "$TEST"
 mkdir -p "$(dirname "$DROPIN")"

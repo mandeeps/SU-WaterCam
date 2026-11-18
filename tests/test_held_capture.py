@@ -13,7 +13,8 @@ SCRIPT = ROOT / "tools" / "held_capture.sh"
 
 # systemctl: services' states in $STATE/<name>; "start ticktalk" plays a wake
 # (one capture, the config and lora_daemon's state as the wake saw them, the
-# journal, and the shutdown through the stand-in doas).
+# journal, USB powered for the modem and the shutdown, both through the
+# stand-in doas).
 SYSTEMCTL = r"""#!/bin/bash
 echo "systemctl $*" >> "$STATE/calls.log"
 case "$1" in
@@ -29,6 +30,7 @@ case "$1" in
       # A real wake writes its schedule and arms the next start-up, as on 005
       echo "BEGIN 2026-11-13 08:00:00 (written by the wake)" > "$HELD_CAPTURE_WITTYPI_DIR/schedule.wpi"
       echo "14 08:00:00" > "$HELD_CAPTURE_WITTYPI_DIR/.startup"
+      PATH="$HELD_CAPTURE_RUN_DIR/bin:$PATH" doas /usr/sbin/uhubctl -l 2 -a on
       PATH="$HELD_CAPTURE_RUN_DIR/bin:$PATH" doas /usr/sbin/shutdown -h now
     else
       echo active > "$STATE/$svc"
@@ -57,6 +59,11 @@ set_shutdown_time() { printf '%02d %02d:%02d:%02d\n' "$1" "$2" "$3" "$4" > ./.sh
 clear_startup_time() { echo "00 00:00:00" > ./.startup; }
 clear_shutdown_time() { echo "00 00:00:00" > ./.shutdown; }
 """
+# The real doas: records what reached it
+REAL_DOAS = r"""#!/bin/bash
+echo "$*" >> "$STATE/real_doas.log"
+exit 0
+"""
 JOURNALCTL = r"""#!/bin/bash
 case "$*" in *"-u ticktalk"*) cat "$STATE/journal" 2>/dev/null ;; esac
 exit 0
@@ -77,7 +84,7 @@ def held(tmp_path):
     (wittypi / "utilities.sh").write_text(UTILITIES)
     bin_ = tmp_path / "bin"
     bin_.mkdir()
-    for name, text in (("systemctl", SYSTEMCTL), ("systemd-run", SYSTEMD_RUN), ("journalctl", JOURNALCTL)):
+    for name, text in (("systemctl", SYSTEMCTL), ("systemd-run", SYSTEMD_RUN), ("journalctl", JOURNALCTL), ("real-doas", REAL_DOAS)):
         (bin_ / name).write_text(text)
         (bin_ / name).chmod(0o755)
     config = {"iteration_count": 3, "shutdown_iteration_limit": 2,
@@ -95,7 +102,8 @@ def held(tmp_path):
                "HELD_CAPTURE_RUN_DIR": str(tmp_path / "run"),
                "HELD_CAPTURE_DROPIN": str(tmp_path / "dropin" / "zz-test.conf"),
                "HELD_CAPTURE_LORA_HEALTH": str(tmp_path / "lora-health.json"),
-               "HELD_CAPTURE_SETTLE_S": "0", "HELD_CAPTURE_WITTYPI_DIR": str(wittypi)}
+               "HELD_CAPTURE_SETTLE_S": "0", "HELD_CAPTURE_WITTYPI_DIR": str(wittypi),
+               "HELD_CAPTURE_REAL_DOAS": str(bin_ / "real-doas")}
         r = subprocess.run(["bash", str(SCRIPT), *args, str(out)], env=env, capture_output=True,
                            text=True, timeout=60)
 
@@ -107,6 +115,7 @@ def held(tmp_path):
                 "wake_lora": read(state / "wake_lora_daemon").strip(), "lora_after": read(state / "lora_daemon").strip(),
                 "config_after": json.loads(cfg.read_text()), "mode_after": cfg.stat().st_mode & 0o777,
                 "captures": read(out / "captures.txt").split(), "doas": read(out / "doas.log"),
+                "real_doas": read(state / "real_doas.log"),
                 "run_dir_left": (tmp_path / "run").exists(), "dropin_left": (tmp_path / "dropin" / "zz-test.conf").exists(),
                 "health_cache": tmp_path / "lora-health.json"}
     run.state = state
@@ -125,6 +134,18 @@ def test_each_run_starts_from_iteration_zero_and_restores_the_config(held):
     assert "probe" in r["doas"] and "shutdown -h now" in r["doas"]
     assert len(r["captures"]) == 1
     assert not r["run_dir_left"] and not r["dropin_left"]
+
+
+def test_only_power_off_is_intercepted(held):
+    # USB power (cellular modem, GPS) must reach the real doas, or a held wake
+    # can't bring cellular up ("No suitable device found" on 008, 2026-11-18)
+    r = held("--ip", config={"iteration_count": 3, "shutdown_iteration_limit": 2,
+                             "ip_upload": {"enabled": True, "server_url": "https://x"}},
+             journal="IP uplink OK: 26 channels sent (attempt 1)")
+    assert "passed through: /usr/sbin/uhubctl -l 2 -a on" in r["doas"]
+    assert r["real_doas"].split("\n")[0] == "/usr/sbin/uhubctl -l 2 -a on"
+    assert "intercepted: /usr/sbin/shutdown -h now" in r["doas"]
+    assert "shutdown" not in r["real_doas"] and "probe" not in r["real_doas"]
 
 
 def test_a_lora_run_leaves_lora_daemon_alone(held):
