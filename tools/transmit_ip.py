@@ -142,7 +142,7 @@ _TAILNET_NETS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd
 
 
 _STATUS_MAX_AGE_S = 10.0
-TAILNET_WAIT_MIN_S = 180    # wait_tailnet's floor: Tailscale over a cellular link at the edge of range
+TAILNET_WAIT_MIN_S = 150    # wait_tailnet's floor: Tailscale over a cellular link at the edge of range; with the 90 s cellular_up, one failed attempt costs at most 4 min, two 8 min of a 10-min wake
 _status_cache: Tuple[float, Optional[Dict[str, Any]]] = (float("-inf"), None)
 
 
