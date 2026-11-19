@@ -682,6 +682,25 @@ class TestWaitTailnet:
              patch("tools.transmit_ip.time.monotonic", side_effect=lambda: next(clock)):
             assert tx.wait_tailnet(30) is False
 
+    def test_wait_tailnet_waits_when_it_cant_tell(self):
+        # Status unreadable or the server not listed yet (None): wait for trust too
+        tx = IPTransmitter(override_url="http://server.example.ts.net:8000")
+        with patch("tools.transmit_ip.tailscale_online", side_effect=[None, None, True]), \
+             patch("tools.transmit_ip.trusted_server", side_effect=[False, False, True]) as trusted, \
+             patch("tools.transmit_ip.time.sleep"):
+            assert tx.wait_tailnet(30) is True
+        assert trusted.call_count == 3
+
+    def test_wait_tailnet_waits_at_least_the_floor(self):
+        # The main loop passes 30 s; a weak cellular link gets TAILNET_WAIT_MIN_S
+        tx = IPTransmitter(override_url="http://server.example.ts.net:8000")
+        clock = itertools.count(0, 10)
+        with patch("tools.transmit_ip.tailscale_online", return_value=False) as online, \
+             patch("tools.transmit_ip.time.sleep"), \
+             patch("tools.transmit_ip.time.monotonic", side_effect=lambda: next(clock)):
+            assert tx.wait_tailnet(30) is False
+        assert online.call_count == transmit_ip.TAILNET_WAIT_MIN_S // 10
+
     def test_wait_tailnet_gives_up(self):
         tx = IPTransmitter(override_url="http://server.example.ts.net:8000")
         clock = itertools.count(0, 20)
