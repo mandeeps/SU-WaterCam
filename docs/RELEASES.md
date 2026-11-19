@@ -124,8 +124,31 @@ sudo systemctl restart lora_daemon segformer_daemon
 conflict are kept. For 005, save the patch, `git checkout -- ticktalk_main.py`, update,
 then `git apply --3way` the patch as before.
 
-If the release changes anything outside the checkout, the release notes say so:
-systemd units, `doas.conf`, Witty Pi scripts or pip packages.
+Then install the release's files outside the checkout (systemd units, `doas.conf`, the
+firewall, the Witty Pi scripts) with `tools/install_system.py`. It works from one list of
+every such file, changes only what differs, keeps what it replaces under
+`/var/backups/watercam/`, and is safe to run again:
+
+```bash
+tools/install_system.py                 # dry run: lists what would change (the default)
+sudo tools/install_system.py --apply
+```
+
+Or do the update and the install in one step, over WiFi:
+`sudo tools/install_system.py --release v2026.11.1 --apply`. It fetches the tag, stops
+unless `git verify-tag` passes and the pickle's SHA-256 matches, updates the venv if
+`requirements.txt` changed, then runs the new release's copy of itself. `--check` exits 3
+when anything would change, and `--json` prints the actions for a script or an agent.
+
+A firewall change is loaded with a rollback armed: it is stopped again after 5 minutes
+unless `sudo tools/install_system.py --confirm-firewall` runs from a **new** SSH session,
+so a rule that cuts you off undoes itself. The script never enables or disables
+`ticktalk` or `wittypi-recovery`, and never changes `runtime_config.json`, the schedule,
+`config.txt` or the network services (those are deployment steps, `tools/field_setup.py`).
+It holds back `max-awake.timer` on a unit with `ticktalk` disabled and no `hold_awake`,
+which the timer would otherwise power off. When a release adds a file outside the
+checkout, add it to `MANIFEST` in the script; the release notes then only need to say
+to run it.
 
 **Going back** to a known-good release is the same, with the older tag:
 `git fetch --depth 1 origin tag v2026.10.0 && git verify-tag v2026.10.0 && git checkout v2026.10.0`.

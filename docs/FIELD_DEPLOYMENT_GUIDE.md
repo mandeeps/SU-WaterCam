@@ -180,13 +180,19 @@ If it isn't on the current release, or `.git` is larger than a few MB (`du -sh .
 follow [RELEASES.md](RELEASES.md#updating-a-node): update, or convert the full clone to
 a shallow one first. Check each release with `git verify-tag` before checking it out.
 
-After updating, install any system files the release notes list as changed. From
-v2026.10.4 the doas rules are stricter (passwordless `shutdown` only as `-h now`),
-so replace the whole file rather than appending lines:
+After updating, install the release's system files: the units, `doas.conf`, the
+firewall and the other files that sections 1.3.3 to 1.9 copy by hand. One command
+does them all, and only changes what differs:
 
 ```bash
-sudo cp config/doas.conf /etc/doas.conf && sudo doas -C /etc/doas.conf
+tools/install_system.py                 # dry run first: what would change
+sudo tools/install_system.py --apply    # then, if the firewall changed, --confirm-firewall
 ```
+
+It leaves `ticktalk`, `wittypi-recovery`, `runtime_config.json`, the schedule, `config.txt`
+and `cmdline.txt` alone. The sections below explain each file and remain the reference.
+The script reports missing apt packages but doesn't install them. [RELEASES.md](RELEASES.md#updating-a-node)
+has the options.
 
 ### 1.3.2 Remove packages a node doesn't need
 
