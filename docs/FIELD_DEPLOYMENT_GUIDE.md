@@ -930,8 +930,8 @@ Keep the systemd journal on the microSD card, so a wake that went wrong can be
 read back on the unit (`journalctl -b -1`) after it has shut down. This is the
 default for every unit: `tools/install_system.py --apply` installs
 `config/journald-persistent.conf` as `zz-watercam-journal.conf` and removes the
-older RAM-only drop-in. It keeps up to 90 days, costs about 100-150 MB of card
-writes a day on an hourly schedule, and sets `SystemMaxFiles=1000`, because
+older RAM-only drop-in. It keeps up to 90 days, costs about 5-30 MB of journal a
+day (measured on two units), and sets `SystemMaxFiles=1000`, because
 journald's default of 100 files holds only about 3 days on a node. By hand:
 
 ```bash
