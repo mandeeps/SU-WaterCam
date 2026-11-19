@@ -26,11 +26,23 @@ class FakeRunner:
         self.enabled = set(enabled)
         self.doas_ok = doas_ok
         self.route = route
-        self.inactive = set()
+        self.inactive = {f"{ins.FIREWALL_ROLLBACK_UNIT}.timer"}
+        self.nft_ok = True
+        self.fail = set()      # commands (joined) that fail
 
     def __call__(self, argv, timeout=120):
         self.calls.append(list(argv))
         out, rc = "", 0
+        if " ".join(argv) in self.fail:
+            return subprocess.CompletedProcess(argv, 1, "", "failed")
+        if argv[0] == "systemd-run":
+            self.inactive.discard(f"{ins.FIREWALL_ROLLBACK_UNIT}.timer")
+        elif argv[:2] == ["systemctl", "stop"] and argv[2] == f"{ins.FIREWALL_ROLLBACK_UNIT}.timer":
+            self.inactive.add(argv[2])
+        elif argv[:2] == ["systemctl", "disable"]:
+            self.enabled.discard(argv[-1])
+        elif argv[:2] == ["nft", "-c"]:
+            rc = 0 if self.nft_ok else 1
         if argv[:2] == ["systemctl", "is-enabled"]:
             out = "enabled" if argv[2] in self.enabled else "disabled"
         elif argv[:2] == ["systemctl", "enable"]:
@@ -107,6 +119,7 @@ def test_apply_installs_then_nothing_left(root):
     # the replaced journal drop-in and gpsd defaults were backed up
     assert (root / "var/backups/watercam/T/etc/default/gpsd").read_text().endswith('"/dev/ttyUSB1"\n')
     assert (root / "var/backups/watercam/T/etc/systemd/journald.conf.d/zz-watercam-journal.conf").exists()
+    assert ins.confirm_firewall(run) == 0
     again = plan(run)
     assert [a.target for a in again.actions if a.pending] == []
 
@@ -176,6 +189,7 @@ def test_firewall_last_with_rollback_armed_first(root):
 def test_firewall_current_means_no_reload(root):
     run = FakeRunner(enabled={"ticktalk.service"})
     plan(run).apply()
+    assert ins.confirm_firewall(run) == 0
     run2 = FakeRunner(enabled=run.enabled)
     inst = plan(run2)
     assert not by_target(inst, "watercam-firewall.service")[0].pending
@@ -212,7 +226,7 @@ def test_firewall_stopped_by_a_rollback_is_loaded_again(root):
     run = FakeRunner(enabled={"ticktalk.service"})
     plan(run).apply()
     run2 = FakeRunner(enabled=run.enabled)
-    run2.inactive = {"watercam-firewall.service"}
+    run2.inactive |= {"watercam-firewall.service"}
     act = by_target(plan(run2), "watercam-firewall.service")[0]
     assert act.pending and "load the input firewall" in act.detail
 
@@ -239,3 +253,61 @@ def test_volatile_journal_on_request(root):
     assert inst.apply()
     assert "Storage=volatile" in (jd / "journald-volatile.conf").read_text()
     assert not (jd / "zz-watercam-journal.conf").exists()
+
+
+def test_firewall_on_trial_is_not_enabled_for_boot(root):
+    # a reboot before --confirm-firewall must come back without the new rules
+    run = FakeRunner(enabled={"ticktalk.service", "watercam-firewall.service"})
+    plan(run).apply()
+    assert "watercam-firewall.service" not in run.enabled
+    arm = next(c for c in run.calls if c[0] == "systemd-run")
+    assert arm[-3:] == ["disable", "--now", "watercam-firewall.service"]
+    # a re-run while on trial doesn't re-arm it, it reminds
+    act = by_target(plan(run), "watercam-firewall.service")[0]
+    assert act.kind == "warn" and not act.pending
+    assert ins.confirm_firewall(run) == 0
+    assert "watercam-firewall.service" in run.enabled
+
+
+def test_firewall_rules_rejected_by_nft_are_not_loaded(root):
+    run = FakeRunner(enabled={"ticktalk.service"})
+    run.nft_ok = False
+    inst = plan(run)
+    assert not inst.apply()
+    assert ["systemctl", "restart", "watercam-firewall.service"] not in run.calls
+    assert not any(c[0] == "systemd-run" for c in run.calls)
+
+
+def test_confirm_reports_a_failed_timer_stop(root, capsys):
+    run = FakeRunner()
+    run.fail = {f"systemctl stop {ins.FIREWALL_ROLLBACK_UNIT}.timer"}
+    assert ins.confirm_firewall(run) == 1
+    assert "kept" not in capsys.readouterr().out
+    assert ["systemctl", "enable", "watercam-firewall.service"] not in run.calls
+
+
+def test_check_counts_a_pending_release(root, capsys):
+    run = FakeRunner()
+    assert ins.main(["--check", "--release", "v9999.1.0"], run=run) == 3
+    assert "Nothing to change" not in capsys.readouterr().out
+
+
+def test_rebuilt_args_never_carry_release():
+    a = ins.argparse.Namespace(apply=True, check=False, dry_run=False, allow_cellular=True, allow_max_awake=False,
+                               volatile_journal=True, no_restart=False, json=True)
+    assert ins.rebuild_args(a) == ["--apply", "--allow-cellular", "--volatile-journal", "--json"]
+
+
+def test_release_actions_reach_the_new_script(root, capsys, monkeypatch):
+    pre = [{"kind": "release", "target": "v1", "detail": "pip install failed", "status": "failed"}]
+    monkeypatch.setenv("WATERCAM_INSTALL_PRE", json.dumps(pre))
+    assert ins.main(["--json", "--_after-release", "abc"], run=FakeRunner()) == 1
+    out = json.loads(capsys.readouterr().out)
+    assert any(x["detail"] == "pip install failed" for x in out["actions"])
+
+
+def test_cellular_filter_and_gpsd_reloaded_when_changed(root):
+    run = FakeRunner(enabled={"ticktalk.service"})
+    plan(run).apply()
+    assert ["systemctl", "try-restart", "watercam-cellular-filter.service"] in run.calls
+    assert ["systemctl", "try-restart", "gpsd.service"] in run.calls

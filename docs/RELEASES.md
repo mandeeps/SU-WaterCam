@@ -140,9 +140,11 @@ unless `git verify-tag` passes and the pickle's SHA-256 matches, updates the ven
 `requirements.txt` changed, then runs the new release's copy of itself. `--check` exits 3
 when anything would change, and `--json` prints the actions for a script or an agent.
 
-A firewall change is loaded with a rollback armed: it is stopped again after 5 minutes
-unless `sudo tools/install_system.py --confirm-firewall` runs from a **new** SSH session,
-so a rule that cuts you off undoes itself. The script never enables or disables
+A firewall change is syntax-checked (`nft -c`), then loaded on trial: running but not
+enabled for boot, with a rollback armed that stops and disables it after 5 minutes.
+`sudo tools/install_system.py --confirm-firewall` from a **new** SSH session keeps it and
+enables it for boot. So a rule that cuts you off undoes itself, and a reboot or power
+cut before the confirmation also comes back without it. The script never enables or disables
 `ticktalk` or `wittypi-recovery`, and never changes `runtime_config.json`, the schedule,
 `config.txt` or the network services (those are deployment steps, `tools/field_setup.py`).
 It holds back `max-awake.timer` on a unit with `ticktalk` disabled and no `hold_awake`,

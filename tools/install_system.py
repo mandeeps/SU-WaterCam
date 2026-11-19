@@ -18,8 +18,10 @@ What it does, and only when something differs from the repo:
 - copies each manifest file (content, mode and owner), keeping the replaced file under
   /var/backups/watercam/<time>/;
 - doas.conf only after `doas -C` accepts the new file, so a bad file can't lock pi out;
-- the firewall only with a rollback armed: a systemd timer stops it again after 5
-  minutes unless `--confirm-firewall` runs from a new SSH session first;
+- the firewall only with a rollback armed: the rules are syntax-checked, loaded but
+  not enabled, and a systemd timer stops and disables them after 5 minutes unless
+  `--confirm-firewall` (which enables them for boot) runs from a new SSH session
+  first; a reboot before that also comes back without them;
 - sets gpsd DEVICES="" (quectel-gnss.service hands gpsd the port);
 - removes units and drop-ins that releases have retired;
 - applies the Witty Pi daemon patch (tools/wittypi_patch.py);
@@ -60,6 +62,7 @@ BACKUP_DIR = "/var/backups/watercam"
 VERSION_CACHE = "/tmp/watercam-version.json"
 FIREWALL_ROLLBACK_UNIT = "watercam-fw-rollback"
 FIREWALL_ROLLBACK_DELAY = "5min"
+FIREWALL_RULES = "/etc/nftables.d/watercam-host.nft"
 
 SYSTEMD = "/etc/systemd/system"
 WITTYPI = "/home/pi/wittypi"
@@ -105,11 +108,11 @@ MANIFEST: List[Item] = [
     _unit("watercam-cellular-filter.service"),
     _unit("watercam-cellular-usage.service"),
     _unit("watercam-firewall.service", "firewall"),
-    Item("config/nftables/watercam-cellular.nft", "/etc/nftables.d/watercam-cellular.nft"),
+    Item("config/nftables/watercam-cellular.nft", "/etc/nftables.d/watercam-cellular.nft", tags=("cellular_filter",)),
     Item("config/nftables/watercam-host.nft", "/etc/nftables.d/watercam-host.nft", tags=("firewall",)),
     Item("config/networkmanager/dispatcher.d/90-watercam-cellular-usage",
          "/etc/NetworkManager/dispatcher.d/90-watercam-cellular-usage", mode=0o755),
-    Item("config/systemd-network/10-wwan.link", "/etc/systemd/network/10-wwan.link", tags=("udev",)),
+    Item("config/systemd-network/10-wwan.link", "/etc/systemd/network/10-wwan.link", tags=("udev", "next_boot")),
     Item("config/polkit/50-watercam-networkmanager.rules",
          "/etc/polkit-1/rules.d/50-watercam-networkmanager.rules", tags=("next_boot",)),
     Item("config/networkmanager/90-dns-systemd-resolved.conf",
@@ -183,7 +186,8 @@ class Action:
 
     @property
     def pending(self) -> bool:
-        return self.run is not None and self.status == "pending"
+        # a release step found in a dry run has nothing to run here but is still to do
+        return self.status == "pending" and (self.run is not None or self.kind == "release")
 
     def as_dict(self) -> Dict[str, str]:
         return {"kind": self.kind, "target": self.target, "detail": self.detail,
@@ -441,7 +445,12 @@ class Installer:
         fw_files = [a for a in self.actions if "firewall" in a.tags and a.pending]
         state = self.unit_state(fw)
         active = (self.run(["systemctl", "is-active", fw], timeout=20).stdout or "").strip()
-        if state != "enabled" or fw_files or active != "active":
+        trial = (self.run(["systemctl", "is-active", f"{FIREWALL_ROLLBACK_UNIT}.timer"], timeout=20).stdout
+                 or "").strip() == "active"
+        if state != "enabled" and active == "active" and trial and not fw_files:
+            self.add("warn", fw, "on trial, not yet kept: run --confirm-firewall from a new SSH session "
+                     f"before the rollback stops it")
+        elif state != "enabled" or fw_files or active != "active":
             what = ("load the input firewall" if state != "enabled" or active != "active"
                     else "reload the changed firewall")
             state = f"{state}, {active or 'unknown'}"
@@ -451,11 +460,19 @@ class Installer:
             self.add("enable", fw, "enabled")
 
     def load_firewall(self) -> None:
+        """Load the rules for a trial: started, NOT enabled, with a rollback armed.
+
+        Only --confirm-firewall enables it. So if the rules cut SSH off, the rollback
+        (or, failing that, any reboot or power cycle) brings the unit back without them."""
+        self.check(["nft", "-c", "-f", node_path(FIREWALL_RULES)],
+                   f"nft -c rejects {FIREWALL_RULES}; firewall not loaded")
         self.run(["systemctl", "stop", f"{FIREWALL_ROLLBACK_UNIT}.timer"])
         self.check(["systemd-run", f"--unit={FIREWALL_ROLLBACK_UNIT}", f"--on-active={FIREWALL_ROLLBACK_DELAY}",
-                    "/bin/systemctl", "stop", "watercam-firewall.service"], "arm the firewall rollback")
+                    "/bin/systemctl", "disable", "--now", "watercam-firewall.service"],
+                   "arm the firewall rollback")
         self.check(["systemctl", "daemon-reload"], "daemon-reload")
-        self.check(["systemctl", "enable", "watercam-firewall.service"], "enable the firewall")
+        # an earlier, confirmed copy may be enabled: the new rules must not come back at boot unconfirmed
+        self.check(["systemctl", "disable", "watercam-firewall.service"], "hold the firewall off at boot")
         self.check(["systemctl", "restart", "watercam-firewall.service"], "load the firewall")
 
     def plan_deployment_units(self) -> None:
@@ -509,6 +526,10 @@ class Installer:
             steps.append(["systemctl", "restart", "systemd-journald"])
         if "gpsd" in tags:
             steps.append(["systemctl", "restart", "gpsd.socket"])
+            steps.append(["systemctl", "try-restart", "gpsd.service"])
+        if "cellular_filter" in tags:
+            # only while wwan0 is up; otherwise the new rules load with the next cellular link
+            steps.append(["systemctl", "try-restart", "watercam-cellular-filter.service"])
         if "logrotate" in tags:
             steps.append(["logrotate", "-d", "/etc/logrotate.d/watercam"])
         return self._steps(steps)
@@ -545,6 +566,7 @@ def update_release(tag: str, apply: bool, allow_cellular: bool, run: Runner, out
 
     git = lambda *a: run(as_repo_owner(["git", "-C", REPO, *a]), timeout=300)  # noqa: E731
     old = (git("rev-parse", "HEAD").stdout or "").strip()
+    branch = (git("symbolic-ref", "-q", "--short", "HEAD").stdout or "").strip()
     target = (git("rev-parse", "-q", "--verify", f"refs/tags/{tag}^{{commit}}").stdout or "").strip()
     if target and target == old:
         add("already checked out")
@@ -576,8 +598,11 @@ def update_release(tag: str, apply: bool, allow_cellular: bool, run: Runner, out
     except (OSError, IndexError):
         have, want = "", "?"
     if have != want:
-        add("pickle SHA-256 does not match output/ticktalk_main.pickle.sha256: going back", "failed")
-        git("checkout", "-q", old)
+        back = git("checkout", "-q", branch or old)
+        add("pickle SHA-256 does not match output/ticktalk_main.pickle.sha256: " +
+            (f"back on {branch or old[:8]}" if back.returncode == 0 else
+             f"AND going back to {branch or old[:8]} failed: check the checkout by hand"),
+            "failed", (back.stderr or "").strip()[:300])
         raise SystemExit(1)
     add(f"checked out (was {old[:8]}), tag verified, pickle matches", "done")
     if git("diff", "--quiet", old, "HEAD", "--", "requirements.txt").returncode:
@@ -618,13 +643,31 @@ def report(actions: List[Action], dry_run: bool) -> str:
 
 
 def confirm_firewall(run: Runner) -> int:
+    """Keep a trial firewall: stop the rollback, then enable it for boot."""
     r = run(["systemctl", "is-active", "watercam-firewall.service"])
     if (r.stdout or "").strip() != "active":
         print("watercam-firewall.service is not active (the rollback may have run): nothing to confirm")
         return 1
-    run(["systemctl", "stop", f"{FIREWALL_ROLLBACK_UNIT}.timer"])
-    print("firewall kept: rollback timer stopped")
+    r = run(["systemctl", "stop", f"{FIREWALL_ROLLBACK_UNIT}.timer"])
+    if r.returncode:
+        print(f"could not stop the rollback timer ({(r.stderr or r.stdout).strip()[:200]}): the firewall "
+              f"will still be stopped. Run with sudo.", file=sys.stderr)
+        return 1
+    r = run(["systemctl", "enable", "watercam-firewall.service"])
+    if r.returncode:
+        print(f"rollback stopped, but enabling the firewall failed ({(r.stderr or r.stdout).strip()[:200]}): "
+              "it runs now but won't load at boot", file=sys.stderr)
+        return 1
+    print("firewall kept: rollback stopped, enabled for boot")
     return 0
+
+
+def rebuild_args(a: argparse.Namespace) -> List[str]:
+    """The options to hand the new release's copy of this script (never --release)."""
+    flags = {"apply": "--apply", "check": "--check", "dry_run": "--dry-run", "allow_cellular": "--allow-cellular",
+             "allow_max_awake": "--allow-max-awake", "volatile_journal": "--volatile-journal",
+             "no_restart": "--no-restart", "json": "--json"}
+    return [f for k, f in flags.items() if getattr(a, k, False)]
 
 
 def main(argv=None, run: Optional[Runner] = None) -> int:
@@ -663,18 +706,28 @@ def main(argv=None, run: Optional[Runner] = None) -> int:
         if old:
             # The checkout now holds the new release's copy of this script and manifest: run that one.
             script = os.path.join(REPO, "tools", "install_system.py")
-            rest = [x for x in (argv if argv is not None else sys.argv[1:])]
-            i = rest.index("--release")
-            rest = rest[:i] + rest[i + 2:] + ["--_after-release", old]
-            print(report(pre, False)) if not a.json else None
-            return subprocess.call([sys.executable, script] + rest)
+            rest = rebuild_args(a) + ["--_after-release", old]
+            env = dict(os.environ, WATERCAM_INSTALL_PRE=json.dumps([x.as_dict() for x in pre]))
+            code = subprocess.call([sys.executable, script] + rest, env=env)
+            if code == 0 and any(x.status == "failed" for x in pre):
+                return 1      # e.g. pip failed: the new release may not run
+            return code
 
     inst = Installer(run=run, allow_max_awake=a.allow_max_awake, restart=not a.no_restart,
                      volatile_journal=a.volatile_journal)
     inst.release_changed = bool(a.after_release)
     inst.actions.extend(pre)
+    if a.after_release:
+        # the release step ran in the old copy of this script: report it here too
+        try:
+            for d in json.loads(os.environ.get("WATERCAM_INSTALL_PRE", "[]")):
+                inst.actions.append(Action(d["kind"], d["target"], d["detail"], status=d["status"],
+                                           error=d.get("error", "")))
+        except (ValueError, KeyError, TypeError):
+            pass
     inst.plan()
     ok = inst.apply() if a.apply else True
+    ok = ok and not any(x.status == "failed" for x in inst.actions)
     if a.json:
         print(json.dumps({"dry_run": not a.apply, "pending": sum(x.pending for x in inst.actions),
                           "actions": [x.as_dict() for x in inst.actions]}, indent=1))
