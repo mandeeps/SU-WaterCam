@@ -55,6 +55,7 @@ import ipaddress
 import json
 import logging
 import os
+import re
 import socket
 import subprocess
 import time
@@ -1456,21 +1457,45 @@ def correct_clock(uplink_result: Dict[str, Any]) -> Optional[float]:
     return offset
 
 
+def _modem_state() -> str:
+    """One line of ModemManager's view of the modem (state, access tech, signal),
+    for the log when cellular won't come up. Local only; "" if unreadable."""
+    try:
+        r = subprocess.run(["mmcli", "-m", "any"], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    keep = []
+    for line in (r.stdout or "").splitlines():
+        line = re.sub(r"\x1b\[[0-9;]*m", "", line).rsplit("|", 1)[-1]
+        key, _, val = line.partition(":")
+        if key.strip() in ("state", "failed reason", "access tech", "signal quality"):
+            keep.append(f"{key.strip()} {val.strip()}")
+    return ", ".join(keep)
+
+
+# nmcli errors that waiting won't fix: the connection itself is missing
+_CELLULAR_PERMANENT = ("unknown connection", "not found", "no such connection")
+
+
 def cellular_up(connection: str, timeout_s: int = 90) -> bool:
     """Activate a NetworkManager connection (the LTE modem's); True once it is up.
-
     The connection should have autoconnect off, so the modem stays registered
     but carries no data until a wake has no other route to the server.
-
     USB may still be off (tools/usb_power.py). A modem that has just been
-    powered takes 20-40 s to show up in NetworkManager; until then nmcli
-    finds no device for the connection, so it is retried within timeout_s.
+    powered takes 20-40 s to show up in NetworkManager (nmcli then finds no
+    device for the connection), and after that it still has to register on the
+    network, which near the edge of coverage can take a minute or more; until
+    then activation fails. So any failure is retried within timeout_s, except
+    a connection that doesn't exist. Each failure logs the modem's state.
     """
     from tools.usb_power import acquire, wait_for
-    end = time.monotonic() + timeout_s
+    start = time.monotonic()
+    end = start + timeout_s
     if acquire("cellular"):
         wait_for("/dev/cdc-wdm*", timeout_s)
+    attempt = 0
     while True:
+        attempt += 1
         wait = max(round(end - time.monotonic()), 5)
         try:
             r = subprocess.run(
@@ -1481,13 +1506,21 @@ def cellular_up(connection: str, timeout_s: int = 90) -> bool:
             logger.warning("nmcli connection up %s failed: %s", connection, exc)
             return False
         if r.returncode == 0:
+            if attempt > 1:
+                logger.info("%s up after %d attempts, %.0f s", connection, attempt,
+                            time.monotonic() - start)
             return True
         msg = (r.stderr or r.stdout).strip()
-        if "no suitable device" in msg.lower() and time.monotonic() + 5 < end:
-            time.sleep(5)
-            continue
-        logger.warning("nmcli connection up %s: %s", connection, msg)
-        return False
+        permanent = any(p in msg.lower() for p in _CELLULAR_PERMANENT)
+        retry = not permanent and time.monotonic() + 10 < end
+        # the modem not showing up yet is expected for 20-40 s after USB power-on
+        log = logger.info if retry and "no suitable device" in msg.lower() else logger.warning
+        log("nmcli connection up %s (attempt %d, %.0f s): %s; modem: %s%s",
+                       connection, attempt, time.monotonic() - start, msg or f"exit {r.returncode}",
+                       _modem_state() or "unknown", "; retrying" if retry else "")
+        if not retry:
+            return False
+        time.sleep(5)
 
 
 def cellular_down(connection: str) -> None:
