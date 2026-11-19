@@ -171,8 +171,9 @@ then shows two boots for that wake.
 - `~/powerlog/powerlog.csv`: one line a minute (Vin, Vout, Iout, get_throttled,
   RTC time), with a `#` line per boot giving its reason.
 - The throttle log (boot/shutdown `get_throttled` lines, on the bench units).
-- The journal is in RAM (`Storage=volatile`) and gone after a power cut: use
-  the two files above for history.
+- The journal (on the card by default: `journalctl -b -1` for the previous
+  wake). On a unit set to keep it in RAM it is gone after a power cut: use the
+  two files above for history.
 - The alarm and configuration registers, read-only:
 
 ```bash

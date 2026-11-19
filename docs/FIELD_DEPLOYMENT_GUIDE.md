@@ -926,28 +926,25 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now powerlog.service
 ```
 
-Keep the systemd journal in RAM to spare the microSD card. Logs then last
-until the next shutdown or power cut; the power log above is the record that
-survives one.
+Keep the systemd journal on the microSD card, so a wake that went wrong can be
+read back on the unit (`journalctl -b -1`) after it has shut down. This is the
+default for every unit: `tools/install_system.py --apply` installs
+`config/journald-persistent.conf` as `zz-watercam-journal.conf` and removes the
+older RAM-only drop-in. It keeps up to 90 days, costs about 100-150 MB of card
+writes a day on an hourly schedule, and sets `SystemMaxFiles=1000`, because
+journald's default of 100 files holds only about 3 days on a node. By hand:
 
 ```bash
 sudo mkdir -p /etc/systemd/journald.conf.d
-sudo cp config/journald-volatile.conf /etc/systemd/journald.conf.d/
-sudo systemctl restart systemd-journald
-```
-
-To look into past wakes on the unit itself, keep the journal on the card
-instead, for 30 days or more, with `config/journald-persistent.conf`. It costs
-about 100-150 MB of card writes a day on an hourly schedule. Install it as
-`zz-watercam-journal.conf` so it overrides the default and any older drop-ins.
-It sets `SystemMaxFiles=1000`, because journald's default of 100 files holds
-only about 3 days on a node.
-
-```bash
 sudo cp config/journald-persistent.conf /etc/systemd/journald.conf.d/zz-watercam-journal.conf
 sudo rm -f /etc/systemd/journald.conf.d/journald-volatile.conf
 sudo systemctl restart systemd-journald
 ```
+
+Only where card wear matters more than the history, keep it in RAM instead
+(`install_system.py --volatile-journal`, or `config/journald-volatile.conf` by
+hand). Logs then last until the next shutdown or power cut; the power log above
+is the record that survives one.
 
 The LoRa handler's `DEBUG:` lines (every AT command, payload hex) and the
 per-poll GPS lines are off by default. Turn them on for a test or problem unit

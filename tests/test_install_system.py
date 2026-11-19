@@ -215,3 +215,27 @@ def test_firewall_stopped_by_a_rollback_is_loaded_again(root):
     run2.inactive = {"watercam-firewall.service"}
     act = by_target(plan(run2), "watercam-firewall.service")[0]
     assert act.pending and "load the input firewall" in act.detail
+
+
+def test_journal_switched_from_ram_to_the_card_by_default(root):
+    jd = root / "etc/systemd/journald.conf.d"
+    (jd / "zz-watercam-journal.conf").unlink()
+    (jd / "journald-volatile.conf").write_text("[Journal]\nStorage=volatile\n")
+    run = FakeRunner(enabled={"ticktalk.service"})
+    inst = plan(run)
+    assert by_target(inst, f"{ins.JOURNALD_DIR}/zz-watercam-journal.conf")[0].pending
+    assert by_target(inst, f"{ins.JOURNALD_DIR}/journald-volatile.conf")[0].kind == "remove"
+    assert inst.apply()
+    assert "Storage=persistent" in (jd / "zz-watercam-journal.conf").read_text()
+    assert not (jd / "journald-volatile.conf").exists()
+    assert (root / "var/backups/watercam/T/etc/systemd/journald.conf.d/journald-volatile.conf").exists()
+    assert ["systemctl", "restart", "systemd-journald"] in run.calls
+
+
+def test_volatile_journal_on_request(root):
+    jd = root / "etc/systemd/journald.conf.d"
+    inst = plan(FakeRunner(enabled={"ticktalk.service"}), volatile_journal=True)
+    assert by_target(inst, f"{ins.JOURNALD_DIR}/zz-watercam-journal.conf")[0].kind == "remove"
+    assert inst.apply()
+    assert "Storage=volatile" in (jd / "journald-volatile.conf").read_text()
+    assert not (jd / "zz-watercam-journal.conf").exists()

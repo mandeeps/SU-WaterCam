@@ -133,7 +133,7 @@ MANIFEST: List[Item] = [
     Item("config/wittypi/beforeScript.sh", f"{WITTYPI}/beforeScript.sh", mode=0o755, owner="pi"),
 ]
 
-#: The journal drop-in: whichever of the two the unit has is kept current (guide 1.9).
+#: The journal drop-in: on the card by default, in RAM with --volatile-journal (guide 1.9).
 JOURNALD_DIR = "/etc/systemd/journald.conf.d"
 JOURNALD_CHOICES = {
     "persistent": ("config/journald-persistent.conf", f"{JOURNALD_DIR}/zz-watercam-journal.conf"),
@@ -206,12 +206,14 @@ class Runner:
 
 class Installer:
     def __init__(self, repo: Optional[str] = None, run: Optional[Runner] = None, backup_stamp: Optional[str] = None,
-                 allow_max_awake: bool = False, restart: bool = True):
+                 allow_max_awake: bool = False, restart: bool = True,
+                 volatile_journal: bool = False):
         self.repo = repo or REPO
         self.run = run or Runner()
         self.stamp = backup_stamp or datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         self.allow_max_awake = allow_max_awake
         self.restart = restart
+        self.volatile_journal = volatile_journal
         self.actions: List[Action] = []
         self.release_changed = False
 
@@ -325,23 +327,27 @@ class Installer:
         self.copy(src, dest, item.mode, item.owner)
 
     def plan_journald(self) -> None:
-        present = {k: os.path.exists(node_path(d)) for k, (_, d) in JOURNALD_CHOICES.items()}
-        chosen = [k for k, p in present.items() if p]
-        if not chosen:
-            self.add("warn", JOURNALD_DIR, "no WaterCam journal drop-in: choose one (guide 1.9; field units "
-                     "keep it on the card: config/journald-persistent.conf as zz-watercam-journal.conf)")
+        """Keep the journal on the card by default (persistent drop-in), so a failed
+        wake can be read back on the unit; RAM only with --volatile-journal."""
+        want = "volatile" if self.volatile_journal else "persistent"
+        other = "persistent" if want == "volatile" else "volatile"
+        s, d = JOURNALD_CHOICES[want]
+        diff = self.file_state(self.src(s), node_path(d), 0o644, "root")
+        if diff:
+            self.add("install", d, f"{diff}: install {s} (journal {'in RAM' if want == 'volatile' else 'on the card'})",
+                     run=lambda s=s, d=d: self.copy(self.src(s), node_path(d), 0o644, "root"),
+                     tags=("journald",))
+        else:
+            self.add("install", d, "current")
+        od = node_path(JOURNALD_CHOICES[other][1])
+        if os.path.lexists(od):
+            def remove(od=od):
+                self.backup(od)
+                os.remove(od)
+            self.add("remove", JOURNALD_CHOICES[other][1], f"switch the journal to {want}", run=remove,
+                     tags=("journald",))
+        if not os.path.isdir(node_path(JOURNALD_DIR)):
             return
-        if len(chosen) == 2:
-            self.add("warn", JOURNALD_DIR, "both persistent and volatile drop-ins present; remove one (guide 1.9)")
-        for k in chosen:
-            s, d = JOURNALD_CHOICES[k]
-            diff = self.file_state(self.src(s), node_path(d), 0o644, "root")
-            if diff:
-                self.add("install", d, f"{diff}: install {s}",
-                         run=lambda s=s, d=d: self.copy(self.src(s), node_path(d), 0o644, "root"),
-                         tags=("journald",))
-            else:
-                self.add("install", d, "current")
         others = sorted(set(os.listdir(node_path(JOURNALD_DIR))) -
                         {os.path.basename(d) for _, d in JOURNALD_CHOICES.values()})
         if others:
@@ -633,6 +639,8 @@ def main(argv=None, run: Optional[Runner] = None) -> int:
     p.add_argument("--allow-cellular", action="store_true", help="allow downloads over cellular")
     p.add_argument("--allow-max-awake", action="store_true",
                    help="enable max-awake.timer even on a unit held up with ticktalk disabled")
+    p.add_argument("--volatile-journal", action="store_true",
+                   help="keep the journal in RAM (lost at each shutdown) instead of on the card")
     p.add_argument("--no-restart", action="store_true", help="don't restart lora_daemon/segformer_daemon")
     p.add_argument("--json", action="store_true", help="print the actions as JSON")
     p.add_argument("--_after-release", dest="after_release", help=argparse.SUPPRESS)
@@ -661,7 +669,8 @@ def main(argv=None, run: Optional[Runner] = None) -> int:
             print(report(pre, False)) if not a.json else None
             return subprocess.call([sys.executable, script] + rest)
 
-    inst = Installer(run=run, allow_max_awake=a.allow_max_awake, restart=not a.no_restart)
+    inst = Installer(run=run, allow_max_awake=a.allow_max_awake, restart=not a.no_restart,
+                     volatile_journal=a.volatile_journal)
     inst.release_changed = bool(a.after_release)
     inst.actions.extend(pre)
     inst.plan()
