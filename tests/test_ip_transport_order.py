@@ -650,6 +650,7 @@ class TestWaitTailnet:
         tx = IPTransmitter(override_url="http://server.example.ts.net:8000")
         with patch("tools.transmit_ip.subprocess.run",
                    side_effect=[_proc(out=nostate)] * 3 + [_proc(out=running)]) as run, \
+             patch("tools.transmit_ip.trusted_server", return_value=True), \
              patch("tools.transmit_ip.time.sleep"):
             assert tx.wait_tailnet(30) is True
         assert run.call_count == 4
@@ -657,9 +658,29 @@ class TestWaitTailnet:
     def test_wait_tailnet_waits_until_online(self):
         tx = IPTransmitter(override_url="http://server.example.ts.net:8000")
         with patch("tools.transmit_ip.tailscale_online", side_effect=[False, False, True]) as online, \
+             patch("tools.transmit_ip.trusted_server", return_value=True), \
              patch("tools.transmit_ip.time.sleep"):
             assert tx.wait_tailnet(30) is True
         assert online.call_count == 3
+
+    def test_wait_tailnet_waits_for_the_name_to_resolve(self):
+        # Running, but MagicDNS doesn't answer for the server yet: trusted_server()
+        # would refuse the POST, so keep waiting (011, 2026-11-18)
+        tx = IPTransmitter(override_url="http://server.example.ts.net:8000")
+        with patch("tools.transmit_ip.tailscale_online", return_value=True), \
+             patch("tools.transmit_ip.trusted_server", side_effect=[False, False, True]) as trusted, \
+             patch("tools.transmit_ip.time.sleep"):
+            assert tx.wait_tailnet(30) is True
+        assert trusted.call_count == 3
+
+    def test_wait_tailnet_gives_up_if_the_name_never_resolves(self):
+        tx = IPTransmitter(override_url="http://server.example.ts.net:8000")
+        clock = itertools.count(0, 20)
+        with patch("tools.transmit_ip.tailscale_online", return_value=True), \
+             patch("tools.transmit_ip.trusted_server", return_value=False), \
+             patch("tools.transmit_ip.time.sleep"), \
+             patch("tools.transmit_ip.time.monotonic", side_effect=lambda: next(clock)):
+            assert tx.wait_tailnet(30) is False
 
     def test_wait_tailnet_gives_up(self):
         tx = IPTransmitter(override_url="http://server.example.ts.net:8000")

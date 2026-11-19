@@ -538,11 +538,15 @@ class IPTransmitter:
         end = time.monotonic() + deadline_s
         while True:
             online = tailscale_online(host)
-            if online is None or online:
+            # Running is not enough: MagicDNS answers for the server's name a moment
+            # later, and until then trusted_server() refuses the upload (on 011,
+            # 2026-11-18, the name didn't resolve into the tailnet just after Running).
+            # Both checks are local: nothing is sent over the new link.
+            if online is None or (online and trusted_server(self.server_url)):
                 return True
             if time.monotonic() >= end:
                 return False
-            time.sleep(2)
+            time.sleep(1 if online else 2)
 
     def server_only_down(self) -> bool:
         """True when WiFi is connected and Tailscale shows the server's peer online
