@@ -617,6 +617,29 @@ class LoRaHandler:
         except Exception:
             return False
 
+    #: Read-only mDot settings for tools/readiness_check.py. Never a set or reset
+    #: (no ATZ: the 4.1.5-wc2610 sw3-sw7 builds reset-loop after a software reset).
+    MDOT_INFO_QUERIES = (("ati", b'ATI\r\n'), ("wdog", b'AT+WDOG?\r\n'), ("silence", b'AT+SILENCE?\r\n'),
+                         ("cproc", b'AT+CPROC?\r\n'), ("fsb", b'AT+FSB?\r\n'), ("njs", b'AT+NJS?\r\n'))
+
+    def mdot_info(self) -> Dict[str, Any]:
+        """Answer each MDOT_INFO_QUERIES query: {name: reply text or None, "error": ...}; never raises.
+
+        The reply is the lines between the command's echo and OK ("ERROR" when the
+        firmware doesn't know the command, e.g. AT+WDOG before the watchdog builds).
+        """
+        out: Dict[str, Any] = {"error": None}
+        for name, cmd in self.MDOT_INFO_QUERIES:
+            try:
+                lines = self._at_query(cmd, 3.0, lambda l: l == 'OK' or 'ERROR' in l)
+            except Exception as e:  # noqa: BLE001
+                out[name], out["error"] = None, str(e)
+                continue
+            echo = cmd.decode().strip()
+            body = [l for l in lines if l != 'OK' and l != echo]
+            out[name] = "\n".join(body) if lines and lines[-1] == 'OK' else ("ERROR" if lines else None)
+        return out
+
     def link_check(self, timeout_s: float = 20.0) -> Dict[str, Any]:
         """Ask the network whether it hears this node (AT+NLC, a LinkCheckReq).
 
@@ -2377,6 +2400,12 @@ class LoRaHandlerClient:
             return dict(self._call("link_check", self._LONG_TIMEOUT_S))
         except Exception as e:
             return {"ok": False, "margin_db": None, "gateways": 0, "error": f"LoRa daemon: {e}"}
+
+    def mdot_info(self) -> Dict[str, Any]:
+        try:
+            return dict(self._call("mdot_info", self._LONG_TIMEOUT_S))
+        except Exception as e:
+            return {"error": f"LoRa daemon: {e}"}
 
     def network_time(self) -> Dict[str, Any]:
         try:

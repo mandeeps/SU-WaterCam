@@ -1126,7 +1126,28 @@ cp /home/pi/SU-WaterCam/config/wittypi/beforeScript.sh /home/pi/wittypi/beforeSc
 
 ### 1.14 Post-install smoke checklist
 
-Run through this on the bench, after the last reboot and before the unit leaves
+**Start with the readiness report**, a few days before the deployment, so anything
+red is decided at the bench, not at the site:
+
+```bash
+cd ~/SU-WaterCam && sudo venv/bin/python tools/readiness_check.py --transport cellular   # or lora / wifi
+```
+
+It reads the unit itself rather than notes about it, and changes nothing. It checks:
+- the release and pickle, and whether the system files match it (`tools/install_system.py`);
+- the services, `runtime_config.json`, and the transport the site will use;
+- the mDot firmware, watchdog and sub-band, read through `lora_daemon` (read-only, never ATZ);
+- the IMU calibration and declination, and the models;
+- the IR-cut filter's last verdict;
+- the schedule, power flags, SIM data, disk space and clock.
+
+Each line is PASS, WARN or FAIL, with what to do. Exit 1 means at least one FAIL.
+Mark a FAIL you have decided to live with as accepted with `--accept <name>` (e.g.
+`--accept mdot_firmware`), and keep the output with the unit's notes. `--json` is for scripts
+and agents. After field_setup's finish step, run it again with `--stage deployed`: then a hold
+flag, a disabled `ticktalk` or a missing schedule fail too.
+
+Then run through this on the bench, after the last reboot and before the unit leaves
 for the site:
 
 - [ ] `pinctrl get 5` shows `op` and `| hi` (mDot units only; not on a handheld with the
@@ -1334,6 +1355,8 @@ Confirm all cable entries are sealed, connections to the solar panel are secure,
 ---
 
 ## Before You Leave: Remote Verification
+
+- **Readiness**: `sudo venv/bin/python tools/readiness_check.py --stage deployed --transport <site's>` has no FAIL.
 
 - **Dashboard**: check for regular incoming readings at the expected
   `monitoring_frequency` cadence.
