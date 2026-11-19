@@ -452,6 +452,22 @@ def check_power(ctx: Context) -> List[Check]:
     return out
 
 
+def check_journal(ctx: Context) -> List[Check]:
+    """The journal must be on the card, or a failed field wake can't be read back."""
+    r = ctx.run(["systemd-analyze", "cat-config", "systemd/journald.conf"])
+    storage = "auto"
+    for line in (r.stdout or "").splitlines():
+        line = line.strip()
+        if line.startswith("Storage="):
+            storage = line.split("=", 1)[1].strip()   # the last one read wins
+    on_card = storage == "persistent" or (storage == "auto" and os.path.isdir("/var/log/journal"))
+    if on_card:
+        return [Check("journal", "pass", f"on the card (Storage={storage})")]
+    return [Check("journal", "fail" if ctx.deployed else "warn",
+                  f"in RAM (Storage={storage}): lost at each shutdown, so a failed wake can't be read back",
+                  "sudo python3 tools/install_system.py --apply (installs journald-persistent.conf)")]
+
+
 def check_disk_and_clock(ctx: Context) -> List[Check]:
     out = []
     du = shutil.disk_usage(ctx.repo)
@@ -472,7 +488,7 @@ def check_disk_and_clock(ctx: Context) -> List[Check]:
 
 CHECKS = [check_release, check_system_files, check_services, check_deployment_switches, check_config,
           check_transport, check_mdot, check_imu, check_camera_and_models, check_nir, check_schedule,
-          check_power, check_disk_and_clock]
+          check_power, check_journal, check_disk_and_clock]
 
 
 def run_checks(ctx: Context, accept=()) -> List[Check]:

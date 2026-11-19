@@ -14,8 +14,9 @@ ATI = "MultiTech mDot\nFirmware: 4.1.5-wc2610-sw9\nLibrary: 4.1.33"
 
 class FakeRunner:
     def __init__(self, enabled=(), active=("lora_daemon.service", "segformer_daemon.service"),
-                 quectel="no\niot.1nce.net", throttled="0x0"):
+                 quectel="no\niot.1nce.net", throttled="0x0", storage="persistent"):
         self.enabled, self.active, self.quectel, self.throttled = set(enabled), set(active), quectel, throttled
+        self.storage = storage
         self.calls = []
 
     def __call__(self, argv, timeout=30):
@@ -29,6 +30,8 @@ class FakeRunner:
             out, rc_ = (self.quectel, 0) if self.quectel is not None else ("", 10)
         elif argv[0] == "nmcli":
             out = "site:802-11-wireless\nQuectel:gsm"
+        elif argv[0] == "systemd-analyze":
+            out = f"[Journal]\nStorage=volatile\n# zz\n[Journal]\nStorage={self.storage}\n"
         elif argv[0] == "vcgencmd":
             out = f"throttled={self.throttled}"
         return subprocess.CompletedProcess(argv, rc_, out, "")
@@ -214,3 +217,9 @@ def test_mdot_info_reads_without_setting():
     assert all(c.endswith(b"?\r\n") or c == b"ATI\r\n" for c in sent)
     assert b"ATZ\r\n" not in sent
     assert lora_daemon.ACTIONS["mdot_info"] is lora_daemon._do_mdot_info
+
+
+def test_journal_in_ram_warns_on_the_bench_and_fails_deployed(unit):
+    assert by_name(rc.run_checks(make(unit)), "journal").status == "pass"
+    assert by_name(rc.run_checks(make(unit, storage="volatile")), "journal").status == "warn"
+    assert by_name(rc.run_checks(make(unit, stage="deployed", storage="volatile")), "journal").status == "fail"
