@@ -637,7 +637,12 @@ class LoRaHandler:
                 continue
             echo = cmd.decode().strip()
             body = [l for l in lines if l != 'OK' and l != echo]
-            out[name] = "\n".join(body) if lines and lines[-1] == 'OK' else ("ERROR" if lines else None)
+            if lines and lines[-1] == 'OK':
+                out[name] = "\n".join(body)
+            elif any('ERROR' in l for l in lines):
+                out[name] = "ERROR"          # the firmware doesn't know the command
+            else:
+                out[name] = None             # timed out, or cut off before OK: no answer
         return out
 
     def link_check(self, timeout_s: float = 20.0) -> Dict[str, Any]:

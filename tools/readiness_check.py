@@ -51,10 +51,14 @@ REPO = os.environ.get("WATERCAM_REPO", "/home/pi/SU-WaterCam")
 #: Prefix for absolute node paths outside the repo; tests point it at a temporary directory.
 ROOT = os.environ.get("WATERCAM_READINESS_ROOT", "/")
 WITTYPI = "/home/pi/wittypi"
-HOLD_FLAG = "/etc/watercam/hold-awake"
+try:
+    from tools.field_setup_steps import HOLD_FLAG          # one definition with field_setup
+except Exception:  # noqa: BLE001 - an older release: the same path
+    HOLD_FLAG = "/etc/watercam/hold-awake"
 MODEL_RGB = "/home/pi/segformer_type_pool/type_pool_b0_dyn_meta.onnx"
 #: mDot builds with the 20 s reset loop after any software reset (mDot-AT-firmware #30).
 MDOT_BANNED = re.compile(r"-wc\d+-sw[3-7]\b")
+NIR_MAX_AGE_DAYS = 14       # an older "ok" doesn't show the filter still moves
 SIM_BYTES = 500e6           # 1NCE one-time SIM (docs/CELLULAR_DATA.md)
 STAGES = ("bench", "deployed")
 TRANSPORTS = ("auto", "lora", "cellular", "wifi")
@@ -96,6 +100,7 @@ class Context:
         self.run = run or Runner()
         self.repo = repo or REPO
         self._daemon = daemon
+        self._mdot: Optional[Dict[str, Any]] = None
         self.config = load_json(os.path.join(self.repo, "runtime_config.json")) or {}
 
     @property
@@ -109,11 +114,23 @@ class Context:
         return (self.run(["systemctl", "is-active", unit]).stdout or "").strip() or "unknown"
 
     def daemon(self, action: str) -> Any:
-        """One read-only lora_daemon request (mdot_info, is_joined); raises if it fails."""
+        """One read-only lora_daemon request; only mdot_info is used (it includes AT+NJS?)."""
         if self._daemon:
             return self._daemon(action)
         from tools.lora_handler_concurrent import LoRaHandlerClient
-        return LoRaHandlerClient()._call(action, 30)
+        if action != "mdot_info":
+            raise ValueError(action)
+        return LoRaHandlerClient().mdot_info()      # never raises: {"error": ...} on failure
+
+    def mdot(self) -> Dict[str, Any]:
+        """The mDot's answers, read once per report (the serial port is shared with the app)."""
+        if self._mdot is None:
+            try:
+                info = self.daemon("mdot_info")
+            except Exception as e:  # noqa: BLE001
+                info = {"error": str(e)}
+            self._mdot = info if isinstance(info, dict) else {"error": "no answer"}
+        return self._mdot
 
     def ip(self, key: str, default=None):
         sec = self.config.get("ip_upload")
@@ -171,12 +188,15 @@ def check_system_files(ctx: Context) -> List[Check]:
         return [Check("system files", "warn", f"could not compare: {e}", "run with sudo")]
     pending = [a.target for a in inst.actions if a.pending]
     unreadable = [a.target for a in inst.actions if "unreadable" in a.detail]
+    warns = [Check("system files: " + os.path.basename(a.target.rstrip("/")) if "/" in a.target else
+                   "system files: " + a.target, "warn", a.detail, "see tools/install_system.py")
+             for a in inst.actions if a.kind == "warn"]
     if not pending:
-        return [Check("system files", "pass", "all match the release")]
+        return [Check("system files", "pass", "all match the release")] + warns
     status = "warn" if unreadable and len(unreadable) == len(pending) else "fail"
     return [Check("system files", status, f"{len(pending)} differ: " + ", ".join(os.path.basename(p) for p in pending[:6])
                   + (" ..." if len(pending) > 6 else ""),
-                  "tools/install_system.py (dry run), then sudo tools/install_system.py --apply")]
+                  "tools/install_system.py (dry run), then sudo tools/install_system.py --apply")] + warns
 
 
 def check_services(ctx: Context) -> List[Check]:
@@ -285,26 +305,29 @@ def check_transport(ctx: Context) -> List[Check]:
         out.append(Check("WiFi profiles", "info", f"{len(wifi)} saved; a hotspot with the same SSID as a saved profile "
                          "but different security won't join"))
     if t == "lora" or t == "auto":
-        try:
-            joined = bool(ctx.daemon("is_joined"))
-        except Exception:  # noqa: BLE001
-            joined = None
-        out.append(Check("LoRa session", "pass" if joined else ("fail" if t == "lora" else "info"),
-                         "joined" if joined else "not joined (saved session absent)",
-                         "join near a gateway before it leaves" if t == "lora" and not joined else ""))
+        info = ctx.mdot() if ctx.unit_active("lora_daemon.service") == "active" else {"error": "lora_daemon not running"}
+        njs = (info.get("njs") or "").strip()
+        if njs in ("0", "1"):
+            joined = njs == "1"
+            out.append(Check("LoRa session", "pass" if joined else ("fail" if t == "lora" else "info"),
+                             "joined (saved session)" if joined else "not joined (no saved session)",
+                             "join near a gateway before it leaves" if t == "lora" and not joined else ""))
+        else:
+            # can't tell: say why, rather than "not joined" (the fix is different)
+            out.append(Check("LoRa session", "fail" if t == "lora" else "info",
+                             f"unknown: {info.get('error') or 'no AT+NJS? answer'}",
+                             "sudo systemctl restart lora_daemon, then re-run" if t == "lora" else ""))
     return out
 
 
 def check_mdot(ctx: Context) -> List[Check]:
     if ctx.unit_active("lora_daemon.service") != "active":
         return [Check("mDot", "warn", "lora_daemon not running: mDot not read", "sudo systemctl start lora_daemon")]
-    try:
-        info = ctx.daemon("mdot_info")
-    except Exception as e:  # noqa: BLE001
-        info = {"error": str(e)}
-    if not info or all(info.get(k) is None for k in ("ati", "wdog")):
-        err = (info or {}).get("error") or "no answer"
-        return [Check("mDot", "warn", f"could not read the mDot: {err}",
+    info = ctx.mdot()
+    if all(info.get(k) is None for k in ("ati", "wdog")):
+        err = info.get("error") or "no answer"
+        # unread firmware could be a reset-loop build: not ready to leave
+        return [Check("mDot", must(ctx), f"could not read the mDot: {err}",
                       "the daemon may predate mdot_info (restart it after updating)")]
     out = []
     ati = info.get("ati") or ""
@@ -317,17 +340,22 @@ def check_mdot(ctx: Context) -> List[Check]:
         out.append(Check("mdot_firmware", "pass" if "-wc" in fw else "warn", fw,
                          "" if "-wc" in fw else "stock firmware: no Pi watchdog or remote start"))
     w = info.get("wdog")
-    if w and w != "ERROR":
-        hours = int(w.split(",")[0]) if w.split(",")[0].isdigit() else None
+    first = (w or "").split(",")[0].strip()
+    if w is None:
+        out.append(Check("mDot watchdog", must(ctx), "no answer to AT+WDOG? (timed out)", "re-run; check the serial link"))
+    elif w == "ERROR":
+        out.append(Check("mDot watchdog", "warn", "AT+WDOG not supported", "firmware without the Pi watchdog"))
+    elif not first.isdigit():
+        out.append(Check("mDot watchdog", must(ctx), f"unreadable reply {w!r}", "read AT+WDOG? by hand"))
+    else:
+        hours = int(first)
         if hours == 0:
             out.append(Check("mDot watchdog", must(ctx), f"off ({w})", "AT+WDOG=20 with lora_daemon stopped"))
-        elif hours is not None and hours < 12:
+        elif hours < 12:
             out.append(Check("mDot watchdog", "warn", f"{hours} h ({w}): a test value; it presses the button "
                              "within a normal overnight gap", "AT+WDOG=20"))
         else:
             out.append(Check("mDot watchdog", "pass", f"{hours} h (hours, hours without Pi power, presses: {w})"))
-    else:
-        out.append(Check("mDot watchdog", "warn", "AT+WDOG not supported", "firmware without the Pi watchdog"))
     s = info.get("silence")
     if s and s != "ERROR":
         out.append(Check("mDot silence restart", "pass" if not s.startswith("0") else "warn", s))
@@ -404,6 +432,7 @@ def latest_capture_status(repo: str) -> Optional[Dict[str, Any]]:
         data = load_json(f)
         if isinstance(data, dict) and data.get("nir_filter"):
             data["_when"] = datetime.datetime.fromtimestamp(os.path.getmtime(f)).strftime("%Y-%m-%d %H:%M")
+            data["_age_days"] = (time.time() - os.path.getmtime(f)) / 86400
             return data
     return None
 
@@ -414,8 +443,13 @@ def check_nir(ctx: Context) -> List[Check]:
         return [Check("IR-cut filter", "warn", "no lit capture has judged it yet",
                       "take a daylight capture and look at capture_status.json")]
     ok = st["nir_filter"] == "ok"
-    return [Check("IR-cut filter", "pass" if ok else "fail", f"{st['nir_filter']} (capture {st['_when']})",
-                  "" if ok else "filter not moving: NIR band empty, flood flags off (docs/KNOWN_ISSUES.md)")]
+    if not ok:
+        return [Check("IR-cut filter", "fail", f"{st['nir_filter']} (capture {st['_when']})",
+                      "filter not moving: NIR band empty, flood flags off (docs/KNOWN_ISSUES.md)")]
+    if st["_age_days"] > NIR_MAX_AGE_DAYS:
+        return [Check("IR-cut filter", "warn", f"ok, but the last judged capture is {st['_age_days']:.0f} days old "
+                      f"({st['_when']})", "take a daylight capture and re-run")]
+    return [Check("IR-cut filter", "pass", f"ok (capture {st['_when']})")]
 
 
 def check_schedule(ctx: Context) -> List[Check]:
@@ -497,12 +531,14 @@ def run_checks(ctx: Context, accept=()) -> List[Check]:
         try:
             out.extend(fn(ctx))
         except Exception as e:  # noqa: BLE001 - one broken check must not hide the rest
-            out.append(Check(fn.__name__.replace("check_", ""), "warn", f"check failed: {e}"))
+            # a check that didn't run hasn't shown the unit is ready
+            out.append(Check(fn.__name__.replace("check_", ""), must(ctx), f"check failed to run: {e}",
+                             "report it; check this by hand"))
     for c in out:
         if c.status == "pass":
             c.fix = ""
         if c.name in accept and c.status in ("fail", "warn"):
-            c.status, c.detail = "info", f"ACCEPTED: {c.detail}"
+            c.status, c.detail, c.fix = "info", f"ACCEPTED: {c.detail}", ""
     return out
 
 
@@ -531,6 +567,11 @@ def main(argv=None, ctx: Optional[Context] = None) -> int:
     a = p.parse_args(argv)
     ctx = ctx or Context(stage=a.stage, transport=a.transport, offline=a.offline)
     checks = run_checks(ctx, accept=set(a.accept))
+    unknown = sorted(set(a.accept) - {c.name for c in checks})
+    if unknown:
+        print(f"--accept: no check named {', '.join(unknown)}. Names: "
+              + ", ".join(sorted({c.name for c in checks})), file=sys.stderr)
+        return 2
     if a.json:
         print(json.dumps({"stage": a.stage, "transport": a.transport, "host": os.uname().nodename,
                           "checks": [asdict(c) for c in checks]}, indent=1))

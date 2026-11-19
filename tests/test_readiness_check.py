@@ -1,7 +1,9 @@
 """tools/readiness_check.py: the read-only deployment readiness report, on a fake unit."""
 import json
+import time
 import os
 import subprocess
+import sys
 
 import pytest
 
@@ -223,3 +225,91 @@ def test_journal_in_ram_warns_on_the_bench_and_fails_deployed(unit):
     assert by_name(rc.run_checks(make(unit)), "journal").status == "pass"
     assert by_name(rc.run_checks(make(unit, storage="volatile")), "journal").status == "warn"
     assert by_name(rc.run_checks(make(unit, stage="deployed", storage="volatile")), "journal").status == "fail"
+
+
+def test_a_broken_check_fails_at_the_deployed_stage(unit, monkeypatch):
+    def boom(ctx):
+        raise ValueError("bad")
+    monkeypatch.setattr(rc, "CHECKS", [boom])
+    assert rc.run_checks(make(unit, stage="deployed"))[0].status == "fail"
+
+
+def test_unreadable_mdot_fails_at_the_deployed_stage(unit):
+    ctx = make(unit, stage="deployed", mdot={"error": "LoRa daemon: timed out"})
+    c = by_name(rc.run_checks(ctx), "mDot")
+    assert c.status == "fail" and "timed out" in c.detail
+
+
+@pytest.mark.parametrize("wdog,status,text", [(None, "warn", "timed out"), ("ERROR", "warn", "not supported"),
+                                              ("garbage", "warn", "unreadable")])
+def test_watchdog_replies(unit, wdog, status, text):
+    info = {"ati": ATI, "wdog": wdog, "silence": "60", "fsb": "1", "njs": "1", "error": None}
+    c = by_name(rc.run_checks(make(unit, mdot=info)), "mDot watchdog")
+    assert c.status == status and text in c.detail
+
+
+def test_daemon_error_is_not_reported_as_not_joined(unit):
+    ctx = make(unit, transport="lora", mdot={"error": "LoRa daemon: connection refused"})
+    c = by_name(rc.run_checks(ctx), "LoRa session")
+    assert "unknown" in c.detail and "refused" in c.detail and "not joined" not in c.detail
+
+
+def test_joined_read_from_njs(unit):
+    info = {"ati": ATI, "wdog": "20,0,0", "njs": "0", "error": None}
+    assert "not joined" in by_name(rc.run_checks(make(unit, transport="lora", mdot=info)), "LoRa session").detail
+
+
+def test_install_warnings_are_shown(unit, monkeypatch):
+    # tools/install_system.py comes with its own PR: stand in for it
+    import types
+    from dataclasses import dataclass
+
+    @dataclass
+    class Action:
+        kind: str
+        target: str
+        detail: str
+        pending: bool = False
+
+    class Fake:
+        def __init__(self, **kw):
+            self.actions = [Action("warn", "max-awake.timer", "not enabled: held")]
+
+        def plan(self):
+            pass
+    mod = types.ModuleType("tools.install_system")
+    mod.Installer = Fake
+    monkeypatch.setitem(sys.modules, "tools.install_system", mod)
+    import tools
+    monkeypatch.setattr(tools, "install_system", mod, raising=False)
+    checks = rc.check_system_files(make(unit))
+    assert checks[0].status == "pass" and any("held" in c.detail and c.status == "warn" for c in checks)
+
+
+def test_unknown_accept_name_is_an_error(unit, capsys):
+    assert rc.main(["--accept", "mdot_firmwear"], ctx=make(unit)) == 2
+    assert "no check named mdot_firmwear" in capsys.readouterr().err
+
+
+def test_accepted_check_has_no_fix_line(unit):
+    info = {"ati": "Firmware: 4.1.5-wc2610-sw7", "wdog": "20,0,0", "njs": "1", "error": None}
+    c = by_name(rc.run_checks(make(unit, mdot=info), accept={"mdot_firmware"}), "mdot_firmware")
+    assert c.status == "info" and c.fix == ""
+
+
+def test_old_nir_verdict_warns(unit):
+    repo, _ = unit
+    f = repo / "images/20261118-120000/capture_status.json"
+    old = time.time() - 40 * 86400
+    os.utime(f, (old, old))
+    assert by_name(rc.run_checks(make(unit)), "IR-cut filter").status == "warn"
+
+
+def test_mdot_info_timeout_and_partial_replies_are_no_answer():
+    replies = {b"ATI\r\n": ["ATI", "MultiTech mDot"],          # cut off before OK
+               b"AT+WDOG?\r\n": [],                              # timed out
+               b"AT+SILENCE?\r\n": ["AT+SILENCE?", "ERROR"]}     # unknown command
+    h = LoRaHandler.__new__(LoRaHandler)
+    h._at_query = lambda cmd, timeout, done: replies.get(cmd, [cmd.decode().strip(), "1", "OK"])
+    info = h.mdot_info()
+    assert info["ati"] is None and info["wdog"] is None and info["silence"] == "ERROR" and info["fsb"] == "1"
