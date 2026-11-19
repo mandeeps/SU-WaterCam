@@ -548,12 +548,24 @@ def _proc(rc=0, out=""):
     return MagicMock(returncode=rc, stdout=out, stderr="")
 
 
+def test_modem_state_summary():
+    out = ("  General  |  state: \x1b[32mregistered\x1b[0m\n"
+           "           |  failed reason: --\n  Status   |  access tech: lte\n"
+           "           |  signal quality: 41% (recent)\n  power state: on\n")
+    with patch("tools.transmit_ip.subprocess.run", return_value=_proc(out=out)):
+        assert transmit_ip._modem_state() == (
+            "state registered, failed reason --, access tech lte, signal quality 41% (recent)")
+    with patch("tools.transmit_ip.subprocess.run", side_effect=FileNotFoundError("mmcli")):
+        assert transmit_ip._modem_state() == ""
+
+
 class TestNmcli:
     @pytest.fixture(autouse=True)
     def usb_already_on(self):
         # these tests patch the shared subprocess module, so tools.usb_power
         # would think it had just powered the modem and wait for it
-        with patch("tools.usb_power.usb_power_on", return_value=False):
+        with patch("tools.usb_power.usb_power_on", return_value=False), \
+             patch("tools.transmit_ip._modem_state", return_value="state searching"):
             yield
 
     def test_up_runs_nmcli_with_wait(self):
@@ -562,8 +574,46 @@ class TestNmcli:
         assert run.call_args[0][0] == ["nmcli", "--wait", "60", "connection", "up", "Quectel"]
 
     def test_up_failure_returns_false(self):
-        with patch("tools.transmit_ip.subprocess.run", return_value=_proc(4)):
+        # out of time: no retry
+        clock = itertools.count(0, 100)
+        with patch("tools.transmit_ip.time.monotonic", side_effect=lambda: next(clock)), \
+             patch("tools.transmit_ip.subprocess.run", return_value=_proc(4)) as run:
             assert transmit_ip.cellular_up("Quectel") is False
+        assert run.call_count == 1
+
+    def test_up_retries_until_the_modem_registers(self):
+        # The modem is there but not registered yet: activation fails, then works
+        unreg = MagicMock(returncode=4, stdout="", stderr=(
+            "Error: Connection activation failed: The device could not be readied for configuration"))
+        with patch("tools.transmit_ip.time.sleep"), \
+             patch("tools.transmit_ip.subprocess.run", side_effect=[unreg, unreg, _proc()]) as run:
+            assert transmit_ip.cellular_up("Quectel", 90) is True
+        assert run.call_count == 3
+
+    def test_up_logs_the_modem_state_on_failure(self, caplog):
+        unreg = MagicMock(returncode=4, stdout="", stderr="Error: Connection activation failed")
+        with patch("tools.transmit_ip.time.sleep"), \
+             patch("tools.transmit_ip.subprocess.run", side_effect=[unreg, _proc()]):
+            assert transmit_ip.cellular_up("Quectel", 90) is True
+        assert "state searching" in caplog.text and "retrying" in caplog.text
+
+    def test_up_gives_up_on_registration_at_the_deadline(self):
+        unreg = MagicMock(returncode=4, stdout="", stderr="Error: Connection activation failed")
+        clock = itertools.count(0, 20)
+        with patch("tools.transmit_ip.time.sleep"), \
+             patch("tools.transmit_ip.time.monotonic", side_effect=lambda: next(clock)), \
+             patch("tools.transmit_ip.subprocess.run", return_value=unreg) as run:
+            assert transmit_ip.cellular_up("Quectel", 90) is False
+        assert 1 < run.call_count < 10
+
+    def test_up_does_not_retry_a_missing_connection(self):
+        gone = MagicMock(returncode=10, stdout="", stderr="Error: unknown connection 'Quectel'.")
+        with patch("tools.transmit_ip.time.sleep") as sleep, \
+             patch("tools.transmit_ip.subprocess.run", return_value=gone) as run:
+            assert transmit_ip.cellular_up("Quectel", 90) is False
+        assert run.call_count == 1
+        sleep.assert_not_called()
+
 
     def test_up_retries_until_the_modem_appears(self):
         missing = MagicMock(returncode=10, stdout="", stderr="Error: No suitable device found for this connection")
