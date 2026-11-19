@@ -434,8 +434,11 @@ class Installer:
         fw = "watercam-firewall.service"
         fw_files = [a for a in self.actions if "firewall" in a.tags and a.pending]
         state = self.unit_state(fw)
-        if state != "enabled" or fw_files:
-            what = "load the input firewall" if state != "enabled" else "reload the changed firewall"
+        active = (self.run(["systemctl", "is-active", fw], timeout=20).stdout or "").strip()
+        if state != "enabled" or fw_files or active != "active":
+            what = ("load the input firewall" if state != "enabled" or active != "active"
+                    else "reload the changed firewall")
+            state = f"{state}, {active or 'unknown'}"
             self.add("enable", fw, f"{state}: {what}, rollback armed ({FIREWALL_ROLLBACK_DELAY}); keep it with "
                      "--confirm-firewall from a new SSH session", run=self.load_firewall, tags=("firewall_load",))
         else:

@@ -26,6 +26,7 @@ class FakeRunner:
         self.enabled = set(enabled)
         self.doas_ok = doas_ok
         self.route = route
+        self.inactive = set()
 
     def __call__(self, argv, timeout=120):
         self.calls.append(list(argv))
@@ -41,7 +42,7 @@ class FakeRunner:
         elif argv[:2] == ["ip", "route"]:
             out = self.route
         elif argv[:2] == ["systemctl", "is-active"]:
-            out = "active"
+            out = "inactive" if argv[2] in self.inactive else "active"
         return subprocess.CompletedProcess(argv, rc, out, "" if rc == 0 else "syntax error")
 
     def mutating(self):
@@ -205,3 +206,12 @@ def test_release_refused_over_cellular(root, capsys):
     run = FakeRunner(route="default via 10.64.0.1 dev wwan0 proto static")
     assert ins.main(["--release", "v9999.1.0", "--apply"], run=run) in (2,)
     assert not any("fetch" in c for c in run.calls)
+
+
+def test_firewall_stopped_by_a_rollback_is_loaded_again(root):
+    run = FakeRunner(enabled={"ticktalk.service"})
+    plan(run).apply()
+    run2 = FakeRunner(enabled=run.enabled)
+    run2.inactive = {"watercam-firewall.service"}
+    act = by_target(plan(run2), "watercam-firewall.service")[0]
+    assert act.pending and "load the input firewall" in act.detail
