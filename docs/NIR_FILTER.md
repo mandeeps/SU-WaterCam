@@ -38,9 +38,11 @@ capture after boot usually starts with the filter already in (next section).
 The Pi's reset default for GPIO 21 is a pull-down, and it is stronger than the
 camera board's pull-up, so after boot the line reads low. Releasing the pin
 from Python (gpiozero) clears the pull, and the board's pull-up then wins. No
-`config.txt` or kernel command-line setting is involved. Seen on 005 after two
-reboots (2026-11-16 and 2026-11-18); the filter position at boot is inferred
-from the level the camera board sees.
+`config.txt` or kernel command-line setting is involved. Seen on 005 after three
+reboots (2026-11-16 to 2026-11-18). A photo check on 2026-11-19 confirmed the
+filter position: with the pin untouched for 13 h after boot, the frame matched
+one with the pin driven low (mean red 40.0 in both, at locked exposure), and
+driving the pin high raised it to 76.9.
 
 This does not change the frames, because the capture drives the pin before
 each one. It matters when checking a unit by hand:
