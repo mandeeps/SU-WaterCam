@@ -311,3 +311,11 @@ def test_cellular_filter_and_gpsd_reloaded_when_changed(root):
     plan(run).apply()
     assert ["systemctl", "try-restart", "watercam-cellular-filter.service"] in run.calls
     assert ["systemctl", "try-restart", "gpsd.service"] in run.calls
+
+
+def test_file_in_an_unreadable_directory_is_not_missing(root, monkeypatch):
+    real = os.access
+    monkeypatch.setattr(ins.os, "access", lambda p, m: False if p.endswith("rules.d") else real(p, m))
+    (root / "etc/polkit-1/rules.d").mkdir(parents=True)
+    act = by_target(plan(FakeRunner()), "/etc/polkit-1/rules.d/50-watercam-networkmanager.rules")[0]
+    assert "unreadable" in act.detail

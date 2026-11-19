@@ -242,6 +242,9 @@ class Installer:
     def file_state(self, src: str, dest: str, mode: int, owner: str) -> str:
         """'' when current, else what differs."""
         if not os.path.lexists(dest):
+            parent = os.path.dirname(dest)
+            if os.path.isdir(parent) and not os.access(parent, os.R_OK | os.X_OK):
+                return "unreadable here (run with sudo to compare)"   # e.g. /etc/polkit-1/rules.d
             return "missing"
         try:
             same = os.path.isfile(dest) and filecmp.cmp(src, dest, shallow=False)
