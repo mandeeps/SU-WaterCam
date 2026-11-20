@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import subprocess
+import time
 import urllib.error
 from email.message import Message
 from email.utils import formatdate
@@ -182,13 +183,16 @@ def sync(tmp_path):
     d = tmp_path / "wittypi"
     d.mkdir()
     shutil.copy(WITTYPI / "syncTime.sh", d)
+    shutil.copy(WITTYPI / "lora_answer.py", d)
     (d / "utilities.sh").write_text('log() { echo "LOG $*"; }\nsystem_to_rtc() { echo RTC-WRITTEN; }\n')
     bin_ = tmp_path / "bin"
     bin_.mkdir()
     (bin_ / "sudo").write_text(f'#!/bin/sh\necho "SUDO $*" >> {tmp_path}/sudo.log\n')
     (bin_ / "sudo").chmod(0o755)
 
-    def go(net_out="", net_rc=0, prior=None, witty_log=""):
+    answer_path = tmp_path / "lora-answer.json"
+
+    def go(net_out="", net_rc=0, prior=None, witty_log="", lora=None, late_wait=0, modem=False):
         (d / "network_time.py").write_text(
             f"import sys\nprint({net_out!r}, end='')\nprint('API down', file=sys.stderr)\nsys.exit({net_rc})\n")
         (d / "wittyPi.log").write_text(witty_log)
@@ -197,9 +201,20 @@ def sync(tmp_path):
             src.write_text(prior + "\n")
         elif src.exists():
             src.unlink()
+        if lora is None:
+            answer_path.unlink(missing_ok=True)
+        else:   # lora_daemon's file: {"status": ..., "offset": LoRa time minus the clock now}
+            boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+            data = {"boot": boot, "status": lora.get("status", "answer")}
+            if "offset" in lora:
+                data.update(unix=time.time() + lora["offset"], boottime=time.clock_gettime(time.CLOCK_BOOTTIME))
+            answer_path.write_text(json.dumps(data))
         env = {**os.environ, "PATH": f"{bin_}:{os.environ['PATH']}", "SYNC_WAIT_S": "0",
+               "LORA_LATE_WAIT_S": str(late_wait),
                "WATERCAM_TIME_SOURCE": str(src), "WATERCAM_RTC_UNTRUSTED": str(tmp_path / "rtc-untrusted"),
-               "WATERCAM_NET_ERR": str(tmp_path / "net.err")}
+               "WATERCAM_NET_ERR": str(tmp_path / "net.err"), "WATERCAM_LORA_ERR": str(tmp_path / "lora.err"),
+               "WATERCAM_LORA_ANSWER": str(answer_path),
+               "WATERCAM_TIME_SYNC_DONE": str(tmp_path / "time-sync-done")}
         r = subprocess.run(["bash", str(d / "syncTime.sh")], capture_output=True, text=True, env=env, timeout=30)
         sudo_log = tmp_path / "sudo.log"
         out = r.stdout + (sudo_log.read_text() if sudo_log.exists() else "")
@@ -216,10 +231,58 @@ def test_sync_applies_network_time(sync):
     assert "SUDO date -u -s @1794287896.700" in out and "RTC-WRITTEN" in out and source == "network"
 
 
-def test_sync_leaves_lora_and_gps_time_alone(sync):
-    for prior in ("lora", "gps"):
-        out, source = sync(net_out="1794287896.700 api\n", prior=prior)
-        assert "SUDO" not in out and source == prior
+def now_net(offset=0.0, name="api"):
+    return f"{time.time() + offset:.3f} {name}\n"
+
+
+def test_sync_applies_lora_time_first_and_network_time_that_agrees_leaves_it(sync):
+    out, source = sync(net_out=now_net(0.5), lora={"offset": 13.0})
+    assert "Applying LoRa time (the clock was +13.0" in out and out.count("SUDO date") == 1
+    assert "agrees with LoRa time" in out and source == "lora"
+    assert (sync.tmp / "time-sync-done").exists()
+
+
+def test_sync_network_time_replaces_lora_time_that_disagrees(sync):
+    out, source = sync(net_out=now_net(20.0), lora={"offset": 13.0})
+    assert out.count("SUDO date") == 2 and "Applying network time (api)" in out and source == "network"
+
+
+def test_sync_without_network_keeps_lora_time(sync):
+    out, source = sync(net_out="", net_rc=1, lora={"offset": 13.0})
+    assert out.count("SUDO date") == 1 and "Clock set from LoRa time" in out and source == "lora"
+
+
+def test_sync_waits_for_a_late_lora_answer_when_nothing_else_came(sync):
+    import threading
+    def answer_later():
+        time.sleep(1.5)
+        boot = Path("/proc/sys/kernel/random/boot_id").read_text().strip()
+        p = sync.tmp / "lora-answer.json"
+        p.with_suffix(".tmp").write_text(json.dumps({"boot": boot, "status": "answer", "unix": time.time() + 7,
+                                                     "boottime": time.clock_gettime(time.CLOCK_BOOTTIME)}))
+        p.with_suffix(".tmp").replace(p)
+    t = threading.Thread(target=answer_later)
+    t.start()
+    out, source = sync(net_out="", net_rc=1, lora={"status": "asking"}, late_wait=20)
+    t.join()
+    assert "Applying LoRa time (the clock was +7.0" in out and source == "lora"
+
+
+def test_sync_doesnt_wait_when_no_lora_answer_is_coming(sync):
+    start = time.monotonic()
+    out, source = sync(net_out="", net_rc=1, lora={"status": "none"}, late_wait=20)
+    assert time.monotonic() - start < 10 and source is None
+    assert "No LoRa, network or GPS time" in out
+
+
+def test_sync_gives_up_on_a_late_answer_after_the_wait(sync):
+    out, source = sync(net_out="", net_rc=1, lora={"status": "asking"}, late_wait=1)
+    assert "SUDO" not in out and source is None
+
+
+def test_sync_refuses_a_lora_answer_a_week_off_and_uses_network_time(sync):
+    out, source = sync(net_out=now_net(0.2), lora={"offset": 7 * 86400})
+    assert "more than a day" in out and out.count("SUDO date") == 1 and source == "network"
 
 
 def test_sync_without_network_time_changes_nothing(sync):

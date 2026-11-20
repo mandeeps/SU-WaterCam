@@ -52,28 +52,33 @@ def test_helper_failure_reported_not_raised():
 
 
 def _run_check(server_ts=2_000_003_600):
-    with patch("tools.transmit_ip.os.path.exists",
-               side_effect=lambda p: p == transmit_ip.SET_CLOCK or (p == transmit_ip.TIME_SOURCE and _time_source[0])), \
+    with patch("tools.transmit_ip.os.path.exists", side_effect=lambda p: p == transmit_ip.SET_CLOCK), \
+         patch("tools.transmit_ip._time_source", return_value=_time_source[0]), \
          patch("tools.transmit_ip.time.time", return_value=2_000_000_000.0), \
          patch("tools.transmit_ip.subprocess.run", return_value=MagicMock(returncode=0)) as run:
         transmit_ip.correct_clock(_result(server_ts))
     return run.call_count
 
 
-_time_source = [False]
+_time_source = [""]
 
 
 def test_only_once_per_boot(monkeypatch):
-    _time_source[0] = False
+    _time_source[0] = ""
     assert _run_check() == 1
     assert _run_check() == 0                       # same boot: not again
     monkeypatch.setattr(transmit_ip, "_boot_id", lambda: "boot-2")
     assert _run_check() == 1                       # next boot
 
 
-def test_skipped_when_network_or_gps_set_the_time():
-    _time_source[0] = True
+def test_skipped_when_network_or_gps_set_the_time(monkeypatch):
     try:
-        assert _run_check() == 0
+        for i, source in enumerate(("network", "gps", "server")):
+            monkeypatch.setattr(transmit_ip, "_boot_id", lambda i=i: f"boot-{i}")
+            _time_source[0] = source
+            assert _run_check() == 0
+        monkeypatch.setattr(transmit_ip, "_boot_id", lambda: "boot-lora")
+        _time_source[0] = "lora"
+        assert _run_check() == 1                   # a clock from LoRa time is still checked
     finally:
-        _time_source[0] = False
+        _time_source[0] = ""

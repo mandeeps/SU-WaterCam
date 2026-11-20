@@ -136,8 +136,10 @@ then shows two boots for that wake.
 ## 5. Clock
 
 - The RTC wins at boot (`daemon.sh`). Ours then corrects it once a boot:
-  `syncTime.sh` uses network time, then GPS (`/run/watercam-time-source`), and
-  failing both, `transmit_ip.py` asks the server (`watercam-set-clock`).
+  `syncTime.sh` takes LoRa time as soon as `lora_daemon` has it, network time
+  (which replaces LoRa time only when they disagree), then GPS
+  (`/run/watercam-time-source`); later `transmit_ip.py` checks against the
+  server's time (`watercam-set-clock`). Details: [TIME_SYNC.md](TIME_SYNC.md).
 - The RTC keeps local time and schedules count seconds from BEGIN, so wakes
   move an hour across a daylight-saving change.
 - A wrong (non-zero) RTC shifts every wake silently; `utilities.sh` only warns
