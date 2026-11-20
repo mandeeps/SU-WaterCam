@@ -1,31 +1,37 @@
-"""tools/lora_time.py: the clock from LoRa network time (DeviceTimeReq, AT+GPSTIME)."""
+"""tools/lora_time.py and config/wittypi/lora_answer.py: LoRa network time
+(DeviceTimeReq, AT+GPSTIME), asked by lora_daemon and applied by syncTime.sh."""
+import importlib.util
 import json
 import os
 import subprocess
+import time
+from pathlib import Path
 
 import pytest
 
 from tools import gps_window, lora_daemon, lora_time, transmit_ip
 from tools.lora_handler_concurrent import LoRaHandler, gps_ms_to_unix
 
+ROOT = Path(__file__).resolve().parent.parent
+spec = importlib.util.spec_from_file_location("lora_answer", ROOT / "config" / "wittypi" / "lora_answer.py")
+la = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(la)
+
 #: 005's answer at 2026-11-10 05:18:16.388 UTC (measured)
 ANSWER_MS = "1478323114388"
 ANSWER_UNIX = 1794287896.388
+T = 1794287896.0
 
 
 @pytest.fixture
 def lt(tmp_path, monkeypatch):
-    helper = tmp_path / "watercam-set-clock"
-    helper.write_text("#!/bin/sh\n")
-    monkeypatch.setattr(lora_time, "SET_CLOCK", str(helper))
     monkeypatch.setattr(lora_time, "TIME_SOURCE", str(tmp_path / "time-source"))
-    monkeypatch.setattr(lora_time, "RTC_UNTRUSTED", str(tmp_path / "rtc-untrusted"))
-    monkeypatch.setattr(lora_time, "DONE_PATH", str(tmp_path / "lora-time-done"))
+    monkeypatch.setattr(lora_time, "ANSWER_PATH", str(tmp_path / "lora-answer.json"))
+    monkeypatch.setattr(lora_time, "TIME_SYNC_DONE", str(tmp_path / "time-sync-done"))
     monkeypatch.setattr(lora_time, "LOG_PATH", str(tmp_path / "time_sync_log.jsonl"))
     monkeypatch.setattr(lora_time, "CONFIG", str(tmp_path / "runtime_config.json"))
     monkeypatch.setattr(lora_time, "STATE_PATH", str(tmp_path / "lora_time.json"))
     monkeypatch.setattr(lora_time, "_boot_id", lambda: "boot-1")
-    monkeypatch.setattr(lora_time, "_mark_verified", lambda: None)
     monkeypatch.setattr(lora_time, "BIAS_DEFAULT_S", 0.0)   # the bias has its own tests
     lora_time.tmp = tmp_path
     return lora_time
@@ -46,25 +52,33 @@ class Handler:
         self.asked += 1
         if not self.ok:
             return {"ok": False, "error": "no answer"}
-        t = 1794287896.0
-        return {"ok": True, "unix": t + self.offset, "answered_at": t, "rtt_s": 1.2}
+        return {"ok": True, "unix": T + self.offset, "answered_at": T, "rtt_s": 1.2}
 
 
-HEALTHY = lambda: {"healthy": True, "joined": True, "margin_db": 15, "gateways": 1, "reason": "15 dB"}  # noqa: E731
-WEAK = lambda: {"healthy": False, "joined": True, "margin_db": 2, "gateways": 1, "reason": "weak link"}  # noqa: E731
+def synced(m, source):
+    """syncTime.sh has finished, the clock from `source` (None: nothing)."""
+    if source:
+        (m.tmp / "time-source").write_text(source + "\n")
+    (m.tmp / "time-sync-done").write_text("")
 
 
-class Run:
-    def __init__(self, rc=0):
-        self.rc, self.calls = rc, []
+def answer(m):
+    return json.loads((m.tmp / "lora-answer.json").read_text())
 
-    def __call__(self, argv, **kw):
-        self.calls.append(argv)
-        return subprocess.CompletedProcess(argv, self.rc, "", "bad" if self.rc else "")
+
+def state(m):
+    return json.loads((m.tmp / "lora_time.json").read_text())
 
 
 def logged(m):
     return [json.loads(line) for line in (m.tmp / "time_sync_log.jsonl").read_text().splitlines()]
+
+
+def ask(m, handler=None, source="lora", now=T + 0.05, boottime=100.0):
+    if source is not False:
+        synced(m, source)
+    return m.sync(handler or Handler(), now=lambda: now, boottime=lambda: boottime,
+                  sleep=lambda s: None, outcome_wait_s=0)
 
 
 def test_the_mdots_answer_is_gps_milliseconds():
@@ -86,214 +100,129 @@ def test_the_daemon_serves_it():
     assert lora_daemon.ACTIONS["network_time"] is lora_daemon._do_network_time
 
 
-def test_healthy_link_and_a_clock_that_agrees_is_verified_not_set(lt):
-    run = Run()
-    ev = lt.sync(Handler(offset=0.3), run=run, assess=HEALTHY)
-    assert ev["asked"] and ev["verified"] and not ev["applied"] and ev["offset_s"] == 0.3
-    assert run.calls == []
-    assert lt.synced_this_boot()
+# --- the daemon: ask, hand over, log ------------------------------------------
+
+def test_the_answer_is_written_for_synctime_with_the_time_since_boot(lt):
+    ask(lt, Handler(offset=30.0), now=T + 0.05, boottime=100.0)
+    a = answer(lt)
+    assert a["boot"] == "boot-1" and a["status"] == "answer"
+    assert a["boottime"] == 100.0
+    assert a["unix"] == pytest.approx(T + 30.05)          # network time when the boot time was read
+    assert a["offset_s"] == 30.0
+
+
+def test_the_daemon_never_sets_the_clock(lt, monkeypatch):
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("ran a command"))
+    ask(lt, Handler(offset=30.0))
+    assert "doas" not in Path(lt.__file__).read_text()
+
+
+def test_applied_by_synctime_is_logged_and_counts_as_done(lt):
+    ev = ask(lt, Handler(offset=0.4), source="lora")
+    assert ev["applied"] and ev["clock_from"] == "lora" and ev["offset_s"] == 0.4
+    assert state(lt)["used"] and not lt.due(now=T + 3600)
     assert logged(lt)[-1]["source"] == "lora"
 
 
-def test_healthy_link_and_a_clock_off_is_set_through_the_helper(lt):
-    run = Run()
-    ev = lt.sync(Handler(offset=30.0), run=run, now=lambda: 1794287896.0, assess=HEALTHY)
-    assert ev["applied"] and ev["verified"]
-    argv = run.calls[0]
-    assert argv[:2] == ["doas", lt.SET_CLOCK] and argv[3] == "lora"
-    assert int(argv[2]) == 1794287926                     # network time now, whole seconds
+def test_a_clock_set_by_network_time_counts_as_done_and_logs_the_comparison(lt):
+    ev = ask(lt, Handler(offset=3.0), source="network")
+    assert not ev["applied"] and ev["clock_from"] == "network" and ev["offset_s"] == 3.0
+    assert not lt.due(now=T + 3600)
 
 
-def test_ip_time_steps_aside_once_lora_has_the_clock(lt, monkeypatch, tmp_path):
-    lt.sync(Handler(offset=0.3), run=Run(), assess=HEALTHY)
-    helper = tmp_path / "set-clock-ip"
-    helper.write_text("")
-    monkeypatch.setattr(transmit_ip, "SET_CLOCK", str(helper))
-    monkeypatch.setattr(transmit_ip, "TIME_SOURCE", str(tmp_path / "no-source"))
-    monkeypatch.setattr(transmit_ip, "CLOCK_CHECKED", str(tmp_path / "checked"))
-    called = []
-    monkeypatch.setattr(transmit_ip.subprocess, "run", lambda *a, **k: called.append(a) or
-                        subprocess.CompletedProcess(a, 0, "", ""))
-    assert transmit_ip.correct_clock({"server_date": "Tue, 10 Nov 2026 05:18:16 GMT", "rtt_s": 0.2}) is None
-    assert not called
+def test_an_answer_too_late_to_be_used_is_asked_for_again_after_6_h(lt):
+    ev = ask(lt, Handler(offset=3.0), source=None)
+    assert not ev["applied"] and ev["clock_from"] == "rtc" and "too late" in ev["reason"]
+    assert not lt.due(now=T + 5 * 3600) and lt.due(now=T + 6 * 3600)
 
 
-def test_a_weak_link_is_left_to_ip_and_gps_by_default(lt):
-    h, run = Handler(offset=30.0), Run()
-    ev = lt.sync(h, run=run, assess=WEAK)
-    assert not ev["asked"] and h.asked == 0 and not run.calls
-    assert "weak link" in ev["reason"] and not lt.synced_this_boot()
+def test_an_unanswered_ask_waits_a_day(lt):
+    ev = ask(lt, Handler(ok=False), source=False)
+    assert not ev["ok"] and answer(lt)["status"] == "none"
+    assert not lt.due(now=T + 12 * 3600) and lt.due(now=T + 24 * 3600)
 
 
-def test_measure_asks_on_a_weak_link_but_only_logs(lt):
-    set_mode(lt, "measure")
-    h, run = Handler(offset=30.0), Run()
-    ev = lt.sync(h, run=run, assess=WEAK)
-    assert ev["asked"] and ev["ok"] and not ev["applied"] and not run.calls
-    assert logged(lt)[-1]["offset_s"] == 30.0 and logged(lt)[-1]["link"]["margin_db"] == 2
+def test_it_waits_for_synctime_to_finish_before_judging(lt, monkeypatch):
+    sleeps = []
+
+    def sleep(s):
+        sleeps.append(s)
+        if len(sleeps) == 3:
+            synced(lt, "network")        # LoRa first, then network time disagreed and replaced it
+    (lt.tmp / "time-source").write_text("lora\n")
+    ev = lt.sync(Handler(offset=0.4), now=lambda: T, boottime=lambda: 1.0, sleep=sleep, outcome_wait_s=60)
+    assert len(sleeps) == 3 and ev["clock_from"] == "network" and not ev["applied"]
 
 
-def test_measure_still_sets_the_clock_on_a_healthy_link(lt):
-    set_mode(lt, "measure")
-    run = Run()
-    assert lt.sync(Handler(offset=30.0), run=run, assess=HEALTHY)["applied"]
-
-
-def test_always_uses_a_weak_link_too(lt):
-    set_mode(lt, "always")
-    run = Run()
-    assert lt.sync(Handler(offset=30.0), run=run, assess=WEAK)["applied"]
-
-
-def test_off_never_asks(lt):
-    set_mode(lt, "off")
-    h = Handler()
-    assert not lt.sync(h, run=Run(), assess=HEALTHY)["asked"] and h.asked == 0
-
-
-def test_unknown_mode_means_healthy(lt):
-    set_mode(lt, "sometimes")
-    assert lt.mode() == "healthy"
-
-
-def test_gps_time_this_boot_wins(lt):
-    (lt.tmp / "time-source").write_text("gps\n")
-    h = Handler(offset=30.0)
-    ev = lt.sync(h, run=Run(), assess=HEALTHY)
-    assert not ev["asked"] and "GPS" in ev["reason"]
-
-
-def test_network_time_this_boot_is_refined_by_lora(lt):
-    (lt.tmp / "time-source").write_text("network\n")
-    assert lt.sync(Handler(offset=3.0), run=Run(), assess=HEALTHY)["applied"]
-
-
-def test_a_day_off_is_not_trusted_unless_the_rtc_is_bad(lt):
-    run = Run()
-    ev = lt.sync(Handler(offset=3 * 86400), run=run, now=lambda: 1794287896.0, assess=HEALTHY)
-    assert not ev["applied"] and not run.calls and "more than a day" in ev["reason"]
-    (lt.tmp / "rtc-untrusted").write_text("")
-    os.remove(lt.DONE_PATH)
-    assert lt.sync(Handler(offset=3 * 86400), run=run, now=lambda: 1794287896.0, assess=HEALTHY)["applied"]
-
-
-def test_failures_are_logged_not_raised(lt):
-    ev = lt.sync(Handler(ok=False), run=Run(), assess=HEALTHY)
-    assert ev["asked"] and not ev["ok"] and "no network time" in ev["reason"]
-    ev = lt.sync(Handler(offset=30.0), run=Run(rc=1), assess=HEALTHY)
-    assert not ev["applied"] and "not corrected" in ev["reason"]
-    os.remove(lt.SET_CLOCK)
-    ev = lt.sync(Handler(offset=30.0), run=Run(), assess=HEALTHY)
-    assert not ev["applied"] and "isn't installed" in ev["reason"]
-
-
-def test_not_joined_is_not_asked(lt):
-    h = Handler()
-    ev = lt.sync(h, run=Run(), assess=lambda: {"healthy": False, "joined": False, "reason": "not joined"})
-    assert not ev["asked"] and ev["reason"] == "not joined"
-
-
-def test_the_daemon_tries_once_per_boot_after_the_join(lt, monkeypatch):
+def test_the_daemon_asks_once_per_boot_after_the_join(lt, monkeypatch):
     joins = iter([False, False, True])
 
     class Late(Handler):
         def is_joined(self):
             return next(joins, True)
-    calls = []
-    monkeypatch.setattr(lt, "sync", lambda h: calls.append(h) or {"reason": "synced"})
-    assert lt.sync_when_joined(Late(), sleep=lambda s: None)["reason"] == "synced"
-    (lt.tmp / "lora-time-done").write_text(json.dumps({"boot": "boot-1"}))
+    seen = []
+    monkeypatch.setattr(lt, "sync", lambda h: seen.append(answer(lt)["status"]) or {"reason": "asked"})
+    assert lt.sync_when_joined(Late(), sleep=lambda s: None)["reason"] == "asked"
+    assert seen == ["asking"]                            # syncTime.sh waits for it meanwhile
     assert lt.sync_when_joined(Late(), sleep=lambda s: None)["reason"] == "already tried this boot"
-    assert len(calls) == 1
+    assert len(seen) == 1
+
+
+def test_off_never_asks_and_says_so(lt):
+    set_mode(lt, "off")
+    h = Handler()
+    assert lt.sync_when_joined(h)["reason"] == "lora_time_sync is off" and h.asked == 0
+    assert answer(lt)["status"] == "none"
+
+
+def test_the_old_modes_mean_on(lt):
+    for value in ("healthy", "measure", "always", "on", "ON", "sometimes", None):
+        set_mode(lt, value)
+        assert lt.mode() == "on"
+    set_mode(lt, "off")
+    assert lt.mode() == "off"
 
 
 def test_at_most_once_a_day_across_boots(lt, monkeypatch):
     assert lt.due(now=1_000_000)
-    lt.sync(Handler(offset=0.3), run=Run(), now=lambda: 1_000_000, assess=HEALTHY)
+    ask(lt, now=1_000_000)
     assert not lt.due(now=1_000_000 + 3600)              # an hourly wake later: not yet
     assert lt.due(now=1_000_000 + 24 * 3600)             # a day later
     assert lt.due(now=1_000_000 - 60)                    # the clock went back: ask
     monkeypatch.setattr(lt, "_boot_id", lambda: "boot-2")  # a new boot an hour later
     monkeypatch.setattr(lt.time, "time", lambda: 1_000_000 + 3600)
+    (lt.tmp / "time-sync-done").unlink()
     assert lt.sync_when_joined(Handler())["reason"] == "asked within the last day"
+    assert answer(lt) == {"boot": "boot-2", "status": "none", "reason": "asked within the last day"}
 
 
-def test_a_weak_link_skip_doesnt_count_as_asking(lt):
-    lt.sync(Handler(), run=Run(), now=lambda: 1_000_000, assess=WEAK)
-    assert lt.due(now=1_000_000 + 60)
+def test_no_ask_once_synctime_has_finished(lt):
+    synced(lt, None)
+    h = Handler()
+    assert "too late" in lt.sync_when_joined(h)["reason"] and h.asked == 0
+
+
+def test_synctime_finishing_during_the_join_wait_stops_it(lt):
+    class Never(Handler):
+        def is_joined(self):
+            synced(lt, "network")
+            return False
+    h = Never()
+    assert "before the join" in lt.sync_when_joined(h, sleep=lambda s: None)["reason"] and h.asked == 0
+    assert answer(lt)["status"] == "none"
 
 
 def test_the_daemon_gives_up_without_a_join(lt, monkeypatch):
     monkeypatch.setattr(lt.time, "monotonic", iter([0, 0, 10_000]).__next__)
     assert "not joined" in lt.sync_when_joined(Handler(joined=False), wait_s=60, sleep=lambda s: None)["reason"]
+    assert answer(lt)["status"] == "none"
 
 
-def test_the_log_keeps_the_newest_lines(lt, monkeypatch):
-    monkeypatch.setattr(lt, "LOG_MAX_LINES", 5)
-    for i in range(8):
-        lt.log_event({"i": i})
-    assert [e["i"] for e in logged(lt)] == [3, 4, 5, 6, 7]
-
-
-def test_the_gps_window_logs_its_offset_even_when_it_doesnt_set_the_clock(lt, monkeypatch, tmp_path):
-    source = tmp_path / "gps-time-source"
-    source.write_text("lora\n")
-    monkeypatch.setattr(gps_window, "TIME_SOURCE", str(source))
-    monkeypatch.setattr(gps_window.time, "time", lambda: 1794287896.0)
-    ran = []
-    monkeypatch.setattr(gps_window.subprocess, "run", lambda *a, **k: ran.append(a))
-
-    class Packet:
-        time = "2026-11-10T05:18:16.250Z"
-    gps_window._set_clock_from(Packet())
-    ev = logged(lt)[-1]
-    assert ev["source"] == "gps" and ev["clock_from"] == "lora" and not ev["applied"]
-    assert ev["offset_s"] == pytest.approx(0.25, abs=1e-3)
-    assert not ran                                       # LoRa set it this boot: GPS only compares
-
-
-def test_the_helper_takes_only_known_sources():
-    path = os.path.join(os.path.dirname(__file__), "..", "config", "watercam-set-clock")
-    text = open(path).read()
-    assert 'source=${2:-server}' in text and '^(server|lora|gps)$' in text
-    r = subprocess.run(["bash", path, "1794287896", "'; rm -rf /'"], capture_output=True, text=True)
-    assert r.returncode == 2 and "source must be" in r.stderr
-
-
-def test_an_unanswered_ask_on_a_healthy_link_retries_sooner(lt):
-    lt.sync(Handler(ok=False), run=Run(), now=lambda: 1_000_000, assess=HEALTHY)
-    assert not lt.due(now=1_000_000 + 3600)
-    assert lt.due(now=1_000_000 + lt.RETRY_S)                      # not a whole day
-    lt.sync(Handler(ok=True), run=Run(), now=lambda: 1_100_000, assess=HEALTHY)
-    assert not lt.due(now=1_100_000 + lt.RETRY_S)                  # answered: a day again
-
-
-def test_an_unanswered_ask_on_a_weak_link_waits_a_day(lt):
-    set_mode(lt, "measure")
-    lt.sync(Handler(ok=False), run=Run(), now=lambda: 1_000_000, assess=WEAK)
-    assert not lt.due(now=1_000_000 + lt.RETRY_S)
-    assert lt.due(now=1_000_000 + lt.INTERVAL_S)
-
-
-def test_a_gone_gateway_costs_no_asks(lt):
-    # The mDot still says joined, but the link check fails: not healthy, so no ask
-    gone = lambda: {"healthy": False, "joined": True, "margin_db": None, "gateways": 0,  # noqa: E731
-                    "reason": "link check failed: no gateway answered"}
-    h = Handler()
-    for t in range(5):
-        lt.sync(h, run=Run(), now=lambda: 1_000_000 + t * 3600, assess=gone)
-    assert h.asked == 0 and not lt.synced_this_boot()             # server and GPS time still run
-
-
-def test_the_bias_is_subtracted_before_deciding_and_setting(lt, monkeypatch):
+def test_the_bias_is_subtracted(lt):
     (lt.tmp / "runtime_config.json").write_text(json.dumps({"lora_time_bias_s": 0.21}))
-    # LoRa time 1.1 s ahead of the clock is 0.89 s after the bias: within the tolerance
-    e = lt.sync(Handler(offset=1.1), run=Run(), now=lambda: 1794287896.0, assess=HEALTHY)
-    assert e["verified"] and not e["applied"] and e["offset_s"] == pytest.approx(0.89) and e["bias_s"] == 0.21
-    os.unlink(lt.DONE_PATH)
-    run = Run()
-    e = lt.sync(Handler(offset=5.21), run=run, now=lambda: 1794287896.0, assess=HEALTHY)
-    assert e["applied"] and run.calls[0][2] == str(1794287896 + 5)   # 5.21 - 0.21
+    ev = ask(lt, Handler(offset=5.21), now=T)
+    assert ev["offset_s"] == pytest.approx(5.0) and ev["bias_s"] == 0.21
+    assert answer(lt)["unix"] == pytest.approx(T + 5.0)
 
 
 def test_the_bias_setting_falls_back_to_the_default(lt, monkeypatch):
@@ -306,3 +235,141 @@ def test_the_bias_setting_falls_back_to_the_default(lt, monkeypatch):
     assert lt.bias_s() == 0.0                                          # a gateway with GPS timestamps
     (lt.tmp / "runtime_config.json").write_text(json.dumps({"lora_time_bias_s": -0.05}))
     assert lt.bias_s() == -0.05
+
+
+def test_the_log_keeps_the_newest_lines(lt, monkeypatch):
+    monkeypatch.setattr(lt, "LOG_MAX_LINES", 5)
+    for i in range(8):
+        lt.log_event({"i": i})
+    assert [e["i"] for e in logged(lt)] == [3, 4, 5, 6, 7]
+
+
+# --- lora_answer.py (syncTime.sh's side, as root) -------------------------------
+
+@pytest.fixture
+def ans(tmp_path):
+    path = tmp_path / "answer.json"
+
+    def write(**data):
+        path.write_text(json.dumps({"boot": "b1", "status": "answer", "unix": T, "boottime": 50.0, **data}))
+
+    def run(now_bt=60.0, clock=T, rtc_untrusted=False, boot="b1"):
+        return la.main(str(path), boot=boot, now_bt=now_bt, clock=clock, rtc_untrusted=rtc_untrusted)
+    write.run, write.path = run, path
+    return write
+
+
+def test_the_answer_is_carried_to_now_with_the_time_since_boot(ans, capsys):
+    ans()
+    assert ans.run(now_bt=60.0, clock=T - 3.0) == 0      # 10 s later; the clock 13 s behind
+    ts, off = capsys.readouterr().out.split()
+    assert float(ts) == pytest.approx(T + 10.0) and float(off) == pytest.approx(13.0)
+
+
+def test_asking_none_and_other_boots(ans):
+    assert ans.run() == 4                                # no file: no daemon, or not started
+    ans(status="asking")
+    assert ans.run() == 3
+    ans(status="none")
+    assert ans.run() == 4
+    ans()
+    assert ans.run(boot="b2") == 4                       # last boot's answer
+
+
+def test_refused_answers(ans, capsys):
+    for data, kw in (({"unix": "x"}, {}),
+                     ({}, {"now_bt": 50.0 + 31 * 60}),        # too old
+                     ({}, {"now_bt": 40.0}),                  # from before (boot time can't go back)
+                     ({"unix": 1700000000.0}, {"clock": 1700000000.0}),   # before 2026
+                     ({"unix": T + 2 * 86400}, {})):          # two days off, RTC looks valid
+        ans(**data)
+        assert ans.run(**kw) == 1, data
+    ans(unix=T + 2 * 86400)
+    assert ans.run(rtc_untrusted=True) == 0              # the RTC is known to be bad: allowed
+
+
+def test_only_a_plain_file_is_read(ans, tmp_path):
+    ans()
+    link = tmp_path / "link.json"
+    link.symlink_to(ans.path)
+    assert la.read_answer(str(link)) is None
+    assert la.read_answer(str(ans.path))["status"] == "answer"
+
+
+# --- the IP and GPS paths still correct a clock from LoRa time --------------------
+
+@pytest.fixture
+def ip(tmp_path, monkeypatch):
+    helper = tmp_path / "set-clock"
+    helper.write_text("")
+    monkeypatch.setattr(transmit_ip, "SET_CLOCK", str(helper))
+    monkeypatch.setattr(transmit_ip, "TIME_SOURCE", str(tmp_path / "time-source"))
+    monkeypatch.setattr(transmit_ip, "CLOCK_CHECKED", str(tmp_path / "checked"))
+    monkeypatch.setattr(transmit_ip.time, "time", lambda: T)
+    class Called(list):
+        pass
+    called = Called()
+    monkeypatch.setattr(transmit_ip.subprocess, "run", lambda *a, **k: called.append(a[0]) or
+                        subprocess.CompletedProcess(a, 0, "", ""))
+    called.tmp = tmp_path
+    return called
+
+
+def test_server_time_replaces_lora_time_only_when_more_than_5_s_off(ip, monkeypatch):
+    from email.utils import formatdate
+    (ip.tmp / "time-source").write_text("lora\n")
+    monkeypatch.setattr("tools.capture_time.mark_clock_verified", lambda: None)
+    assert transmit_ip.correct_clock({"server_date": formatdate(T + 2, usegmt=True), "rtt_s": 0}) is None
+    assert not ip
+    (ip.tmp / "checked").unlink()
+    transmit_ip.correct_clock({"server_date": formatdate(T + 30, usegmt=True), "rtt_s": 0})
+    assert ip and ip[0][:2] == ["doas", str(ip.tmp / "set-clock")]
+
+
+def test_server_time_leaves_network_and_gps_time(ip):
+    from email.utils import formatdate
+    for source in ("network", "gps"):
+        (ip.tmp / "time-source").write_text(source + "\n")
+        transmit_ip.correct_clock({"server_date": formatdate(T + 30, usegmt=True), "rtt_s": 0})
+    assert not ip
+
+
+def gps_fix(lt, monkeypatch, tmp_path, clock_from, fix_offset):
+    source = tmp_path / "gps-time-source"
+    if clock_from:
+        source.write_text(clock_from + "\n")
+    monkeypatch.setattr(gps_window, "TIME_SOURCE", str(source))
+    monkeypatch.setattr(gps_window.time, "time", lambda: T)
+    ran = []
+    monkeypatch.setattr(gps_window.subprocess, "run", lambda *a, **k: ran.append(a[0]) or
+                        subprocess.CompletedProcess(a, 0, "", ""))
+
+    class Packet:
+        time = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(T + fix_offset)) + f".{int(fix_offset * 1000) % 1000:03d}Z"
+    gps_window._set_clock_from(Packet())
+    return ran, logged(lt)[-1]
+
+
+def test_the_gps_window_logs_its_offset_and_leaves_a_lora_clock_that_agrees(lt, monkeypatch, tmp_path):
+    ran, ev = gps_fix(lt, monkeypatch, tmp_path, "lora", 0.25)
+    assert ev["source"] == "gps" and ev["clock_from"] == "lora" and not ev["applied"]
+    assert ev["offset_s"] == pytest.approx(0.25, abs=1e-3) and not ran
+
+
+def test_the_gps_window_corrects_a_lora_clock_that_is_off(lt, monkeypatch, tmp_path):
+    ran, ev = gps_fix(lt, monkeypatch, tmp_path, "lora", 5.0)
+    assert ev["applied"] and ran[0][-1] == "gps"
+
+
+def test_the_gps_window_leaves_network_time(lt, monkeypatch, tmp_path):
+    ran, ev = gps_fix(lt, monkeypatch, tmp_path, "network", 5.0)
+    assert not ev["applied"] and not ran
+
+
+def test_the_helper_takes_only_known_sources():
+    path = os.path.join(os.path.dirname(__file__), "..", "config", "watercam-set-clock")
+    text = open(path).read()
+    assert 'source=${2:-server}' in text and '^(server|gps)$' in text
+    for bad in ("'; rm -rf /'", "lora"):
+        r = subprocess.run(["bash", path, "1794287896", bad], capture_output=True, text=True)
+        assert r.returncode == 2 and "source must be" in r.stderr
