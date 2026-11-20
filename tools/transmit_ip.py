@@ -142,6 +142,7 @@ _TAILNET_NETS = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd
 
 
 _STATUS_MAX_AGE_S = 10.0
+TAILNET_WAIT_MIN_S = 150    # wait_tailnet's floor: Tailscale over a cellular link at the edge of range; with the 90 s cellular_up, one failed attempt costs at most 4 min, two 8 min of a 10-min wake
 _status_cache: Tuple[float, Optional[Dict[str, Any]]] = (float("-inf"), None)
 
 
@@ -528,21 +529,32 @@ class IPTransmitter:
         2 s while Tailscale finds a path costs cellular data, and the uplink
         POST, with its retries, is a check of its own. This asks the local
         daemon (``tailscale status``) whether this node and the server are
-        online. True straight away when the server isn't a tailnet name or the
-        status can't be read, leaving the decision to the POST.
+        online and the server is trusted. True straight away when the server
+        isn't a tailnet name, leaving the decision to the POST.
+
+        Waits at least TAILNET_WAIT_MIN_S whatever the caller asks: over a weak
+        cellular link Tailscale may need a relay and longer than the 30 s the
+        main loop passes. The wait ends as soon as the server is trusted, so a
+        good link loses nothing.
         """
         from urllib.parse import urlparse
         host = (urlparse(self.server_url).hostname or "").lower()
         if not host.endswith(".ts.net"):
             return True
-        end = time.monotonic() + deadline_s
+        end = time.monotonic() + max(deadline_s, TAILNET_WAIT_MIN_S)
         while True:
             online = tailscale_online(host)
-            if online is None or online:
+            # Running is not enough: MagicDNS answers for the server's name a moment
+            # later, and until then trusted_server() refuses the upload (on 011,
+            # 2026-11-18, the name didn't resolve into the tailnet just after Running).
+            # "Can't tell" (None: the status didn't read, or the server isn't listed
+            # as a peer yet) isn't enough either: the POST would be refused the same way.
+            # Both checks are local: nothing is sent over the new link.
+            if online is not False and trusted_server(self.server_url):
                 return True
             if time.monotonic() >= end:
                 return False
-            time.sleep(2)
+            time.sleep(1 if online else 2)
 
     def server_only_down(self) -> bool:
         """True when WiFi is connected and Tailscale shows the server's peer online
@@ -1356,11 +1368,17 @@ def tailscale_online(host: str) -> Optional[bool]:
     """Whether the local Tailscale daemon is online and sees ``host`` online.
 
     Reads ``tailscale status --json``, which sends nothing over the network.
-    None if the status can't be read or ``host`` isn't a peer.
+    False while the daemon isn't running yet (NoState, Starting, ...): it then
+    lists no peers, and a node that booted without a network stays that way
+    until a link comes up, so this must not read as "can't tell". None if the
+    status can't be read or ``host`` isn't a peer of a running daemon.
     """
     status = _tailscale_status(max_age_s=0)     # polled while waiting: always fresh
     if status is None:
         return None
+    state = status.get("BackendState")
+    if state is not None and state != "Running":
+        return False
     for peer in (status.get("Peer") or {}).values():
         if (peer.get("DNSName") or "").rstrip(".").lower() == host:
             return bool((status.get("Self") or {}).get("Online")) and bool(peer.get("Online"))
