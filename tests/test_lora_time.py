@@ -342,11 +342,11 @@ def ip(tmp_path, monkeypatch):
     return called
 
 
-def test_server_time_replaces_lora_time_only_when_more_than_5_s_off(ip, monkeypatch):
+def test_server_time_replaces_lora_time_only_when_off_by_more_than_the_tolerance(ip, monkeypatch):
     from email.utils import formatdate
     (ip.tmp / "time-source").write_text("lora\n")
     monkeypatch.setattr("tools.capture_time.mark_clock_verified", lambda: None)
-    assert transmit_ip.correct_clock({"server_date": formatdate(T + 2, usegmt=True), "rtt_s": 0}) is None
+    assert transmit_ip.correct_clock({"server_date": formatdate(T + 1, usegmt=True), "rtt_s": 0}) is None
     assert not ip
     (ip.tmp / "checked").unlink()
     transmit_ip.correct_clock({"server_date": formatdate(T + 30, usegmt=True), "rtt_s": 0})
@@ -400,3 +400,18 @@ def test_the_helper_takes_only_known_sources():
     for bad in ("'; rm -rf /'", "lora"):
         r = subprocess.run(["bash", path, "1794287896", bad], capture_output=True, text=True)
         assert r.returncode == 2 and "source must be" in r.stderr
+
+
+@pytest.mark.parametrize("ts", ["1794287896.1234567", "1794287896.", ".5", "1e9", "-1794287896",
+                                "1794287896.5; reboot", "179428789", ""])
+def test_the_helper_refuses_anything_but_a_plain_unix_time(ts):
+    path = os.path.join(os.path.dirname(__file__), "..", "config", "watercam-set-clock")
+    r = subprocess.run(["bash", path, ts, "server"], capture_output=True, text=True)
+    assert r.returncode == 2 and "usage" in r.stderr
+
+
+@pytest.mark.parametrize("ts", ["1000000000.5", "4102444800.000"])
+def test_the_helper_refuses_fractional_times_out_of_range(ts):
+    path = os.path.join(os.path.dirname(__file__), "..", "config", "watercam-set-clock")
+    r = subprocess.run(["bash", path, ts, "server"], capture_output=True, text=True)
+    assert r.returncode == 2 and "out of range" in r.stderr

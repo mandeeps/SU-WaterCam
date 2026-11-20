@@ -169,7 +169,7 @@ def _correct(offset_s, tmp_path, monkeypatch, rtc_untrusted=False):
         returncode, stdout, stderr = 0, "", ""
     monkeypatch.setattr(tip.subprocess, "run", lambda cmd, **k: calls.append(cmd) or R())
     tip.correct_clock({"server_date": formatdate(time.time() + offset_s, usegmt=True), "rtt_s": 0})
-    return int(calls[0][2]) if calls else None
+    return float(calls[0][2]) if calls else None
 
 
 def test_small_corrections_still_apply(tmp_path, monkeypatch):
