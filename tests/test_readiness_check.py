@@ -11,6 +11,8 @@ from tools import node_version, readiness_check as rc
 from tools.lora_handler_concurrent import LoRaHandler
 from tools import lora_daemon
 
+real_check_system_files = rc.check_system_files
+
 ATI = "MultiTech mDot\nFirmware: 4.1.5-wc2610-sw9\nLibrary: 4.1.33"
 
 
@@ -69,6 +71,10 @@ def unit(tmp_path, monkeypatch):
     monkeypatch.setattr(rc, "ROOT", str(root))
     monkeypatch.setattr(node_version, "software_version", lambda use_cache=True: {
         "describe": "v2026.11.0", "release": (2026, 11, 0), "ahead": 0, "dirty": False, "commit": "2af2c09a"})
+    # the real installer would compare this machine's /etc: test it in its own file
+    def system_files_match(ctx):
+        return [rc.Check("system files", "pass", "all match the release")]
+    monkeypatch.setattr(rc, "CHECKS", [system_files_match if c is rc.check_system_files else c for c in rc.CHECKS])
     monkeypatch.setattr(node_version, "model_info", lambda path=None: {"name": "m.onnx", "sha256": "ab" * 32, "bands": 5})
     return repo, root
 
@@ -260,7 +266,7 @@ def test_joined_read_from_njs(unit):
 
 
 def test_install_warnings_are_shown(unit, monkeypatch):
-    # tools/install_system.py comes with its own PR: stand in for it
+    # stand in for tools/install_system.py
     import types
     from dataclasses import dataclass
 
@@ -282,7 +288,7 @@ def test_install_warnings_are_shown(unit, monkeypatch):
     monkeypatch.setitem(sys.modules, "tools.install_system", mod)
     import tools
     monkeypatch.setattr(tools, "install_system", mod, raising=False)
-    checks = rc.check_system_files(make(unit))
+    checks = real_check_system_files(make(unit))
     assert checks[0].status == "pass" and any("held" in c.detail and c.status == "warn" for c in checks)
 
 
