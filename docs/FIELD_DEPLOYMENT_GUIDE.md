@@ -180,13 +180,19 @@ If it isn't on the current release, or `.git` is larger than a few MB (`du -sh .
 follow [RELEASES.md](RELEASES.md#updating-a-node): update, or convert the full clone to
 a shallow one first. Check each release with `git verify-tag` before checking it out.
 
-After updating, install any system files the release notes list as changed. From
-v2026.10.4 the doas rules are stricter (passwordless `shutdown` only as `-h now`),
-so replace the whole file rather than appending lines:
+After updating, install the release's system files: the units, `doas.conf`, the
+firewall and the other files that sections 1.3.3 to 1.9 copy by hand. One command
+does them all, and only changes what differs:
 
 ```bash
-sudo cp config/doas.conf /etc/doas.conf && sudo doas -C /etc/doas.conf
+tools/install_system.py                 # dry run first: what would change
+sudo tools/install_system.py --apply    # then, if the firewall changed, --confirm-firewall
 ```
+
+It leaves `ticktalk`, `wittypi-recovery`, `runtime_config.json`, the schedule, `config.txt`
+and `cmdline.txt` alone. The sections below explain each file and remain the reference.
+The script reports missing apt packages but doesn't install them. [RELEASES.md](RELEASES.md#updating-a-node)
+has the options.
 
 ### 1.3.2 Remove packages a node doesn't need
 
@@ -920,28 +926,25 @@ sudo systemctl daemon-reload
 sudo systemctl enable --now powerlog.service
 ```
 
-Keep the systemd journal in RAM to spare the microSD card. Logs then last
-until the next shutdown or power cut; the power log above is the record that
-survives one.
+Keep the systemd journal on the microSD card, so a wake that went wrong can be
+read back on the unit (`journalctl -b -1`) after it has shut down. This is the
+default for every unit: `tools/install_system.py --apply` installs
+`config/journald-persistent.conf` as `zz-watercam-journal.conf` and removes the
+older RAM-only drop-in. It keeps up to 90 days, costs about 5-30 MB of journal a
+day (measured on two units), and sets `SystemMaxFiles=1000`, because
+journald's default of 100 files holds only about 3 days on a node. By hand:
 
 ```bash
 sudo mkdir -p /etc/systemd/journald.conf.d
-sudo cp config/journald-volatile.conf /etc/systemd/journald.conf.d/
-sudo systemctl restart systemd-journald
-```
-
-To look into past wakes on the unit itself, keep the journal on the card
-instead, for 30 days or more, with `config/journald-persistent.conf`. It costs
-about 100-150 MB of card writes a day on an hourly schedule. Install it as
-`zz-watercam-journal.conf` so it overrides the default and any older drop-ins.
-It sets `SystemMaxFiles=1000`, because journald's default of 100 files holds
-only about 3 days on a node.
-
-```bash
 sudo cp config/journald-persistent.conf /etc/systemd/journald.conf.d/zz-watercam-journal.conf
 sudo rm -f /etc/systemd/journald.conf.d/journald-volatile.conf
 sudo systemctl restart systemd-journald
 ```
+
+Only where card wear matters more than the history, keep it in RAM instead
+(`install_system.py --volatile-journal`, or `config/journald-volatile.conf` by
+hand). Logs then last until the next shutdown or power cut; the power log above
+is the record that survives one.
 
 The LoRa handler's `DEBUG:` lines (every AT command, payload hex) and the
 per-poll GPS lines are off by default. Turn them on for a test or problem unit
