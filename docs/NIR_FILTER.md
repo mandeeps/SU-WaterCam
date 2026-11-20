@@ -16,14 +16,45 @@ circuit moves the filter.
 `tt_take_photos.take_two_photos()` (the capture the app runs; also
 `tools/take_nir_photos.py` and `button_hold_camera.py`):
 
-1. GPIO 21 low: filter **in**. Wait 2.5 s (0.5 s for the filter, 2 s for
-   auto white balance and exposure), lock both, take the NIR-OFF frame.
-2. GPIO 21 high: filter **out**. Wait 0.5 s, take the NIR-ON frame at the same
-   locked settings.
-3. Release the pin (input). The camera board's pull-up holds it high, so the
-   filter stays out for the rest of the wake and through the next boot.
+1. GPIO 21 low: filter **in**. Wait 2.5 s (the filter needs about 0.6 s, the
+   rest is for auto white balance and exposure), lock both, take the NIR-OFF
+   frame.
+2. GPIO 21 high: filter **out**. Wait 0.5 s (the filter needs about 0.33 s),
+   take the NIR-ON frame at the same locked settings.
+3. Release the pin (input, no pull). The camera board's pull-up holds it high,
+   so the filter stays out for the rest of the wake.
 
-So every capture is one filter cycle (in, then out).
+So every capture is one filter cycle (in, then out), except that the first
+capture after boot usually starts with the filter already in (next section).
+
+### The resting position depends on whether a capture has run since boot
+
+| When | GPIO 21 (`pinctrl get 21`) | Filter |
+|---|---|---|
+| From boot until the first capture | `ip pd \| lo`: input, the Pi's pull-down, reads low | in |
+| During NIR-OFF / NIR-ON | `op \| lo` / `op \| hi` | in / out |
+| After any capture, for the rest of the boot | `ip pn \| hi`: input, no pull, reads high | out |
+
+The Pi's reset default for GPIO 21 is a pull-down, and it is stronger than the
+camera board's pull-up, so after boot the line reads low. Releasing the pin
+from Python (gpiozero) clears the pull, and the board's pull-up then wins. No
+`config.txt` or kernel command-line setting is involved. Seen on 005 after three
+reboots (2026-11-16 to 2026-11-18). A photo check on 2026-11-19 confirmed the
+filter position: with the pin untouched for 13 h after boot, the frame matched
+one with the pin driven low (mean red 40.0 in both, at locked exposure), and
+driving the pin high raised it to 76.9.
+
+This does not change the frames, because the capture drives the pin before
+each one. It matters when checking a unit by hand:
+
+- GPIO 21 reading **low while released** right after boot is normal.
+- GPIO 21 reading **low while driven high** (`op | hi` set, `lo` read back) is a
+  fault: something on the camera side holds the line to ground, as on 007 in
+  November 2026.
+
+Measured move times (005, 2026-11-18, 27 moves each way, to within one 33 ms
+frame): in 0.56-0.60 s, out 0.30-0.33 s. Code that moves the filter in and
+then takes a frame should wait at least 0.7 s.
 
 `tools/nir_filter_check.py` compares the two frames' mean red, green and blue
 and reports `nir_filter_status` (0 moved, 1 not) when the NIR-OFF frame is lit.
@@ -84,7 +115,8 @@ instead at the wiring, moisture or corrosion, dirt in the slider, or heat.
 
 Unknown: whether the camera board pulses the coil or keeps it energised for as
 long as GPIO 21 holds a level. If it keeps it energised, the coil carries
-current for the whole wake (the pin rests high), and heat in a sealed summer
+current for the whole wake (the line rests high after the first capture, low
+before it), and heat in a sealed summer
 enclosure, not cycle count, would limit its life. Step 4 above (watch whether
 the voltage across the coil stays on while the pin is held) answers this; if it
 does, a pulsed driver or switching the filter's supply would be the fix.
