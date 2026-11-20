@@ -142,6 +142,33 @@ def test_an_unanswered_ask_waits_a_day(lt):
     assert not lt.due(now=T + 12 * 3600) and lt.due(now=T + 24 * 3600)
 
 
+def test_a_busy_mdot_refusing_at_once_is_asked_again(lt, monkeypatch):
+    class Busy(Handler):
+        def network_time(self):
+            if self.asked < 2:
+                self.asked += 1
+                return {"ok": False, "error": "ERROR"}      # at once: nothing was sent
+            return super().network_time()
+    h, sleeps = Busy(offset=2.0), []
+    synced(lt, "lora")
+    ev = lt.sync(h, now=lambda: T, boottime=lambda: 1.0, sleep=sleeps.append, outcome_wait_s=0)
+    assert ev["ok"] and ev["tries"] == 3 and h.asked == 3 and sleeps[:2] == [lt.ASK_RETRY_S] * 2
+
+
+def test_an_ask_that_went_out_unanswered_is_not_repeated(lt, monkeypatch):
+    clock = iter([0.0, 21.0] * 5)
+    monkeypatch.setattr(lt.time, "monotonic", lambda: next(clock))
+    h = Handler(ok=False)
+    ev = lt.sync(h, now=lambda: T, boottime=lambda: 1.0, sleep=lambda s: None, outcome_wait_s=0)
+    assert not ev["ok"] and h.asked == 1 and ev["tries"] == 1
+
+
+def test_a_mdot_that_keeps_refusing_is_given_up_on(lt):
+    h = Handler(ok=False)
+    ev = lt.sync(h, now=lambda: T, boottime=lambda: 1.0, sleep=lambda s: None, outcome_wait_s=0)
+    assert not ev["ok"] and h.asked == lt.ASK_TRIES and answer(lt)["status"] == "none"
+
+
 def test_it_waits_for_synctime_to_finish_before_judging(lt, monkeypatch):
     sleeps = []
 

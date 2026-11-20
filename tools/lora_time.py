@@ -63,6 +63,13 @@ RETRY_S = 6 * 3600
 JOIN_WAIT_S = 15 * 60
 #: How long to wait for syncTime.sh to finish after an answer (its waits, plus a GPS try)
 OUTCOME_WAIT_S = 300
+#: The mDot refuses AT+GPSTIME at once (plain ERROR, nothing sent) while it is
+#: busy, as in the first seconds after the Pi boots (005, 2026-11-20). An ask
+#: that went out takes at least the 1 s receive delay, so a quicker failure is
+#: retried, costing no airtime; one that went out unanswered is not.
+REFUSED_UNDER_S = 1.0
+ASK_TRIES = 4
+ASK_RETRY_S = 10.0
 
 
 def _boot_id() -> str:
@@ -170,7 +177,13 @@ def sync(handler, now: Callable[[], float] = time.time, boottime: Callable[[], f
         return event
 
     _write_state({"last_asked": event["t"], "answered": False, "used": False})
-    answer = handler.network_time()
+    for attempt in range(1, ASK_TRIES + 1):
+        start = time.monotonic()
+        answer = handler.network_time()
+        if answer.get("ok") or time.monotonic() - start >= REFUSED_UNDER_S or attempt == ASK_TRIES:
+            break
+        sleep(ASK_RETRY_S)                         # refused at once: the mDot was busy
+    event["tries"] = attempt
     if not answer.get("ok"):
         _write_answer("none")
         event["error"] = answer.get("error")

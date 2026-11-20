@@ -120,6 +120,9 @@ answer is coming this boot (off, asked within the day, or the join took too
 long). Once `syncTime.sh` has finished (`/run/watercam-time-sync-done`), nothing
 would apply an answer, so the daemon doesn't ask. An answer that came too late
 to be used is asked for again after 6 h; an unanswered ask waits the full day.
+The mDot refuses the command at once (a plain `ERROR`, nothing sent) while it is
+busy, as in the first seconds after the Pi boots; such a refusal is retried up
+to three times, 10 s apart, at no airtime cost.
 
 ### `lora_time_sync` (runtime_config.json)
 
