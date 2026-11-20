@@ -143,6 +143,10 @@ def _do_network_time(handler, params):
     return handler.network_time()
 
 
+def _do_mdot_info(handler, params):
+    return handler.mdot_info()
+
+
 def _do_get_size_limit(handler, params):
     return handler.get_size_limit()
 
@@ -155,6 +159,7 @@ ACTIONS = {
     "is_joined": _do_is_joined,
     "link_check": _do_link_check,
     "network_time": _do_network_time,
+    "mdot_info": _do_mdot_info,
     "queue_transmit": _do_queue_transmit,
     "queue_binary_transmit": _do_queue_binary_transmit,
     "process_transmit_queue": _do_process_transmit_queue,
