@@ -132,6 +132,7 @@ MANIFEST: List[Item] = [
     # Witty Pi time scripts and the faster boot script (guide 1.4, 1.13)
     Item("config/wittypi/syncTime.sh", f"{WITTYPI}/syncTime.sh", mode=0o755, owner="pi"),
     Item("config/wittypi/network_time.py", f"{WITTYPI}/network_time.py", mode=0o755, owner="pi"),
+    Item("config/wittypi/lora_answer.py", f"{WITTYPI}/lora_answer.py", mode=0o755, owner="pi"),
     Item("config/wittypi/gps_time.py", f"{WITTYPI}/gps_time.py", mode=0o755, owner="pi"),
     Item("config/wittypi/beforeScript.sh", f"{WITTYPI}/beforeScript.sh", mode=0o755, owner="pi"),
 ]

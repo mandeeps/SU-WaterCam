@@ -253,7 +253,9 @@ def _wait_for_fix(timeout_s: float) -> Optional[dict]:
 
 
 def _set_clock_from(packet) -> None:
-    """Set the clock from the fix if nothing set it this boot (no network time).
+    """Set the clock from the fix unless network time, GPS or the server's time set
+    it this boot: a clock from LoRa time or the RTC is corrected when it is 2 s
+    or more off (docs/TIME_SYNC.md).
 
     Either way the fix's offset goes into the time sync log, next to LoRa time's
     (tools/lora_time.py), to compare the two on the same unit (docs/TIME_SYNC.md)."""
@@ -274,7 +276,7 @@ def _set_clock_from(packet) -> None:
     event = {"t": int(time.time()), "source": "gps", "ok": True, "offset_s": round(offset, 3),
              "clock_from": source or "rtc", "applied": False}
     try:
-        if source or abs(offset) < 2:
+        if source in ("network", "gps", "server") or abs(offset) < 2:
             return
         r = subprocess.run(["doas", SET_CLOCK, str(int(ts)), "gps"], capture_output=True, text=True, timeout=15)
         if r.returncode == 0:

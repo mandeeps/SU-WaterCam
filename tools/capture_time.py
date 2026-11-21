@@ -16,7 +16,7 @@ FILENAME = "capture_time"
 #: Present in a capture directory when the capture was taken before the clock was
 #: known to be right. Sent as `clock_unverified` (field code 01 0D, 1 = unverified).
 UNVERIFIED_FILENAME = "clock_unverified"
-#: Written by syncTime.sh (network or GPS time) or watercam-set-clock (server time);
+#: Written by syncTime.sh (LoRa, network or GPS time) or watercam-set-clock (server or GPS time);
 #: /run is cleared at every boot.
 TIME_SOURCE = "/run/watercam-time-source"
 #: Boot id, written by transmit_ip.correct_clock when the server's Date header
@@ -34,7 +34,7 @@ def _boot_id() -> str:
 
 def clock_verified() -> bool:
     """True once this boot's clock has come from, or been checked against, a real
-    time source (network, GPS or the server). Until then the RTC alone is trusted,
+    time source (LoRa, network, GPS or the server). Until then the RTC alone is trusted,
     which can be hours or days off after a long outage."""
     if os.path.exists(TIME_SOURCE):
         return True

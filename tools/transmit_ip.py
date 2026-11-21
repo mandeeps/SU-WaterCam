@@ -1393,7 +1393,7 @@ CLOCK_TOLERANCE_S = 5
 MAX_CLOCK_STEP_S = 24 * 3600
 RTC_UNTRUSTED = "/run/watercam-rtc-untrusted"
 CLOCK_FLOOR = 1767225600              # 2026-01-01, as watercam-set-clock
-# Set by syncTime.sh (network or GPS time at boot) or by SET_CLOCK; /run is cleared at boot
+# Set by syncTime.sh (LoRa, network or GPS time at boot) or by SET_CLOCK; /run is cleared at boot
 TIME_SOURCE = "/run/watercam-time-source"
 # This boot's check, so it runs once: holds the boot id, so a /tmp that survives reboots is fine
 CLOCK_CHECKED = "/tmp/watercam-clock-checked"
@@ -1402,6 +1402,14 @@ CLOCK_CHECKED = "/tmp/watercam-clock-checked"
 def _boot_id() -> str:
     try:
         with open("/proc/sys/kernel/random/boot_id") as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def _time_source() -> str:
+    try:
+        with open(TIME_SOURCE) as f:
             return f.read().strip()
     except OSError:
         return ""
@@ -1418,22 +1426,15 @@ def correct_clock(uplink_result: Dict[str, Any]) -> Optional[float]:
     SET_CLOCK helper and its doas rule. Returns the offset applied, or None.
 
     Runs at most once per boot, and not at all when the clock was already set
-    from the network, LoRa or GPS this boot (TIME_SOURCE), or LoRa time
-    confirmed it (tools/lora_time.py). The Date header comes with
+    from network time or GPS this boot (TIME_SOURCE). A clock from LoRa time is
+    still checked: the server's time wins when they disagree by more than
+    CLOCK_TOLERANCE_S (docs/TIME_SYNC.md). The Date header comes with
     the upload's own reply, so the check sends nothing extra either way.
     """
     from email.utils import parsedate_to_datetime
     date = (uplink_result or {}).get("server_date")
-    if not date or not os.path.exists(SET_CLOCK) or os.path.exists(TIME_SOURCE):
+    if not date or not os.path.exists(SET_CLOCK) or _time_source() in ("network", "gps", "server"):
         return None
-    # LoRa time (tools/lora_time.py, 1 s or better) set or confirmed the clock this
-    # boot: the reply's Date header (1 s resolution, plus the upload's delay) can't improve it
-    try:
-        from tools import lora_time
-        if lora_time.synced_this_boot():
-            return None
-    except Exception:  # noqa: BLE001
-        pass
     boot = _boot_id()
     try:
         with open(CLOCK_CHECKED) as f:

@@ -331,8 +331,8 @@ def start_mdot_keepalive(handler, interval_s: float = MDOT_KEEPALIVE_S) -> threa
 
 
 def start_lora_time_sync(handler) -> None:
-    """Set the clock from LoRa network time once per boot, in the background
-    (tools/lora_time.py decides whether the link is good enough)."""
+    """Ask for LoRa network time once per boot, in the background, for
+    syncTime.sh to apply (tools/lora_time.py; this daemon never sets the clock)."""
     def run():
         try:
             from tools import lora_time
