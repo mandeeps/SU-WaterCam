@@ -164,6 +164,15 @@ def test_fetch_reads_the_date_header_of_any_status():
         raise urllib.error.HTTPError(req.full_url, 405, "no", headers(NOW), None)
     assert nt.fetch_date("https://x", opener=refused) == pytest.approx(NOW + 0.5, abs=0.1)
 
+    precise = headers(NOW - 5)
+    precise["X-Server-Time"] = f"{NOW + 0.123:.3f}"
+    t = iter([100.0, 100.4])
+    assert nt.fetch_date("https://x", opener=lambda req, **kw: type("R", (), {"headers": precise, "close": lambda s: None})(),
+                         now=lambda: next(t)) == pytest.approx(NOW + 0.123 + 0.2)   # X-Server-Time wins over Date
+    precise.replace_header("X-Server-Time", "later")
+    assert nt.fetch_date("https://x", opener=lambda req, **kw: type("R", (), {"headers": precise, "close": lambda s: None})(),
+                         now=lambda: 100.0) == pytest.approx(NOW - 5 + 0.5)        # unreadable: Date
+
     def down(req, **kw):
         raise urllib.error.URLError("connection refused")
     assert nt.fetch_date("https://x", opener=down) is None

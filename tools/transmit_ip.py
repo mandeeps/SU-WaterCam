@@ -54,6 +54,7 @@ if _REPO not in _sys.path:
 import ipaddress
 import json
 import logging
+import math
 import os
 import socket
 import subprocess
@@ -762,6 +763,7 @@ class IPTransmitter:
                     url, json=payload, timeout=self.timeout_s, headers=self._auth_headers()
                 )
                 rtt_s = time.monotonic() - sent_at
+                received_at = time.time()          # before parsing: correct_clock's offset is from here
                 last_status = resp.status_code
 
                 if resp.status_code in (200, 201):
@@ -785,6 +787,8 @@ class IPTransmitter:
                         "status_code": resp.status_code,
                         "response": body,
                         "server_date": resp.headers.get("Date") if self.trusted else None,
+                        "server_time": resp.headers.get("X-Server-Time") if self.trusted else None,
+                        "received_at": received_at,
                         "rtt_s": rtt_s,
                         "error": None,
                         "attempts": attempt,
@@ -1386,7 +1390,10 @@ def tailscale_online(host: str) -> Optional[bool]:
 
 
 SET_CLOCK = "/usr/local/sbin/watercam-set-clock"
-CLOCK_TOLERANCE_S = 5
+#: With X-Server-Time, a correction lands within the round trip's asymmetry
+#: (about 0.1-0.3 s over cellular), so 2 s leaves room; with the Date header alone
+#: the estimate itself is within about a second (docs/TIME_SYNC.md)
+CLOCK_TOLERANCE_S = 2
 # A larger correction is only applied when the RTC is known to be bad
 # (rtc_early_clock.py leaves RTC_UNTRUSTED) or the clock is before 2026: a
 # server time a day or more off is more likely wrong than the RTC (#203).
@@ -1415,25 +1422,47 @@ def _time_source() -> str:
         return ""
 
 
+def server_time(uplink_result: Dict[str, Any]) -> Optional[float]:
+    """The server's time when the reply arrived, or None.
+
+    X-Server-Time (Unix time in ms, stamped as the reply went out; API
+    app/server_time.py) when the server sends it, else the Date header: whole
+    seconds, floored, so +0.5 s on average (older servers). Plus half the round
+    trip for the reply's way back."""
+    from email.utils import parsedate_to_datetime
+    result = uplink_result or {}
+    half_rtt = (result.get("rtt_s") or 0) / 2
+    try:
+        precise = float(result.get("server_time") or "nan")
+    except (TypeError, ValueError):
+        precise = float("nan")
+    if math.isfinite(precise):
+        return precise + half_rtt
+    try:
+        return parsedate_to_datetime(result.get("server_date")).timestamp() + 0.5 + half_rtt
+    except (TypeError, ValueError):
+        return None
+
+
 def correct_clock(uplink_result: Dict[str, Any]) -> Optional[float]:
     """Set the clock and RTC from the server's reply when they're off.
 
     A unit with no WiFi at boot gets no network time (cellular isn't up then)
     and, without a GPS fix, no GPS time either, so its RTC drifts and misses
-    daylight-saving changes. The uplink reply's HTTP Date header (1 s
-    resolution) fixes that once the upload has reached the server. Only an
-    offset over CLOCK_TOLERANCE_S is corrected, through the root-owned
-    SET_CLOCK helper and its doas rule. Returns the offset applied, or None.
+    daylight-saving changes. The uplink reply's time (server_time()) fixes that
+    once the upload has reached the server. Only an offset over
+    CLOCK_TOLERANCE_S is corrected, through the root-owned SET_CLOCK helper and
+    its doas rule, to the millisecond. Returns the offset applied, or None.
 
     Runs at most once per boot, and not at all when the clock was already set
     from network time or GPS this boot (TIME_SOURCE). A clock from LoRa time is
     still checked: the server's time wins when they disagree by more than
-    CLOCK_TOLERANCE_S (docs/TIME_SYNC.md). The Date header comes with
-    the upload's own reply, so the check sends nothing extra either way.
+    CLOCK_TOLERANCE_S (docs/TIME_SYNC.md). The time comes with the upload's own
+    reply, so the check sends nothing extra either way.
     """
-    from email.utils import parsedate_to_datetime
-    date = (uplink_result or {}).get("server_date")
-    if not date or not os.path.exists(SET_CLOCK) or _time_source() in ("network", "gps", "server"):
+    result = uplink_result or {}
+    if not (result.get("server_time") or result.get("server_date")) or not os.path.exists(SET_CLOCK) \
+            or _time_source() in ("network", "gps", "server"):
         return None
     boot = _boot_id()
     try:
@@ -1447,11 +1476,11 @@ def correct_clock(uplink_result: Dict[str, Any]) -> Optional[float]:
             f.write(boot)
     except OSError:
         pass
-    try:
-        server = parsedate_to_datetime(date).timestamp() + (uplink_result.get("rtt_s") or 0) / 2
-    except (TypeError, ValueError):
+    server = server_time(result)
+    if server is None:
         return None
-    offset = server - time.time()
+    # The clock when the reply arrived; whatever ran since is carried forward below
+    offset = server - (result.get("received_at") or time.time())
     if abs(offset) > MAX_CLOCK_STEP_S and not os.path.exists(RTC_UNTRUSTED) and time.time() >= CLOCK_FLOOR:
         logger.warning("server time is %.1f h %s the clock: more than %d h, not applied "
                        "(the RTC looks valid; #203)", abs(offset) / 3600,
@@ -1461,16 +1490,21 @@ def correct_clock(uplink_result: Dict[str, Any]) -> Optional[float]:
         from tools.capture_time import mark_clock_verified
         mark_clock_verified()      # the clock agrees with the server: later captures are fine
         return None
+    target = time.time() + offset
     try:
-        r = subprocess.run(["doas", SET_CLOCK, str(int(round(server)))],
-                           capture_output=True, text=True, timeout=30)
+        r = subprocess.run(["doas", SET_CLOCK, f"{target:.3f}"], capture_output=True, text=True, timeout=30)
+        if r.returncode == 2:
+            # A helper from before fractional seconds (not yet reinstalled): whole seconds
+            target = time.time() + offset
+            r = subprocess.run(["doas", SET_CLOCK, str(int(round(target)))],
+                               capture_output=True, text=True, timeout=30)
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("clock correction failed: %s", exc)
         return None
     if r.returncode != 0:
         logger.warning("clock correction failed: %s", (r.stderr or r.stdout).strip())
         return None
-    logger.warning("clock was %.0f s %s the server's; corrected (system and RTC)",
+    logger.warning("clock was %.2f s %s the server's; corrected (system and RTC)",
                    abs(offset), "behind" if offset > 0 else "ahead of")
     return offset
 

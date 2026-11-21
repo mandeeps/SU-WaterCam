@@ -16,9 +16,9 @@ to IP time; no setting is needed for that.
 |---|---|---|---|
 | Every boot, first | The Witty Pi RTC, copied into the system clock by the Witty Pi daemon (or the other way round if the RTC's time is bad) | 1 s, drifts (005: 2 s in 4 days) | `~/wittypi/daemon.sh` (stock), `tools/rtc_early_clock.py` |
 | As soon as it answers, once a day | **LoRa network time** (DeviceTimeReq), asked by `lora_daemon` once the mDot has joined and applied by `syncTime.sh` | about 10 ms after its bias (0.21 s) | `tools/lora_time.py`, `config/wittypi/lora_answer.py`, `syncTime.sh` |
-| Every boot, +30 s | **Network time**: the API server's `Date` header (tailnet or https), or public https servers' when it is down. Replaces LoRa time only when they disagree by more than 2 s | about 0.5 s | `config/wittypi/syncTime.sh`, `network_time.py` |
+| Every boot, +30 s | **Network time**: the API server's time (tailnet or https; its `X-Server-Time` header, in ms), or public https servers' `Date` header when it is down. Replaces LoRa time only when they disagree by more than 2 s | about 0.1 s (API), 0.5 s (`Date`) | `config/wittypi/syncTime.sh`, `network_time.py` |
 | Then, with neither | **GPS time**, if the modem already has power; otherwise a late LoRa answer, waited for up to 60 s | better than 0.1 s | `syncTime.sh`, `gps_time.py` |
-| After an IP upload, once per boot | The **server's** `Date` header in the reply, unless network or GPS time set the clock this boot; it replaces LoRa time or the RTC when more than 5 s off (the upload's delay is in the header) | 1 s | `tools/transmit_ip.py` `correct_clock` |
+| After an IP upload, once per boot | The **server's** time in the reply (`X-Server-Time`, else `Date`), unless network or GPS time set the clock this boot; it replaces LoRa time or the RTC when more than 2 s off, set to the millisecond | 0.1-0.3 s over cellular (1 s with `Date` only) | `tools/transmit_ip.py` `correct_clock` |
 | The daily GPS window | **GPS time** from the fix, unless network, GPS or server time set the clock this boot; it replaces LoRa time or the RTC when 2 s or more off | better than 0.1 s | `tools/gps_window.py` |
 
 LoRa time usually answers within `syncTime.sh`'s 30 s wait (the mDot stays
@@ -156,8 +156,22 @@ uplink and downlink a day.
   after a daylight-saving change. Captures are flagged `clock_unverified`
   (uplink `01 0D`) until a source confirms the clock.
 
-LoRa time and the server's `Date` header both come from our servers' clocks, so
-those need NTP. The GPS lines in the time sync log would show if one drifted.
+LoRa time and the server's time both come from our servers' clocks, so those
+need NTP. The GPS lines in the time sync log would show if one drifted.
+
+## The server's time: `X-Server-Time`, not `Date`
+
+`Date` is whole seconds, floored, and uvicorn caches it and refreshes it once a
+second: measured on 005 (2026-11-20), the API's ran 0.3-1.2 s behind its
+NTP-synced clock, and a clock set from it by `correct_clock` (whole seconds,
+without the +0.5 s) ended up 0.3-2.0 s behind. So the API sends `X-Server-Time`
+(Unix time in ms, stamped as the reply goes out) on the two replies units read
+the time from, `GET /health` and `POST /ip/uplink` (API `app/server_time.py`).
+`network_time.py` and `correct_clock` use it, plus half the round trip, and fall
+back to `Date` + 0.5 s when it is missing (an older server, or public servers).
+What remains is the round trip's asymmetry, a few hundred ms at most over
+cellular. `watercam-set-clock` takes fractional seconds; `correct_clock` falls
+back to whole seconds if the installed copy is older.
 
 ## The time sync log
 
