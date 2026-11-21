@@ -31,6 +31,7 @@ Standard library only: it runs as root from the Witty Pi daemon, outside the ven
 """
 import ipaddress
 import json
+import math
 import os
 import signal
 import socket
@@ -123,7 +124,8 @@ def trusted(url):
 
 
 def fetch_date(url, opener=urllib.request.urlopen, now=time.time):
-    """The server's time from its Date header (any HTTP status), or None."""
+    """The server's time (any HTTP status), or None: X-Server-Time (ms, stamped
+    as the reply went out; our API sends it) or else the Date header."""
     req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "watercam-clock"})
     t0 = now()
     try:
@@ -136,8 +138,14 @@ def fetch_date(url, opener=urllib.request.urlopen, now=time.time):
         return None
     rtt = now() - t0
     try:
-        # The header is the second the reply was made, floored: +0.5 s on average,
-        # plus half the round trip for the reply's way back
+        precise = float(headers.get("X-Server-Time") or "nan")
+    except (TypeError, ValueError, AttributeError):
+        precise = float("nan")
+    if math.isfinite(precise):
+        return precise + rtt / 2              # plus half the round trip for the reply's way back
+    try:
+        # Date is the second the reply was made, floored (and cached by some
+        # servers): +0.5 s on average, plus half the round trip
         return parsedate_to_datetime(headers["Date"]).timestamp() + 0.5 + rtt / 2
     except (TypeError, ValueError, KeyError):
         return None
