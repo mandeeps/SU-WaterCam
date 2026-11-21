@@ -410,6 +410,15 @@ def test_the_helper_refuses_anything_but_a_plain_unix_time(ts):
     assert r.returncode == 2 and "usage" in r.stderr
 
 
+@pytest.mark.parametrize("ts", ["1794287896", "1794287896.5", "1794287896.123456"])
+def test_the_helper_accepts_whole_and_fractional_seconds(ts):
+    # Its own pattern, run alone: the script itself would set the clock
+    path = os.path.join(os.path.dirname(__file__), "..", "config", "watercam-set-clock")
+    check = next(line for line in open(path) if line.startswith('[[ "$ts" =~'))
+    r = subprocess.run(["bash", "-c", 'ts=$1; ' + check.replace("exit 2", "exit 9"), "_", ts])
+    assert r.returncode == 0
+
+
 @pytest.mark.parametrize("ts", ["1000000000.5", "4102444800.000"])
 def test_the_helper_refuses_fractional_times_out_of_range(ts):
     path = os.path.join(os.path.dirname(__file__), "..", "config", "watercam-set-clock")

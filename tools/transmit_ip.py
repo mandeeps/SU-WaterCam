@@ -763,6 +763,7 @@ class IPTransmitter:
                     url, json=payload, timeout=self.timeout_s, headers=self._auth_headers()
                 )
                 rtt_s = time.monotonic() - sent_at
+                received_at = time.time()          # before parsing: correct_clock's offset is from here
                 last_status = resp.status_code
 
                 if resp.status_code in (200, 201):
@@ -787,7 +788,7 @@ class IPTransmitter:
                         "response": body,
                         "server_date": resp.headers.get("Date") if self.trusted else None,
                         "server_time": resp.headers.get("X-Server-Time") if self.trusted else None,
-                        "received_at": time.time(),
+                        "received_at": received_at,
                         "rtt_s": rtt_s,
                         "error": None,
                         "attempts": attempt,
