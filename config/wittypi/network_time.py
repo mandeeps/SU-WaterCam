@@ -52,6 +52,9 @@ TOTAL_TIMEOUT_S = 30
 CLOCK_FLOOR = 1767225600       # 2026-01-01, as watercam-set-clock
 CLOCK_CEILING = 4102444800     # 2100-01-01
 MAX_STEP_S = 24 * 3600
+# The reply's way back: half the round trip, at most this (a slow round trip is
+# mostly before the server's stamp; tools/transmit_ip.py RETURN_LEG_MAX_S)
+RETURN_LEG_MAX_S = 0.25
 TAILNET = (ipaddress.ip_network("100.64.0.0/10"), ipaddress.ip_network("fd7a:115c:a1e0::/48"))
 
 
@@ -136,17 +139,17 @@ def fetch_date(url, opener=urllib.request.urlopen, now=time.time):
         headers = e.headers
     except (OSError, ValueError, ssl.SSLError):
         return None
-    rtt = now() - t0
+    back = min((now() - t0) / 2, RETURN_LEG_MAX_S)
     try:
         precise = float(headers.get("X-Server-Time") or "nan")
     except (TypeError, ValueError, AttributeError):
         precise = float("nan")
     if math.isfinite(precise):
-        return precise + rtt / 2              # plus half the round trip for the reply's way back
+        return precise + back                 # plus the reply's way back
     try:
         # Date is the second the reply was made, floored (and cached by some
-        # servers): +0.5 s on average, plus half the round trip
-        return parsedate_to_datetime(headers["Date"]).timestamp() + 0.5 + rtt / 2
+        # servers): +0.5 s on average, plus the reply's way back
+        return parsedate_to_datetime(headers["Date"]).timestamp() + 0.5 + back
     except (TypeError, ValueError, KeyError):
         return None
 

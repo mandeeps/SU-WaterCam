@@ -131,3 +131,25 @@ def test_the_offset_is_from_when_the_reply_arrived():
 def test_an_old_helper_gets_whole_seconds():
     offset, args = _correct({"server_time": "2000000010.600", "rtt_s": 0}, returncodes=(2, 0))
     assert offset == pytest.approx(10.6) and args == ["2000000010.600", "2000000011"]
+
+
+def test_a_slow_round_trip_adds_at_most_the_return_leg_cap():
+    # 5.75 s round trip (a fresh cellular link): the reply's way back counts as
+    # RETURN_LEG_MAX_S, not half the round trip (docs/TIME_SYNC.md)
+    offset, args = _correct({"server_time": "2000000010.000", "rtt_s": 5.75})
+    assert offset == pytest.approx(10.25) and args == ["2000000010.250"]
+    transmit_ip_reset()
+    offset, args = _correct({"server_date": formatdate(2_000_000_010, usegmt=True), "rtt_s": 6.0})
+    assert offset == pytest.approx(10.75)                     # Date: +0.5 floored second, +0.25
+
+
+def test_a_fast_round_trip_still_adds_half_of_it():
+    offset, args = _correct({"server_time": "2000000010.000", "rtt_s": 0.3})
+    assert offset == pytest.approx(10.15) and args == ["2000000010.150"]
+
+
+def test_a_slow_upload_does_not_move_a_clock_that_is_right():
+    # The clock is 0.1 s behind the server; a 5.75 s round trip used to make
+    # that look like 2.98 s, over the 2 s tolerance, and set the clock ahead
+    offset, args = _correct({"server_time": "2000000000.100", "rtt_s": 5.75})
+    assert offset is None and args == []

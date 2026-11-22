@@ -158,7 +158,7 @@ def test_fetch_reads_the_date_header_of_any_status():
 
     t = iter([100.0, 100.4])
     ts = nt.fetch_date("https://x", opener=lambda req, **kw: Resp(NOW), now=lambda: next(t))
-    assert ts == pytest.approx(NOW + 0.5 + 0.2)       # floored second + half the round trip
+    assert ts == pytest.approx(NOW + 0.5 + 0.2, abs=1e-3)       # floored second + half the round trip
 
     def refused(req, **kw):
         raise urllib.error.HTTPError(req.full_url, 405, "no", headers(NOW), None)
@@ -168,10 +168,13 @@ def test_fetch_reads_the_date_header_of_any_status():
     precise["X-Server-Time"] = f"{NOW + 0.123:.3f}"
     t = iter([100.0, 100.4])
     assert nt.fetch_date("https://x", opener=lambda req, **kw: type("R", (), {"headers": precise, "close": lambda s: None})(),
-                         now=lambda: next(t)) == pytest.approx(NOW + 0.123 + 0.2)   # X-Server-Time wins over Date
+                         now=lambda: next(t)) == pytest.approx(NOW + 0.123 + 0.2, abs=1e-3)   # X-Server-Time wins over Date
+    t = iter([100.0, 105.75])                          # a slow round trip: the way back counts 0.25 s at most
+    assert nt.fetch_date("https://x", opener=lambda req, **kw: type("R", (), {"headers": precise, "close": lambda s: None})(),
+                         now=lambda: next(t)) == pytest.approx(NOW + 0.123 + nt.RETURN_LEG_MAX_S, abs=1e-3)
     precise.replace_header("X-Server-Time", "later")
     assert nt.fetch_date("https://x", opener=lambda req, **kw: type("R", (), {"headers": precise, "close": lambda s: None})(),
-                         now=lambda: 100.0) == pytest.approx(NOW - 5 + 0.5)        # unreadable: Date
+                         now=lambda: 100.0) == pytest.approx(NOW - 5 + 0.5, abs=1e-3)        # unreadable: Date
 
     def down(req, **kw):
         raise urllib.error.URLError("connection refused")
