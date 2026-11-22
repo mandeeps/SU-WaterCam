@@ -140,7 +140,7 @@ def test_a_slow_round_trip_adds_at_most_the_return_leg_cap():
     assert offset == pytest.approx(10.25) and args == ["2000000010.250"]
     transmit_ip_reset()
     offset, args = _correct({"server_date": formatdate(2_000_000_010, usegmt=True), "rtt_s": 6.0})
-    assert offset == pytest.approx(10.75)                     # Date: +0.5 floored second, +0.25
+    assert offset == pytest.approx(10.75) and args == ["2000000010.750"]   # Date: +0.5 floored second, +0.25
 
 
 def test_a_fast_round_trip_still_adds_half_of_it():
@@ -153,3 +153,20 @@ def test_a_slow_upload_does_not_move_a_clock_that_is_right():
     # that look like 2.98 s, over the 2 s tolerance, and set the clock ahead
     offset, args = _correct({"server_time": "2000000000.100", "rtt_s": 5.75})
     assert offset is None and args == []
+
+
+def test_a_bad_round_trip_counts_as_none():
+    # A negative or non-finite rtt_s adds nothing, and never makes the time NaN
+    for rtt in (-3.0, float("nan"), float("inf"), "x"):
+        assert transmit_ip.server_time({"server_time": "2000000010.000", "rtt_s": rtt}) == pytest.approx(2_000_000_010.0)
+
+
+def test_network_time_uses_the_same_cap():
+    # config/wittypi/network_time.py runs outside the venv and can't import transmit_ip
+    import importlib.util
+    from pathlib import Path
+    path = Path(__file__).resolve().parent.parent / "config" / "wittypi" / "network_time.py"
+    spec = importlib.util.spec_from_file_location("network_time_cap", path)
+    nt = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nt)
+    assert nt.RETURN_LEG_MAX_S == transmit_ip.RETURN_LEG_MAX_S

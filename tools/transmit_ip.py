@@ -1398,8 +1398,9 @@ CLOCK_TOLERANCE_S = 2
 # Time allowed for the reply's way back: half the round trip, but no more than
 # this. The server stamps its time as the reply leaves, so most of a slow round
 # trip comes before the stamp (setting up a fresh cellular link, sending an
-# upload's body, the server's own work). Over cellular and Tailscale the way back
-# measured 0.15-0.21 s while round trips ran up to 5.7 s (docs/TIME_SYNC.md).
+# upload's body, the server's own work). Over cellular, through Tailscale, the
+# way back measured 0.15-0.21 s while round trips ran up to 5.7 s
+# (docs/TIME_SYNC.md).
 RETURN_LEG_MAX_S = 0.25
 # A larger correction is only applied when the RTC is known to be bad
 # (rtc_early_clock.py leaves RTC_UNTRUSTED) or the clock is before 2026: a
@@ -1438,15 +1439,19 @@ def server_time(uplink_result: Dict[str, Any]) -> Optional[float]:
     back: half the round trip, at most RETURN_LEG_MAX_S."""
     from email.utils import parsedate_to_datetime
     result = uplink_result or {}
-    half_rtt = min((result.get("rtt_s") or 0) / 2, RETURN_LEG_MAX_S)
+    try:
+        rtt = float(result.get("rtt_s") or 0)
+    except (TypeError, ValueError):
+        rtt = 0.0
+    back = min(max(rtt / 2, 0.0), RETURN_LEG_MAX_S) if math.isfinite(rtt) else 0.0
     try:
         precise = float(result.get("server_time") or "nan")
     except (TypeError, ValueError):
         precise = float("nan")
     if math.isfinite(precise):
-        return precise + half_rtt
+        return precise + back
     try:
-        return parsedate_to_datetime(result.get("server_date")).timestamp() + 0.5 + half_rtt
+        return parsedate_to_datetime(result.get("server_date")).timestamp() + 0.5 + back
     except (TypeError, ValueError):
         return None
 

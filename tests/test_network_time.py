@@ -172,6 +172,9 @@ def test_fetch_reads_the_date_header_of_any_status():
     t = iter([100.0, 105.75])                          # a slow round trip: the way back counts 0.25 s at most
     assert nt.fetch_date("https://x", opener=lambda req, **kw: type("R", (), {"headers": precise, "close": lambda s: None})(),
                          now=lambda: next(t)) == pytest.approx(NOW + 0.123 + nt.RETURN_LEG_MAX_S, abs=1e-3)
+    t = iter([100.0, 99.0])                            # the clock stepped back mid-request: nothing added
+    assert nt.fetch_date("https://x", opener=lambda req, **kw: type("R", (), {"headers": precise, "close": lambda s: None})(),
+                         now=lambda: next(t)) == pytest.approx(NOW + 0.123, abs=1e-3)
     precise.replace_header("X-Server-Time", "later")
     assert nt.fetch_date("https://x", opener=lambda req, **kw: type("R", (), {"headers": precise, "close": lambda s: None})(),
                          now=lambda: 100.0) == pytest.approx(NOW - 5 + 0.5, abs=1e-3)        # unreadable: Date

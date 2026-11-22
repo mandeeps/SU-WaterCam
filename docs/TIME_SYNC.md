@@ -180,7 +180,8 @@ reply (0.3-0.5 s round trip) left the clock within 0.03 s, but slow ones
 (1.25 s and 5.7 s) left it 0.5 s and 2.7 s ahead. A 2.7 s error is also more
 than `CLOCK_TOLERANCE_S`, so it could replace a good clock from LoRa time. With
 the cap, all four would have been within about 0.1 s. A unit whose way back is
-longer (Tailscale relaying, for one) ends up behind by the excess.
+longer ends up behind by the excess: for one, when Tailscale can't connect
+directly and relays its traffic through a DERP server.
 `watercam-set-clock` takes fractional seconds; `correct_clock` falls
 back to whole seconds if the installed copy is older.
 

@@ -139,7 +139,7 @@ def fetch_date(url, opener=urllib.request.urlopen, now=time.time):
         headers = e.headers
     except (OSError, ValueError, ssl.SSLError):
         return None
-    back = min((now() - t0) / 2, RETURN_LEG_MAX_S)
+    back = min(max((now() - t0) / 2, 0.0), RETURN_LEG_MAX_S)   # 0 if the clock stepped back meanwhile
     try:
         precise = float(headers.get("X-Server-Time") or "nan")
     except (TypeError, ValueError, AttributeError):
