@@ -222,7 +222,9 @@ def generate(s: Schedule, now: datetime, label: Optional[str] = None) -> str:
     """schedule.wpi text: BEGIN at today's first wake, one day of ON/OFF states."""
     offsets = wakes(s)
     begin = now.replace(hour=s.start // 60, minute=s.start % 60, second=0, microsecond=0)
-    lines = [f"# HazMapper schedule {label or s.label()} (start-end/interval/awake, local time)"
+    # The API's app/schedule.py reproduces this text exactly (its fixture vectors
+    # come from this module), so change the header in both repos at once.
+    lines = [f"# WaterCam schedule {label or s.label()} (start-end/interval/awake, local time)"
              + (f", today {s.label()}" if label and label != s.label() else "") + ",",
              f"# written {now:%Y-%m-%d %H:%M} by tools/schedule_control.py from downlink 15 95.",
              f"# UTC offset {_offset_min(now)} min; rewritten when it changes (DST).",
