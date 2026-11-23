@@ -3,7 +3,8 @@ Description=Set the system clock from the Witty Pi RTC early in boot (tools/rtc_
 # The clock otherwise starts at the last shutdown's time until the Witty Pi
 # daemon / syncTime.sh fix it, after tailscaled has already started with it.
 # Only moves the clock forward, only to a plausible RTC time; never fails or
-# holds up the boot (no Witty Pi: it waits at most 5 s for /dev/i2c-1).
+# holds up the boot (no Witty Pi: at most 5 s for /dev/i2c-1, then about 3-4 s
+# of read retries, as a Witty Pi can be slow to answer right after power-on).
 DefaultDependencies=no
 After=local-fs.target systemd-modules-load.service systemd-udev-trigger.service fake-hwclock.service
 Before=time-sync.target systemd-timesyncd.service tailscaled.service lora_daemon.service ticktalk.service powerlog.service wittypi.service sysinit.target shutdown.target

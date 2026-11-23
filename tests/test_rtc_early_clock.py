@@ -73,28 +73,44 @@ def test_read_straddling_a_tick_is_rejected(monkeypatch):
     assert rec.rtc_timestamp() is None
 
 
+class FakeClock:
+    """time.monotonic/sleep for read_registers, so retry tests don't depend on real time."""
+    def __init__(self):
+        self.t = 0.0
+
+    def monotonic(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+
+
 @pytest.fixture
-def fast_retry(monkeypatch):
-    monkeypatch.setattr(rec, "READ_RETRY_S", 0.2)
-    monkeypatch.setattr(rec, "READ_RETRY_INTERVAL_S", 0.01)
+def clock(monkeypatch):
+    c = FakeClock()
+    monkeypatch.setattr(rec, "time", c)
+    return c
 
 
-def test_no_wittypi_gives_up_after_the_retry_window(monkeypatch, fast_retry):
+def test_no_wittypi_gives_up_after_the_retry_window(monkeypatch, clock):
     calls = []
     monkeypatch.setattr(rec, "_i2cget", lambda r: calls.append(r))
     assert rec.read_registers() == [None] * 7
-    assert len(calls) > 1 and set(calls) == {rec.REG_RTC_FIRST}   # retried the first register only
+    assert set(calls) == {rec.REG_RTC_FIRST}                     # only the first register is retried
+    assert len(calls) >= rec.READ_RETRY_S / rec.READ_RETRY_INTERVAL_S - 1     # retried through the window
+    assert clock.t <= rec.READ_RETRY_S                            # the sleeps stay inside the window
 
 
-def test_a_wittypi_slow_to_answer_after_power_on_is_read(monkeypatch, fast_retry):
+def test_a_wittypi_slow_to_answer_after_power_on_is_read(monkeypatch, clock):
     # The first reads fail at once ("Read failed"), then it answers (seen on a unit at boot)
     answers = iter([None, None, None] + regs(T))
     monkeypatch.setattr(rec, "_i2cget", lambda r: next(answers))
     assert rec.decode(rec.read_registers()) == T
+    assert clock.t == pytest.approx(3 * rec.READ_RETRY_INTERVAL_S)
 
 
-def test_the_retry_window_is_shared_by_all_registers(monkeypatch, fast_retry):
-    # A register that never answers stops the read: the window isn't renewed per register
+def test_a_later_register_that_fails_is_not_retried(monkeypatch, clock):
+    # Once the Witty Pi answers, the reads stay back to back: a failure stops the read
     calls = []
 
     def flaky(r):
@@ -102,7 +118,7 @@ def test_the_retry_window_is_shared_by_all_registers(monkeypatch, fast_retry):
         return None if r == rec.REG_RTC_FIRST + 2 else 0x10
     monkeypatch.setattr(rec, "_i2cget", flaky)
     assert rec.read_registers()[2:] == [None] * 5
-    assert max(calls) == rec.REG_RTC_FIRST + 2
+    assert calls == [rec.REG_RTC_FIRST, rec.REG_RTC_FIRST + 1, rec.REG_RTC_FIRST + 2] and clock.t == 0
 
 
 def test_writes_no_time_source_marker():
