@@ -47,8 +47,11 @@ LATEST = datetime(2038, 1, 1).timestamp()
 MIN_STEP_S = 2
 
 # (field, low, high) for the 7 registers after the BCD decode
+# The weekday isn't used for the time. The Witty Pi scripts and watercam-set-clock
+# write `date +%u` (1-7, Sunday 7); 0 is accepted too. With the 3-bit mask in
+# decode() this range rejects nothing: the weekday is not checked.
 _FIELDS = (("second", 0, 59), ("minute", 0, 59), ("hour", 0, 23), ("day", 1, 31),
-           ("weekday", 0, 6), ("month", 1, 12), ("year", 0, 99))
+           ("weekday", 0, 7), ("month", 1, 12), ("year", 0, 99))
 
 
 def _bcd(v: int) -> Optional[int]:
