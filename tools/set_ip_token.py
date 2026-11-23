@@ -51,7 +51,7 @@ def main(argv=None, prompt=getpass.getpass):
         return 1
     token = prompt("Paste the token from the dashboard (input hidden): ").strip()
     if not looks_like_token(token):
-        print(f"That does not look like a WaterCam token (they start with {PREFIX}). Nothing changed.",
+        print(f"That does not look like a UFONet token (they start with {PREFIX}). Nothing changed.",
               file=sys.stderr)
         return 1
     device = store_token(args.config, token)

@@ -9,7 +9,7 @@ are maintained. Older releases aren't patched: update the unit to the current ta
 ## Reporting a vulnerability
 
 Open a private security advisory on this repository (Security → Advisories → Report a
-vulnerability), or contact the WaterCam team maintainers directly. Don't describe it in a
+vulnerability), or contact the UFONet team maintainers directly. Don't describe it in a
 public issue.
 
 How the units are protected (network access, signed releases, the checked capture program)

@@ -1,6 +1,6 @@
 """Integration tests for IP uplink/downlink transport.
 
-Runs against a live WaterCam FastAPI server, and only when you name one:
+Runs against a live UFONet FastAPI server, and only when you name one:
 
     WATERCAM_SERVER_URL=http://localhost:8000
     WATERCAM_DEVICE_ID=watercam-test-001     # optional

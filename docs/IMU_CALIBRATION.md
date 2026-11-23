@@ -1,6 +1,6 @@
-# WaterCam IMU Calibration Procedure
+# HazMapper IMU Calibration Procedure
 
-**Applies to:** All WaterCam units equipped with a BNO055 IMU  
+**Applies to:** All HazMapper units equipped with a BNO055 IMU  
 **Script:** `tools/bno055_calibration.py`  
 **Time required:** ~20 minutes pre-mount + ~10 minutes post-mount
 
@@ -22,7 +22,7 @@ The BNO055 has no internal non-volatile memory. Calibration offsets must be save
 ## What you need
 
 **For Stage 1 (pre-mount):**
-- Assembled WaterCam unit (fully populated PCB, all components installed)
+- Assembled HazMapper unit (fully populated PCB, all components installed)
 - Raspberry Pi powered and running
 - Outdoor location away from metal furniture, power supplies, and electrical panels
 - Laptop or SSH session to run the calibration script

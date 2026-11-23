@@ -23,11 +23,11 @@ HARDWARE SETUP:
         i2cdetect -y 1     (should show 0x28 or 0x29)
 
 IMPORTANT — MOUNTING NOTE:
-    The BNO055 must be mounted rigidly to the camera box, not the pole.
+    The BNO055 must be mounted rigidly to the enclosure, not the pole.
     Any flex between the sensor and cameras introduces orientation error.
     Once mounted, do not move or re-solder the sensor — the hard-iron
     calibration (magnetometer offsets) is specific to that physical location
-    because nearby ferromagnetic materials in the camera box shift the
+    because nearby ferromagnetic materials in the enclosure shift the
     local magnetic field. If you remount the sensor, recalibrate from scratch.
 
 DEPENDENCIES:
@@ -353,9 +353,9 @@ def save_calibration(imu: BNO055, path: str = CALIB_FILE,
     Save calibration offsets and metadata to a JSON file.
 
     PARAMETERS:
-        node_id : identifier for this specific camera node.
+        node_id : identifier for this specific HazMapper node.
                   Calibration is node-specific because the hard-iron offsets
-                  depend on the local magnetic environment of the camera box.
+                  depend on the local magnetic environment of the enclosure.
         magnetic_declination_deg : local magnetic declination in degrees.
                   Positive = East (magnetic North is East of true North).
                   Look this up for your deployment site at:
@@ -420,7 +420,7 @@ def load_calibration(imu: BNO055, path: str = CALIB_FILE) -> float:
             - Same physical mounting, same location
         Recalibrate from scratch:
             - Sensor has been physically moved or remounted
-            - Camera box has been modified (new hardware added nearby)
+            - Enclosure has been modified (new hardware added nearby)
             - Heading readings seem consistently wrong by a fixed offset
             - More than ~6 months have passed (Earth's field drifts slowly)
     """
@@ -532,12 +532,12 @@ def run_calibration_procedure(imu: BNO055,
     The gyroscope and magnetometer stages wait for status = 3.
 
     BEFORE STARTING:
-        - BNO055 must already be mounted rigidly inside the camera box.
+        - BNO055 must already be mounted rigidly inside the enclosure.
         - Calibration must be performed at the deployment site (or a
           magnetically similar outdoor location), not at a workbench near
           computers, power supplies, or large metal objects.
         - The hard-iron magnetometer offsets captured here are specific to
-          this sensor's physical position inside this camera box.
+          this sensor's physical position inside this enclosure.
           If the sensor is ever remounted, recalibrate from scratch.
     """
     # The chip counts an accelerometer pose only when gravity lies along one of its
@@ -567,7 +567,7 @@ def run_calibration_procedure(imu: BNO055,
             print("─"*60)
             print(f"STAGE {stage_no['gyro']}/{n_stages} -- GYROSCOPE (~5 seconds)")
             print()
-            print("  Place the camera box on a flat, stable surface.")
+            print("  Place the enclosure on a flat, stable surface.")
             print("  Do not touch or move the box during this stage.")
             print()
             input("  Press Enter when the box is placed and still > ")
@@ -630,7 +630,7 @@ def run_calibration_procedure(imu: BNO055,
             print("─"*60)
             print(f"STAGE {stage_no['mag']}/{n_stages} -- MAGNETOMETER (~2 minutes)")
             print()
-            print("  Pick up the camera box and rotate it slowly through a")
+            print("  Pick up the enclosure and rotate it slowly through a")
             print("  figure-eight pattern -- as if drawing a large '8' in the air.")
             print()
             print("  Rules:")
@@ -699,7 +699,7 @@ def validate_heading(imu: BNO055,
     This tells you the combined heading error from:
         - Magnetic declination (systematic, fixed for a location)
         - Hard-iron offsets not fully corrected by calibration
-        - Soft-iron distortion from the camera box structure
+        - Soft-iron distortion from the enclosure structure
 
     The residual offset printed here can be added to all subsequent heading
     readings as a fine correction beyond what the BNO055 calibration alone
@@ -778,7 +778,7 @@ def run_logger(imu: BNO055,
     CALIBRATION WATCH:
         If mag calibration drops below 2 during logging, the heading data
         becomes unreliable — this is flagged in the log and printed to console.
-        This can happen if the camera box is moved near a large metal object.
+        This can happen if the enclosure is moved near a large metal object.
         Re-run the magnetometer figure-eight if this occurs.
     """
     fieldnames = ["timestamp", "tilt_deg", "roll_deg", "yaw_deg",

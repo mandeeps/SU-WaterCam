@@ -1,4 +1,4 @@
-# IP Transmission — WaterCam over WiFi/Cellular
+# IP Transmission — HazMapper over WiFi/Cellular
 
 **Status:** Complete — standalone client and TickTalkPython integration both implemented.  
 **Written:** April 2026 on the `CellTransmit` branch, now in `main`; later sections and the `battery_pct` row updated through 2026-11-14.
@@ -7,7 +7,7 @@
 
 ## Overview
 
-The WaterCam device normally sends sensor data over LoRa via an mDot modem.
+The HazMapper device normally sends sensor data over LoRa via an mDot modem.
 On deployments with WiFi or cellular access, the same data can be sent directly
 to the FastAPI server over HTTP.  Both transports produce identical readings in
 InfluxDB and the dashboard — the only difference is the delivery path.
@@ -615,7 +615,7 @@ tailscale ssh -t pi@<unit-hostname> \
 ```
 
 and paste the token at the hidden prompt. The script checks that it looks like a
-WaterCam token (`wct_…`), stores it as `ip_upload.api_key`, makes
+UFONet token (`wct_…`), stores it as `ip_upload.api_key`, makes
 `runtime_config.json` readable by its owner only (0600, which later config writes
 keep), and prints only the token's last four characters. No restart is needed.
 Keep the token out of shell history, chat and command lines: always paste it at

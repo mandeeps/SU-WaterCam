@@ -1,4 +1,4 @@
-# WaterCam: on for 15 min every 2 h, daylight only (the camera can't see at night).
+# HazMapper: on for 15 min every 2 h, daylight only (the camera can't see at night).
 # Wakes at 08:00, 10:00, 12:00, 14:00, 16:00 EST; the Witty Pi counts seconds
 # from BEGIN, so during daylight saving they land an hour later (09:00-17:00 EDT).
 # Checked for Syracuse (43 N) all year: first wake >= 24 min after sunrise, last

@@ -13,7 +13,7 @@ or compatible single board computer with GPIO, I2C, SPI etc.,
 
 ## Parts List
 
-**WaterCam Unit**
+**HazMapper Unit**
 
 - Raspberry Pi 4B
 

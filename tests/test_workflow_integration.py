@@ -1,8 +1,8 @@
 """
-WaterCam full-workflow integration tests.
+HazMapper full-workflow integration tests.
 
 These tests simulate every stage of the wake-cycle pipeline that runs on a
-physical WaterCam device:
+physical HazMapper device:
 
   initialize_lora → ip_downlink_poll → validate_config → adaptive_monitoring
   → get_time → take_two_photos → flir → coregistration → segformer
@@ -556,7 +556,7 @@ class TestCoregSegmentation:
 
 class TestFullPipelineSmoke:
     """
-    End-to-end simulation of one complete WaterCam wake cycle.
+    End-to-end simulation of one complete HazMapper wake cycle.
 
     Each stage that involves real hardware is replaced by a mock or
     graceful-fallback path; all software-only stages run the actual code.

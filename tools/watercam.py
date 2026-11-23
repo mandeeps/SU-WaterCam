@@ -1,5 +1,5 @@
 #!/home/pi/SU-WaterCam/venv/bin/python
-# Main script for controlling automated WaterCam functions when running in field on a schedule
+# Main script for controlling automated HazMapper functions when running in field on a schedule
 # When the system wakes up this script will run functions from take_nir_photos to save images and data from the optical and Flir Lepton cameras and metadata from the IMU and GPS
 
 import os

@@ -1,5 +1,5 @@
 """
-Hardware stubs and shared fixtures for the WaterCam CI test suite.
+Hardware stubs and shared fixtures for the HazMapper CI test suite.
 
 All Raspberry Pi / hardware-specific Python modules are replaced with
 lightweight stubs at import time, before any project code is loaded.

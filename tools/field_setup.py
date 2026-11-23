@@ -1,5 +1,5 @@
 #!/home/pi/SU-WaterCam/venv/bin/python
-"""Guided installation of a WaterCam unit at its site, one numbered step at a time.
+"""Guided installation of a HazMapper unit at its site, one numbered step at a time.
 
 Run it on the unit, over SSH (the phone hotspot your laptop is also on) or the
 serial console:
@@ -87,7 +87,7 @@ def pick_session(ui: fs.TerminalUI, args) -> fs.Session:
 
 
 def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(description="Guided installation of a WaterCam unit at its site.")
+    ap = argparse.ArgumentParser(description="Guided installation of a HazMapper unit at its site.")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--step", choices=fs.STEP_IDS)
     ap.add_argument("--list", action="store_true")
@@ -116,7 +116,7 @@ def main(argv=None) -> int:
     else:
         ui = fs.TerminalUI()
 
-    ui.say("WaterCam field setup" + ("  -- DRY RUN: checks only, nothing on the unit is changed" if args.dry_run else ""))
+    ui.say("HazMapper field setup" + ("  -- DRY RUN: checks only, nothing on the unit is changed" if args.dry_run else ""))
     ui.say("Type q at any prompt to stop. Progress is saved; run this again to continue.")
     try:
         session = pick_session(ui, args)

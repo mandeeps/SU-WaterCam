@@ -1,4 +1,4 @@
-# Field Deployment Guide: Configuring and Installing an Assembled WaterCam Unit
+# Field Deployment Guide: Configuring and Installing an Assembled HazMapper Unit
 
 **Audience:** Written assuming you have an assembled unit and flashed the SD card image (published as release assets of the team's private `sd-images` repository, as described in `README.md`) but need to set up remote access, the WittyPi schdedule, and the auto-start functionality. 
 
@@ -428,7 +428,7 @@ settings, with defaults and where each lives, is in
 Also confirm before deploying:
 
 - `emergency_mode: false` and `debug_mode: false` — both should be off for a normal deployment (`debug_mode` also turns on the LoRa handler's `DEBUG:` lines and the per-poll GPS lines, see 1.9.1)
-- `ip_upload.enabled` — `true` if this site will use cellular/IP upload in addition to (or instead of) LoRa; if so, fill in `server_url` for the WaterCam API server this unit reports to (already set for our tailnet), and give it this unit's own token: on the dashboard, Management → select the unit → IP access token → Generate (the token is shown once), then run `venv/bin/python tools/set_ip_token.py` on the unit and paste it at the hidden prompt (docs/IP_TRANSMISSION.md, "Installing the IP token"). Once the server enforces tokens (`IP_AUTH=enforce`), a unit without one can't send over IP.
+- `ip_upload.enabled` — `true` if this site will use cellular/IP upload in addition to (or instead of) LoRa; if so, fill in `server_url` for the UFONet API server this unit reports to (already set for our tailnet), and give it this unit's own token: on the dashboard, Management → select the unit → IP access token → Generate (the token is shown once), then run `venv/bin/python tools/set_ip_token.py` on the unit and paste it at the hidden prompt (docs/IP_TRANSMISSION.md, "Installing the IP token"). Once the server enforces tokens (`IP_AUTH=enforce`), a unit without one can't send over IP.
 - **LoRa sensor packet:** each capture sends the capture time plus only the fields
   that changed enough since they were last sent (`data/lora_last_sent.json`). Fields
   in the `lora_thresholds` section of `runtime_config.json` use a step in their own
@@ -1048,7 +1048,7 @@ journalctl -u ticktalk.service -f
 ```
 
 Watch the log for a completed photo capture and a successful LoRa/IP
-transmission. Then confirm the reading actually arrived — check the WaterCam dashboard for this device's `device_id` and confirm a fresh
+transmission. Then confirm the reading actually arrived — check the UFONet dashboard for this device's `device_id` and confirm a fresh
 reading shows up. Stop the service again if you still need to seal the case as the service will shutdown the Raspberry Pi once it has finished capturing data:
 
 ```bash

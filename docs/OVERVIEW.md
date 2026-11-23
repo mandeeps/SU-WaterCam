@@ -1,6 +1,6 @@
 # The node from wake to shutdown
 
-A map of what one WaterCam unit does, in order, and where each part lives in
+A map of what one HazMapper unit does, in order, and where each part lives in
 this repository. It points to the detailed docs and does not repeat them. Each
 statement was checked against the code on 2026-11-14.
 

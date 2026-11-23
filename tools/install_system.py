@@ -359,7 +359,7 @@ class Installer:
         others = sorted(set(os.listdir(node_path(JOURNALD_DIR))) -
                         {os.path.basename(d) for _, d in JOURNALD_CHOICES.values()})
         if others:
-            self.add("warn", JOURNALD_DIR, "other drop-ins may override the WaterCam one: " + ", ".join(others))
+            self.add("warn", JOURNALD_DIR, "other drop-ins may override the HazMapper one: " + ", ".join(others))
 
     def plan_gpsd(self) -> None:
         path = node_path(GPSD_DEFAULTS)

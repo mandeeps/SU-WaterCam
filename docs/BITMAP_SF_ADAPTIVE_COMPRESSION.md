@@ -3,7 +3,7 @@
 The bitmap byte format itself (header, bitpacking and RLE payloads, decoding) is specified in [BITMAP_DECODING_SPEC.md](BITMAP_DECODING_SPEC.md).
 
 **Date:** May 2026  
-**Related repo:** WaterCam API (`fix/bitmap-sf-adaptive-raw-mode`)  
+**Related repo:** UFONet API (`fix/bitmap-sf-adaptive-raw-mode`)  
 **Affected files:** `ticktalk_main.py`
 
 ---
@@ -145,7 +145,7 @@ with `lsof /run/lock/watercam-lora.lock`.
 
 ## Server-Side Counterpart
 
-The WaterCam API also needed a fix: its raw bitmap detection only accepted `method == 0`
+The UFONet API also needed a fix: its raw bitmap detection only accepted `method == 0`
 (bitpacked + Brotli). Method 1 (RLE + Brotli) bitmaps — which `compress_image()` may
 choose when they produce a smaller output — were being silently discarded. This is fixed
 in `app/chirpstack.py` in the companion PR.

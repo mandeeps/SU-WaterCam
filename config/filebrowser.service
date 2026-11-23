@@ -1,5 +1,5 @@
 [Unit]
-Description=Filebrowser for accessing WaterCam files
+Description=Filebrowser for accessing HazMapper files
 Requires=network-online.target 
 After=network-online.target
 

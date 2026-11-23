@@ -112,7 +112,7 @@ example_packet = compressed_encoding({
 
 def transmit_from_watercam(data_dict):
     # example for direct use
-    print("handle data from watercam sensors")
+    print("handle data from HazMapper sensors")
     print(data_dict)
 
     packet = compressed_encoding(data_dict)
