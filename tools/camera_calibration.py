@@ -1,6 +1,10 @@
 """
 Camera Calibration & Georeferencing Pipeline
 =============================================
+COPY: the canonical file is camera_calibration.py in the Georeferencing repo.
+    This copy differs from it only in the DEPENDENCIES note below. Change the
+    code there, then copy it here and put this note back.
+
 DEPENDENCIES:
     This is a workstation tool. It needs the full OpenCV build with windows
     (opencv-python): the interactive capture and the corner preview use
@@ -261,7 +265,7 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
         if not found:
             found, corners = cv2.findChessboardCorners(
                 gray, board_size,
-                cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE)
+                flags=cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE)
 
         if found:
             corners_refined = corners if used_sb else cv2.cornerSubPix(
