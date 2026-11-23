@@ -1,6 +1,10 @@
 """
 Camera Calibration & Georeferencing Pipeline
 =============================================
+COPY: the canonical file is camera_calibration.py in the Georeferencing repo.
+    This copy differs from it only in the DEPENDENCIES note below. Change the
+    code there, then copy it here and put this note back.
+
 DEPENDENCIES:
     This is a workstation tool. It needs the full OpenCV build with windows
     (opencv-python): the interactive capture and the corner preview use
