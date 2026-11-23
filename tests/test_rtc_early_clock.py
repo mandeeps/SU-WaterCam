@@ -73,10 +73,52 @@ def test_read_straddling_a_tick_is_rejected(monkeypatch):
     assert rec.rtc_timestamp() is None
 
 
-def test_no_wittypi_stops_after_the_first_failed_read(monkeypatch):
+class FakeClock:
+    """time.monotonic/sleep for read_registers, so retry tests don't depend on real time."""
+    def __init__(self):
+        self.t = 0.0
+
+    def monotonic(self):
+        return self.t
+
+    def sleep(self, s):
+        self.t += s
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    c = FakeClock()
+    monkeypatch.setattr(rec, "time", c)
+    return c
+
+
+def test_no_wittypi_gives_up_after_the_retry_window(monkeypatch, clock):
     calls = []
     monkeypatch.setattr(rec, "_i2cget", lambda r: calls.append(r))
-    assert rec.read_registers() == [None] * 7 and len(calls) == 1
+    assert rec.read_registers() == [None] * 7
+    assert set(calls) == {rec.REG_RTC_FIRST}                     # only the first register is retried
+    assert len(calls) >= rec.READ_RETRY_S / rec.READ_RETRY_INTERVAL_S - 1     # retried through the window
+    assert clock.t <= rec.READ_RETRY_S                            # the sleeps stay inside the window
+
+
+def test_a_wittypi_slow_to_answer_after_power_on_is_read(monkeypatch, clock):
+    # The first reads fail at once ("Read failed"), then it answers (seen on a unit at boot)
+    answers = iter([None, None, None] + regs(T))
+    monkeypatch.setattr(rec, "_i2cget", lambda r: next(answers))
+    assert rec.decode(rec.read_registers()) == T
+    assert clock.t == pytest.approx(3 * rec.READ_RETRY_INTERVAL_S)
+
+
+def test_a_later_register_that_fails_is_not_retried(monkeypatch, clock):
+    # Once the Witty Pi answers, the reads stay back to back: a failure stops the read
+    calls = []
+
+    def flaky(r):
+        calls.append(r)
+        return None if r == rec.REG_RTC_FIRST + 2 else 0x10
+    monkeypatch.setattr(rec, "_i2cget", flaky)
+    assert rec.read_registers()[2:] == [None] * 5
+    assert calls == [rec.REG_RTC_FIRST, rec.REG_RTC_FIRST + 1, rec.REG_RTC_FIRST + 2] and clock.t == 0
 
 
 def test_writes_no_time_source_marker():
