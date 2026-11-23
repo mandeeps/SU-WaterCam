@@ -117,6 +117,10 @@ def pose_from_reading(reading: Any) -> Optional[Dict[str, Any]]:
     return {"quaternion": q, "gravity": g, "euler_deg": euler, "mag_calibrated": mag_ok}
 
 
+#: How far a quaternion's norm may be from 1 for its heading to become the reference
+UNIT_QUATERNION_TOL = 0.05
+
+
 def _stored_pose(d: Any) -> Optional[Dict[str, Any]]:
     """A reference as _store() wrote it, or None if missing or damaged."""
     if not isinstance(d, dict):
@@ -214,12 +218,15 @@ def check(capture_dir: str, reading: Any,
             result["status"] = "adopted"
             return result
         tilt = round(tilt_deg(ref["gravity"], pose["gravity"]), 2)
-        if adopt and pose["mag_calibrated"] and not ref["mag_calibrated"] and tilt < tilt_threshold_deg:
+        unit_q = abs(math.sqrt(sum(x * x for x in pose["quaternion"])) - 1.0) < UNIT_QUATERNION_TOL
+        if adopt and pose["mag_calibrated"] and not ref["mag_calibrated"] and tilt < tilt_threshold_deg \
+                and unit_q:             # a garbled read mustn't become the reference heading
             # The reference was adopted before its heading could be trusted (after a
             # power-up the magnetometer status reads 0 for a while): take the heading
             # from the first trusted reading, as tools/pose_monitor.py does. A rotation
             # between the adoption and now goes unseen; later ones count.
-            ref = dict(ref, quaternion=pose["quaternion"], euler_deg=pose["euler_deg"],
+            ref = dict(ref, quaternion=pose["quaternion"],
+                       euler_deg=pose["euler_deg"] or ref.get("euler_deg"),
                        mag_calibrated=True, heading_set_at=result["checked_at"])
             data["metadata"]["orientation"] = dict(ref)
             write_json(path, data, mode=0o644)

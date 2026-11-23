@@ -223,8 +223,11 @@ def test_a_reference_adopted_before_the_heading_settled_takes_the_first_trusted_
     assert not load(images_dir)["metadata"]["orientation"]["mag_calibrated"]
     r = ro.check(capture, settled(q=quat((0, 0, 1), 3)))                    # settled: its heading is taken
     assert r["status"] == "ok" and r.get("heading_adopted") and r["heading_reliable"]
-    stored = load(images_dir)["metadata"]["orientation"]
+    cache = load(images_dir)
+    stored = cache["metadata"]["orientation"]
     assert stored["mag_calibrated"] and stored["quaternion"] == list(quat((0, 0, 1), 3))
+    assert cache["parameters"] == TRANSFORM["parameters"]                   # the transform is untouched
+    assert stored["gravity"] == [0.0, -G, 0.0] and stored["recorded_at"] and stored["heading_set_at"]
     r = ro.check(capture, settled(q=quat((0, 0, 1), 3 + 2 * ro.DEFAULT_ROTATION_THRESHOLD_DEG)))
     assert r["status"] == "shifted"                                         # a later turn now counts
     assert "heading_adopted" not in r
@@ -236,4 +239,11 @@ def test_no_heading_is_taken_from_a_tilted_reading_or_without_adopt(images):
     r = ro.check(capture, settled(g=gravity_tilted(2 * ro.DEFAULT_TILT_THRESHOLD_DEG)))
     assert r["status"] == "shifted" and "heading_adopted" not in r
     r = ro.check(capture, settled(), adopt=False)                           # e.g. this capture's solve was rejected
+    assert "heading_adopted" not in r and not load(images_dir)["metadata"]["orientation"]["mag_calibrated"]
+
+
+def test_a_garbled_quaternion_does_not_become_the_reference_heading(images):
+    images_dir, capture = images
+    ro.check(capture, pose(mag=0))
+    r = ro.check(capture, settled(q=(0.5, 0.0, 0.0, 0.0)))                 # not a unit quaternion
     assert "heading_adopted" not in r and not load(images_dir)["metadata"]["orientation"]["mag_calibrated"]
