@@ -167,10 +167,22 @@ NTP-synced clock, and a clock set from it by `correct_clock` (whole seconds,
 without the +0.5 s) ended up 0.3-2.0 s behind. So the API sends `X-Server-Time`
 (Unix time in ms, stamped as the reply goes out) on the two replies units read
 the time from, `GET /health` and `POST /ip/uplink` (API `app/server_time.py`).
-`network_time.py` and `correct_clock` use it, plus half the round trip, and fall
+`network_time.py` and `correct_clock` use it, plus the reply's way back, and fall
 back to `Date` + 0.5 s when it is missing (an older server, or public servers).
-What remains is the round trip's asymmetry, a few hundred ms at most over
-cellular. `watercam-set-clock` takes fractional seconds; `correct_clock` falls
+
+The way back is taken as half the round trip, but at most 0.25 s
+(`RETURN_LEG_MAX_S`). The server stamps its time as the reply leaves, so most of
+a slow round trip comes before the stamp: setting up a fresh cellular link,
+sending an upload's body, the server's own work. In cold boots of the bench unit
+over cellular (2026-11-22, LoRa time as the reference), the way back was
+0.15-0.21 s every time. With half the round trip, a first request with a fast
+reply (0.3-0.5 s round trip) left the clock within 0.03 s, but slow ones
+(1.25 s and 5.7 s) left it 0.5 s and 2.7 s ahead. A 2.7 s error is also more
+than `CLOCK_TOLERANCE_S`, so it could replace a good clock from LoRa time. With
+the cap, all four would have been within about 0.1 s. A unit whose way back is
+longer ends up behind by the excess: for one, when Tailscale can't connect
+directly and relays its traffic through a DERP server.
+`watercam-set-clock` takes fractional seconds; `correct_clock` falls
 back to whole seconds if the installed copy is older.
 
 ## The time sync log

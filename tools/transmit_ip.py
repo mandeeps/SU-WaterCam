@@ -1395,6 +1395,13 @@ SET_CLOCK = "/usr/local/sbin/watercam-set-clock"
 #: (about 0.1-0.3 s over cellular), so 2 s leaves room; with the Date header alone
 #: the estimate itself is within about a second (docs/TIME_SYNC.md)
 CLOCK_TOLERANCE_S = 2
+# Time allowed for the reply's way back: half the round trip, but no more than
+# this. The server stamps its time as the reply leaves, so most of a slow round
+# trip comes before the stamp (setting up a fresh cellular link, sending an
+# upload's body, the server's own work). Over cellular, through Tailscale, the
+# way back measured 0.15-0.21 s while round trips ran up to 5.7 s
+# (docs/TIME_SYNC.md).
+RETURN_LEG_MAX_S = 0.25
 # A larger correction is only applied when the RTC is known to be bad
 # (rtc_early_clock.py leaves RTC_UNTRUSTED) or the clock is before 2026: a
 # server time a day or more off is more likely wrong than the RTC (#203).
@@ -1428,19 +1435,23 @@ def server_time(uplink_result: Dict[str, Any]) -> Optional[float]:
 
     X-Server-Time (Unix time in ms, stamped as the reply went out; API
     app/server_time.py) when the server sends it, else the Date header: whole
-    seconds, floored, so +0.5 s on average (older servers). Plus half the round
-    trip for the reply's way back."""
+    seconds, floored, so +0.5 s on average (older servers). Plus the reply's way
+    back: half the round trip, at most RETURN_LEG_MAX_S."""
     from email.utils import parsedate_to_datetime
     result = uplink_result or {}
-    half_rtt = (result.get("rtt_s") or 0) / 2
+    try:
+        rtt = float(result.get("rtt_s") or 0)
+    except (TypeError, ValueError):
+        rtt = 0.0
+    back = min(max(rtt / 2, 0.0), RETURN_LEG_MAX_S) if math.isfinite(rtt) else 0.0
     try:
         precise = float(result.get("server_time") or "nan")
     except (TypeError, ValueError):
         precise = float("nan")
     if math.isfinite(precise):
-        return precise + half_rtt
+        return precise + back
     try:
-        return parsedate_to_datetime(result.get("server_date")).timestamp() + 0.5 + half_rtt
+        return parsedate_to_datetime(result.get("server_date")).timestamp() + 0.5 + back
     except (TypeError, ValueError):
         return None
 
