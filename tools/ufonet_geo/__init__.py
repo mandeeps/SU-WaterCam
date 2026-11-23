@@ -1,6 +1,6 @@
 """
 ufonet_geo: the georeferencing core shared by this repo's tools and the
-WaterCam API server.
+UFONet API server.
 
   geometry  rotation, lens model, rays, flat ground, ENU <-> lat/lon (numpy only)
   pose      heading / pitch / roll / position from a unit config and EXIF

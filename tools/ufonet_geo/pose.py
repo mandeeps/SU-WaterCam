@@ -22,6 +22,21 @@ log = logging.getLogger(__name__)
 # calibration status is at its maximum (0-3 scale, 3 = fully calibrated).
 MIN_CALIB_MAG_FOR_EXIF_YAW = 3
 
+# After a power-up on a fixed mount the BNO055 reports magnetometer status 0
+# although the saved offsets SU-WaterCam loads are right; once the fusion has
+# run this long with them loaded, the heading holds (006, 2026-10/11: within
+# 1.3 deg a minute in, often ~130 deg off a few seconds in). SU-WaterCam's
+# tools/registration_orientation.py HEADING_SETTLE_S; photos record it in XMP as
+# MagOffsetsLoaded and FusionAgeS (SU-WaterCam #329).
+HEADING_SETTLE_S = 60.0
+
+
+def heading_settled(mag_offsets_loaded, fusion_age_s) -> bool:
+    """Saved magnetometer offsets were loaded and the fusion had run HEADING_SETTLE_S."""
+    return (mag_offsets_loaded is True and isinstance(fusion_age_s, (int, float))
+            and not isinstance(fusion_age_s, bool) and math.isfinite(fusion_age_s)
+            and fusion_age_s >= HEADING_SETTLE_S)
+
 
 class HeadingUnavailableError(ValueError):
     """No trustworthy camera heading could be resolved."""
@@ -115,7 +130,8 @@ def resolve_position(cfg: Mapping,
 def resolve_heading(cfg: Mapping,
                     override: Optional[float],
                     exif_yaw: Optional[float],
-                    calib_mag: Optional[int] = None) -> Tuple[float, str]:
+                    calib_mag: Optional[int] = None,
+                    settled: bool = False) -> Tuple[float, str]:
     """
     Return (heading_deg, source_label).
     Source: 'cli' > 'unit_config' > 'exif_yaw_corrected' | 'exif_yaw_uncalibrated'
@@ -136,6 +152,10 @@ def resolve_heading(cfg: Mapping,
         known to be unverified.
       * calib_mag is None: calibration unknown; EXIF yaw is used with a
         warning.
+      * settled (heading_settled(): offsets loaded and the fusion had run
+        HEADING_SETTLE_S, from the photo's XMP) counts as calibrated whatever
+        calib_mag says, as the status reads 0 after a power-up although the
+        loaded offsets are right.
 
     When heading comes from EXIF, per-unit IMU corrections are applied:
     mount offset, magnetic declination, and post-calibration residual.
@@ -143,10 +163,10 @@ def resolve_heading(cfg: Mapping,
     """
     if override is not None:
         return float(override), "cli"
+    trusted = settled is True or (calib_mag is not None and calib_mag >= MIN_CALIB_MAG_FOR_EXIF_YAW)
     heading = _get(cfg, "heading_deg")
     if heading is not None:
-        if (exif_yaw is not None and calib_mag is not None
-                and calib_mag < MIN_CALIB_MAG_FOR_EXIF_YAW):
+        if exif_yaw is not None and calib_mag is not None and not trusted:
             log.warning(
                 "EXIF yaw ignored: magnetometer CalibMag=%s (< %d). "
                 "Using configured heading %.1f deg.",
@@ -160,7 +180,9 @@ def resolve_heading(cfg: Mapping,
             "pass --heading. (GPS track is not used: a fixed camera has "
             "no course over ground.)")
     source = "exif_yaw_corrected"
-    if calib_mag is not None and calib_mag < MIN_CALIB_MAG_FOR_EXIF_YAW:
+    if trusted:
+        pass
+    elif calib_mag is not None:
         log.warning(
             "HEADING UNCALIBRATED: magnetometer CalibMag=%s (need %d) and no "
             "heading_deg in the unit config / --heading; using EXIF yaw as the "
