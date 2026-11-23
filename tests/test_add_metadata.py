@@ -301,3 +301,50 @@ class TestGPS:
         am.add_metadata(tmp_jpeg)
         assert _gps_ifd(tmp_jpeg) == {}
         assert "GPSFixSource" not in _xmp_props(xmp_capture)
+
+
+# ── heading trust (status 0 after power-up, offsets loaded) ─────────────────
+
+class TestHeadingTrust:
+    def test_cases(self):
+        from tools.add_metadata import heading_trust
+        settled = {"mag_offsets_loaded": True, "fusion_age_s": 90.0}
+        early = {"mag_offsets_loaded": True, "fusion_age_s": 12.0}
+        assert heading_trust(3, {}) == (True, None)
+        assert heading_trust(0, settled) == (True, None)                  # status 0 but settled
+        trusted, note = heading_trust(0, early)
+        assert trusted is False and "still settling" in note and "12 of 60 s" in note
+        assert not note.startswith("WARNING")
+        trusted, note = heading_trust(1, {"mag_offsets_loaded": False})
+        assert trusted is False and note.startswith("WARNING") and "no saved offsets" in note
+        assert heading_trust(None, {}) == (None, None)
+
+    def _pose(self, monkeypatch, **extra):
+        import tools.bno055_imu as imu
+        monkeypatch.setattr(imu, "get_pose", lambda: dict({
+            "quaternion": (0.7, 0.1, -0.2, 0.68), "gravity": (0.5, -9.7, 1.2),
+            "euler": (70.0, 2.0, -1.0), "calibration_status": (3, 3, 2, 0)}, **extra))
+
+    def test_settled_heading_is_marked_trusted_without_a_warning(self, tmp_jpeg, xmp_capture, monkeypatch, capsys):
+        _enable_imu(monkeypatch, mag=0)
+        self._pose(monkeypatch, mag_offsets_loaded=True, fusion_age_s=95.4)
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        props = _xmp_props(xmp_capture)
+        assert props["CalibMag"] == "0" and props["HeadingTrusted"] == "true"
+        assert props["MagOffsetsLoaded"] == "true" and props["FusionAgeS"] == "95"
+        assert "uncalibrated" not in capsys.readouterr().out
+
+    def test_early_heading_is_marked_untrusted_and_noted(self, tmp_jpeg, xmp_capture, monkeypatch, capsys):
+        _enable_imu(monkeypatch, mag=0)
+        self._pose(monkeypatch, mag_offsets_loaded=True, fusion_age_s=8.0)
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        assert _xmp_props(xmp_capture)["HeadingTrusted"] == "false"
+        out = capsys.readouterr().out
+        assert "still settling" in out and "WARNING" not in out
+
+    def test_no_heading_no_trust_field(self, tmp_jpeg, xmp_capture):
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        assert "HeadingTrusted" not in _xmp_props(xmp_capture)

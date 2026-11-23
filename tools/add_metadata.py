@@ -13,6 +13,32 @@ from libxmp import XMPFiles, XMPMeta, consts
 logger = logging.getLogger(__name__)
 
 
+def heading_trust(calib_mag, pose):
+    """(trusted, note) for this photo's heading.
+
+    trusted: True when the magnetometer reports calibrated (2-3) or the heading has
+    settled (saved offsets loaded and the fusion has run HEADING_SETTLE_S;
+    tools/registration_orientation.heading_settled), False when it can't be trusted,
+    None when there is no status at all. note: what to print, or None. After a
+    power-up on a fixed mount the status reads 0 although the loaded offsets are
+    right, so a 0 alone is not "uncalibrated"; early in a wake the heading can still
+    be well off until the fusion settles (006: ~130 deg a few seconds in).
+    """
+    from tools.registration_orientation import HEADING_SETTLE_S, heading_settled
+    pose = pose or {}
+    if (isinstance(calib_mag, int) and calib_mag >= 2) or heading_settled(pose):
+        return True, None
+    if pose.get("mag_offsets_loaded"):
+        age = pose.get("fusion_age_s")
+        age_s = f"{age:.0f}" if isinstance(age, (int, float)) else "?"
+        return False, (f"BNO055 heading still settling (saved offsets loaded, fusion {age_s} of "
+                       f"{HEADING_SETTLE_S:.0f} s, mag status {calib_mag}/3): this photo's heading may be off")
+    if calib_mag is None:
+        return None, None
+    return False, (f"WARNING: BNO055 magnetometer uncalibrated (mag={calib_mag}/3, no saved offsets) "
+                   f"— heading in EXIF will be unreliable")
+
+
 def _read_device_id() -> str:
     """Return the device_id from runtime_config.json as a str, or '' if unavailable."""
     from tools.transmit_ip import _load_ip_config
@@ -142,9 +168,6 @@ def add_metadata(image):
             roll        = euler_stable.get("roll_mean")
             pitch       = euler_stable.get("pitch_mean")
             heading_std = euler_stable.get("heading_std")
-            if calib_mag is not None and calib_mag < 2:
-                print(f"WARNING: BNO055 magnetometer uncalibrated (mag={calib_mag}/3) "
-                      f"— heading in EXIF will be unreliable")
 
     # Quaternion and gravity vector: Euler angles cannot be compared across captures
     # near +/-90 degrees pitch (gimbal lock), and a fixed camera is mounted close to
@@ -160,6 +183,11 @@ def add_metadata(image):
             pose = {}
     quaternion = _vector(pose.get("quaternion"), 4)
     gravity = _vector(pose.get("gravity"), 3)
+    heading_trusted = None
+    if yaw is not None:
+        heading_trusted, note = heading_trust(calib_mag, pose)
+        if note:
+            print(note)
 
     # GPS: get current info from gpsd, or the last saved fix (packet None) when
     # there is no live one
@@ -247,7 +275,16 @@ def add_metadata(image):
         xmp_props["CalibSys"]   = str(calib_sys)
         xmp_props["CalibGyro"]  = str(calib_gyro)
         xmp_props["CalibAccel"] = str(calib_accel)
-        xmp_props["CalibMag"]   = str(calib_mag)   # 0-3; heading is trustworthy at 2 or more
+        xmp_props["CalibMag"]   = str(calib_mag)   # 0-3, the chip's raw status (0 after power-up
+                                                    # even with good offsets: see HeadingTrusted)
+    if heading_trusted is not None:
+        # The heading can be trusted: mag status 2-3, or saved offsets loaded and the fusion
+        # settled (tools/registration_orientation.heading_settled)
+        xmp_props["HeadingTrusted"] = "true" if heading_trusted else "false"
+    if isinstance(pose.get("mag_offsets_loaded"), bool):
+        xmp_props["MagOffsetsLoaded"] = "true" if pose["mag_offsets_loaded"] else "false"
+    if isinstance(pose.get("fusion_age_s"), (int, float)):
+        xmp_props["FusionAgeS"] = f"{pose['fusion_age_s']:.0f}"
     # Orientation without gimbal lock, in the sensor frame (BNO055 order: w,x,y,z;
     # gravity in m/s^2), and when it was read (ISO 8601 with UTC offset)
     if quaternion is not None:
