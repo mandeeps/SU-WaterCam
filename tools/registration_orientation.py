@@ -172,8 +172,10 @@ def check(capture_dir: str, reading: Any,
 
     status is one of:
       ok        within the thresholds
-      shifted   tilted by tilt_threshold_deg or more, or (magnetometer calibrated at
-                both readings) rotated by rotation_threshold_deg or more
+      shifted   tilted by tilt_threshold_deg or more, or (heading trusted at both
+                readings) rotated by rotation_threshold_deg or more. A reference
+                adopted while its heading wasn't trusted takes the heading of the
+                first trusted reading within the tilt threshold (heading_adopted)
       adopted   the cache had no reference, so this reading became it
       no_reference  the cache has no reference and adopt is False
       no_cache  there is no cached transform yet
@@ -211,9 +213,19 @@ def check(capture_dir: str, reading: Any,
             _store(path, data, pose, result["checked_at"])
             result["status"] = "adopted"
             return result
+        tilt = round(tilt_deg(ref["gravity"], pose["gravity"]), 2)
+        if adopt and pose["mag_calibrated"] and not ref["mag_calibrated"] and tilt < tilt_threshold_deg:
+            # The reference was adopted before its heading could be trusted (after a
+            # power-up the magnetometer status reads 0 for a while): take the heading
+            # from the first trusted reading, as tools/pose_monitor.py does. A rotation
+            # between the adoption and now goes unseen; later ones count.
+            ref = dict(ref, quaternion=pose["quaternion"], euler_deg=pose["euler_deg"],
+                       mag_calibrated=True, heading_set_at=result["checked_at"])
+            data["metadata"]["orientation"] = dict(ref)
+            write_json(path, data, mode=0o644)
+            result["heading_adopted"] = True
 
     result["reference"] = ref
-    tilt = round(tilt_deg(ref["gravity"], pose["gravity"]), 2)
     rotation = round(rotation_deg(ref["quaternion"], pose["quaternion"]), 2)
     heading_reliable = ref["mag_calibrated"] and pose["mag_calibrated"]
     result["change_deg"] = {"tilt": tilt, "rotation": rotation}
@@ -266,7 +278,8 @@ def describe(result: Dict[str, Any]) -> str:
         rot = (f"rotated {c['rotation']}°" if result["heading_reliable"]
                else f"rotated {c['rotation']}° (heading unreliable, not counted)")
         if status == "ok":
-            return f"Registration orientation OK: tilted {c['tilt']}°, {rot} since the reference"
+            took = " (reference heading taken from this reading)" if result.get("heading_adopted") else ""
+            return f"Registration orientation OK: tilted {c['tilt']}°, {rot} since the reference{took}"
         return (f"⚠️ Node has turned since the registration transform was cached: "
                 f"tilted {c['tilt']}°, {rot} (thresholds {t['tilt']}° tilt, "
                 f"{t['rotation']}° rotation). The cached transform is still used: check "

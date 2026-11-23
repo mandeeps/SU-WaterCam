@@ -102,10 +102,15 @@ def test_thresholds(images, now, status):
 def test_turn_is_ignored_when_the_reference_had_no_magnetometer(images):
     _, capture = images
     ro.check(capture, pose(mag=0))
-    result = ro.check(capture, pose(q=quat((0, -1, 0), 40)))
+    result = ro.check(capture, pose(q=quat((0, -1, 0), 40), mag=0))    # untrusted on both sides
     assert result["status"] == "ok"
     assert result["heading_reliable"] is False
     assert "not counted" in ro.describe(result)
+    # The first trusted reading gives the reference its heading: a turn before it
+    # can't be seen, so it is "ok" (as in tools/pose_monitor.py), later turns count
+    result = ro.check(capture, pose(q=quat((0, -1, 0), 40)))
+    assert result["status"] == "ok" and result["heading_adopted"] and result["heading_reliable"]
+    assert "reference heading taken" in ro.describe(result)
 
 
 def test_thresholds_are_configurable(images):
@@ -205,3 +210,30 @@ def test_heading_trusted_once_the_fusion_has_settled_with_offsets_loaded():
     assert not ro.pose_from_reading(dict(base, mag_offsets_loaded=True, fusion_age_s=5.0))["mag_calibrated"]
     assert not ro.pose_from_reading(dict(base, mag_offsets_loaded=False, fusion_age_s=90.0))["mag_calibrated"]
     assert not ro.pose_from_reading(base)["mag_calibrated"]
+
+
+def settled(q=(1.0, 0.0, 0.0, 0.0), g=(0.0, -G, 0.0)):
+    """A reading after the fusion settled with saved offsets loaded; the status register still reads 0."""
+    return dict(pose(q=q, g=g, mag=0), mag_offsets_loaded=True, fusion_age_s=90.0)
+
+
+def test_a_reference_adopted_before_the_heading_settled_takes_the_first_trusted_heading(images):
+    images_dir, capture = images
+    assert ro.check(capture, pose(mag=0))["status"] == "adopted"           # status 0 at the first wake
+    assert not load(images_dir)["metadata"]["orientation"]["mag_calibrated"]
+    r = ro.check(capture, settled(q=quat((0, 0, 1), 3)))                    # settled: its heading is taken
+    assert r["status"] == "ok" and r.get("heading_adopted") and r["heading_reliable"]
+    stored = load(images_dir)["metadata"]["orientation"]
+    assert stored["mag_calibrated"] and stored["quaternion"] == list(quat((0, 0, 1), 3))
+    r = ro.check(capture, settled(q=quat((0, 0, 1), 3 + 2 * ro.DEFAULT_ROTATION_THRESHOLD_DEG)))
+    assert r["status"] == "shifted"                                         # a later turn now counts
+    assert "heading_adopted" not in r
+
+
+def test_no_heading_is_taken_from_a_tilted_reading_or_without_adopt(images):
+    images_dir, capture = images
+    ro.check(capture, pose(mag=0))
+    r = ro.check(capture, settled(g=gravity_tilted(2 * ro.DEFAULT_TILT_THRESHOLD_DEG)))
+    assert r["status"] == "shifted" and "heading_adopted" not in r
+    r = ro.check(capture, settled(), adopt=False)                           # e.g. this capture's solve was rejected
+    assert "heading_adopted" not in r and not load(images_dir)["metadata"]["orientation"]["mag_calibrated"]
