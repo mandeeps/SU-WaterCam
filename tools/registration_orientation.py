@@ -25,8 +25,10 @@ are not compared one by one. Instead:
 - rotation: the angle of the rotation between the two quaternions, heading
   included. Heading comes from the magnetometer, which is meaningless until the
   BNO055 is calibrated (nodes without bno055_calibration.json read heading 0), so
-  rotation only counts when the magnetometer was calibrated (status 2 or 3) at
-  both readings.
+  rotation only counts when the heading can be trusted at both readings: the
+  magnetometer reports calibrated (status 2 or 3), or saved magnetometer offsets
+  were loaded and the fusion has run HEADING_SETTLE_S (heading_settled; after a
+  power-up the chip reports 0 on a fixed mount although the offsets are right).
 
 The reference lives in the cache's metadata under "orientation". A cache without
 one adopts the current pose: after a fresh solve, after a re-seed (which writes a
@@ -88,6 +90,18 @@ def _vector(v: Any, n: int) -> Optional[List[float]]:
     return [float(x) for x in v]
 
 
+#: Fusion running this long with saved mag offsets loaded: the heading can be trusted
+#: although the status register still reads 0 (006, 2026-10-24..11-12: a minute in, the
+#: heading held within 1.3 deg; a few seconds in it was often ~130 deg off).
+HEADING_SETTLE_S = 60.0
+
+
+def heading_settled(reading: Dict[str, Any]) -> bool:
+    """Saved magnetometer offsets were loaded and the fusion has run HEADING_SETTLE_S."""
+    age = reading.get("fusion_age_s")
+    return bool(reading.get("mag_offsets_loaded")) and isinstance(age, (int, float)) and age >= HEADING_SETTLE_S
+
+
 def pose_from_reading(reading: Any) -> Optional[Dict[str, Any]]:
     """The parts of a bno055_imu.get_pose() reading kept as a reference, or None."""
     if not isinstance(reading, dict):
@@ -98,9 +112,13 @@ def pose_from_reading(reading: Any) -> Optional[Dict[str, Any]]:
         return None
     calib = reading.get("calibration_status")
     mag_ok = (isinstance(calib, (list, tuple)) and len(calib) == 4
-              and isinstance(calib[3], int) and calib[3] >= MAG_CALIBRATED)
+              and isinstance(calib[3], int) and calib[3] >= MAG_CALIBRATED) or heading_settled(reading)
     euler = _vector(reading.get("euler"), 3)
     return {"quaternion": q, "gravity": g, "euler_deg": euler, "mag_calibrated": mag_ok}
+
+
+#: How far a quaternion's norm may be from 1 for its heading to become the reference
+UNIT_QUATERNION_TOL = 0.05
 
 
 def _stored_pose(d: Any) -> Optional[Dict[str, Any]]:
@@ -158,8 +176,10 @@ def check(capture_dir: str, reading: Any,
 
     status is one of:
       ok        within the thresholds
-      shifted   tilted by tilt_threshold_deg or more, or (magnetometer calibrated at
-                both readings) rotated by rotation_threshold_deg or more
+      shifted   tilted by tilt_threshold_deg or more, or (heading trusted at both
+                readings) rotated by rotation_threshold_deg or more. A reference
+                adopted while its heading wasn't trusted takes the heading of the
+                first trusted reading within the tilt threshold (heading_adopted)
       adopted   the cache had no reference, so this reading became it
       no_reference  the cache has no reference and adopt is False
       no_cache  there is no cached transform yet
@@ -197,9 +217,22 @@ def check(capture_dir: str, reading: Any,
             _store(path, data, pose, result["checked_at"])
             result["status"] = "adopted"
             return result
+        tilt = round(tilt_deg(ref["gravity"], pose["gravity"]), 2)
+        unit_q = abs(math.sqrt(sum(x * x for x in pose["quaternion"])) - 1.0) < UNIT_QUATERNION_TOL
+        if adopt and pose["mag_calibrated"] and not ref["mag_calibrated"] and tilt < tilt_threshold_deg \
+                and unit_q:             # a garbled read mustn't become the reference heading
+            # The reference was adopted before its heading could be trusted (after a
+            # power-up the magnetometer status reads 0 for a while): take the heading
+            # from the first trusted reading, as tools/pose_monitor.py does. A rotation
+            # between the adoption and now goes unseen; later ones count.
+            ref = dict(ref, quaternion=pose["quaternion"],
+                       euler_deg=pose["euler_deg"] or ref.get("euler_deg"),
+                       mag_calibrated=True, heading_set_at=result["checked_at"])
+            data["metadata"]["orientation"] = dict(ref)
+            write_json(path, data, mode=0o644)
+            result["heading_adopted"] = True
 
     result["reference"] = ref
-    tilt = round(tilt_deg(ref["gravity"], pose["gravity"]), 2)
     rotation = round(rotation_deg(ref["quaternion"], pose["quaternion"]), 2)
     heading_reliable = ref["mag_calibrated"] and pose["mag_calibrated"]
     result["change_deg"] = {"tilt": tilt, "rotation": rotation}
@@ -252,7 +285,8 @@ def describe(result: Dict[str, Any]) -> str:
         rot = (f"rotated {c['rotation']}°" if result["heading_reliable"]
                else f"rotated {c['rotation']}° (heading unreliable, not counted)")
         if status == "ok":
-            return f"Registration orientation OK: tilted {c['tilt']}°, {rot} since the reference"
+            took = " (reference heading taken from this reading)" if result.get("heading_adopted") else ""
+            return f"Registration orientation OK: tilted {c['tilt']}°, {rot} since the reference{took}"
         return (f"⚠️ Node has turned since the registration transform was cached: "
                 f"tilted {c['tilt']}°, {rot} (thresholds {t['tilt']}° tilt, "
                 f"{t['rotation']}° rotation). The cached transform is still used: check "
