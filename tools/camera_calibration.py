@@ -265,7 +265,7 @@ def calibrate_camera(image_dir: str, save_path: str = "calibration.json",
         if not found:
             found, corners = cv2.findChessboardCorners(
                 gray, board_size,
-                cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE)
+                flags=cv2.CALIB_CB_ADAPTIVE_THRESH | cv2.CALIB_CB_NORMALIZE_IMAGE)
 
         if found:
             corners_refined = corners if used_sb else cv2.cornerSubPix(
