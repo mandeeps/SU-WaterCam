@@ -1,5 +1,5 @@
 [Unit]
-Description=WaterCam input firewall: nothing reaches the node except over Tailscale (docs/NODE_SECURITY.md)
+Description=HazMapper input firewall: nothing reaches the node except over Tailscale (docs/NODE_SECURITY.md)
 # Loaded before any network comes up, like Debian's nftables.service, so there is
 # no window with WiFi up and no filter
 DefaultDependencies=no

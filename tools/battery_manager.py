@@ -1,5 +1,5 @@
 """
-Battery state-of-charge estimation for the UFONet HazMapper WaterCam unit.
+Battery state-of-charge estimation for the UFONet HazMapper unit.
 
 Hardware: Voltaic V50 battery pack (50 Wh, ~13 500 mAh at 3.7 V nominal).
 

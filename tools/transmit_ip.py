@@ -1,7 +1,7 @@
 #!/home/pi/SU-WaterCam/venv/bin/python
 """IP uplink/downlink transport for SU-WaterCam.
 
-Sends sensor field data to the WaterCam FastAPI server over HTTP (WiFi or
+Sends sensor field data to the UFONet FastAPI server over HTTP (WiFi or
 cellular) and polls for queued downlink commands.  Designed to run outside of
 TickTalkPython so the logic can be tested standalone before integration.
 

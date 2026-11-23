@@ -1,4 +1,4 @@
-# WaterCam Power Budget
+# HazMapper Power Budget
 
 **Updated:** 2026-10-06, from bench measurements on units 005 and 006 running
 current `main` (006 at stock clocks on the packaged kernel since 2026-10-06),

@@ -1,5 +1,5 @@
 [Unit]
-Description=Start a requested WaterCam remote debug session at once (docs/REMOTE_DEBUG_SESSION.md)
+Description=Start a requested HazMapper remote debug session at once (docs/REMOTE_DEBUG_SESSION.md)
 
 # lora_daemon and the IP poll write the request file; remote-debug.service applies it
 # (remote-debug.timer would also pick it up, within 30 s). PathChanged rather than

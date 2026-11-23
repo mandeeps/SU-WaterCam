@@ -90,7 +90,7 @@ def test_apply_writes_arms_and_records(tmp_path, monkeypatch):
     monkeypatch.setattr(rb, "log_to_wittypi", lambda *a: None)
     ok, msg, params, armed = _apply(tmp_path, _s())
     assert ok, msg
-    assert (tmp_path / "schedule.wpi").read_text().startswith("# WaterCam schedule 0800-1615/120/15")
+    assert (tmp_path / "schedule.wpi").read_text().startswith("# HazMapper schedule 0800-1615/120/15")
     assert (tmp_path / "schedule.wpi.prev").read_text() == "OLD\n"
     assert [datetime.fromtimestamp(t) for t in armed] == [datetime(2026, 10, 22, 14, 0)]
     assert params["schedule"]["interval"] == 120 and "utc_offset_min" in params["schedule"]

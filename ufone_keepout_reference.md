@@ -1,18 +1,18 @@
-# UFONet WaterCam – Component Keep-Out Reference
+# UFONet HazMapper – Component Keep-Out Reference
 
-**Rev 0.3 | UFO-Net / WaterCam Sensor Stack**
+**Rev 0.3 | UFO-Net / HazMapper Sensor Stack**
 
-This document covers mechanical dimensions, keep-out zones, special placement constraints, and conformal coating instructions for each component in the WaterCam sensor assembly. Dimensions are in millimeters unless noted. All dimensions should be verified against the linked official sources before committing to a PCB layout.
+This document covers mechanical dimensions, keep-out zones, special placement constraints, and conformal coating instructions for each component in the HazMapper sensor assembly. Dimensions are in millimeters unless noted. All dimensions should be verified against the linked official sources before committing to a PCB layout.
 
-> **Conformal Coating Note:** Two coating materials are in use across WaterCam builds. Third-party manufactured units use **acrylic** (IPC-CC-830 Type AR, 25–75 µm). Student-assembled units may use **MG brand modified silicone** (IPC-CC-830 Type SR). Keep-out zones are identical for both materials; process procedure and safety considerations differ — see [Section 0](#0-conformal-coating-material-selection) before beginning.
+> **Conformal Coating Note:** Two coating materials are in use across HazMapper builds. Third-party manufactured units use **acrylic** (IPC-CC-830 Type AR, 25–75 µm). Student-assembled units may use **MG brand modified silicone** (IPC-CC-830 Type SR). Keep-out zones are identical for both materials; process procedure and safety considerations differ — see [Section 0](#0-conformal-coating-material-selection) before beginning.
 
 ---
 
 ## 0. Conformal Coating Material Selection
 
-### Is acrylic sufficient for WaterCam?
+### Is acrylic sufficient for HazMapper?
 
-**Yes.** WaterCam units are housed in IP65-rated enclosures. The conformal coating is a secondary protection layer against condensation forming inside the enclosure — not a substitute for the enclosure seal. Acrylic (IPC-CC-830 Type AR) at 25–75 µm is standard practice for this type of deployment and is the correct specification for third-party manufacturing.
+**Yes.** HazMapper units are housed in IP65-rated enclosures. The conformal coating is a secondary protection layer against condensation forming inside the enclosure — not a substitute for the enclosure seal. Acrylic (IPC-CC-830 Type AR) at 25–75 µm is standard practice for this type of deployment and is the correct specification for third-party manufacturing.
 
 Acrylic advantages for this application:
 - Simple, consistent application by spray or brush
@@ -240,7 +240,7 @@ WittyPi 4 Top View (65 mm × 56 mm)
 
 **Socket contact zone.** The Lepton module is NOT a sealed assembly (per FLIR Engineering Datasheet §6.2). Its 32 side contacts engage the Molex socket through wiping contact. Any liquid (coating, flux residue, condensation) that enters the socket-module interface will cause contact resistance failures. The Lepton module must never be coated.
 
-**Polyethylene IR window.** The WaterCam enclosure uses an Edmund Optics 6″ × 6″ Translucent IR Material Window (EO #2593) cut to fit the **Lepton aperture only**. This window does not cover the Dorhea optical camera — the Dorhea lens faces the environment directly (see Section 5). Material is **polyethylene (PE)**, 0.38 mm thick, molded translucent/milky white sheet. Transmission spans 8–14 µm (LWIR, matching the Lepton 3.5 spectral response) and extends to ~40 µm. The FLIR Engineering Datasheet §6.2 cites germanium and zinc selenide as common crystalline options — those are not in use here.
+**Polyethylene IR window.** The HazMapper enclosure uses an Edmund Optics 6″ × 6″ Translucent IR Material Window (EO #2593) cut to fit the **Lepton aperture only**. This window does not cover the Dorhea optical camera — the Dorhea lens faces the environment directly (see Section 5). Material is **polyethylene (PE)**, 0.38 mm thick, molded translucent/milky white sheet. Transmission spans 8–14 µm (LWIR, matching the Lepton 3.5 spectral response) and extends to ~40 µm. The FLIR Engineering Datasheet §6.2 cites germanium and zinc selenide as common crystalline options — those are not in use here.
 
 Key handling notes for this window:
 - **Thickness 0.38 mm — very flexible and scratch-prone.** Handle by edges only. Do not lay flat on abrasive surfaces.
@@ -410,7 +410,7 @@ Dorhea IR-Cut Camera — Top View (approximate)
 
 ## 6. IMU — BNO055 (most units) / BNO085 (some units)
 
-> **Variant note:** Most WaterCam units use the **BNO055**. A small number of units use the **BNO085** (or BNO086). Both share the same LGA-28 footprint and identical conformal coating rules. The differences that matter for this document are I2C address selection and package thickness (see table). Verify which variant is installed before finalizing firmware and I2C address conflict checks.
+> **Variant note:** Most HazMapper units use the **BNO055**. A small number of units use the **BNO085** (or BNO086). Both share the same LGA-28 footprint and identical conformal coating rules. The differences that matter for this document are I2C address selection and package thickness (see table). Verify which variant is installed before finalizing firmware and I2C address conflict checks.
 
 | Attribute | BNO055 | BNO085 |
 |---|---|---|
@@ -679,6 +679,6 @@ Keep the EC25 cellular antenna and mDot LoRa antenna physically separated and pr
 - The WittyPi 4 SMT header height changed from 2.0 mm to 3.5 mm as of August 2025 (Adafruit product page). If your unit predates this change, adjust HAT stack height accordingly.
 - The EC25 variant in use (LCC vs. Mini PCIe, and regional suffix: -AF, -A, etc.) determines the exact footprint. Verify against your specific part number.
 - The mDot SMT variant dimensions should be confirmed against the MultiTech developer guide mechanical drawings (Chapter 2) for the specific MTDOT part number in use.
-- **IMU variants (Rev 0.2):** Most WaterCam units use the BNO055 (I2C address 0x28/0x29 via COM3 pin). A small number of units use the BNO085 (CEVA SH-2 firmware, SA0 pin address select). Both are LGA-28; conformal coating rules are identical for both variants. Magnetic keep-out distances are the same.
+- **IMU variants (Rev 0.2):** Most HazMapper units use the BNO055 (I2C address 0x28/0x29 via COM3 pin). A small number of units use the BNO085 (CEVA SH-2 firmware, SA0 pin address select). Both are LGA-28; conformal coating rules are identical for both variants. Magnetic keep-out distances are the same.
 - **Camera correction (Rev 0.2):** Prior revision listed "Raspberry Pi Camera Module 3." The installed optical camera is the Dorhea IR-Cut Camera (CSI-2, motorized NIR filter, GPIO 21).
 - **Coating materials (Rev 0.3):** Acrylic is the specified coating for third-party-built units and is accurate for the use case (IP65 enclosure, secondary moisture protection). Student-assembled units may use MG modified silicone — see Section 0 for material comparison, outgassing risks, and the silicone-specific process order. Key difference: silicone builds require 72 h open-air off-gas before enclosure installation to protect the AHT20 humidity sensor.

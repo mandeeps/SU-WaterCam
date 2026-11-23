@@ -1,5 +1,5 @@
 [Unit]
-Description=Check the WaterCam remote debug session every 30 s
+Description=Check the HazMapper remote debug session every 30 s
 
 [Timer]
 OnBootSec=30s

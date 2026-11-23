@@ -353,7 +353,7 @@ def save_calibration(imu: BNO055, path: str = CALIB_FILE,
     Save calibration offsets and metadata to a JSON file.
 
     PARAMETERS:
-        node_id : identifier for this specific camera node.
+        node_id : identifier for this specific HazMapper node.
                   Calibration is node-specific because the hard-iron offsets
                   depend on the local magnetic environment of the camera box.
         magnetic_declination_deg : local magnetic declination in degrees.

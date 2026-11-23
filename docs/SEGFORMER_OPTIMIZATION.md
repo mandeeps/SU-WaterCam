@@ -30,7 +30,7 @@ subprocess.Popen(
 ).wait()
 ```
 
-Each call was synchronous (`.wait()`), so the entire WaterCam pipeline stalled for the duration of
+Each call was synchronous (`.wait()`), so the entire HazMapper pipeline stalled for the duration of
 inference — which is what the daemon removed.
 
 The mask name is not a free choice: the old `segment_tiff_5band.py` took no output argument and
