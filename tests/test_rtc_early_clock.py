@@ -73,10 +73,36 @@ def test_read_straddling_a_tick_is_rejected(monkeypatch):
     assert rec.rtc_timestamp() is None
 
 
-def test_no_wittypi_stops_after_the_first_failed_read(monkeypatch):
+@pytest.fixture
+def fast_retry(monkeypatch):
+    monkeypatch.setattr(rec, "READ_RETRY_S", 0.2)
+    monkeypatch.setattr(rec, "READ_RETRY_INTERVAL_S", 0.01)
+
+
+def test_no_wittypi_gives_up_after_the_retry_window(monkeypatch, fast_retry):
     calls = []
     monkeypatch.setattr(rec, "_i2cget", lambda r: calls.append(r))
-    assert rec.read_registers() == [None] * 7 and len(calls) == 1
+    assert rec.read_registers() == [None] * 7
+    assert len(calls) > 1 and set(calls) == {rec.REG_RTC_FIRST}   # retried the first register only
+
+
+def test_a_wittypi_slow_to_answer_after_power_on_is_read(monkeypatch, fast_retry):
+    # The first reads fail at once ("Read failed"), then it answers (seen on a unit at boot)
+    answers = iter([None, None, None] + regs(T))
+    monkeypatch.setattr(rec, "_i2cget", lambda r: next(answers))
+    assert rec.decode(rec.read_registers()) == T
+
+
+def test_the_retry_window_is_shared_by_all_registers(monkeypatch, fast_retry):
+    # A register that never answers stops the read: the window isn't renewed per register
+    calls = []
+
+    def flaky(r):
+        calls.append(r)
+        return None if r == rec.REG_RTC_FIRST + 2 else 0x10
+    monkeypatch.setattr(rec, "_i2cget", flaky)
+    assert rec.read_registers()[2:] == [None] * 5
+    assert max(calls) == rec.REG_RTC_FIRST + 2
 
 
 def test_writes_no_time_source_marker():

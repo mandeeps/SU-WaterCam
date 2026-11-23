@@ -12,7 +12,8 @@ and time-sync.target.
 
 It only ever moves the clock forward, and only to a plausible RTC time:
 - every register is readable and valid BCD for its field (a missing Witty Pi
-  or a failed read changes nothing);
+  or a failed read changes nothing; a failed read is retried for a few seconds,
+  as a Witty Pi can be slow to answer right after power-on);
 - the RTC's oscillator-stop flag (bit 7 of the seconds register) is clear: set,
   the RTC lost power and its time can't be trusted (a dead backup battery
   restarts it at 2000-01-01);
@@ -42,6 +43,13 @@ REG_RTC_FIRST = 58      # seconds, minutes, hours, day, weekday, month, year (BC
 I2C_DEVICE = "/dev/i2c-1"
 DEVICE_WAIT_S = 5       # for i2c-dev to load; a unit without a Witty Pi then just goes on
 READ_TIMEOUT_S = 1
+# Right after power-on a Witty Pi can take a moment to answer: on one unit the
+# first read at 5.7 s after power-on failed at once ("Read failed") and reads
+# worked from 7.3 s. So a failed read is retried for up to READ_RETRY_S in
+# all (not per register) before the RTC counts as unreadable. A unit without a
+# Witty Pi fails the same way, so it now waits this long once per read.
+READ_RETRY_S = 3.0
+READ_RETRY_INTERVAL_S = 0.2
 EARLIEST = datetime(2026, 1, 1).timestamp()
 LATEST = datetime(2038, 1, 1).timestamp()
 MIN_STEP_S = 2
@@ -110,10 +118,14 @@ def _i2cget(reg: int) -> Optional[int]:
 
 def read_registers() -> List[Optional[int]]:
     regs: List[Optional[int]] = []
+    deadline = time.monotonic() + READ_RETRY_S
     for r in range(REG_RTC_FIRST, REG_RTC_FIRST + 7):
         v = _i2cget(r)
+        while v is None and time.monotonic() < deadline:   # not answering yet (just powered on)
+            time.sleep(READ_RETRY_INTERVAL_S)
+            v = _i2cget(r)
         regs.append(v)
-        if v is None:               # no Witty Pi: don't spend a timeout per register
+        if v is None:               # still nothing: no Witty Pi, or it never answered
             break
     return regs + [None] * (7 - len(regs))
 
