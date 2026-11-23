@@ -23,6 +23,13 @@ def test_decode_valid():
     assert rec.decode(regs(T)) == T
 
 
+@pytest.mark.parametrize("weekday", range(8))
+def test_decode_accepts_every_weekday_convention(weekday):
+    # `date +%u` (the Witty Pi scripts, watercam-set-clock) writes Sunday as 7:
+    # rejecting it made the RTC "unreadable" every Sunday
+    assert rec.decode(regs(T, weekday=weekday)) == T
+
+
 @pytest.mark.parametrize("bad", [
     regs(T, os_flag=True),                      # oscillator stopped
     regs(T)[:6] + [None],                       # a failed read
