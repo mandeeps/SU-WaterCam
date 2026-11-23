@@ -4,6 +4,7 @@
 
 import datetime
 import logging
+import math
 import time
 from fractions import Fraction
 import piexif
@@ -13,30 +14,46 @@ from libxmp import XMPFiles, XMPMeta, consts
 logger = logging.getLogger(__name__)
 
 
+def _number(v):
+    """v as a finite float, or None (bools and NaN don't count)."""
+    if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v):
+        return None
+    return float(v)
+
+
 def heading_trust(calib_mag, pose):
     """(trusted, note) for this photo's heading.
 
     trusted: True when the magnetometer reports calibrated (2-3) or the heading has
-    settled (saved offsets loaded and the fusion has run HEADING_SETTLE_S;
-    tools/registration_orientation.heading_settled), False when it can't be trusted,
-    None when there is no status at all. note: what to print, or None. After a
-    power-up on a fixed mount the status reads 0 although the loaded offsets are
-    right, so a 0 alone is not "uncalibrated"; early in a wake the heading can still
-    be well off until the fusion settles (006: ~130 deg a few seconds in).
+    settled (saved offsets loaded and the fusion has run HEADING_SETTLE_S, the rule of
+    tools/registration_orientation.heading_settled), False when it can't be trusted
+    yet, None when that isn't known (no status, or no pose read). note: what to
+    print, or None. After a power-up on a fixed mount the status reads 0 although
+    the loaded offsets are right, so a 0 alone is not "uncalibrated"; early in a
+    wake the heading can still be well off until the fusion settles (006: ~130 deg
+    a few seconds in).
     """
-    from tools.registration_orientation import HEADING_SETTLE_S, heading_settled
-    pose = pose or {}
-    if (isinstance(calib_mag, int) and calib_mag >= 2) or heading_settled(pose):
+    try:
+        from tools.registration_orientation import HEADING_SETTLE_S
+    except Exception:           # never let this cost the photo its metadata
+        HEADING_SETTLE_S = 60.0
+    pose = pose if isinstance(pose, dict) else {}
+    status = calib_mag if isinstance(calib_mag, int) and not isinstance(calib_mag, bool) else None
+    loaded = pose.get("mag_offsets_loaded")
+    age = _number(pose.get("fusion_age_s"))
+    if (status is not None and status >= 2) or (loaded is True and age is not None and age >= HEADING_SETTLE_S):
         return True, None
-    if pose.get("mag_offsets_loaded"):
-        age = pose.get("fusion_age_s")
-        age_s = f"{age:.0f}" if isinstance(age, (int, float)) else "?"
-        return False, (f"BNO055 heading still settling (saved offsets loaded, fusion {age_s} of "
-                       f"{HEADING_SETTLE_S:.0f} s, mag status {calib_mag}/3): this photo's heading may be off")
-    if calib_mag is None:
+    if status is None:
         return None, None
-    return False, (f"WARNING: BNO055 magnetometer uncalibrated (mag={calib_mag}/3, no saved offsets) "
-                   f"— heading in EXIF will be unreliable")
+    if loaded is True and age is not None:
+        return False, (f"BNO055 heading still settling (saved offsets loaded, fusion {int(age)} of "
+                       f"{HEADING_SETTLE_S:.0f} s, mag status {status}/3): this photo's heading may be off")
+    if loaded is False:
+        return False, (f"WARNING: BNO055 magnetometer uncalibrated (mag={status}/3, no saved offsets) "
+                       f"— heading in EXIF will be unreliable")
+    # No pose read (or no fusion age): whether offsets were loaded isn't known
+    return None, (f"WARNING: BNO055 magnetometer status {status}/3 and no pose read "
+                  f"— heading in EXIF may be unreliable")
 
 
 def _read_device_id() -> str:
@@ -283,8 +300,8 @@ def add_metadata(image):
         xmp_props["HeadingTrusted"] = "true" if heading_trusted else "false"
     if isinstance(pose.get("mag_offsets_loaded"), bool):
         xmp_props["MagOffsetsLoaded"] = "true" if pose["mag_offsets_loaded"] else "false"
-    if isinstance(pose.get("fusion_age_s"), (int, float)):
-        xmp_props["FusionAgeS"] = f"{pose['fusion_age_s']:.0f}"
+    if _number(pose.get("fusion_age_s")) is not None:
+        xmp_props["FusionAgeS"] = str(int(_number(pose["fusion_age_s"])))   # whole seconds, floored
     # Orientation without gimbal lock, in the sensor frame (BNO055 order: w,x,y,z;
     # gravity in m/s^2), and when it was read (ISO 8601 with UTC offset)
     if quaternion is not None:

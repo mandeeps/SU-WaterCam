@@ -318,6 +318,14 @@ class TestHeadingTrust:
         trusted, note = heading_trust(1, {"mag_offsets_loaded": False})
         assert trusted is False and note.startswith("WARNING") and "no saved offsets" in note
         assert heading_trust(None, {}) == (None, None)
+        assert heading_trust(None, early) == (None, None)                  # no status: unknown
+        assert heading_trust(2, {}) == (True, None)
+        assert heading_trust(0, {"mag_offsets_loaded": True, "fusion_age_s": 60.0}) == (True, None)
+        trusted, note = heading_trust(0, {})                               # no pose read: unknown
+        assert trusted is None and "no pose read" in note and "no saved offsets" not in note
+        for bad in (None, float("nan"), True, "12"):                       # unusable fusion age
+            assert heading_trust(0, {"mag_offsets_loaded": True, "fusion_age_s": bad})[0] is None
+        assert heading_trust(True, {})[0] is None                         # a bool is not a status
 
     def _pose(self, monkeypatch, **extra):
         import tools.bno055_imu as imu
@@ -348,3 +356,20 @@ class TestHeadingTrust:
         import tools.add_metadata as am
         am.add_metadata(tmp_jpeg)
         assert "HeadingTrusted" not in _xmp_props(xmp_capture)
+
+    def test_failed_pose_read_leaves_trust_unknown(self, tmp_jpeg, xmp_capture, monkeypatch, capsys):
+        _enable_imu(monkeypatch, mag=0)                                    # get_pose stays {} (fixture)
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        props = _xmp_props(xmp_capture)
+        assert "HeadingTrusted" not in props and "MagOffsetsLoaded" not in props
+        out = capsys.readouterr().out
+        assert "no pose read" in out and "no saved offsets" not in out
+
+    def test_fusion_age_is_floored(self, tmp_jpeg, xmp_capture, monkeypatch):
+        _enable_imu(monkeypatch, mag=0)
+        self._pose(monkeypatch, mag_offsets_loaded=True, fusion_age_s=59.6)
+        import tools.add_metadata as am
+        am.add_metadata(tmp_jpeg)
+        props = _xmp_props(xmp_capture)
+        assert props["FusionAgeS"] == "59" and props["HeadingTrusted"] == "false"
