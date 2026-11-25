@@ -168,22 +168,27 @@ def _enqueue_locked(sensor_hex, bitmap_hex, captured_at, queue_dir, max_depth, m
         return False
 
 
-#: Capture-time packet sent before a delayed bitmap: 00 01 + u32 seconds
-CAPTURE_TIME_PACKET_LEN = 6
-
-
-def capture_time_packet(captured_at: float) -> str:
-    """The 00 01 capture-time TLV (u32, as in a sensor packet) as hex."""
-    return (bytes([0x00, 0x01]) + struct.pack(">I", max(0, min(0xFFFFFFFF, int(captured_at))))).hex()
+def capture_time_packet(captured_at: float, water_pct=None) -> str:
+    """The packet sent before a delayed bitmap, as hex: the 00 01 capture time
+    (u32, as in a sensor packet), and the node's 07 37 water % when known, so
+    the server keeps the node's value for that capture instead of one worked
+    out from the bitmap. 6 B, or 9 B with the water %."""
+    p = bytes([0x00, 0x01]) + struct.pack(">I", max(0, min(0xFFFFFFFF, int(captured_at))))
+    if isinstance(water_pct, (int, float)) and not isinstance(water_pct, bool) and water_pct == water_pct:
+        p += bytes([0x07, 0x37, max(0, min(100, int(round(water_pct))))])
+    return p.hex()
 
 
 def capture_time_sent(handler, record: dict, size_limit: Optional[int]) -> bool:
-    """Send the record's capture time ahead of its delayed bitmap."""
+    """Send the record's capture time (and water %) ahead of its delayed bitmap."""
     if record.get("captured_at") is None:
         return True     # nothing to send: the server stores it at receive time
-    if size_limit is not None and size_limit < CAPTURE_TIME_PACKET_LEN:
+    policy = record.get("bitmap_policy")
+    water = policy.get("camera_water_pct") if isinstance(policy, dict) else None
+    packet = capture_time_packet(record["captured_at"], water)
+    if size_limit is not None and len(packet) // 2 > size_limit:
         return False
-    return bool(handler.transmit(capture_time_packet(record["captured_at"])))
+    return bool(handler.transmit(packet))
 
 
 def drain(
@@ -210,8 +215,8 @@ def drain(
     packet, bytes or hex, or None): it is replaced by that and sent.
 
     A bitmap sent without its record's sensor chunks in front of it (they went
-    out earlier) is preceded by a 6-byte capture-time packet (00 01), so the
-    server pairs it with its own capture; a bitmap right after its chunks isn't.
+    out earlier) is preceded by a capture-time packet (00 01, plus the node's 07 37 water %
+    when the record has it), so the server pairs it with its own capture; a bitmap right after its chunks isn't.
 
     *on_bitmap_sent(record)* is called after a queued bitmap went out (the
     record still holds its captured_at and bitmap_policy); its errors are

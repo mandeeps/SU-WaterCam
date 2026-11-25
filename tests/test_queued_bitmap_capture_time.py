@@ -68,3 +68,31 @@ def test_failed_capture_time_keeps_the_bitmap_queued(tmp_path):
     r2 = Radio()
     lsf.drain(r2, queue_dir=d, size_limit=242)
     assert r2.sent == [TIME_A, BITMAP]
+
+
+def test_capture_time_packet_carries_the_node_water_pct(tmp_path):
+    d = str(tmp_path / "q")
+    os.makedirs(d)
+    assert lsf.enqueue(None, BITMAP, T0, queue_dir=d, bitmap_policy={"camera_water_pct": 44.4})
+    r = Radio()
+    lsf.drain(r, queue_dir=d, size_limit=242)
+    assert r.sent == [TIME_A + "07372c", BITMAP]       # 0x2c = 44
+
+
+def test_capture_time_packet_without_or_with_bad_water_pct():
+    assert lsf.capture_time_packet(T0) == TIME_A
+    assert lsf.capture_time_packet(T0, None) == TIME_A
+    assert lsf.capture_time_packet(T0, float("nan")) == TIME_A
+    assert lsf.capture_time_packet(T0, True) == TIME_A
+    assert lsf.capture_time_packet(T0, 130).endswith("073764")    # clamped to 100
+    assert lsf.capture_time_packet(T0, -5).endswith("073700")
+
+
+def test_no_room_for_the_capture_time_keeps_the_bitmap_queued(tmp_path):
+    d = str(tmp_path / "q")
+    os.makedirs(d)
+    small = (bytes([0x08, 0x18, 0, 1]) + bytes(1)).hex()            # 5 B bitmap
+    assert lsf.enqueue(None, small, T0, queue_dir=d, bitmap_policy={"camera_water_pct": 10})
+    r = Radio()
+    res = lsf.drain(r, queue_dir=d, size_limit=8)                 # 9 B packet won't fit
+    assert res["failed"] and r.sent == [] and lsf.queue_depth(d) == 1
