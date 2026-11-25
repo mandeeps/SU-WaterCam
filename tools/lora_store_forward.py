@@ -41,6 +41,7 @@ import contextlib
 import fcntl
 import json
 import logging
+import math
 import os
 import struct
 import time
@@ -174,18 +175,21 @@ def capture_time_packet(captured_at: float, water_pct=None) -> str:
     the server keeps the node's value for that capture instead of one worked
     out from the bitmap. 6 B, or 9 B with the water %."""
     p = bytes([0x00, 0x01]) + struct.pack(">I", max(0, min(0xFFFFFFFF, int(captured_at))))
-    if isinstance(water_pct, (int, float)) and not isinstance(water_pct, bool) and water_pct == water_pct:
+    if isinstance(water_pct, (int, float)) and not isinstance(water_pct, bool) and math.isfinite(water_pct):
         p += bytes([0x07, 0x37, max(0, min(100, int(round(water_pct))))])
     return p.hex()
 
 
 def capture_time_sent(handler, record: dict, size_limit: Optional[int]) -> bool:
     """Send the record's capture time (and water %) ahead of its delayed bitmap."""
-    if record.get("captured_at") is None:
-        return True     # nothing to send: the server stores it at receive time
+    captured_at = record.get("captured_at")
+    if not isinstance(captured_at, (int, float)) or not math.isfinite(captured_at):
+        # enqueue() always records it; a record without a usable one can't be
+        # helped, and the bitmap goes out as before (paired by frame counter)
+        return True
     policy = record.get("bitmap_policy")
     water = policy.get("camera_water_pct") if isinstance(policy, dict) else None
-    packet = capture_time_packet(record["captured_at"], water)
+    packet = capture_time_packet(captured_at, water)
     if size_limit is not None and len(packet) // 2 > size_limit:
         return False
     return bool(handler.transmit(packet))

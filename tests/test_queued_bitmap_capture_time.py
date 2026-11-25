@@ -96,3 +96,24 @@ def test_no_room_for_the_capture_time_keeps_the_bitmap_queued(tmp_path):
     r = Radio()
     res = lsf.drain(r, queue_dir=d, size_limit=8)                 # 9 B packet won't fit
     assert res["failed"] and r.sent == [] and lsf.queue_depth(d) == 1
+
+
+def test_non_finite_values_do_not_break_the_drain(tmp_path):
+    assert lsf.capture_time_packet(T0, float("inf")) == TIME_A
+    d = str(tmp_path / "q")
+    os.makedirs(d)
+    assert lsf.enqueue(None, BITMAP, T0, queue_dir=d, bitmap_policy={"camera_water_pct": float("-inf")})
+    r = Radio()
+    assert lsf.drain(r, queue_dir=d, size_limit=242)["drained"] == 1
+    assert r.sent == [TIME_A, BITMAP]
+
+
+def test_each_record_judged_on_its_own(tmp_path):
+    """A bitmap-only entry behind a sensor+bitmap entry still gets its time."""
+    d = str(tmp_path / "q")
+    os.makedirs(d)
+    assert lsf.enqueue(SENSOR, None, T0 - 60, queue_dir=d)
+    assert lsf.enqueue(None, BITMAP, T0, queue_dir=d)
+    r = Radio()
+    assert lsf.drain(r, queue_dir=d, size_limit=242)["drained"] == 2
+    assert r.sent == [SENSOR, TIME_A, BITMAP]
