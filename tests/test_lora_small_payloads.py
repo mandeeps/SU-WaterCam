@@ -115,7 +115,9 @@ def test_drain_does_not_resend_a_delivered_half(tmp_path):
     assert r["failed"] and h.sent == ["aa" * 30]
     h.fail_on.clear()
     r = lsf.drain(h, queue_dir=str(tmp_path), size_limit=240)
-    assert r["drained"] == 1 and h.sent == ["aa" * 30, "bb" * 40]   # the sensor half only once
+    # the sensor half only once; the bitmap, now without it, gets its capture time first (#333)
+    assert r["drained"] == 1 and h.sent[0] == "aa" * 30 and h.sent[2] == "bb" * 40
+    assert len(h.sent) == 3 and h.sent[1].startswith("0001") and len(h.sent[1]) == 12
     assert lsf.queue_depth(str(tmp_path)) == 0
 
 

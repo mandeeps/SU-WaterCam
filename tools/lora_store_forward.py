@@ -42,6 +42,7 @@ import fcntl
 import json
 import logging
 import os
+import struct
 import time
 from typing import Optional
 
@@ -167,6 +168,24 @@ def _enqueue_locked(sensor_hex, bitmap_hex, captured_at, queue_dir, max_depth, m
         return False
 
 
+#: Capture-time packet sent before a delayed bitmap: 00 01 + u32 seconds
+CAPTURE_TIME_PACKET_LEN = 6
+
+
+def capture_time_packet(captured_at: float) -> str:
+    """The 00 01 capture-time TLV (u32, as in a sensor packet) as hex."""
+    return (bytes([0x00, 0x01]) + struct.pack(">I", max(0, min(0xFFFFFFFF, int(captured_at))))).hex()
+
+
+def capture_time_sent(handler, record: dict, size_limit: Optional[int]) -> bool:
+    """Send the record's capture time ahead of its delayed bitmap."""
+    if record.get("captured_at") is None:
+        return True     # nothing to send: the server stores it at receive time
+    if size_limit is not None and size_limit < CAPTURE_TIME_PACKET_LEN:
+        return False
+    return bool(handler.transmit(capture_time_packet(record["captured_at"])))
+
+
 def drain(
     handler,
     max_packets: int = 2,
@@ -189,6 +208,10 @@ def drain(
     draining stops there until a cycle with a higher data rate ("deferred"),
     except a bitmap that *refit(record, size_limit)* can make again to fit (a
     packet, bytes or hex, or None): it is replaced by that and sent.
+
+    A bitmap sent without its record's sensor chunks in front of it (they went
+    out earlier) is preceded by a 6-byte capture-time packet (00 01), so the
+    server pairs it with its own capture; a bitmap right after its chunks isn't.
 
     *on_bitmap_sent(record)* is called after a queued bitmap went out (the
     record still holds its captured_at and bitmap_policy); its errors are
@@ -270,6 +293,15 @@ def drain(
                 ok = False
                 break
             delivered.append(hex_payload)
+        if ok and record.get("bitmap_hex"):
+            # A bitmap packet carries no capture time: the server takes it from
+            # the timed packet just before it. Sent from the queue without its
+            # sensor chunks (they went out live, or earlier), it gets its own
+            # capture time first, or the server pairs it with another capture
+            # or none (#333). A bitmap sent right after its chunks needs none.
+            if not delivered and not capture_time_sent(handler, record, size_limit):
+                logger.warning("LoRa S&F: capture time for %s not sent", fname)
+                ok = False
         if ok and record.get("bitmap_hex"):
             if handler.transmit(record["bitmap_hex"]):
                 bitmap_sent = True

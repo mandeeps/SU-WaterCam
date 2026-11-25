@@ -163,7 +163,8 @@ def test_oversize_queued_bitmap_is_compressed_again_on_drain(tmp_path):
                                                      _encode_compressed_packet, True)
     r = lsf.drain(h, queue_dir=q, size_limit=240, refit=refit, on_bitmap_sent=marked.append)
     assert r["drained"] == 1 and not r["deferred"]
-    [sent] = [c.args[0] for c in h.transmit.call_args_list]
+    [stamp, sent] = [c.args[0] for c in h.transmit.call_args_list]
+    assert stamp == lsf.capture_time_packet(T0)     # its capture time goes first (#333)
     assert sent.startswith("0818") and len(sent) // 2 <= 240
     assert marked and marked[0]["bitmap_policy"]["capture"] == c1.name
 
