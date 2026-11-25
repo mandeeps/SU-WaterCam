@@ -41,7 +41,9 @@ import contextlib
 import fcntl
 import json
 import logging
+import math
 import os
+import struct
 import time
 from typing import Optional
 
@@ -167,6 +169,32 @@ def _enqueue_locked(sensor_hex, bitmap_hex, captured_at, queue_dir, max_depth, m
         return False
 
 
+def capture_time_packet(captured_at: float, water_pct=None) -> str:
+    """The packet sent before a delayed bitmap, as hex: the 00 01 capture time
+    (u32, as in a sensor packet), and the node's 07 37 water % when known, so
+    the server keeps the node's value for that capture instead of one worked
+    out from the bitmap. 6 B, or 9 B with the water %."""
+    p = bytes([0x00, 0x01]) + struct.pack(">I", max(0, min(0xFFFFFFFF, int(captured_at))))
+    if isinstance(water_pct, (int, float)) and not isinstance(water_pct, bool) and math.isfinite(water_pct):
+        p += bytes([0x07, 0x37, max(0, min(100, int(round(water_pct))))])
+    return p.hex()
+
+
+def capture_time_sent(handler, record: dict, size_limit: Optional[int]) -> bool:
+    """Send the record's capture time (and water %) ahead of its delayed bitmap."""
+    captured_at = record.get("captured_at")
+    if not isinstance(captured_at, (int, float)) or not math.isfinite(captured_at):
+        # enqueue() always records it; a record without a usable one can't be
+        # helped, and the bitmap goes out as before (paired by frame counter)
+        return True
+    policy = record.get("bitmap_policy")
+    water = policy.get("camera_water_pct") if isinstance(policy, dict) else None
+    packet = capture_time_packet(captured_at, water)
+    if size_limit is not None and len(packet) // 2 > size_limit:
+        return False
+    return bool(handler.transmit(packet))
+
+
 def drain(
     handler,
     max_packets: int = 2,
@@ -189,6 +217,10 @@ def drain(
     draining stops there until a cycle with a higher data rate ("deferred"),
     except a bitmap that *refit(record, size_limit)* can make again to fit (a
     packet, bytes or hex, or None): it is replaced by that and sent.
+
+    A bitmap sent without its record's sensor chunks in front of it (they went
+    out earlier) is preceded by a capture-time packet (00 01, plus the node's 07 37 water %
+    when the record has it), so the server pairs it with its own capture; a bitmap right after its chunks isn't.
 
     *on_bitmap_sent(record)* is called after a queued bitmap went out (the
     record still holds its captured_at and bitmap_policy); its errors are
@@ -270,6 +302,15 @@ def drain(
                 ok = False
                 break
             delivered.append(hex_payload)
+        if ok and record.get("bitmap_hex"):
+            # A bitmap packet carries no capture time: the server takes it from
+            # the timed packet just before it. Sent from the queue without its
+            # sensor chunks (they went out live, or earlier), it gets its own
+            # capture time first, or the server pairs it with another capture
+            # or none (#333). A bitmap sent right after its chunks needs none.
+            if not delivered and not capture_time_sent(handler, record, size_limit):
+                logger.warning("LoRa S&F: capture time for %s not sent", fname)
+                ok = False
         if ok and record.get("bitmap_hex"):
             if handler.transmit(record["bitmap_hex"]):
                 bitmap_sent = True
