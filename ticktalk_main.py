@@ -1227,8 +1227,8 @@ def compress_bitmap(segmented_file):
             # Not a binary water mask (tools/compress_segmented.py mask_format_error)
             print(f"⚠️ Not sending {segmented_file}: {bitmap_dict['error']}")
             return b''
+        from tools.bitmap_fit import queue_budget
         if not bitmap_dict.get('success'):
-            from tools.bitmap_fit import queue_budget
             if max_bitmap_bytes < queue_budget():
                 # Doesn't fit the room now (methods 0/1 only, a slow data rate):
                 # compress for the queue as at DR0, so the bitmap goes out later
@@ -1236,7 +1236,7 @@ def compress_bitmap(segmented_file):
                 print(f"⚠️ Could not compress {segmented_file} to {max_bitmap_bytes}B: compressing at {queue_budget()}B to queue")
                 bitmap_dict = compress_image(segmented_file, max_bytes=queue_budget(), method2=method2)
         if not bitmap_dict.get('success'):
-            print(f"⚠️ Could not compress {segmented_file} to fit within {max_bitmap_bytes}B (SF too high?)")
+            print(f"⚠️ Could not compress {segmented_file} to fit within {max(max_bitmap_bytes, queue_budget())}B")
             return b''
         print(f"Compressed {segmented_file}: {bitmap_dict['total_size']}B at {bitmap_dict['width']}×{bitmap_dict['height']}px")
         return bitmap_dict['compressed_data']
