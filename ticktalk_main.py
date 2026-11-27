@@ -2232,7 +2232,15 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             print(f"📶 WiFi in range but the server isn't reachable yet — "
                   f"waiting up to {tx.wifi_grace_s} s before {cell}")
             reachable = tx.wait_reachable(tx.wifi_grace_s)
-            if reachable:
+            if reachable and not wifi_connected() and cellular_status(cell)["active"]:
+                # Another upload (the LoRa fallback runs alongside) brought
+                # cellular up during the wait: the server answered over it, so
+                # send as a metered link. Leave its teardown to that upload, and
+                # don't take the power lock: that upload holds it until after
+                # taking cellular down, so waiting on it would lose the link.
+                cellular_active = True
+                print(f"📶 Server reachable over {cell} (brought up by another upload)")
+            elif reachable:
                 print("📶 Server reachable over WiFi — cellular not needed")
         if not reachable and on_demand and not cellular_active and tx.server_only_down():
             # WiFi is up and Tailscale shows the server's peer online (or no peer
