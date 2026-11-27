@@ -55,7 +55,7 @@ def _tx(reachable, only_if_lora=True, cellular="Quectel"):
     return tx
 
 
-def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True, in_range=False):
+def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True, in_range=False, later_status=None):
     """Run ip_uplink_transmit with hardware and NetworkManager patched; return the mocks."""
     import ticktalk_main
     handler = MagicMock()
@@ -65,7 +65,12 @@ def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True, in_range=
         _hardware(stack)
         stack.enter_context(patch("tools.transmit_ip.IPTransmitter", return_value=tx))
         stack.enter_context(patch("tools.lora_handler_concurrent.get_lora_handler", return_value=handler))
-        stack.enter_context(patch("tools.transmit_ip.cellular_status", return_value=dict(status)))
+        if later_status is None:
+            stack.enter_context(patch("tools.transmit_ip.cellular_status", return_value=dict(status)))
+        else:   # the first call sees `status`, every later one `later_status`
+            seq = iter([dict(status)])
+            stack.enter_context(patch("tools.transmit_ip.cellular_status",
+                                      side_effect=lambda c: next(seq, dict(later_status))))
         stack.enter_context(patch("tools.transmit_ip.wifi_connected", return_value=wifi))
         m["in_range"] = stack.enter_context(patch("tools.transmit_ip.wifi_in_range", return_value=in_range))
         m["health"] = stack.enter_context(patch("tools.lora_health.assess",
@@ -351,6 +356,23 @@ class TestWiFiGraceBeforeCellular:
         m = _run(tx)
         tx.wait_reachable.assert_not_called()
         m["in_range"].assert_not_called()
+
+    def test_cellular_brought_up_by_another_upload_during_the_wait_is_metered(self):
+        # The LoRa fallback's upload brought cellular up while this one waited
+        # for WiFi: the server answered over cellular, so drain as metered and
+        # leave the session to the upload that started it.
+        tx = _tx(reachable=False)
+        m = _run(tx, in_range=True, later_status=ON_DEMAND_UP)
+        tx.wait_reachable.assert_called_once_with(45)
+        tx._drain_queue.assert_called_once_with(metered=True)
+        m["up"].assert_not_called()
+        m["down"].assert_not_called()
+        assert m["result"]["success"] is True
+
+    def test_wifi_after_the_wait_drains_unmetered(self):
+        tx = _tx(reachable=False)
+        _run(tx, in_range=True)
+        tx._drain_queue.assert_called_once_with(metered=False)
 
     def test_cellular_already_up_doesnt_wait(self):
         tx = _tx(reachable=False)
