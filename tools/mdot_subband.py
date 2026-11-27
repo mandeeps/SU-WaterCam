@@ -21,6 +21,7 @@ range. With 0 it keeps trying on the sub-band set here.
     python3 tools/mdot_subband.py --rejoin      # then join once to prove it
     python3 tools/mdot_subband.py --fixed-dr 1  # also turn ADR off and send at DR1 (SF9)
     python3 tools/mdot_subband.py --adr         # also turn ADR back on
+    python3 tools/mdot_subband.py --restart-daemon  # start lora_daemon afterwards even if it was stopped
 
 A fixed data rate is for a site at the edge of coverage. There the network's ADR
 can raise the data rate past what the link carries: 006's frames arrived at SF9
@@ -222,6 +223,9 @@ def main() -> int:
                     help='turn ADR off and send at this data rate (US915 DR0-DR3, SF10-SF7)')
     dr.add_argument('--adr', action='store_true', help='turn ADR (back) on')
     ap.add_argument('--port', default=DEFAULT_PORT)
+    ap.add_argument('--restart-daemon', action='store_true',
+                    help='start lora_daemon afterwards even if it was stopped before (it is '
+                         'restarted anyway when it was running)')
     a = ap.parse_args()
     if serial is None:
         print('pyserial required (the node venv has it)')
@@ -232,8 +236,18 @@ def main() -> int:
     try:
         return run(a)
     finally:
-        if was_running:
-            daemon('start')
+        finish_daemon(was_running, a.restart_daemon)
+
+
+def finish_daemon(was_running: bool, restart: bool) -> None:
+    """Start lora_daemon again if it was running or --restart-daemon asked; else
+    say it is still stopped (#313), since the next wake then has no LoRa."""
+    if was_running or restart:
+        daemon('start')
+    else:
+        print('lora_daemon was not running and is still stopped: the next wake has no LoRa '
+              'until it starts. Start it with `sudo systemctl start lora_daemon` '
+              '(or rerun with --restart-daemon).')
 
 
 if __name__ == '__main__':

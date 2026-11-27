@@ -605,6 +605,11 @@ python3 tools/mdot_subband.py            # sets and saves sub-band 1 and no sub-
 python3 tools/mdot_subband.py --check    # report only
 ```
 
+The tool stops `lora_daemon` while it uses the serial port and starts it again
+if it was running. If you stopped the daemon yourself first, it stays stopped and
+the tool says so: start it with `sudo systemctl start lora_daemon`, or run the
+tool with `--restart-daemon`.
+
 It also sets join retries to 0 (`AT+JR=0`). Otherwise an mDot that keeps
 failing to join, out of range or at the edge of coverage, moves on to the next
 sub-band after a few tries, round all eight. Then it can't join our gateway even
