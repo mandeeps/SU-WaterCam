@@ -465,8 +465,13 @@ before the uplink and never brings up cellular, so a unit without WiFi gets its
 commands here, after the capture rather than before it. Polling twice is safe:
 the server offers a command until it is acked, and the node applies a frame once.
 
-Queued readings keep only the newest bitmap: queuing one removes the `08 18`
-field code from older entries. An entry the server rejects as wrong (a 4xx other
+The reading is queued before anything is sent and removed once it is
+delivered, so an unexpected error or a power cut mid-send (Witty Pi off-time,
+max-awake, a flat battery) leaves it for the next wake; the server drops a
+capture it already has, so a resend does no harm. The backlog drain skips it,
+and the live send goes after the drain. Queued readings keep only the newest
+bitmap: a reading whose send failed removes the `08 18` field code from older
+entries. An entry the server rejects as wrong (a 4xx other
 than 401, 403 and 429) or that can't be read is dropped rather than blocking the
 queue. Entries are written with an fsync (`config_io.write_json`).
 

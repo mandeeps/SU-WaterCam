@@ -626,17 +626,63 @@ class IPTransmitter:
         bitmap field from older entries.  Returns True on success, False on
         I/O error.
         """
+        return self._write_entry(channels, device_ts, trim=True) is not None
+
+    def _enqueue_live(self, channels: List[Dict[str, str]], device_ts: int) -> Optional[str]:
+        """Queue the live reading before sending it, so it survives an error or a
+        power cut mid-send (#311). Older entries are left alone until the send
+        fails (keep_queued); a successful send deletes the file (unqueue).
+        Returns the entry's path, or None on I/O error."""
+        return self._write_entry(channels, device_ts, trim=False)
+
+    def keep_queued(self, path: Optional[str], channels: List[Dict[str, str]], device_ts: int) -> bool:
+        """The live send failed: leave its entry queued (applying the queue's depth
+        and newest-bitmap rules as _enqueue does), or queue it now if
+        _enqueue_live couldn't write it or another upload drained it meanwhile."""
+        if not path or not os.path.exists(path):
+            return self._enqueue(channels, device_ts)
+        try:
+            if any(isinstance(c, dict) and c.get("code") == BITMAP_CODE for c in channels):
+                self._drop_older_bitmaps(device_ts - 1)
+            self._trim_to_depth(keep=os.path.basename(path), room_for_new=False)
+        except OSError as exc:
+            logger.warning("Queue clean-up after a failed send: %s", exc)
+        return True
+
+    def unqueue(self, path: Optional[str]) -> None:
+        """The live send succeeded: remove its pre-send entry."""
+        if path:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+
+    def _trim_to_depth(self, keep: Optional[str] = None, room_for_new: bool = True) -> List[str]:
+        """Drop the oldest entries (never `keep`) until the queue is under
+        max_queue_depth, with room for one more when room_for_new. Returns what's left."""
+        existing = self._queued_files()
+        limit = self.max_queue_depth - (1 if room_for_new else 0)
+        while len(existing) > limit:
+            victim = next((f for f in existing if f != keep), None)
+            if victim is None:
+                break
+            existing.remove(victim)
+            try:
+                os.unlink(os.path.join(self._queue_dir, victim))
+                drop_counter.record("ip", path=drop_counter.path_for(self._queue_dir))
+            except OSError:
+                pass
+        return existing
+
+    def _write_entry(self, channels: List[Dict[str, str]], device_ts: int, trim: bool) -> Optional[str]:
         try:
             os.makedirs(self._queue_dir, exist_ok=True)
-            if any(isinstance(c, dict) and c.get("code") == BITMAP_CODE for c in channels):
-                self._drop_older_bitmaps(device_ts)
-            existing = self._queued_files()
-            while len(existing) >= self.max_queue_depth:
-                try:
-                    os.unlink(os.path.join(self._queue_dir, existing.pop(0)))
-                    drop_counter.record("ip", path=drop_counter.path_for(self._queue_dir))
-                except OSError:
-                    pass
+            if trim:
+                if any(isinstance(c, dict) and c.get("code") == BITMAP_CODE for c in channels):
+                    self._drop_older_bitmaps(device_ts)
+                existing = self._trim_to_depth()
+            else:
+                existing = self._queued_files()
             record = {
                 "channels": channels,
                 "device_ts": device_ts,
@@ -645,12 +691,13 @@ class IPTransmitter:
             fname = f"{device_ts}_{len(existing):06d}.json"
             while os.path.exists(os.path.join(self._queue_dir, fname)):
                 fname = f"{device_ts}_{int(time.time() * 1000) % 1000000:06d}.json"
-            config_io.write_json(os.path.join(self._queue_dir, fname), record, mode=0o644)
+            path = os.path.join(self._queue_dir, fname)
+            config_io.write_json(path, record, mode=0o644)
             logger.info("Queued uplink to %s (%d channels)", fname, len(channels))
-            return True
+            return path
         except OSError as exc:
             logger.warning("Failed to enqueue uplink: %s", exc)
-            return False
+            return None
 
     def _drop_entry(self, path: str, why: str) -> None:
         logger.warning("Dropping queue entry %s: %s", os.path.basename(path), why)
@@ -660,7 +707,7 @@ class IPTransmitter:
         except OSError:
             pass
 
-    def _drain_queue(self, metered: bool = False) -> Dict[str, Any]:
+    def _drain_queue(self, metered: bool = False, skip: Optional[str] = None) -> Dict[str, Any]:
         """Send queued entries oldest-first; stop on first send failure.
 
         ``metered`` (on cellular) caps the wake at CELLULAR_DRAIN_MAX_ENTRIES
@@ -681,7 +728,10 @@ class IPTransmitter:
         cutoff = time.time() - self.max_queue_age_days * 86400
         sent_bytes = 0
 
+        skip_name = os.path.basename(skip) if skip else None
         for fname in self._queued_files():
+            if fname == skip_name:
+                continue    # the live reading, queued before its own send (#311)
             path = os.path.join(self._queue_dir, fname)
             if metered and (result["drained"] >= CELLULAR_DRAIN_MAX_ENTRIES
                             or sent_bytes >= CELLULAR_DRAIN_MAX_BYTES):

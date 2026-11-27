@@ -233,7 +233,7 @@ def _ip_channels(dirname, bitmap):
         ticktalk_main.ip_uplink_transmit.__wrapped__(bitmap=bitmap, _sensor_tracker=None, dirname=dirname)
     import base64
     return {c["code"]: c["payload_hex"] if "payload_hex" in c else base64.b64decode(c["payload_b64"]).hex()
-            for c in tx._enqueue.call_args.args[0]}
+            for c in tx._enqueue_live.call_args.args[0]}
 
 
 LORA_BITMAP = b"\x00\x00\x20\x00\x18" + b"lora"
