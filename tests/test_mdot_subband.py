@@ -76,4 +76,5 @@ def test_restart_daemon_starts_it_either_way(monkeypatch):
     calls = []
     monkeypatch.setattr(ms, "daemon", calls.append)
     ms.finish_daemon(False, True)
-    assert calls == ["start"]
+    ms.finish_daemon(True, True)
+    assert calls == ["start", "start"]

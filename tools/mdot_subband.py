@@ -241,13 +241,13 @@ def main() -> int:
 
 def finish_daemon(was_running: bool, restart: bool) -> None:
     """Start lora_daemon again if it was running or --restart-daemon asked; else
-    say it is still stopped (#313), since the next wake then has no LoRa."""
+    say it is still stopped (#313): no LoRa until it starts."""
     if was_running or restart:
         daemon('start')
     else:
-        print('lora_daemon was not running and is still stopped: the next wake has no LoRa '
-              'until it starts. Start it with `sudo systemctl start lora_daemon` '
-              '(or rerun with --restart-daemon).')
+        print('lora_daemon was not running and is still stopped: no LoRa until it starts '
+              '(at the next boot if it is enabled). Start it now with '
+              '`sudo systemctl start lora_daemon`, or rerun with --restart-daemon.')
 
 
 if __name__ == '__main__':
