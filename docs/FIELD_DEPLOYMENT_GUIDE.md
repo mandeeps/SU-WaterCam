@@ -1236,7 +1236,8 @@ anything. The sections below are the same procedure by hand
    powers off in the middle of setup.
 2. **Plugging in power triggers the recovery boot.** It shuts down and arms the
    next schedule slot at least 2 h away, which can be the next morning. The
-   `finish` step applies the schedule again; before you leave, check the next
+   `finish` step applies the schedule again once you confirm it is saved on
+   the dashboard; before you leave, check the next
    startup time with
    `export PATH=$PATH:/usr/sbin; cd ~/wittypi && . ./utilities.sh && get_startup_time`.
 3. **The camera orientation reference is set at the first capture after
@@ -1248,7 +1249,8 @@ anything. The sections below are the same procedure by hand
    Use a phone hotspot, and keep the unit held awake for steps that move files.
 5. **Weak downlinks.** Run a link check from the unit before relying on LoRa
    commands or remote start at a site. If link checks get no answer, set the
-   unit's transport to IP on the dashboard so commands go over IP.
+   unit's transport to IP on the dashboard: commands then wait for the unit's
+   next IP poll instead of going over LoRa. Remote start still goes over LoRa.
 
 ### 2.1 Site selection
 
