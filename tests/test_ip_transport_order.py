@@ -69,8 +69,8 @@ def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True, in_range=
             stack.enter_context(patch("tools.transmit_ip.cellular_status", return_value=dict(status)))
         else:   # the first call sees `status`, every later one `later_status`
             seq = iter([dict(status)])
-            stack.enter_context(patch("tools.transmit_ip.cellular_status",
-                                      side_effect=lambda c: next(seq, dict(later_status))))
+            m["status"] = stack.enter_context(patch("tools.transmit_ip.cellular_status",
+                                                    side_effect=lambda c: next(seq, dict(later_status))))
         stack.enter_context(patch("tools.transmit_ip.wifi_connected", return_value=wifi))
         m["in_range"] = stack.enter_context(patch("tools.transmit_ip.wifi_in_range", return_value=in_range))
         m["health"] = stack.enter_context(patch("tools.lora_health.assess",
@@ -363,11 +363,20 @@ class TestWiFiGraceBeforeCellular:
         # leave the session to the upload that started it.
         tx = _tx(reachable=False)
         m = _run(tx, in_range=True, later_status=ON_DEMAND_UP)
+        assert m["status"].call_count == 2   # once at the start, once after the wait
         tx.wait_reachable.assert_called_once_with(45)
         tx._drain_queue.assert_called_once_with(metered=True)
         m["up"].assert_not_called()
         m["down"].assert_not_called()
         assert m["result"]["success"] is True
+
+    def test_wifi_connected_after_the_wait_drains_unmetered_even_with_cellular_up(self):
+        # WiFi joined during the wait while another upload had cellular up:
+        # the probe went over WiFi, so no metered drain.
+        tx = _tx(reachable=False)
+        m = _run(tx, wifi=True, later_status=ON_DEMAND_UP)
+        tx._drain_queue.assert_called_once_with(metered=False)
+        m["up"].assert_not_called()
 
     def test_wifi_after_the_wait_drains_unmetered(self):
         tx = _tx(reachable=False)
