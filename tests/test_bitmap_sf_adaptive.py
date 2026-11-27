@@ -115,6 +115,44 @@ class TestCompressBitmapEdgeCases:
             result = ticktalk_main.compress_bitmap.__wrapped__("fake.png")
         assert result == b""
 
+    def _detailed(self, limit, fits_from=100, method2=False):
+        """compress_bitmap at room *limit* with a mask that compresses only at
+        *fits_from* bytes or more; returns (result, [(max_bytes, method2), ...])."""
+        import ticktalk_main
+        calls = []
+
+        def compress(path, max_bytes=238, method2=False, **kw):
+            calls.append((max_bytes, method2))
+            if max_bytes < fits_from:
+                return {"success": False}
+            return {"success": True, "compressed_data": b"y" * 150, "total_size": 150,
+                    "width": 64, "height": 48}
+
+        with patch("tools.lora_handler_concurrent.get_size_limit", return_value=limit), \
+             patch("tools.lora_runtime_integration.get_parameter", return_value=method2), \
+             patch("tools.compress_segmented.compress_image", side_effect=compress):
+            return ticktalk_main.compress_bitmap.__wrapped__("fake.png"), calls
+
+    def test_too_detailed_for_the_room_compresses_for_the_queue(self):
+        """Methods 0/1 can't fit a detailed mask into DR1's 49 B: compress it for
+        the queue (226 B) as at DR0, so it isn't dropped (#332)."""
+        result, calls = self._detailed(53)
+        assert calls == [(49, False), (226, False)]
+        assert result == b"y" * 150
+
+    def test_retry_keeps_method2_setting(self):
+        _, calls = self._detailed(53, fits_from=300, method2=True)
+        assert calls == [(49, True), (226, True)]
+
+    def test_retry_that_also_fails_returns_empty(self):
+        result, calls = self._detailed(53, fits_from=300)
+        assert result == b"" and len(calls) == 2
+
+    def test_no_retry_at_or_above_the_queue_size(self):
+        for limit, budget in ((230, 226), (242, 238)):
+            result, calls = self._detailed(limit, fits_from=300)
+            assert result == b"" and calls == [(budget, False)], limit
+
     def test_handler_unavailable_falls_back_to_238(self):
         """get_size_limit() raises → fall back to 238B default (242 - 4)."""
         import ticktalk_main
