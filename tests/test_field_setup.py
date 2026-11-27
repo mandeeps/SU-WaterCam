@@ -157,7 +157,7 @@ def test_new_site_yes_backs_up_then_resets(env, monkeypatch):
     ctx, _ = ctx_for(["y"], runner)
     assert fs.step_new_site(ctx).status == "pass"
     assert (env / "field_setup" / os.path.basename(ctx.session.path) / "backup" / "gps_home.json").exists()
-    for tool in ("gps_home.py --reset", "flood_baseline.py --reset", "registration_orientation.py --reset"):
+    for tool in ("gps_home.py --reset", "flood_baseline.py --reset", "registration_orientation.py --forget"):
         assert runner.ran(tool), tool
 
 
