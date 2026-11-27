@@ -1,5 +1,6 @@
 """tools/mdot_subband.py: the sub-band in an AT+CHM? answer, and what to change."""
 from tools.mdot_subband import GATEWAY_SUB_BAND, changes_needed, data_rate, sub_band_from_mask
+import tools.mdot_subband as ms
 
 
 def test_our_gateway_mask_is_sub_band_1():
@@ -55,3 +56,25 @@ def test_data_rate_answer():
     assert data_rate("DR1 - SF9BW125") == 1
     assert data_rate("DR0 - SF10BW125") == 0
     assert data_rate("") is None and data_rate(None) is None
+
+
+def test_daemon_restarted_when_it_was_running(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(ms, "daemon", calls.append)
+    ms.finish_daemon(True, False)
+    assert calls == ["start"] and "still stopped" not in capsys.readouterr().out
+
+
+def test_daemon_left_stopped_says_so(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(ms, "daemon", calls.append)
+    ms.finish_daemon(False, False)
+    assert calls == [] and "still stopped" in capsys.readouterr().out
+
+
+def test_restart_daemon_starts_it_either_way(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ms, "daemon", calls.append)
+    ms.finish_daemon(False, True)
+    ms.finish_daemon(True, True)
+    assert calls == ["start", "start"]
