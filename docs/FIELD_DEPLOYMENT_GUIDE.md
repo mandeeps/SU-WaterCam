@@ -1228,6 +1228,28 @@ on. `--dry-run` first, at the bench, shows what it would do without changing
 anything. The sections below are the same procedure by hand
 (docs/SETUP_MODE_DESIGN.md 8.1).
 
+**Lessons from installs:**
+
+1. **Run `field_setup.py` first, before anything else at the site.** Its first
+   step (`start`) holds the unit awake. With ticktalk enabled, a button press
+   does a full wake that ends in a shutdown, so without the hold the unit
+   powers off in the middle of setup.
+2. **Plugging in power triggers the recovery boot.** It shuts down and arms the
+   next schedule slot at least 2 h away, which can be the next morning. The
+   `finish` step applies the schedule again; before you leave, check the next
+   startup time with
+   `export PATH=$PATH:/usr/sbin; cd ~/wittypi && . ./utilities.sh && get_startup_time`.
+3. **The camera orientation reference is set at the first capture after
+   mounting.** The `new_site` step only removes the old one
+   (`registration_orientation.py --forget`). `--reset` takes the pose at the
+   moment you run it, so use it only with the unit mounted and aimed for good.
+4. **Slow guest or relay Wi-Fi.** Copying a full-size reference photo over it
+   can take minutes, and Tailscale SSH may not connect within a ~2 min wake.
+   Use a phone hotspot, and keep the unit held awake for steps that move files.
+5. **Weak downlinks.** Run a link check from the unit before relying on LoRa
+   commands or remote start at a site. If link checks get no answer, set the
+   unit's transport to IP on the dashboard so commands go over IP.
+
 ### 2.1 Site selection
 
 - Camera has a clear, unobstructed view of the area to monitor.

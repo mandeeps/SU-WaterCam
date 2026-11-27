@@ -38,6 +38,12 @@ flag, and so does
     python -m tools.registration_orientation --reset
 
 (run from ~/SU-WaterCam) once the alignment has been checked by eye and found good.
+--reset takes the pose at that moment, so run it only with the unit mounted and
+aimed for good. To have the next capture adopt a new reference instead (a new
+site or angle, before mounting), use
+
+    python -m tools.registration_orientation --forget
+
 With no argument it prints the check without changing anything.
 """
 
@@ -255,6 +261,19 @@ def reset(capture_dir: str, reading: Any) -> Dict[str, Any]:
     return {"status": "reset", "cache": path, "reference": pose}
 
 
+def forget(capture_dir: str) -> Dict[str, Any]:
+    """Remove the reference, so the next capture adopts its pose as the new one."""
+    path = cache_path(capture_dir)
+    if path is None:
+        return {"status": "no_cache"}
+    with locked(path):
+        data = read_json(path)
+        meta = data.get("metadata") if isinstance(data, dict) else None
+        if isinstance(meta, dict) and meta.pop("orientation", None) is not None:
+            write_json(path, data, mode=0o644)
+    return {"status": "forgotten", "cache": path}
+
+
 def write_capture_flag(capture_dir: str, result: Dict[str, Any]) -> None:
     """Record the check next to the capture it applies to."""
     with open(os.path.join(capture_dir, CAPTURE_FLAG_FILENAME), "w") as f:
@@ -301,9 +320,20 @@ def main(argv=None) -> int:
     p.add_argument("--images", default=os.path.join(
         os.environ.get("WATERCAM_REPO", "/home/pi/SU-WaterCam"), "images"),
         help="directory holding registration_transform.json (default: the repo's images/)")
-    p.add_argument("--reset", action="store_true",
-                   help="make the current pose the reference")
+    mode = p.add_mutually_exclusive_group()
+    mode.add_argument("--reset", action="store_true",
+                      help="make the current pose the reference (unit mounted and aimed)")
+    mode.add_argument("--forget", action="store_true",
+                      help="remove the reference; the next capture adopts its pose")
     a = p.parse_args(argv)
+    if a.forget:
+        try:
+            result = forget(os.path.join(a.images, "_check"))
+        except (OSError, ConfigUnreadable) as e:
+            print(f"ERROR: {e}")
+            return 1
+        print(json.dumps(result, indent=2))
+        return 0
 
     from tools.bno055_imu import get_pose
     # cache_path() looks in the parent of what it is given, so hand it a child path.

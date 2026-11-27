@@ -556,7 +556,7 @@ def step_new_site(ctx: Context) -> StepResult:
         ctx.change("forget the flood baseline (set again after the first capture)",
                    [VENV_PY, "tools/flood_baseline.py", "--reset"]),
         ctx.change("forget the camera orientation reference (adopted again at the first capture)",
-                   [VENV_PY, "tools/registration_orientation.py", "--reset"], timeout=120),
+                   [VENV_PY, "tools/registration_orientation.py", "--forget"], timeout=120),
     ])
     if not ok:
         return StepResult("fail", "Some of the old position's data could not be cleared (see above).", {"new_site": True})

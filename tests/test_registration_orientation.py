@@ -140,6 +140,36 @@ def test_reset_replaces_the_reference(images):
     assert load(images_dir)["parameters"] == TRANSFORM["parameters"]
 
 
+def test_forget_lets_the_next_capture_adopt(images):
+    # new_site in tools/field_setup.py runs before mounting: the mounted pose
+    # must become the reference, not the pose on the bench (#312)
+    images_dir, capture = images
+    ro.check(capture, pose())                              # bench pose adopted
+    mounted = pose(q=quat((1, 0, 0), 30), g=gravity_tilted(30))
+    assert ro.forget(capture)["status"] == "forgotten"
+    assert "orientation" not in load(images_dir)["metadata"]
+    assert load(images_dir)["parameters"] == TRANSFORM["parameters"]
+    assert ro.check(capture, mounted)["status"] == "adopted"
+    assert ro.check(capture, mounted)["status"] == "ok"
+
+
+def test_forget_without_a_reference_or_cache(images, tmp_path):
+    _, capture = images
+    assert ro.forget(capture)["status"] == "forgotten"     # nothing stored yet: no change
+    bare = tmp_path / "other" / "20261011-120000"
+    bare.mkdir(parents=True)
+    assert ro.forget(str(bare))["status"] == "no_cache"
+
+
+def test_forget_cli_needs_no_imu(images, monkeypatch):
+    images_dir, capture = images
+    ro.check(capture, pose())
+    import tools.bno055_imu as imu
+    monkeypatch.setattr(imu, "get_pose", lambda: (_ for _ in ()).throw(AssertionError("IMU read")))
+    assert ro.main(["--images", str(images_dir), "--forget"]) == 0
+    assert "orientation" not in load(images_dir)["metadata"]
+
+
 def test_damaged_reference_is_replaced(images):
     images_dir, capture = images
     cache = dict(TRANSFORM, metadata={"transform_type": "affine", "orientation": {"gravity": "x"}})
