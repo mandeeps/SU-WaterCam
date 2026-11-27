@@ -1984,6 +1984,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             return {"status": "skipped_lora_joined", "success": False}
 
     cellular_started = False
+    live_entry = None   # the reading queued before its send (#311)
     delivered = False
     result = {}
     # Cellular transmission and heavy CPU work take turns (tools/lock_utils.py
@@ -2214,6 +2215,13 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         if data.get('schedule'):
             _add("09 79", lambda: {"payload_hex": data['schedule']})
 
+        # ── Queue first (#311) ────────────────────────────────────────────────
+        # The reading is queued before anything is sent and removed once the live
+        # send succeeds, so an unexpected error or a power cut mid-send (Witty Pi
+        # off-time, max-awake, battery) leaves it for the next wake. The server
+        # drops a capture it already has, so a resend is harmless.
+        live_entry = tx._enqueue_live(channels, ts_now)
+
         # ── Reachability check (after data is ready so we can queue on failure) ─
         # WiFi first; cellular only as the last resort.  A cellular session
         # left up by an earlier cycle gives way as soon as WiFi is back.
@@ -2260,12 +2268,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                 cellular_started = False
         if not reachable:
             print(f"⚠️ IP uplink: server unreachable at {tx.server_url} — queuing reading")
-            tx._enqueue(channels, ts_now)
+            tx.keep_queued(live_entry, channels, ts_now)
             return {"status": "queued", "success": False, "channels_queued": len(channels)}
 
         # ── Drain any previously queued readings ───────────────────────────────
         # On cellular each wake sends only a few queued readings (tools/transmit_ip.py)
-        drain = tx._drain_queue(metered=cellular_started or cellular_active)
+        drain = tx._drain_queue(metered=cellular_started or cellular_active, skip=live_entry)
         delivered_ts = list(drain.get("drained_ts", []))
         if drain["drained"]:
             print(f"✅ IP uplink: drained {drain['drained']} queued reading(s)")
@@ -2273,7 +2281,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             if delivered_ts:
                 _lsf.remove_delivered(delivered_ts)
             print(f"⚠️ IP uplink: drain failed on {drain['failed_file']} — queuing live reading")
-            tx._enqueue(channels, ts_now)
+            tx.keep_queued(live_entry, channels, ts_now)
             return {
                 "status": "queued_drain_failed",
                 "success": False,
@@ -2286,6 +2294,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         result = tx.send_uplink(channels, device_ts=ts_now, want_command=True,
                                 ip_fallback=fallback)
         delivered = result["success"]
+        if delivered:
+            tx.unqueue(live_entry)
         if delivered and (bitmap or fallback):
             try:
                 if bitmap:
@@ -2316,7 +2326,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         if not result["success"]:
             print(f"⚠️ IP uplink failed after {result.get('attempts', '?')} attempt(s): "
                   f"{result.get('error', 'unknown error')} — queuing reading")
-            tx._enqueue(channels, ts_now)
+            tx.keep_queued(live_entry, channels, ts_now)
             if tx.fallback_to_lora:
                 print("📡 LoRa fallback is enabled — data may also be sent via the LoRa path")
 
@@ -2328,7 +2338,9 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             "result": result,
         }
     except Exception as exc:
-        print(f"⚠️ IP uplink: unexpected error: {exc}")
+        # A reading queued before the error stays queued for the next wake (#311)
+        print(f"⚠️ IP uplink: unexpected error: {exc}"
+              + (" — the reading stays queued" if live_entry else ""))
         return {"status": "error", "success": False, "error": str(exc)}
     finally:
         if delivered:

@@ -116,7 +116,7 @@ class TestWiFiThenCellular:
         tx.send_uplink.assert_called_once()
         tx.poll_downlink.assert_called_once()
         m["down"].assert_called_once_with("Quectel")      # after the upload and the poll
-        tx._drain_queue.assert_called_once_with(metered=True)
+        tx._drain_queue.assert_called_once_with(metered=True, skip=tx._enqueue_live.return_value)
 
     def test_wifi_up_and_server_peer_online_does_not_bring_cellular_up(self):
         tx = _tx(reachable=False)
@@ -124,7 +124,7 @@ class TestWiFiThenCellular:
         tx.wait_reachable.return_value = False
         m = _run(tx, wifi=True)
         m["up"].assert_not_called()
-        tx._enqueue.assert_called_once()
+        tx.keep_queued.assert_called_once()
         tx.send_uplink.assert_not_called()
         assert m["result"]["status"] == "queued"
 
@@ -184,7 +184,7 @@ class TestWiFiThenCellular:
         tx = _tx(reachable=False)
         m = _run(tx, up=False)
         assert m["result"]["status"] == "queued"
-        tx._enqueue.assert_called_once()
+        tx.keep_queued.assert_called_once()
         m["down"].assert_not_called()
 
     def test_cellular_up_but_server_unreachable_takes_it_down(self):
@@ -311,6 +311,44 @@ class TestReplyCommands:
         assert "want_command" not in post.call_args_list[1].args[1]
 
 
+class TestQueueFirst:
+    """#311: the live reading is queued before it's sent."""
+
+    def test_queued_before_the_send_and_unqueued_after_it(self):
+        tx = _tx(reachable=True)
+        order = []
+        tx._enqueue_live.side_effect = lambda *a: order.append("queue") or "/q/live.json"
+        tx.send_uplink.side_effect = lambda *a, **k: order.append("send") or {"success": True, "attempts": 1}
+        m = _run(tx)
+        assert order == ["queue", "send"]
+        tx.unqueue.assert_called_once_with("/q/live.json")
+        tx.keep_queued.assert_not_called()
+        assert m["result"]["success"] is True
+
+    def test_failed_send_keeps_it_queued(self):
+        tx = _tx(reachable=True)
+        tx._enqueue_live.return_value = "/q/live.json"
+        tx.send_uplink.return_value = {"success": False, "attempts": 3, "error": "timeout"}
+        _run(tx)
+        tx.keep_queued.assert_called_once()
+        assert tx.keep_queued.call_args.args[0] == "/q/live.json"
+        tx.unqueue.assert_not_called()
+
+    def test_an_error_mid_send_leaves_it_queued(self):
+        tx = _tx(reachable=True)
+        tx._enqueue_live.return_value = "/q/live.json"
+        tx.send_uplink.side_effect = RuntimeError("boom")
+        m = _run(tx)
+        assert m["result"]["status"] == "error"
+        tx._enqueue_live.assert_called_once()
+        tx.unqueue.assert_not_called()
+
+    def test_skipped_when_lora_is_healthy(self):
+        tx = _tx(reachable=True)
+        _run(tx, joined=True)
+        tx._enqueue_live.assert_not_called()
+
+
 class TestWiFiGraceBeforeCellular:
     """A saved WiFi network in range but not usable yet gets a bounded wait first."""
 
@@ -365,7 +403,7 @@ class TestWiFiGraceBeforeCellular:
         m = _run(tx, in_range=True, later_status=ON_DEMAND_UP)
         assert m["status"].call_count == 2   # once at the start, once after the wait
         tx.wait_reachable.assert_called_once_with(45)
-        tx._drain_queue.assert_called_once_with(metered=True)
+        tx._drain_queue.assert_called_once_with(metered=True, skip=tx._enqueue_live.return_value)
         m["up"].assert_not_called()
         m["down"].assert_not_called()
         assert m["result"]["success"] is True
@@ -375,13 +413,13 @@ class TestWiFiGraceBeforeCellular:
         # the probe went over WiFi, so no metered drain.
         tx = _tx(reachable=False)
         m = _run(tx, wifi=True, later_status=ON_DEMAND_UP)
-        tx._drain_queue.assert_called_once_with(metered=False)
+        tx._drain_queue.assert_called_once_with(metered=False, skip=tx._enqueue_live.return_value)
         m["up"].assert_not_called()
 
     def test_wifi_after_the_wait_drains_unmetered(self):
         tx = _tx(reachable=False)
         _run(tx, in_range=True)
-        tx._drain_queue.assert_called_once_with(metered=False)
+        tx._drain_queue.assert_called_once_with(metered=False, skip=tx._enqueue_live.return_value)
 
     def test_cellular_already_up_doesnt_wait(self):
         tx = _tx(reachable=False)

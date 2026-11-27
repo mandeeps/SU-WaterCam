@@ -366,7 +366,7 @@ class TestIPUplinkTransmitIntegration:
 
         assert result["status"] == "queued"
         assert result["success"] is False
-        instance._enqueue.assert_called_once()
+        instance.keep_queued.assert_called_once()
 
     def test_water_pct_and_flood_flags_channels(self, tmp_path):
         """07 37 carries the water %; 07 17 / 07 27 only when flood_fields gives them."""
@@ -390,7 +390,7 @@ class TestIPUplinkTransmitIntegration:
             finally:
                 for p in patches.values():
                     p.__exit__(None, None, None)
-        channels = {c["code"]: c["payload_hex"] for c in instance._enqueue.call_args.args[0]}
+        channels = {c["code"]: c["payload_hex"] for c in instance._enqueue_live.call_args.args[0]}
         assert channels["07 37"] == "2a"
         assert channels["07 17"] == "00000001" and channels["07 27"] == "00000000"
 
@@ -413,7 +413,7 @@ class TestIPUplinkTransmitIntegration:
             finally:
                 for p in patches.values():
                     p.__exit__(None, None, None)
-        codes = {c["code"] for c in instance._enqueue.call_args.args[0]}
+        codes = {c["code"] for c in instance._enqueue_live.call_args.args[0]}
         assert not codes & {"07 17", "07 27", "07 37"}
         assert "08 18" in codes
 
@@ -441,7 +441,7 @@ class TestIPUplinkTransmitIntegration:
                 for p in patches.values():
                     p.__exit__(None, None, None)
 
-        instance._enqueue.assert_called_once()
+        instance.keep_queued.assert_called_once()
         assert result["success"] is False
 
     def test_drain_fails_live_reading_also_queued(self, tmp_path):
@@ -469,7 +469,7 @@ class TestIPUplinkTransmitIntegration:
                     p.__exit__(None, None, None)
 
         assert result["status"] == "queued_drain_failed"
-        instance._enqueue.assert_called_once()
+        instance.keep_queued.assert_called_once()
         instance.send_uplink.assert_not_called()
 
     def test_successful_send_after_drain(self, tmp_path):
