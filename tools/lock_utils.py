@@ -96,8 +96,9 @@ class CellularUsers:
     running, an upload that started cellular leaves the teardown owed (a marker
     file) and returns False. Both files are in /tmp, so a boot starts clean."""
 
-    def __init__(self, lock_path=CELLULAR_USERS_LOCK, owed_path=CELLULAR_TEARDOWN_OWED):
-        self.lock_path, self.owed_path = lock_path, owed_path
+    def __init__(self, lock_path=None, owed_path=None):
+        self.lock_path = lock_path or CELLULAR_USERS_LOCK
+        self.owed_path = owed_path or CELLULAR_TEARDOWN_OWED
         self._fd = None
 
     def join(self):
@@ -120,21 +121,22 @@ class CellularUsers:
         if fd is None:
             return bool(started)
         try:
+            if started:
+                # Marked before letting go, so an upload finishing at the same
+                # moment that wins the exclusive lock below sees it
+                self._mark_owed()
             fcntl.flock(fd, fcntl.LOCK_UN)
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
-                # another upload is still running: the last one out takes it down
-                if started:
-                    self._mark_owed()
-                return False
+                return False    # another upload is still running: the last one out takes it down
             owed = os.path.exists(self.owed_path)
             if owed:
                 try:
                     os.unlink(self.owed_path)
                 except OSError:
                     pass
-            return bool(started) or owed
+            return owed or bool(started)
         finally:
             os.close(fd)
 

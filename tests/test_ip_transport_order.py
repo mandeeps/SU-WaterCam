@@ -61,8 +61,12 @@ def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True, in_range=
     handler = MagicMock()
     handler.is_joined.return_value = joined
     m = {}
-    with ExitStack() as stack:
+    import tempfile
+    with ExitStack() as stack, tempfile.TemporaryDirectory() as tmp:
         _hardware(stack)
+        # keep the cellular-users lock and marker off the real /tmp paths
+        stack.enter_context(patch("tools.lock_utils.CELLULAR_USERS_LOCK", tmp + "/users.lock"))
+        stack.enter_context(patch("tools.lock_utils.CELLULAR_TEARDOWN_OWED", tmp + "/owed"))
         stack.enter_context(patch("tools.transmit_ip.IPTransmitter", return_value=tx))
         stack.enter_context(patch("tools.lora_handler_concurrent.get_lora_handler", return_value=handler))
         if later_status is None:

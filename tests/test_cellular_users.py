@@ -43,3 +43,18 @@ def test_unusable_lock_path_falls_back(tmp_path):
     a = CellularUsers(lock_path=str(tmp_path / "missing" / "x.lock"), owed_path=str(tmp_path / "o"))
     a.join()
     assert a.leave(started=True) is True
+
+
+def test_simultaneous_finish_still_takes_it_down(tmp_path):
+    # Both let go; the non-starter wins the exclusive lock before the starter
+    # tries it. The starter's marker is already there, so the winner tears down.
+    import fcntl
+    a, b, owed = _pair(tmp_path)
+    a.join(); b.join()
+    b._mark_owed()                       # what b.leave(started=True) does first
+    fcntl.flock(b._fd, fcntl.LOCK_UN)
+    assert a.leave(started=False) is True and not owed.exists()
+    try:
+        fcntl.flock(b._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    finally:
+        import os; os.close(b._fd); b._fd = None
