@@ -109,7 +109,8 @@ end:   dashboard "End remote debug" (18 98 00), or on the node:
        or the time runs out (checked every 30 s by remote-debug.timer)
 node:  1. cellular down, if it is managed on demand (Quectel autoconnect off)
        2. re-arm the Witty Pi from the installed schedule.wpi (runScript.sh);
-          not in emergency mode, which keeps the shutdown alarm cleared
+          not in emergency mode, which sets its own alarms (a backstop shutdown
+          and the next capture's startup)
        3. start ticktalk.service: a normal cycle, then its usual shutdown
           (not if ticktalk.service is disabled, as on a bench unit: it stays up;
           in emergency mode a "power off" end starts ticktalk instead)

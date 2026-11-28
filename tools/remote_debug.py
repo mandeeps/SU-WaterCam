@@ -519,7 +519,8 @@ def stop(shutdown=False, handler=None, reason="requested"):
             cellular_down(conn)
         emergency = _runtime_flag("emergency_mode")
         if emergency:
-            # emergency mode keeps the shutdown alarm cleared; ticktalk carries on with it
+            # emergency mode manages the Witty Pi itself (backstop shutdown alarm, next
+            # capture's startup alarm); ticktalk carries on with it
             log("emergency mode is on: Witty Pi schedule not re-armed")
         else:
             rearm_schedule()
