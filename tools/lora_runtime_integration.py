@@ -91,8 +91,9 @@ class LoRaRuntimeManager:
     and integrates with the ticktalk_main.py system
     """
 
-    # Emergency mode keeps the unit awake and clears the Witty Pi shutdown
-    # alarm; call_shutdown() ends it after this many hours (runtime_config
+    # Emergency mode replaces the Witty Pi shutdown alarm with a backstop (and,
+    # by default, sleeps between captures: tools/emergency_sleep.py);
+    # call_shutdown() ends it after this many hours (runtime_config
     # emergency_max_hours, 0 = never) so a stray command can't drain the battery.
     EMERGENCY_MAX_HOURS = 24
 

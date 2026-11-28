@@ -58,7 +58,10 @@ def set_startup_at(epoch: float) -> bool:
     _require_wittypi()
     return witty_pi_4.set_startup_time(*_alarm_parts(epoch))
 
-# Emergency mode keeps the unit on, so the shutdown alarm would otherwise be cleared.
+# The schedule's shutdown alarm would end emergency mode, so it is replaced by the
+# backstop below (or cleared when there is no time limit), not kept.
+# (Emergency mode doesn't keep the unit on by default: it sleeps between captures,
+# tools/emergency_sleep.py, and stays up only in the cases listed there.)
 # Its software end (emergency_max_hours, checked each iteration in ticktalk_main's
 # call_shutdown) needs the graph to keep running; this hardware backstop powers the
 # unit down this long after that end if the run hangs instead (#209). A normal end
@@ -164,8 +167,9 @@ def apply_emergency_schedule(emergency_mode: bool) -> dict:
     """Clear or restore the WittyPi hardware shutdown schedule for emergency mode.
 
     Emergency ON: move the shutdown alarm to an hour after emergency mode should
-    end (arm_emergency_backstop), so the device stays on but a hung run is still
-    powered down; with no time limit, clear it. Emergency OFF: re-arm the installed
+    end (arm_emergency_backstop), so the schedule doesn't end emergency mode but a
+    hung run is still powered down; with no time limit, clear it. Between captures
+    the unit sleeps by default (call_shutdown, tools/emergency_sleep.py). Emergency OFF: re-arm the installed
     schedule.wpi. If none is installed, install the backed-up deployment
     schedule or the repo's daylight preset (install_fallback_schedule()), and
     only if that fails generate one from runtime_config.json.
