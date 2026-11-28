@@ -58,3 +58,11 @@ def test_simultaneous_finish_still_takes_it_down(tmp_path):
         fcntl.flock(b._fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
     finally:
         import os; os.close(b._fd); b._fd = None
+
+
+def test_without_join_a_requested_teardown_is_still_honoured(tmp_path):
+    a = CellularUsers(lock_path=str(tmp_path / "missing" / "x.lock"), owed_path=str(tmp_path / "o"))
+    a.join()                              # can't open the lock: no coordination
+    a.request_teardown()
+    assert a.leave(started=False) is True
+    assert not (tmp_path / "o").exists()

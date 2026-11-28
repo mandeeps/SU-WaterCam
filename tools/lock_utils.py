@@ -119,7 +119,8 @@ class CellularUsers:
         """Release; return True if this upload should take cellular down now."""
         fd, self._fd = self._fd, None
         if fd is None:
-            return bool(started)
+            # no coordination: still honour a teardown requested by this or any upload
+            return self._take_owed() or bool(started)
         try:
             if started:
                 # Marked before letting go, so an upload finishing at the same
@@ -130,15 +131,19 @@ class CellularUsers:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 return False    # another upload is still running: the last one out takes it down
-            owed = os.path.exists(self.owed_path)
-            if owed:
-                try:
-                    os.unlink(self.owed_path)
-                except OSError:
-                    pass
-            return owed or bool(started)
+            return self._take_owed() or bool(started)
         finally:
             os.close(fd)
+
+    def _take_owed(self):
+        """Whether a teardown was requested; clears the request."""
+        if not os.path.exists(self.owed_path):
+            return False
+        try:
+            os.unlink(self.owed_path)
+        except OSError:
+            pass
+        return True
 
     def request_teardown(self):
         """Ask for cellular to go down without cutting off another upload using

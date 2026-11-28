@@ -1994,6 +1994,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
 
     cellular_started = False
     live_entry = None   # the reading queued before its send (#311)
+    wifi_back = False   # cellular was up at the start and WiFi came back
     delivered = False
     result = {}
     # Cellular transmission and heavy CPU work take turns (tools/lock_utils.py
@@ -2243,6 +2244,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             # still sending over it (#337); this one goes over WiFi meanwhile
             users.request_teardown()
             cellular_active = False
+            wifi_back = True
             print(f"📶 WiFi is back — {cell} goes down at the end of the upload")
         reachable = tx.is_reachable(timeout_s=5)
         if (not reachable and on_demand and not cellular_active and tx.wifi_grace_s > 0
@@ -2274,7 +2276,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             # Another upload brought cellular up since this one started: use it
             # rather than bringing it up again (#337); its teardown is shared
             cellular_active = True
-            print(f"📶 IP uplink: {cell} is up (brought up by another upload) — using it")
+            print(f"📶 IP uplink: server not reachable over WiFi — using {cell}, still up (it goes down at the end)"
+                  if wifi_back else f"📶 IP uplink: {cell} is up (brought up by another upload) — using it")
             reachable = tx.wait_tailnet(30)
         if not reachable and on_demand and not cellular_active:
             print(f"📶 IP uplink: server unreachable — bringing up {cell}")
