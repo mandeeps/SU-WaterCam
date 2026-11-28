@@ -1990,8 +1990,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
     # Cellular transmission and heavy CPU work take turns (tools/lock_utils.py
     # power_exclusive): held from bringing cellular up, or from here if it is
     # already up, until this upload is done.
-    from tools.lock_utils import PowerHold
+    from tools.lock_utils import CellularUsers, PowerHold
     power = PowerHold()
+    # Another upload can run in the same wake: the last one to finish takes
+    # cellular down, not whichever brought it up (#337)
+    users = CellularUsers()
+    users.join()
     if cellular_active:
         power.acquire("cellular upload", 60)
     try:
@@ -2255,6 +2259,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             # to check): the server itself is failing, and cellular wouldn't help
             print(f"⚠️ IP uplink: WiFi is up but the server isn't answering — not spending {cell} data")
             on_demand = False
+        if not reachable and on_demand and not cellular_active and cellular_status(cell)["active"]:
+            # Another upload brought cellular up since this one started: use it
+            # rather than bringing it up again (#337); its teardown is shared
+            cellular_active = True
+            print(f"📶 IP uplink: {cell} is up (brought up by another upload) — using it")
+            reachable = tx.wait_tailnet(30)
         if not reachable and on_demand and not cellular_active:
             print(f"📶 IP uplink: server unreachable — bringing up {cell}")
             power.acquire("cellular upload", 60)
@@ -2357,9 +2367,10 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                                           label="IP downlink after uplink", ack_fn=tx.post_acks)
             except Exception as exc:
                 print(f"⚠️ IP downlink after uplink failed: {exc}")
-        if cellular_started:
-            # This wake brought cellular up: it goes down now the upload and the
-            # command poll are done, or on any failure, so Tailscale stops using data
+        if users.leave(cellular_started):
+            # This upload brought cellular up, or was the last one using a session
+            # another upload left up: it goes down now the upload and the command
+            # poll are done, or on any failure, so Tailscale stops using data
             try:
                 cellular_down(cell)
                 print(f"📶 IP uplink done — {cell} taken down")
