@@ -107,7 +107,10 @@ class CellularUsers:
         try:
             fd = os.open(self.lock_path, os.O_CREAT | os.O_RDWR, 0o666)
         except OSError:
-            return              # no coordination: leave() falls back to "started"
+            try:                # made by another user: a read-only fd locks just as well
+                fd = os.open(self.lock_path, os.O_RDONLY)
+            except OSError:
+                return          # no coordination: leave() falls back
         try:
             fcntl.flock(fd, fcntl.LOCK_SH)
         except OSError:
@@ -115,12 +118,17 @@ class CellularUsers:
             return
         self._fd = fd
 
-    def leave(self, started):
-        """Release; return True if this upload should take cellular down now."""
+    def leave(self, started, teardown=None):
+        """Release; return True if this upload should take cellular down now.
+        teardown, if given, is called then while the exclusive lock is still
+        held, so no upload can join and start using cellular in between."""
         fd, self._fd = self._fd, None
         if fd is None:
             # no coordination: still honour a teardown requested by this or any upload
-            return self._take_owed() or bool(started)
+            down = self._take_owed() or bool(started)
+            if down and teardown:
+                teardown()
+            return down
         try:
             if started:
                 # Marked before letting go, so an upload finishing at the same
@@ -131,7 +139,10 @@ class CellularUsers:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 return False    # another upload is still running: the last one out takes it down
-            return self._take_owed() or bool(started)
+            down = self._take_owed() or bool(started)
+            if down and teardown:
+                teardown()
+            return down
         finally:
             os.close(fd)
 

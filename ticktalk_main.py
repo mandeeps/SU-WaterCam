@@ -1983,8 +1983,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                 lora_users = CellularUsers()
                 lora_users.join()
                 lora_users.request_teardown()
-                if lora_users.leave(False):
-                    cellular_down(cell)
+                if lora_users.leave(False, teardown=lambda: cellular_down(cell)):
                     print(f"📶 LoRa is back — {cell} taken down")
                 else:
                     print(f"📶 LoRa is back — {cell} goes down when the other upload using it finishes")
@@ -2383,10 +2382,11 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                                           label="IP downlink after uplink", ack_fn=tx.post_acks)
             except Exception as exc:
                 print(f"⚠️ IP downlink after uplink failed: {exc}")
-        if users.leave(cellular_started):
+        def _take_cellular_down():
             # This upload brought cellular up, or was the last one using a session
             # another upload left up: it goes down now the upload and the command
-            # poll are done, or on any failure, so Tailscale stops using data
+            # poll are done, or on any failure, so Tailscale stops using data.
+            # Runs under the users lock, so no upload starts using it meanwhile.
             try:
                 was_up = cellular_status(cell)["active"]
                 cellular_down(cell)     # also gives USB back; harmless when already down
@@ -2394,6 +2394,7 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                     print(f"📶 IP uplink done — {cell} taken down")
             except Exception as exc:
                 print(f"⚠️ IP uplink: could not take {cell} down: {exc}")
+        users.leave(cellular_started, teardown=_take_cellular_down)
         tx.close()
         power.release()
 
