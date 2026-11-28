@@ -453,7 +453,8 @@ On by default. Each capture's IP uplink:
    the command poll are done, or on any failure, so Tailscale stops using data.
    Two uploads can run in one wake: one finding cellular already up uses it, and
    the last one to finish takes it down (`CellularUsers` in
-   `tools/lock_utils.py`). Cellular isn't brought up when WiFi is connected
+   `tools/lock_utils.py`). The other reasons to take it down (LoRa or WiFi
+   back, or no tailnet over it) also wait for any other upload still using it. Cellular isn't brought up when WiFi is connected
    and Tailscale shows the server's peer online: the server is failing, not the
    link, and the reading is queued.
 

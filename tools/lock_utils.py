@@ -107,7 +107,10 @@ class CellularUsers:
         try:
             fd = os.open(self.lock_path, os.O_CREAT | os.O_RDWR, 0o666)
         except OSError:
-            return              # no coordination: leave() falls back to "started"
+            try:                # made by another user: a read-only fd locks just as well
+                fd = os.open(self.lock_path, os.O_RDONLY)
+            except OSError:
+                return          # no coordination: leave() falls back
         try:
             fcntl.flock(fd, fcntl.LOCK_SH)
         except OSError:
@@ -115,11 +118,14 @@ class CellularUsers:
             return
         self._fd = fd
 
-    def leave(self, started):
-        """Release; return True if this upload should take cellular down now."""
+    def leave(self, started, teardown=None):
+        """Release; return True if this upload should take cellular down now.
+        teardown, if given, is called then while the exclusive lock is still
+        held, so no upload can join and start using cellular in between."""
         fd, self._fd = self._fd, None
         if fd is None:
-            return bool(started)
+            # no coordination: still honour a teardown requested by this or any upload
+            return self._finish(started, teardown)
         try:
             if started:
                 # Marked before letting go, so an upload finishing at the same
@@ -130,15 +136,40 @@ class CellularUsers:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except OSError:
                 return False    # another upload is still running: the last one out takes it down
-            owed = os.path.exists(self.owed_path)
-            if owed:
-                try:
-                    os.unlink(self.owed_path)
-                except OSError:
-                    pass
-            return owed or bool(started)
+            return self._finish(started, teardown)
         finally:
             os.close(fd)
+
+    def _finish(self, started, teardown):
+        """Run the teardown if one is due, and clear the request only after it, so
+        a teardown that raises leaves the request for the next upload."""
+        owed = os.path.exists(self.owed_path)
+        down = owed or bool(started)
+        if down and teardown:
+            try:
+                teardown()
+            except Exception:
+                if started:
+                    self._mark_owed()
+                return down
+        if owed:
+            self._take_owed()
+        return down
+
+    def _take_owed(self):
+        """Whether a teardown was requested; clears the request."""
+        if not os.path.exists(self.owed_path):
+            return False
+        try:
+            os.unlink(self.owed_path)
+        except OSError:
+            pass
+        return True
+
+    def request_teardown(self):
+        """Ask for cellular to go down without cutting off another upload using
+        it: leave() then returns True for whichever upload finishes last."""
+        self._mark_owed()
 
     def _mark_owed(self):
         try:

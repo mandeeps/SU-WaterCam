@@ -1977,14 +1977,28 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             print("🚨 Unit moved from its mount position — sending over IP as well as LoRa")
         elif lora_joined:
             if cellular_active:
-                cellular_down(cell)
-                print(f"📶 LoRa is back — {cell} taken down")
+                # Down now if no other upload is using it; otherwise the last
+                # one to finish takes it down (#337)
+                from tools.lock_utils import CellularUsers
+                lora_users = CellularUsers()
+                lora_users.join()
+                lora_users.request_teardown()
+                try:
+                    lora_down = lora_users.leave(False, teardown=lambda: cellular_down(cell))
+                except Exception as exc:
+                    print(f"⚠️ IP uplink: cellular users check failed: {exc}")
+                    lora_down = False
+                if lora_down:
+                    print(f"📶 LoRa is back — {cell} taken down")
+                else:
+                    print(f"📶 LoRa is back — {cell} goes down when the other upload using it finishes")
             print("📡 LoRa is healthy — IP uplink not needed this cycle")
             tx.close()
             return {"status": "skipped_lora_joined", "success": False}
 
     cellular_started = False
     live_entry = None   # the reading queued before its send (#311)
+    wifi_back = False   # cellular was up at the start and WiFi came back
     delivered = False
     result = {}
     # Cellular transmission and heavy CPU work take turns (tools/lock_utils.py
@@ -2230,9 +2244,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
         # WiFi first; cellular only as the last resort.  A cellular session
         # left up by an earlier cycle gives way as soon as WiFi is back.
         if cellular_active and wifi_connected():
-            cellular_down(cell)
+            # Taken down when this upload ends, or by the last other upload
+            # still sending over it (#337); this one goes over WiFi meanwhile
+            users.request_teardown()
             cellular_active = False
-            print(f"📶 WiFi is back — {cell} taken down")
+            wifi_back = True
+            print(f"📶 WiFi is back — {cell} goes down at the end of the upload")
         reachable = tx.is_reachable(timeout_s=5)
         if (not reachable and on_demand and not cellular_active and tx.wifi_grace_s > 0
                 and (wifi_connected() or wifi_in_range())):
@@ -2263,7 +2280,8 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             # Another upload brought cellular up since this one started: use it
             # rather than bringing it up again (#337); its teardown is shared
             cellular_active = True
-            print(f"📶 IP uplink: {cell} is up (brought up by another upload) — using it")
+            print(f"📶 IP uplink: server not reachable over WiFi — using {cell}, still up (it goes down at the end)"
+                  if wifi_back else f"📶 IP uplink: {cell} is up (brought up by another upload) — using it")
             reachable = tx.wait_tailnet(30)
         if not reachable and on_demand and not cellular_active:
             print(f"📶 IP uplink: server unreachable — bringing up {cell}")
@@ -2274,7 +2292,9 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
             # below, with its retries, is the reachability check.
             reachable = cellular_started and tx.wait_tailnet(30)
             if cellular_started and not reachable:
-                cellular_down(cell)   # no use to us, and Tailscale would keep using data
+                # No use to us, and Tailscale would keep using data: down at the
+                # end of this upload, or when another upload waiting on it is done
+                users.request_teardown()
                 cellular_started = False
         if not reachable:
             print(f"⚠️ IP uplink: server unreachable at {tx.server_url} — queuing reading")
@@ -2367,15 +2387,22 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                                           label="IP downlink after uplink", ack_fn=tx.post_acks)
             except Exception as exc:
                 print(f"⚠️ IP downlink after uplink failed: {exc}")
-        if users.leave(cellular_started):
+        def _take_cellular_down():
             # This upload brought cellular up, or was the last one using a session
             # another upload left up: it goes down now the upload and the command
-            # poll are done, or on any failure, so Tailscale stops using data
+            # poll are done, or on any failure, so Tailscale stops using data.
+            # Runs under the users lock, so no upload starts using it meanwhile.
             try:
-                cellular_down(cell)
-                print(f"📶 IP uplink done — {cell} taken down")
+                was_up = cellular_status(cell)["active"]
+                cellular_down(cell)     # also gives USB back; harmless when already down
+                if was_up:
+                    print(f"📶 IP uplink done — {cell} taken down")
             except Exception as exc:
                 print(f"⚠️ IP uplink: could not take {cell} down: {exc}")
+        try:
+            users.leave(cellular_started, teardown=_take_cellular_down)
+        except Exception as exc:
+            print(f"⚠️ IP uplink: cellular users check failed: {exc}")
         tx.close()
         power.release()
 

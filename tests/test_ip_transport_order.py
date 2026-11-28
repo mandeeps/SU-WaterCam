@@ -55,7 +55,7 @@ def _tx(reachable, only_if_lora=True, cellular="Quectel"):
     return tx
 
 
-def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True, in_range=False, later_status=None):
+def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True, in_range=False, later_status=None, lock_dir=None):
     """Run ip_uplink_transmit with hardware and NetworkManager patched; return the mocks."""
     import ticktalk_main
     handler = MagicMock()
@@ -63,6 +63,7 @@ def _run(tx, joined=False, status=ON_DEMAND_IDLE, wifi=False, up=True, in_range=
     m = {}
     import tempfile
     with ExitStack() as stack, tempfile.TemporaryDirectory() as tmp:
+        tmp = lock_dir or tmp
         _hardware(stack)
         # keep the cellular-users lock and marker off the real /tmp paths
         stack.enter_context(patch("tools.lock_utils.CELLULAR_USERS_LOCK", tmp + "/users.lock"))
@@ -166,7 +167,7 @@ class TestWiFiThenCellular:
         tx = _tx(reachable=False)
         tx.wait_reachable.return_value = False
         m = _run(tx, status=ON_DEMAND_UP, wifi=True, later_status=ON_DEMAND_IDLE)   # down once WiFi is back
-        assert m["down"].call_args_list == [(("Quectel",),)] * 2   # WiFi came back, then after the upload
+        m["down"].assert_called_once_with("Quectel")   # once, at the end (the WiFi-back teardown is deferred, #337)
         tx.wait_reachable.assert_called_once_with(45)
         tx.wait_tailnet.assert_called_once_with(30)
         m["up"].assert_called_once()
@@ -373,8 +374,86 @@ class TestSharedCellularSession:
         m["up"].assert_called_once()
         m["down"].assert_not_called()
         tx = _tx(reachable=False)
-        with _p("tools.lock_utils.CellularUsers.leave", return_value=True):
+        def leave_last(self_, started, teardown=None):
+            teardown()
+            return True
+        with _p("tools.lock_utils.CellularUsers.leave", leave_last):
             m = _run(tx, status=ON_DEMAND_UP)       # used another's session and was the last out
+        m["down"].assert_called_once_with("Quectel")
+
+
+class TestDeferredTeardowns:
+    """#337 follow-up: no path takes cellular down under another upload."""
+
+    @staticmethod
+    def _other_upload_running():
+        # another upload holds a shared lock on the same (patched) users lock
+        import fcntl, os, tools.lock_utils as lu
+        fd = os.open(lu.CELLULAR_USERS_LOCK, os.O_CREAT | os.O_RDWR, 0o666)
+        fcntl.flock(fd, fcntl.LOCK_SH)
+        return fd
+
+    def _run_with_other(self, tx, **kw):
+        import os
+        from unittest.mock import patch as _p
+        from tools.lock_utils import CellularUsers
+        real_join = CellularUsers.join
+        holder = {}
+
+        def join(self_):
+            if "fd" not in holder:
+                holder["fd"] = TestDeferredTeardowns._other_upload_running()
+            real_join(self_)
+        with _p.object(CellularUsers, "join", join):
+            m = _run(tx, **kw)
+        if "fd" in holder:
+            os.close(holder["fd"])
+        return m
+
+    def test_lora_back_leaves_it_to_another_upload(self):
+        m = self._run_with_other(_tx(reachable=True), joined=True, status=ON_DEMAND_UP)
+        m["down"].assert_not_called()
+
+    def test_wifi_back_goes_down_at_the_end_when_alone(self):
+        tx = _tx(reachable=True)
+        order = []
+        tx.send_uplink.side_effect = lambda *a, **k: order.append("send") or {"success": True, "attempts": 1}
+        m = _run(tx, status=ON_DEMAND_UP, wifi=True)
+        m["down"].assert_called_once_with("Quectel")
+        assert order == ["send"]
+
+    def test_wifi_back_leaves_it_to_another_upload(self):
+        m = self._run_with_other(_tx(reachable=True), status=ON_DEMAND_UP, wifi=True)
+        m["down"].assert_not_called()
+
+    def test_failed_tailnet_leaves_it_to_another_upload(self):
+        tx = _tx(reachable=False)
+        tx.wait_tailnet.return_value = False
+        m = self._run_with_other(tx)
+        m["up"].assert_called_once()
+        m["down"].assert_not_called()
+        assert m["result"]["status"] == "queued"
+
+    def test_handoff_after_the_other_upload_finishes(self):
+        # WiFi back while another upload runs: no teardown now, the request
+        # stays, and the other upload (finishing last) carries it out.
+        import os, tempfile
+        from unittest.mock import patch as _p
+        from tools.lock_utils import CellularUsers
+        with tempfile.TemporaryDirectory() as tmp:
+            other = CellularUsers(lock_path=tmp + "/users.lock", owed_path=tmp + "/owed")
+            other.join()
+            m = _run(_tx(reachable=True), status=ON_DEMAND_UP, wifi=True, lock_dir=tmp)
+            m["down"].assert_not_called()
+            assert os.path.exists(tmp + "/owed")
+            calls = []
+            assert other.leave(False, teardown=lambda: calls.append(1)) is True
+            assert calls == [1] and not os.path.exists(tmp + "/owed")
+
+    def test_failed_tailnet_alone_goes_down(self):
+        tx = _tx(reachable=False)
+        tx.wait_tailnet.return_value = False
+        m = _run(tx)
         m["down"].assert_called_once_with("Quectel")
 
 
