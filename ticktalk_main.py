@@ -1983,7 +1983,12 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                 lora_users = CellularUsers()
                 lora_users.join()
                 lora_users.request_teardown()
-                if lora_users.leave(False, teardown=lambda: cellular_down(cell)):
+                try:
+                    lora_down = lora_users.leave(False, teardown=lambda: cellular_down(cell))
+                except Exception as exc:
+                    print(f"⚠️ IP uplink: cellular users check failed: {exc}")
+                    lora_down = False
+                if lora_down:
                     print(f"📶 LoRa is back — {cell} taken down")
                 else:
                     print(f"📶 LoRa is back — {cell} goes down when the other upload using it finishes")
@@ -2394,7 +2399,10 @@ def ip_uplink_transmit(bitmap, _sensor_tracker, dirname):
                     print(f"📶 IP uplink done — {cell} taken down")
             except Exception as exc:
                 print(f"⚠️ IP uplink: could not take {cell} down: {exc}")
-        users.leave(cellular_started, teardown=_take_cellular_down)
+        try:
+            users.leave(cellular_started, teardown=_take_cellular_down)
+        except Exception as exc:
+            print(f"⚠️ IP uplink: cellular users check failed: {exc}")
         tx.close()
         power.release()
 

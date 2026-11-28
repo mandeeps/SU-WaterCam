@@ -107,3 +107,16 @@ def test_read_only_lock_file_still_coordinates(tmp_path):
     assert a._fd is not None and b._fd is not None
     assert a.leave(started=True) is False and owed.exists()
     assert b.leave(started=False) is True
+
+
+def test_a_failing_teardown_keeps_the_request(tmp_path):
+    a, b, owed = _pair(tmp_path)
+    a.join()
+    a.request_teardown()
+
+    def boom():
+        raise RuntimeError("nmcli")
+    assert a.leave(started=False, teardown=boom) is True
+    assert owed.exists()                  # the next upload to finish last retries
+    b.join()
+    assert b.leave(started=False, teardown=lambda: None) is True and not owed.exists()
