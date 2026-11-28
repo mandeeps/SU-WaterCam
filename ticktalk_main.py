@@ -27,7 +27,8 @@ def wittypi_emergency_control(emergency_mode):
     """
     Control WittyPi schedule based on emergency mode status
     - Emergency ON: replace the schedule's shutdown alarm with a backstop after
-      emergency mode's end, so the schedule doesn't end it. This does not keep
+      emergency mode's end (or clear it when there is no time limit), so the
+      schedule doesn't end it. This does not keep
       the host on: by default each emergency wake takes one capture, arms the
       startup alarm for the next and shuts down (call_shutdown,
       tools/emergency_sleep.py); it stays up only in the cases listed there.

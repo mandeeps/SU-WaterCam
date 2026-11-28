@@ -58,7 +58,8 @@ def set_startup_at(epoch: float) -> bool:
     _require_wittypi()
     return witty_pi_4.set_startup_time(*_alarm_parts(epoch))
 
-# The schedule's shutdown alarm would end emergency mode, so it is replaced, not kept.
+# The schedule's shutdown alarm would end emergency mode, so it is replaced by the
+# backstop below (or cleared when there is no time limit), not kept.
 # (Emergency mode doesn't keep the unit on by default: it sleeps between captures,
 # tools/emergency_sleep.py, and stays up only in the cases listed there.)
 # Its software end (emergency_max_hours, checked each iteration in ticktalk_main's
