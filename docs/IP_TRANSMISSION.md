@@ -449,9 +449,11 @@ On by default. Each capture's IP uplink:
 3. **Cellular.** If the server is still unreachable, `nmcli connection up`
    brings the modem's data connection up and the reading and a capped part of
    the queued backlog are sent (5 readings or 200 KB a wake on cellular, the
-   rest waits; WiFi sends it all). A wake that brought cellular up takes it down
-   again once the upload and the command poll are done, or on any failure, so
-   Tailscale stops using data. Cellular isn't brought up when WiFi is connected
+   rest waits; WiFi sends it all). Cellular goes down again once the upload and
+   the command poll are done, or on any failure, so Tailscale stops using data.
+   Two uploads can run in one wake: one finding cellular already up uses it, and
+   the last one to finish takes it down (`CellularUsers` in
+   `tools/lock_utils.py`). Cellular isn't brought up when WiFi is connected
    and Tailscale shows the server's peer online: the server is failing, not the
    link, and the reading is queued.
 

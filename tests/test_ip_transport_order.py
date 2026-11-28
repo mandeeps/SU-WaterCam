@@ -161,7 +161,7 @@ class TestWiFiThenCellular:
         # reachable over it does cellular come back.
         tx = _tx(reachable=False)
         tx.wait_reachable.return_value = False
-        m = _run(tx, status=ON_DEMAND_UP, wifi=True)
+        m = _run(tx, status=ON_DEMAND_UP, wifi=True, later_status=ON_DEMAND_IDLE)   # down once WiFi is back
         assert m["down"].call_args_list == [(("Quectel",),)] * 2   # WiFi came back, then after the upload
         tx.wait_reachable.assert_called_once_with(45)
         tx.wait_tailnet.assert_called_once_with(30)
@@ -347,6 +347,31 @@ class TestQueueFirst:
         tx = _tx(reachable=True)
         _run(tx, joined=True)
         tx._enqueue_live.assert_not_called()
+
+
+class TestSharedCellularSession:
+    """#337: the last upload to finish takes cellular down."""
+
+    def test_uses_a_session_another_upload_brought_up(self):
+        tx = _tx(reachable=False)
+        m = _run(tx, later_status=ON_DEMAND_UP)    # idle at the start, up by the reachability step
+        m["up"].assert_not_called()
+        tx.wait_tailnet.assert_called_once_with(30)
+        tx._drain_queue.assert_called_once_with(metered=True, skip=tx._enqueue_live.return_value)
+        m["down"].assert_not_called()               # alone here (leave() -> no teardown owed)
+        assert m["result"]["success"] is True
+
+    def test_teardown_follows_leave(self):
+        from unittest.mock import patch as _p
+        tx = _tx(reachable=False)
+        with _p("tools.lock_utils.CellularUsers.leave", return_value=False):
+            m = _run(tx)                            # brought it up, another upload still running
+        m["up"].assert_called_once()
+        m["down"].assert_not_called()
+        tx = _tx(reachable=False)
+        with _p("tools.lock_utils.CellularUsers.leave", return_value=True):
+            m = _run(tx, status=ON_DEMAND_UP)       # used another's session and was the last out
+        m["down"].assert_called_once_with("Quectel")
 
 
 class TestWiFiGraceBeforeCellular:

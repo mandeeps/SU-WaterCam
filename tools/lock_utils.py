@@ -77,3 +77,70 @@ class PowerHold:
         if self._cm is not None:
             cm, self._cm = self._cm, None
             cm.__exit__(None, None, None)
+
+
+CELLULAR_USERS_LOCK = "/tmp/watercam_cellular_users.lock"
+CELLULAR_TEARDOWN_OWED = "/tmp/watercam_cellular_teardown_owed"
+
+
+class CellularUsers:
+    """Who is using the cellular session, so the last upload to finish takes it
+    down (#337). Two IP uploads can run in one wake; before, the one that brought
+    cellular up took it down when it finished, even while the other was sending.
+
+    Each upload calls join() when it starts and leave(started) when it ends. join()
+    takes a shared flock on CELLULAR_USERS_LOCK for the upload's lifetime. leave()
+    releases it and tries for an exclusive lock without waiting: if that succeeds,
+    no other upload is running, and it returns True when this upload started
+    cellular or another one left a teardown owed. If another upload is still
+    running, an upload that started cellular leaves the teardown owed (a marker
+    file) and returns False. Both files are in /tmp, so a boot starts clean."""
+
+    def __init__(self, lock_path=CELLULAR_USERS_LOCK, owed_path=CELLULAR_TEARDOWN_OWED):
+        self.lock_path, self.owed_path = lock_path, owed_path
+        self._fd = None
+
+    def join(self):
+        if self._fd is not None:
+            return
+        try:
+            fd = os.open(self.lock_path, os.O_CREAT | os.O_RDWR, 0o666)
+        except OSError:
+            return              # no coordination: leave() falls back to "started"
+        try:
+            fcntl.flock(fd, fcntl.LOCK_SH)
+        except OSError:
+            os.close(fd)
+            return
+        self._fd = fd
+
+    def leave(self, started):
+        """Release; return True if this upload should take cellular down now."""
+        fd, self._fd = self._fd, None
+        if fd is None:
+            return bool(started)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except OSError:
+                # another upload is still running: the last one out takes it down
+                if started:
+                    self._mark_owed()
+                return False
+            owed = os.path.exists(self.owed_path)
+            if owed:
+                try:
+                    os.unlink(self.owed_path)
+                except OSError:
+                    pass
+            return bool(started) or owed
+        finally:
+            os.close(fd)
+
+    def _mark_owed(self):
+        try:
+            with open(self.owed_path, "w"):
+                pass
+        except OSError:
+            pass
