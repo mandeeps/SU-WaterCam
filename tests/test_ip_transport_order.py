@@ -166,7 +166,7 @@ class TestWiFiThenCellular:
         tx = _tx(reachable=False)
         tx.wait_reachable.return_value = False
         m = _run(tx, status=ON_DEMAND_UP, wifi=True, later_status=ON_DEMAND_IDLE)   # down once WiFi is back
-        assert m["down"].call_args_list == [(("Quectel",),)] * 2   # WiFi came back, then after the upload
+        m["down"].assert_called_once_with("Quectel")   # once, at the end (the WiFi-back teardown is deferred, #337)
         tx.wait_reachable.assert_called_once_with(45)
         tx.wait_tailnet.assert_called_once_with(30)
         m["up"].assert_called_once()
@@ -375,6 +375,65 @@ class TestSharedCellularSession:
         tx = _tx(reachable=False)
         with _p("tools.lock_utils.CellularUsers.leave", return_value=True):
             m = _run(tx, status=ON_DEMAND_UP)       # used another's session and was the last out
+        m["down"].assert_called_once_with("Quectel")
+
+
+class TestDeferredTeardowns:
+    """#337 follow-up: no path takes cellular down under another upload."""
+
+    @staticmethod
+    def _other_upload_running():
+        # another upload holds a shared lock on the same (patched) users lock
+        import fcntl, os, tools.lock_utils as lu
+        fd = os.open(lu.CELLULAR_USERS_LOCK, os.O_CREAT | os.O_RDWR, 0o666)
+        fcntl.flock(fd, fcntl.LOCK_SH)
+        return fd
+
+    def _run_with_other(self, tx, **kw):
+        import os
+        from unittest.mock import patch as _p
+        from tools.lock_utils import CellularUsers
+        real_join = CellularUsers.join
+        holder = {}
+
+        def join(self_):
+            if "fd" not in holder:
+                holder["fd"] = TestDeferredTeardowns._other_upload_running()
+            real_join(self_)
+        with _p.object(CellularUsers, "join", join):
+            m = _run(tx, **kw)
+        if "fd" in holder:
+            os.close(holder["fd"])
+        return m
+
+    def test_lora_back_leaves_it_to_another_upload(self):
+        m = self._run_with_other(_tx(reachable=True), joined=True, status=ON_DEMAND_UP)
+        m["down"].assert_not_called()
+
+    def test_wifi_back_goes_down_at_the_end_when_alone(self):
+        tx = _tx(reachable=True)
+        order = []
+        tx.send_uplink.side_effect = lambda *a, **k: order.append("send") or {"success": True, "attempts": 1}
+        m = _run(tx, status=ON_DEMAND_UP, wifi=True)
+        m["down"].assert_called_once_with("Quectel")
+        assert order == ["send"]
+
+    def test_wifi_back_leaves_it_to_another_upload(self):
+        m = self._run_with_other(_tx(reachable=True), status=ON_DEMAND_UP, wifi=True)
+        m["down"].assert_not_called()
+
+    def test_failed_tailnet_leaves_it_to_another_upload(self):
+        tx = _tx(reachable=False)
+        tx.wait_tailnet.return_value = False
+        m = self._run_with_other(tx)
+        m["up"].assert_called_once()
+        m["down"].assert_not_called()
+        assert m["result"]["status"] == "queued"
+
+    def test_failed_tailnet_alone_goes_down(self):
+        tx = _tx(reachable=False)
+        tx.wait_tailnet.return_value = False
+        m = _run(tx)
         m["down"].assert_called_once_with("Quectel")
 
 

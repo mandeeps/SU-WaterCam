@@ -140,6 +140,11 @@ class CellularUsers:
         finally:
             os.close(fd)
 
+    def request_teardown(self):
+        """Ask for cellular to go down without cutting off another upload using
+        it: leave() then returns True for whichever upload finishes last."""
+        self._mark_owed()
+
     def _mark_owed(self):
         try:
             with open(self.owed_path, "w"):
